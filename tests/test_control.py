@@ -635,6 +635,7 @@ class ControlTests(unittest.TestCase):
         inspected = {
             "Id": image_id,
             "RepoDigests": ["registry.example.com/cpa@sha256:" + "e" * 64],
+            "Config": {"Cmd": ["./CLIProxyAPI"]},
         }
         with mock.patch.object(
             self.module.subprocess,
@@ -658,6 +659,26 @@ class ControlTests(unittest.TestCase):
         self.assertIn("none", command)
         self.assertIn("--read-only", command)
         self.assertIn("no-new-privileges", command)
+        self.assertEqual(command[-2:], ["./CLIProxyAPI", "-h"])
+
+    def test_cliproxy_version_probe_passes_help_to_declared_entrypoint(self):
+        with mock.patch.object(
+            self.module.subprocess,
+            "run",
+            return_value=mock.Mock(stdout="", stderr=""),
+        ) as run:
+            self.app._resolve_cliproxy_image_identity(
+                "registry.example.com/cpa:latest",
+                image={
+                    "Id": "sha256:" + "d" * 64,
+                    "Config": {
+                        "Entrypoint": ["/app/CLIProxyAPI"],
+                        "Cmd": ["-config", "/app/config.yaml"],
+                    },
+                },
+            )
+
+        self.assertEqual(run.call_args.args[0][-1:], ["-h"])
 
     def test_cliproxy_image_identity_prefers_valid_label_and_sorts_semver_tags(self):
         image_id = "sha256:" + "d" * 64

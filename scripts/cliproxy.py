@@ -3920,6 +3920,24 @@ class ControlPlane:
         )
         commit = str(labels.get("org.opencontainers.image.revision") or "").strip()
         built_at = str(labels.get("org.opencontainers.image.created") or "").strip()
+        config = image.get("Config") or {}
+        entrypoint = config.get("Entrypoint") or []
+        default_command = config.get("Cmd") or []
+        if isinstance(entrypoint, str):
+            entrypoint = [entrypoint]
+        if isinstance(default_command, str):
+            default_command = [default_command]
+        default_arguments = [
+            str(value) for value in default_command if str(value).strip()
+        ]
+        # Passing `-h` after the image only works when the image declares an
+        # ENTRYPOINT. CLIProxyAPI publishes its executable as CMD, so Docker
+        # would otherwise try to execute a binary literally named `-h`.
+        probe_arguments = (
+            ["-h"]
+            if entrypoint
+            else [*(default_arguments or ["./CLIProxyAPI"]), "-h"]
+        )
         command = [
             "docker",
             "run",
@@ -3934,7 +3952,7 @@ class ControlPlane:
             "--pids-limit",
             "64",
             image_id or image_ref,
-            "-h",
+            *probe_arguments,
         ]
         try:
             result = subprocess.run(

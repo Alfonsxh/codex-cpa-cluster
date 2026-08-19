@@ -61,7 +61,9 @@ if [ "$REVISION" != "$REMOTE_BRANCH_REVISION" ]; then
   exit 1
 fi
 
-LOCAL_TAG_REVISION=$(git -C "$ROOT_DIR" rev-parse "$VERSION^{commit}" 2>/dev/null || true)
+LOCAL_TAG_REVISION=$(
+  git -C "$ROOT_DIR" rev-parse --verify "$VERSION^{commit}" 2>/dev/null || true
+)
 if [ -n "$LOCAL_TAG_REVISION" ] && [ "$LOCAL_TAG_REVISION" != "$REVISION" ]; then
   echo "本地 Tag 已指向其他提交：$VERSION" >&2
   exit 1

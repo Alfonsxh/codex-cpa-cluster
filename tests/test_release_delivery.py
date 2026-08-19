@@ -178,6 +178,9 @@ class ReleaseDeliveryTests(unittest.TestCase):
         self.assertIn('gh release create "$VERSION"', local_release)
         self.assertIn('gh release edit "$VERSION"', local_release)
         self.assertIn("工作区存在未提交修改，拒绝发布", local_release)
+        self.assertIn(
+            'rev-parse --verify "$VERSION^{commit}"', local_release
+        )
         self.assertLess(
             local_release.index('scripts/release-images.sh" publish'),
             local_release.index('git -C "$ROOT_DIR" push'),

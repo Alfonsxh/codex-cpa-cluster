@@ -324,6 +324,72 @@ class RuntimeDataGuardTests(unittest.TestCase):
         self.assertTrue(result["security_settings_migrated"])
         self.assertTrue(result["retired_settings_migrated"])
 
+    def test_compare_allows_bounded_env_to_sqlite_projection_migration(self):
+        before = self.module.snapshot(self.root)
+        with sqlite3.connect(self.root / "state" / "control-plane.sqlite3") as connection:
+            connection.execute(
+                "INSERT INTO settings VALUES (?, ?)",
+                ("runtime.cliproxy_image", '"example.invalid/cpa:latest"'),
+            )
+            connection.execute(
+                "INSERT INTO settings VALUES (?, ?)",
+                ("gateway.port", "19317"),
+            )
+
+        result = self.module.compare(before, self.module.snapshot(self.root))
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["security_settings_migrated"])
+
+    def test_compare_rejects_invalid_env_to_sqlite_projection_value(self):
+        before = self.module.snapshot(self.root)
+        with sqlite3.connect(self.root / "state" / "control-plane.sqlite3") as connection:
+            connection.execute(
+                "INSERT INTO settings VALUES (?, ?)",
+                ("runtime.cliproxy_image", '"invalid image; command"'),
+            )
+
+        result = self.module.compare(before, self.module.snapshot(self.root))
+
+        self.assertFalse(result["ok"])
+
+    def test_compare_allows_release_metadata_projection_change(self):
+        with sqlite3.connect(self.root / "state" / "control-plane.sqlite3") as connection:
+            connection.execute(
+                "INSERT INTO settings VALUES (?, ?)",
+                (
+                    "delivery.release_metadata_image",
+                    '"registry.example.com/cpa-release:old"',
+                ),
+            )
+        before = self.module.snapshot(self.root)
+        with sqlite3.connect(self.root / "state" / "control-plane.sqlite3") as connection:
+            connection.execute(
+                "UPDATE settings SET value_json = ? WHERE key = ?",
+                (
+                    '"registry.example.com/cpa-release:latest"',
+                    "delivery.release_metadata_image",
+                ),
+            )
+
+        result = self.module.compare(before, self.module.snapshot(self.root))
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["security_settings_migrated"])
+
+    def test_compare_rejects_unrelated_setting_addition(self):
+        before = self.module.snapshot(self.root)
+        with sqlite3.connect(self.root / "state" / "control-plane.sqlite3") as connection:
+            connection.execute(
+                "INSERT INTO settings VALUES (?, ?)",
+                ("branding.product_name", '"changed"'),
+            )
+
+        result = self.module.compare(before, self.module.snapshot(self.root))
+
+        self.assertFalse(result["ok"])
+        self.assertIn("control-plane table changed: settings", result["errors"])
+
     def test_compare_rejects_unrelated_setting_change(self):
         before = self.module.snapshot(self.root)
         with sqlite3.connect(self.root / "state" / "control-plane.sqlite3") as connection:

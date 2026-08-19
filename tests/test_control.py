@@ -421,11 +421,22 @@ class ControlTests(unittest.TestCase):
             return []
 
         self.app._docker_json_rows = mock.Mock(side_effect=docker_json_rows)
+        self.app.store.write_runtime_state(
+            "cliproxy_image",
+            {
+                "candidate": {
+                    "version": "v7.2.111",
+                    "image_id": target_id,
+                    "resolved_ref": CLIPROXY_IMAGE.split(":", 1)[0] + ":v7.2.111@sha256:new",
+                }
+            },
+        )
 
         status = self.app.cliproxy_image_status()
 
         self.assertTrue(status["local_image"]["available"])
         self.assertEqual(status["local_image"]["short_id"], "a" * 12)
+        self.assertEqual(status["local_image"]["version"], "v7.2.111")
         self.assertEqual(status["running_count"], 2)
         self.assertEqual(status["current_count"], 1)
         self.assertEqual(status["outdated_count"], 1)
@@ -481,10 +492,94 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(accounts["alpha"]["enabled"])
         self.assertFalse(accounts["beta"]["enabled"])
 
+    def test_cliproxy_image_status_ignores_version_cached_for_an_old_image_id(self):
+        current_id = "sha256:" + "a" * 64
+        self.app.store.write_runtime_state(
+            "cliproxy_image",
+            {
+                "candidate": {
+                    "version": "v7.2.100",
+                    "image_id": "sha256:" + "b" * 64,
+                    "resolved_ref": "registry.example.com/cpa:v7.2.100@sha256:" + "c" * 64,
+                }
+            },
+        )
+        self.app._docker_json = mock.Mock(return_value={"Id": current_id})
+        self.app._docker_json_rows = mock.Mock(return_value=[])
+
+        status = self.app.cliproxy_image_status()
+
+        self.assertEqual(status["candidate"], {})
+        self.assertEqual(status["local_image"]["version"], "")
+
+    def test_cliproxy_image_status_keeps_versions_for_partially_updated_accounts(self):
+        old_id = "sha256:" + "a" * 64
+        new_id = "sha256:" + "b" * 64
+        self.app.store.write_runtime_state(
+            "cliproxy_image",
+            {
+                "applied": {
+                    "version": "v7.2.100",
+                    "image_id": old_id,
+                    "resolved_ref": old_id,
+                }
+            },
+        )
+        self.app._commit_cliproxy_applied(
+            {
+                "version": "v7.2.111",
+                "image_id": new_id,
+                "resolved_ref": new_id,
+            }
+        )
+        self.app._docker_json = mock.Mock(return_value={"Id": new_id})
+
+        def docker_json_rows(*args, **kwargs):
+            if args == ("container", "ls", "-a", "--format", "json"):
+                return [
+                    {"Names": "cliproxy-alpha"},
+                    {"Names": "cliproxy-beta"},
+                ]
+            if args[:2] == ("container", "inspect"):
+                return [
+                    {
+                        "Name": "/cliproxy-alpha",
+                        "Image": new_id,
+                        "State": {"Running": True, "Status": "running"},
+                    },
+                    {
+                        "Name": "/cliproxy-beta",
+                        "Image": old_id,
+                        "State": {"Running": True, "Status": "running"},
+                    },
+                ]
+            return []
+
+        self.app._docker_json_rows = mock.Mock(side_effect=docker_json_rows)
+
+        status = self.app.cliproxy_image_status()
+
+        accounts = {item["account"]: item for item in status["accounts"]}
+        self.assertEqual(accounts["alpha"]["version"], "v7.2.111")
+        self.assertEqual(accounts["beta"]["version"], "v7.2.100")
+
     def test_pull_cliproxy_image_pulls_configured_reference_and_verifies_local_image(self):
         self.app._docker = mock.Mock()
         self.app._docker_json = mock.Mock(
             return_value={"Id": "sha256:" + "c" * 64}
+        )
+        self.app._resolve_cliproxy_image_identity = mock.Mock(
+            return_value={
+                "source_ref": CLIPROXY_IMAGE,
+                "version": "v7.2.111",
+                "commit": "abc123",
+                "built_at": "2026-08-19T01:02:03Z",
+                "image_id": "sha256:" + "c" * 64,
+                "image_short_id": "c" * 12,
+                "repo_digest": "eceasy/cli-proxy-api@sha256:" + "d" * 64,
+                "repo_digests": [],
+                "resolved_ref": "eceasy/cli-proxy-api:v7.2.111@sha256:" + "d" * 64,
+            }
         )
 
         self.app.pull_cliproxy_image()
@@ -495,6 +590,138 @@ class ControlTests(unittest.TestCase):
         self.app._docker_json.assert_called_once_with(
             "image", "inspect", CLIPROXY_IMAGE
         )
+        candidate = self.app.store.read_runtime_state("cliproxy_image")["candidate"]
+        self.assertEqual(candidate["version"], "v7.2.111")
+        self.assertEqual(candidate["image_id"], "sha256:" + "c" * 64)
+
+    def test_pull_cliproxy_image_does_not_replace_applied_compose_projection(self):
+        old_id = "sha256:" + "a" * 64
+        new_id = "sha256:" + "b" * 64
+        self.app.store.write_runtime_state(
+            "cliproxy_image",
+            {
+                "applied": {
+                    "version": "v7.2.100",
+                    "image_id": old_id,
+                    "resolved_ref": old_id,
+                }
+            },
+        )
+        self.app.render_compose_environment()
+        self.app._docker = mock.Mock()
+        self.app._docker_json = mock.Mock(return_value={"Id": new_id})
+        self.app._resolve_cliproxy_image_identity = mock.Mock(
+            return_value={
+                "source_ref": CLIPROXY_IMAGE,
+                "version": "v7.2.111",
+                "image_id": new_id,
+                "image_short_id": "b" * 12,
+                "repo_digest": "",
+                "repo_digests": [],
+                "resolved_ref": new_id,
+            }
+        )
+
+        self.app.pull_cliproxy_image()
+
+        projection = (self.root / "state" / "compose.env").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("CLIPROXY_IMAGE=" + old_id, projection)
+        self.assertNotIn("CLIPROXY_IMAGE=" + new_id, projection)
+
+    def test_cliproxy_version_banner_is_parsed_without_network_or_privileges(self):
+        image_id = "sha256:" + "d" * 64
+        inspected = {
+            "Id": image_id,
+            "RepoDigests": ["registry.example.com/cpa@sha256:" + "e" * 64],
+        }
+        with mock.patch.object(
+            self.module.subprocess,
+            "run",
+            return_value=mock.Mock(
+                stdout="CLIProxyAPI Version: v7.2.111, Commit: abc123, BuiltAt: 2026-08-19T01:02:03Z\n",
+                stderr="",
+            ),
+        ) as run:
+            identity = self.app._resolve_cliproxy_image_identity(
+                "registry.example.com/cpa:latest", image=inspected
+            )
+
+        self.assertEqual(identity["version"], "v7.2.111")
+        self.assertEqual(
+            identity["resolved_ref"],
+            "registry.example.com/cpa:v7.2.111@sha256:" + "e" * 64,
+        )
+        command = run.call_args.args[0]
+        self.assertIn("--network", command)
+        self.assertIn("none", command)
+        self.assertIn("--read-only", command)
+        self.assertIn("no-new-privileges", command)
+
+    def test_cliproxy_image_identity_prefers_valid_label_and_sorts_semver_tags(self):
+        image_id = "sha256:" + "d" * 64
+        with mock.patch.object(
+            self.module.subprocess,
+            "run",
+            return_value=mock.Mock(
+                stdout="CLIProxyAPI Version: development, Commit: banner, BuiltAt: now\n",
+                stderr="",
+            ),
+        ):
+            labelled = self.app._resolve_cliproxy_image_identity(
+                "registry.example.com/cpa:latest",
+                image={
+                    "Id": image_id,
+                    "Config": {
+                        "Labels": {"org.opencontainers.image.version": "v7.2.10"}
+                    },
+                    "RepoTags": ["registry.example.com/cpa:v7.2.9"],
+                },
+            )
+            tagged = self.app._resolve_cliproxy_image_identity(
+                "registry.example.com/cpa:latest",
+                image={
+                    "Id": image_id,
+                    "RepoTags": [
+                        "registry.example.com/cpa:v7.2.9",
+                        "registry.example.com/cpa:v7.2.10",
+                        "registry.example.com/cpa:latest",
+                    ],
+                },
+            )
+
+        self.assertEqual(labelled["version"], "v7.2.10")
+        self.assertEqual(tagged["version"], "v7.2.10")
+
+    def test_seed_cliproxy_applied_image_preserves_running_legacy_image_once(self):
+        image_id = "sha256:" + "f" * 64
+        identity = {
+            "source_ref": CLIPROXY_IMAGE,
+            "version": "v7.2.100",
+            "commit": "abc123",
+            "built_at": "2026-08-18T01:02:03Z",
+            "image_id": image_id,
+            "image_short_id": "f" * 12,
+            "repo_digest": "",
+            "repo_digests": [],
+            "resolved_ref": image_id,
+        }
+        self.app._docker_json = mock.Mock(return_value={"Id": image_id})
+        self.app._resolve_cliproxy_image_identity = mock.Mock(
+            return_value=dict(identity)
+        )
+
+        applied = self.app.seed_cliproxy_applied_image(image_id)
+        second = self.app.seed_cliproxy_applied_image("sha256:" + "e" * 64)
+
+        self.assertEqual(applied["version"], "v7.2.100")
+        self.assertIsNone(second)
+        self.app._docker_json.assert_called_once_with("image", "inspect", image_id)
+        state = self.app.store.read_runtime_state("cliproxy_image")
+        self.assertEqual(state["applied"]["resolved_ref"], image_id)
+        projection = (self.root / "state" / "compose.env").read_text(encoding="utf-8")
+        self.assertIn("CLIPROXY_IMAGE=" + image_id, projection)
 
     def test_pull_cliproxy_image_rejects_concurrent_runtime_operation(self):
         competing = self.module.ControlPlane(self.root)
@@ -524,7 +751,6 @@ class ControlTests(unittest.TestCase):
         self.app._docker = mock.Mock()
         self.app._compose_with_image = mock.Mock()
         self.app._probe_account_service = mock.Mock()
-        self.app.sync_cliproxy_image_environment = mock.Mock()
 
         self.app.update_cliproxy_image("alpha")
 
@@ -532,7 +758,7 @@ class ControlTests(unittest.TestCase):
             "image", "tag", old_id, "cliproxy-cpa-rollback:alpha"
         )
         self.app._compose_with_image.assert_called_once_with(
-            CLIPROXY_IMAGE,
+            target_id,
             "up",
             "-d",
             "--no-deps",
@@ -540,9 +766,10 @@ class ControlTests(unittest.TestCase):
             "cliproxy-alpha",
         )
         self.app._probe_account_service.assert_called_once_with("alpha")
-        self.app.sync_cliproxy_image_environment.assert_called_once_with(
-            CLIPROXY_IMAGE
-        )
+        applied = self.app.store.read_runtime_state("cliproxy_image")["applied"]
+        self.assertEqual(applied["image_id"], target_id)
+        self.assertEqual(applied["resolved_ref"], target_id)
+        self.assertIn("CLIPROXY_IMAGE=" + target_id, (self.root / "state" / "compose.env").read_text(encoding="utf-8"))
 
     def test_account_probe_uses_internal_key_after_gateway_key_translation(self):
         created = self.app.create_user("alice@example.com", apply=False)
@@ -594,7 +821,6 @@ class ControlTests(unittest.TestCase):
         failure = subprocess.CalledProcessError(1, ["docker", "compose", "up"])
         self.app._compose_with_image = mock.Mock(side_effect=[failure, None])
         self.app._probe_account_service = mock.Mock()
-        self.app.sync_cliproxy_image_environment = mock.Mock()
 
         with self.assertRaises(subprocess.CalledProcessError):
             self.app.update_cliproxy_image("alpha")
@@ -603,7 +829,10 @@ class ControlTests(unittest.TestCase):
         rollback_call = self.app._compose_with_image.call_args_list[1]
         self.assertEqual(rollback_call.args[0], "cliproxy-cpa-rollback:alpha")
         self.app._probe_account_service.assert_called_once_with("alpha")
-        self.app.sync_cliproxy_image_environment.assert_not_called()
+        self.assertNotIn(
+            "applied",
+            self.app.store.read_runtime_state("cliproxy_image", {}),
+        )
 
     def test_update_all_cliproxy_images_rolls_back_previously_updated_accounts(self):
         target_id = "sha256:" + "2" * 64
@@ -637,14 +866,14 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(
             image_refs,
             [
-                CLIPROXY_IMAGE,
-                CLIPROXY_IMAGE,
+                target_id,
+                target_id,
                 "cliproxy-cpa-rollback:beta",
                 "cliproxy-cpa-rollback:alpha",
             ],
         )
 
-    def test_update_cliproxy_image_rolls_back_when_env_commit_fails(self):
+    def test_update_cliproxy_image_rolls_back_when_compose_projection_commit_fails(self):
         target_id = "sha256:" + "5" * 64
         old_id = "sha256:" + "6" * 64
 
@@ -662,11 +891,11 @@ class ControlTests(unittest.TestCase):
         self.app._docker = mock.Mock()
         self.app._compose_with_image = mock.Mock()
         self.app._probe_account_service = mock.Mock()
-        self.app.sync_cliproxy_image_environment = mock.Mock(
-            side_effect=OSError("env write failed")
+        self.app.render_compose_environment = mock.Mock(
+            side_effect=OSError("compose env write failed")
         )
 
-        with self.assertRaisesRegex(OSError, "env write failed"):
+        with self.assertRaisesRegex(OSError, "compose env write failed"):
             self.app.update_cliproxy_image("alpha")
 
         self.assertEqual(self.app._compose_with_image.call_count, 2)
@@ -675,6 +904,10 @@ class ControlTests(unittest.TestCase):
             "cliproxy-cpa-rollback:alpha",
         )
         self.assertEqual(self.app._probe_account_service.call_count, 2)
+        self.assertNotIn(
+            "applied",
+            self.app.store.read_runtime_state("cliproxy_image", {}),
+        )
 
     def test_update_all_cliproxy_images_skips_disabled_accounts(self):
         records = self.app.store.read_accounts()
@@ -736,14 +969,14 @@ class ControlTests(unittest.TestCase):
         )
         self.app._docker = mock.Mock()
         self.app._compose_with_image = mock.Mock()
-        self.app.sync_cliproxy_image_environment = mock.Mock()
 
         self.app.update_cliproxy_image("alpha")
 
         self.app._docker.assert_not_called()
         self.app._compose_with_image.assert_not_called()
-        self.app.sync_cliproxy_image_environment.assert_called_once_with(
-            CLIPROXY_IMAGE
+        self.assertNotIn(
+            "applied",
+            self.app.store.read_runtime_state("cliproxy_image", {}),
         )
 
     def test_update_cliproxy_image_rejects_concurrent_runtime_operation(self):
@@ -756,7 +989,7 @@ class ControlTests(unittest.TestCase):
 
         competing._docker_json.assert_not_called()
 
-    def test_sync_cliproxy_image_environment_repairs_only_image_projection(self):
+    def test_sync_cliproxy_image_environment_updates_only_generated_projection(self):
         (self.root / ".env").write_text(
             "CUSTOM_VALUE=keep\n"
             "CLIPROXY_IMAGE=registry.example.com/cpa:old\n"
@@ -766,12 +999,13 @@ class ControlTests(unittest.TestCase):
 
         self.app.sync_cliproxy_image_environment("registry.example.com/cpa:new")
 
-        environment = (self.root / ".env").read_text(encoding="utf-8")
-        self.assertIn("CUSTOM_VALUE=keep", environment)
-        self.assertIn("CLIPROXY_IMAGE=registry.example.com/cpa:new", environment)
-        self.assertNotIn("registry.example.com/cpa:old", environment)
-        self.assertIn("GATEWAY_PORT=19317", environment)
-        self.assertEqual((self.root / ".env").stat().st_mode & 0o777, 0o600)
+        bootstrap = (self.root / ".env").read_text(encoding="utf-8")
+        projection = (self.root / "state" / "compose.env").read_text(encoding="utf-8")
+        self.assertIn("CUSTOM_VALUE=keep", bootstrap)
+        self.assertIn("registry.example.com/cpa:old", bootstrap)
+        self.assertIn("CLIPROXY_IMAGE=registry.example.com/cpa:new", projection)
+        self.assertNotIn("CUSTOM_VALUE=keep", projection)
+        self.assertEqual((self.root / "state" / "compose.env").stat().st_mode & 0o777, 0o600)
 
     def test_create_user_rejects_non_company_email(self):
         with self.assertRaisesRegex(ValueError, "example.com"):
@@ -1285,11 +1519,92 @@ class ControlTests(unittest.TestCase):
             "09:00,14:00,18:00",
         )
 
-    def test_deployment_configuration_syncs_env_without_dropping_unknown_values(self):
+    def test_record_deployment_persists_release_state_and_regenerates_compose_env(self):
+        result = self.module.main(
+            [
+                "--root",
+                str(self.root),
+                "record-deployment",
+                "--version",
+                "v1.2.3",
+                "--commit",
+                "abc123",
+                "--pipeline",
+                "manual-1",
+                "--deployed-at",
+                "2026-08-19T01:02:03Z",
+                "--metadata-image",
+                "registry.example.com/codex-cpa-release:latest",
+                "--admin-image",
+                "registry.example.com/codex-cpa-admin:v1.2.3",
+                "--web-image",
+                "registry.example.com/codex-cpa-web:v1.2.3",
+                "--gateway-image",
+                "registry.example.com/codex-cpa-gateway:v1.2.3",
+                "--edge-image",
+                "registry.example.com/codex-cpa-edge:v1.2.3",
+                "--gateway-port",
+                "19317",
+                "--gateway-internal-port",
+                "19316",
+            ]
+        )
+
+        self.assertEqual(result, 0)
+        restarted = self.module.ControlPlane(self.root)
+        deployment_state = restarted.store.read_runtime_state("deployment")
+        self.assertNotIn("pending", deployment_state)
+        deployment = deployment_state["applied"]
+        self.assertEqual(deployment["version"], "v1.2.3")
+        self.assertEqual(deployment["admin_image"], "registry.example.com/codex-cpa-admin:v1.2.3")
+        values = restarted.configuration()["values"]
+        self.assertEqual(values["delivery.release_metadata_image"], "registry.example.com/codex-cpa-release:latest")
+        self.assertEqual(values["gateway.port"], 19317)
+        projection = (self.root / "state" / "compose.env").read_text(encoding="utf-8")
+        self.assertNotIn("RELEASE_VERSION=", projection)
+        self.assertIn("ADMIN_IMAGE=registry.example.com/codex-cpa-admin:v1.2.3", projection)
+        self.assertIn("GATEWAY_PORT=19317", projection)
+
+    def test_staged_deployment_drives_compose_without_changing_applied_release(self):
+        self.app.store.write_runtime_state(
+            "deployment",
+            {"applied": {"version": "v1.1.0", "admin_image": "admin:old"}},
+        )
+        args = [
+            "--root", str(self.root), "stage-deployment",
+            "--version", "v1.2.0", "--commit", "abc123",
+            "--pipeline", "manual-1", "--deployed-at", "2026-08-19T01:02:03Z",
+            "--metadata-image", "registry.example.com/codex-cpa-release:latest",
+            "--admin-image", "registry.example.com/codex-cpa-admin:v1.2.0",
+            "--web-image", "registry.example.com/codex-cpa-web:v1.2.0",
+            "--gateway-image", "registry.example.com/codex-cpa-gateway:v1.2.0",
+            "--edge-image", "registry.example.com/codex-cpa-edge:v1.2.0",
+            "--gateway-port", "18317", "--gateway-internal-port", "18316",
+        ]
+
+        self.assertEqual(self.module.main(args), 0)
+
+        restarted = self.module.ControlPlane(self.root)
+        state = restarted.deployment_runtime_state()
+        self.assertEqual(state["applied"]["version"], "v1.1.0")
+        self.assertEqual(state["pending"]["version"], "v1.2.0")
+        projection = (self.root / "state" / "compose.env").read_text(encoding="utf-8")
+        self.assertIn("ADMIN_IMAGE=registry.example.com/codex-cpa-admin:v1.2.0", projection)
+
+        args[2] = "record-deployment"
+        self.assertEqual(self.module.main(args), 0)
+        state = self.module.ControlPlane(self.root).deployment_runtime_state()
+        self.assertNotIn("pending", state)
+        self.assertEqual(state["applied"]["version"], "v1.2.0")
+
+    def test_legacy_env_is_imported_then_split_into_bootstrap_and_generated_projection(self):
         (self.root / ".env").write_text(
-            "CUSTOM_VALUE=keep\nGATEWAY_PORT=18315\n",
+            "DEPLOY_ROOT={}\nCUSTOM_VALUE=keep\nGATEWAY_PORT=18315\n".format(
+                self.root
+            ),
             encoding="utf-8",
         )
+        migration = self.app.migrate_legacy_environment()
         self.assertEqual(self.app.configuration()["values"]["gateway.port"], 18315)
         result = self.app.update_configuration(
             {
@@ -1302,19 +1617,78 @@ class ControlTests(unittest.TestCase):
         )
         self.app.sync_environment_configuration(result["values"])
 
-        environment = (self.root / ".env").read_text(encoding="utf-8")
-        self.assertIn("CUSTOM_VALUE=keep", environment)
-        self.assertIn("CLIPROXY_IMAGE=registry.example.com/cpa:v2", environment)
+        bootstrap = (self.root / ".env").read_text(encoding="utf-8")
+        projection = (self.root / "state" / "compose.env").read_text(encoding="utf-8")
+        backup = Path(migration["backup_path"]).read_text(encoding="utf-8")
+        self.assertIn("DEPLOY_ROOT={}".format(self.root), bootstrap)
+        self.assertNotIn("CUSTOM_VALUE", bootstrap)
+        self.assertNotIn("GATEWAY_PORT", bootstrap)
+        self.assertIn("CUSTOM_VALUE=keep", backup)
+        self.assertIn("CLIPROXY_IMAGE=registry.example.com/cpa:v2", projection)
         self.assertIn(
             "ADMIN_BASE_IMAGE=registry.example.com/admin-base:v2@sha256:" + "c" * 64,
-            environment,
+            projection,
         )
-        self.assertIn("GATEWAY_PORT=18315", environment)
-        self.assertIn("GATEWAY_LISTEN_ADDRESS=127.0.0.1", environment)
-        self.assertIn("MANAGEMENT_LISTEN_ADDRESS=127.0.0.1", environment)
-        self.assertIn("BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.1", environment)
-        self.assertIn("GATEWAY_INTERNAL_PORT=18316", environment)
+        self.assertIn("GATEWAY_PORT=18315", projection)
+        self.assertIn("GATEWAY_LISTEN_ADDRESS=127.0.0.1", projection)
+        self.assertIn("MANAGEMENT_LISTEN_ADDRESS=127.0.0.1", projection)
+        self.assertIn("MANAGEMENT_PORT=18318", projection)
+        self.assertIn("BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.1", projection)
+        self.assertIn("GATEWAY_INTERNAL_PORT=18316", projection)
         self.assertEqual((self.root / ".env").stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.root / "state" / "compose.env").stat().st_mode & 0o777, 0o600)
+        migration_state = self.app.store.read_runtime_state(
+            "legacy_environment_migration"
+        )
+        self.assertEqual(migration_state["unmapped_keys"], ["CUSTOM_VALUE"])
+
+    def test_legacy_env_migration_canonicalizes_public_listeners(self):
+        (self.root / ".env").write_text(
+            "DEPLOY_ROOT={}\nGATEWAY_LISTEN_ADDRESS=0.0.0.0\n".format(
+                self.root
+            ),
+            encoding="utf-8",
+        )
+
+        self.app.migrate_legacy_environment()
+
+        self.assertEqual(
+            self.app.configuration()["values"]["gateway.listen_address"],
+            "127.0.0.1",
+        )
+
+    def test_legacy_env_migration_rejects_invalid_applied_release_identity(self):
+        legacy = "DEPLOY_ROOT={}\nRELEASE_VERSION=not-a-version\n".format(
+            self.root
+        )
+        (self.root / ".env").write_text(legacy, encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "RELEASE_VERSION"):
+            self.app.migrate_legacy_environment()
+
+        self.assertEqual((self.root / ".env").read_text(encoding="utf-8"), legacy)
+
+    def test_legacy_env_migration_ignores_stale_release_fields_already_in_sqlite(self):
+        self.app.store.write_runtime_state(
+            "deployment",
+            {
+                "applied": {
+                    "version": "v1.2.3",
+                    "admin_image": "registry.example.com/admin:v1.2.3",
+                }
+            },
+        )
+        (self.root / ".env").write_text(
+            "DEPLOY_ROOT={}\nRELEASE_VERSION=stale-invalid-value\n"
+            "ADMIN_IMAGE=invalid image; command\n".format(self.root),
+            encoding="utf-8",
+        )
+
+        result = self.app.migrate_legacy_environment()
+
+        self.assertEqual(result["deployment_fields"], [])
+        self.assertEqual(result["unmapped_keys"], [])
+        self.assertEqual(self.app.applied_deployment()["version"], "v1.2.3")
 
     def test_environment_backed_url_rejects_whitespace_and_invalid_port(self):
         for value in (
@@ -1365,7 +1739,7 @@ class ControlTests(unittest.TestCase):
         self.assertIn('"id": "gamma-new2"', public)
         self.assertNotIn("gamma+new2@accounts.example.com", public)
         self.assertNotIn('"email"', public)
-        self.assertIn("${BUSINESS_CPA_LISTEN_ADDRESS:-127.0.0.1}:18323:8317", compose)
+        self.assertIn("${BUSINESS_CPA_LISTEN_ADDRESS:?state/compose.env missing}:18323:8317", compose)
 
     def test_proxy_resolution_prefers_account_then_default_and_supports_direct(self):
         self.app.update_configuration(

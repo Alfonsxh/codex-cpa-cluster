@@ -1181,6 +1181,13 @@ class ControlPlaneStore:
                     ),
                 )
 
+    def delete_runtime_state(self, name):
+        with self._exclusive():
+            with self._connect() as connection:
+                connection.execute(
+                    "DELETE FROM runtime_state WHERE name = ?", (str(name),)
+                )
+
     def branding_asset(self, name="logo"):
         with self._connect() as connection:
             row = connection.execute(

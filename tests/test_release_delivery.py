@@ -87,6 +87,7 @@ class ReleaseDeliveryTests(unittest.TestCase):
             self.assertTrue(
                 {
                     "README.md",
+                    "compose.env.example",
                     "CHANGELOG.md",
                     "CONTRIBUTING.md",
                     "SECURITY.md",
@@ -228,25 +229,53 @@ class ReleaseDeliveryTests(unittest.TestCase):
         self.assertIn('RUNTIME_OPERATION_LOCK="$TARGET/state/runtime-operation.lock"', deploy)
         self.assertIn('flock -n 9', deploy)
         self.assertIn(
-            'cliproxy_image = app.configuration()["values"]["runtime.cliproxy_image"]',
+            'app._compose_with_image(image_id, "up", "-d", "--no-deps", service)',
             deploy,
         )
-        self.assertIn(
-            "app.sync_cliproxy_image_environment(cliproxy_image)",
-            deploy,
-        )
-        self.assertIn(
-            'app._compose_with_image(cliproxy_image, "up", "-d", "--no-deps", service)',
-            deploy,
-        )
+        self.assertIn('release_cli stage-deployment', deploy)
+        self.assertIn('--preserve-cliproxy-image "$PRESERVED_CLIPROXY_IMAGE"', deploy)
+        self.assertIn('--env-file "$TARGET/state/compose.env"', deploy)
+        wait_start = deploy.index("wait_for_runtime_services() {")
+        wait_end = deploy.index("\ncompose_network_name()", wait_start)
+        wait_helper = deploy[wait_start:wait_end]
+        self.assertIn('"--env-file", str(root / ".env")', wait_helper)
+        self.assertIn('"--env-file", str(compose_environment)', wait_helper)
+        self.assertIn('--metadata-image "$RELEASE_METADATA_IMAGE"', deploy)
 
     def test_admin_runtime_source_is_not_shadowed_by_deployment_root_mount(self):
         dockerfile = (ROOT / "admin" / "Dockerfile").read_text(encoding="utf-8")
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertIn("CLIPROXY_APP_ROOT=/opt/codex-cpa-runtime", dockerfile)
         self.assertIn("/opt/codex-cpa-runtime/admin/server.py", compose)
-        self.assertIn("CLIPROXY_RELEASE_VERSION", compose)
-        self.assertIn("CLIPROXY_RELEASE_METADATA_IMAGE", compose)
+        self.assertNotIn("CLIPROXY_RELEASE_VERSION", compose)
+        self.assertNotIn("CLIPROXY_RELEASE_METADATA_IMAGE", compose)
+
+    def test_env_and_sqlite_compose_projection_have_distinct_responsibilities(self):
+        bootstrap = (ROOT / ".env.example").read_text(encoding="utf-8")
+        projection = (ROOT / "compose.env.example").read_text(encoding="utf-8")
+        self.assertEqual(
+            {
+                line.split("=", 1)[0]
+                for line in bootstrap.splitlines()
+                if line and not line.startswith("#")
+            },
+            {
+                "DEPLOY_ROOT",
+                "INSTANCE_NAME",
+                "COMPOSE_PROJECT_NAME",
+                "DOCKER_NETWORK_NAME",
+            },
+        )
+        self.assertIn("CLIPROXY_IMAGE=", projection)
+        self.assertIn("ADMIN_BASE_IMAGE=", projection)
+        self.assertIn("GATEWAY_PORT=", projection)
+        self.assertNotIn("RELEASE_VERSION=", projection)
+        self.assertNotIn("RELEASE_METADATA_IMAGE=", projection)
+        self.assertNotIn("GATEWAY_DRAIN_TIMEOUT_SECONDS=", projection)
+        self.assertNotIn("CLIPROXY_IMAGE=", bootstrap)
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("${CLIPROXY_IMAGE:?state/compose.env missing", compose)
+        self.assertIn("${ADMIN_IMAGE:?state/compose.env missing", compose)
 
     def test_only_release_metadata_image_carries_release_version_labels(self):
         for component in ("admin", "web", "gateway", "edge"):

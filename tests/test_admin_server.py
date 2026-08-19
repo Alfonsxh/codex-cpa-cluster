@@ -842,6 +842,33 @@ class AdminServerTests(unittest.TestCase):
             end_at=None,
         )
 
+    def test_user_summary_manual_refresh_bypasses_both_cache_layers(self):
+        self.control.create_user("alice@example.com", apply=False)
+        original = self.app.usage_store.usage_summaries_for_users
+        self.app.usage_store.usage_summaries_for_users = mock.Mock(
+            wraps=original
+        )
+
+        with mock.patch.object(
+            self.server_module,
+            "utc_timestamp",
+            return_value=1_700_000_000,
+        ):
+            first = self.app.user_management_page(86400)
+            cached = self.app.user_management_page(86400)
+            refreshed = self.app.user_management_page(
+                86400,
+                force_refresh=True,
+            )
+
+        self.assertFalse(first["summary_cached"])
+        self.assertTrue(cached["summary_cached"])
+        self.assertFalse(refreshed["summary_cached"])
+        self.assertEqual(
+            self.app.usage_store.usage_summaries_for_users.call_count,
+            2,
+        )
+
     def test_user_summary_today_window_uses_midnight_and_does_not_share_all_cache(self):
         self.control.create_user("alice@example.com", apply=False)
         original = self.app.usage_store.usage_summaries_for_users
@@ -4133,6 +4160,48 @@ class AdminServerTests(unittest.TestCase):
             self.assertEqual(payload, {"key": key})
         self.assertEqual(list(cache.entries), ["b", "c"])
 
+    def test_bounded_swr_cache_force_refresh_waits_for_one_fresh_value(self):
+        cache = self.server_module.BoundedSWRCache(2)
+        cached, state = cache.get("overview", lambda: {"generated_at": 1}, 60)
+        self.assertEqual(state, "miss")
+        self.assertEqual(cached["generated_at"], 1)
+
+        refresh_started = threading.Event()
+        release_refresh = threading.Event()
+
+        def load_fresh():
+            refresh_started.set()
+            self.assertTrue(release_refresh.wait(timeout=2))
+            return {"generated_at": 2}
+
+        loader = mock.Mock(side_effect=load_fresh)
+        with self.server_module.concurrent.futures.ThreadPoolExecutor(
+            max_workers=2
+        ) as executor:
+            futures = [
+                executor.submit(
+                    cache.get,
+                    "overview",
+                    loader,
+                    60,
+                    force_refresh=True,
+                    stale_while_revalidate=False,
+                )
+                for _ in range(2)
+            ]
+            self.assertTrue(refresh_started.wait(timeout=1))
+            time.sleep(0.05)
+            self.assertEqual(loader.call_count, 1)
+            self.assertTrue(all(not future.done() for future in futures))
+            release_refresh.set()
+            results = [future.result(timeout=1) for future in futures]
+
+        self.assertEqual(loader.call_count, 1)
+        self.assertEqual(
+            results,
+            [({"generated_at": 2}, "refresh")] * 2,
+        )
+
     def test_user_and_team_pages_share_one_cold_usage_aggregation(self):
         self.control.create_user("alice@example.com", apply=False)
         load_started = threading.Event()
@@ -4189,15 +4258,20 @@ class AdminServerTests(unittest.TestCase):
             return {"generated_at": 2, "summary": {}}
 
         self.app._load_overview = mock.Mock(side_effect=refresh)
-        status, headers, raw = self.request("/admin/api/overview?fresh=1")
+        with self.server_module.concurrent.futures.ThreadPoolExecutor(
+            max_workers=1
+        ) as executor:
+            future = executor.submit(
+                self.request,
+                "/admin/api/overview?fresh=1",
+            )
+            self.assertTrue(refresh_started.wait(timeout=1))
+            self.assertFalse(future.done())
+            release_refresh.set()
+            status, headers, raw = future.result(timeout=1)
         self.assertEqual(status, 200)
         self.assertIn('overview-refresh', headers["Server-Timing"])
-        self.assertEqual(json.loads(raw)["generated_at"], 1)
-        self.assertTrue(refresh_started.wait(timeout=1))
-        release_refresh.set()
-        deadline = time.time() + 2
-        while self.app.admin_overview_cache.refreshing and time.time() < deadline:
-            time.sleep(0.01)
+        self.assertEqual(json.loads(raw)["generated_at"], 2)
         self.assertEqual(self.app.overview()["generated_at"], 2)
 
     def test_admin_http_server_rejects_requests_beyond_worker_and_queue_limit(self):
@@ -4639,16 +4713,21 @@ class AdminServerTests(unittest.TestCase):
             "org.opencontainers.image.version": "v1.2.0",
             "org.opencontainers.image.revision": "a" * 40,
         }
-        with mock.patch.dict(
-            self.server_module.os.environ,
+        self.control.store.write_runtime_state(
+            "deployment",
             {
-                "CLIPROXY_RELEASE_VERSION": "v1.1.0",
-                "CLIPROXY_RELEASE_METADATA_IMAGE": (
-                    "docker.io/example/codex-cpa-release:latest"
-                ),
+                "applied": {"version": "v1.1.0"},
+                "pending": {"version": "v1.2.0"},
             },
-            clear=False,
-        ), mock.patch.object(
+        )
+        self.control.update_configuration(
+            {
+                "delivery.release_metadata_image": (
+                    "docker.io/example/codex-cpa-release:latest"
+                )
+            }
+        )
+        with mock.patch.object(
             self.server_module.subprocess,
             "run",
             side_effect=[
@@ -4670,25 +4749,17 @@ class AdminServerTests(unittest.TestCase):
         )
 
     def test_release_status_disables_unconfigured_or_invalid_sources_without_docker(self):
-        with mock.patch.dict(
-            self.server_module.os.environ,
-            {
-                "CLIPROXY_RELEASE_VERSION": "",
-                "CLIPROXY_RELEASE_METADATA_IMAGE": "",
-            },
-            clear=False,
-        ), mock.patch.object(self.server_module.subprocess, "run") as run:
+        with mock.patch.object(self.server_module.subprocess, "run") as run:
             self.assertFalse(self.app.release_status()["configured"])
             run.assert_not_called()
 
-        with mock.patch.dict(
-            self.server_module.os.environ,
-            {
-                "CLIPROXY_RELEASE_VERSION": "v1.0.0",
-                "CLIPROXY_RELEASE_METADATA_IMAGE": "invalid image; command",
-            },
-            clear=False,
-        ), mock.patch.object(self.server_module.subprocess, "run") as run:
+        self.control.store.write_runtime_state(
+            "deployment", {"version": "v1.0.0"}
+        )
+        settings = self.control.store.read_settings()
+        settings["delivery.release_metadata_image"] = "invalid image; command"
+        self.control.store.write_settings(settings)
+        with mock.patch.object(self.server_module.subprocess, "run") as run:
             payload = self.app.release_status(force=True)
             self.assertEqual(payload["status"], "invalid_configuration")
             run.assert_not_called()

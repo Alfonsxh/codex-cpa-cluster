@@ -25,6 +25,7 @@ python3 -m pip install -r requirements.txt
 cp .env.example .env
 export DEPLOY_ROOT="$PWD"
 make dev-build
+python3 scripts/cliproxy.py --root "$PWD" render
 make dev-up
 ```
 
@@ -35,6 +36,9 @@ docker-compose.yml        # 生产运行拓扑，不含 build
   + docker-compose.dev.yml  # 本地 Dockerfile/build args
   + compose.accounts.yml    # 运行时生成的业务 CPA
 ```
+
+`make dev-build` 在没有本地运行状态时使用 `compose.env.example`；`render` 会创建本地
+SQLite 并生成私有的 `state/compose.env`，`make dev-up` 只读取该生成投影。
 
 不要把 `docker-compose.dev.yml` 复制到生产目录，也不要让生产部署执行 `docker compose build`。
 

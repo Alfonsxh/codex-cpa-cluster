@@ -16,6 +16,7 @@ RELEASE_ARCHIVE ?= dist/codex-cpa-cluster-$(VERSION).tar.gz
 GH_REPO ?= Alfonsxh/codex-cpa-cluster
 GIT_REMOTE ?= origin
 RELEASE_BRANCH ?= main
+COMPOSE_RUNTIME_ENV := $(if $(wildcard state/compose.env),state/compose.env,compose.env.example)
 
 .PHONY: help verify dev-config dev-build dev-up privacy-check package images publish publish-harbor publish-dockerhub publish-ghcr publish-all release-check release deploy
 
@@ -39,13 +40,13 @@ verify:
 	sh scripts/verify.sh
 
 dev-config:
-	docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+	docker compose --env-file .env --env-file $(COMPOSE_RUNTIME_ENV) -f docker-compose.yml -f docker-compose.dev.yml config --quiet
 
 dev-build:
-	docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml build admin web gateway-blue edge
+	docker compose --env-file .env --env-file $(COMPOSE_RUNTIME_ENV) -f docker-compose.yml -f docker-compose.dev.yml build admin web gateway-blue edge
 
 dev-up:
-	docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml -f compose.accounts.yml up -d
+	docker compose --env-file .env --env-file state/compose.env -f docker-compose.yml -f docker-compose.dev.yml -f compose.accounts.yml up -d
 
 privacy-check:
 	python3 scripts/check-public-release.py --root .

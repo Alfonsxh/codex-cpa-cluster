@@ -48,7 +48,9 @@
 | Usage collector | 采集 CPA 用量事件并更新额度快照 | 低频控制面配置 |
 | CPA containers | 每个业务账号独立运行 CLIProxyAPI | 外部用户 Key 管理 |
 
-Gateway 的蓝绿切换流程和排空不变量记录在 [ADR 0001](adr/0001-stable-edge-blue-green-gateway.md)。
+Gateway 的蓝绿切换流程和排空不变量记录在 [ADR 0001](adr/0001-stable-edge-blue-green-gateway.md)；
+`.env`、SQLite 与 Compose 投影边界记录在
+[ADR 0002](adr/0002-sqlite-compose-environment-boundary.md)。
 
 ## 数据边界
 
@@ -57,12 +59,17 @@ control-plane.sqlite3 ──▶ 配置、账号、路由、Key、团队、秘密
 usage.sqlite3         ──▶ 高频用量事件、额度策略、调整账本
 control-plane.key     ──▶ 控制面秘密的唯一加密主密钥
 auth/                 ──▶ 上游 OAuth 文件
+.env                  ──▶ 宿主机路径和 Compose 身份
+state/compose.env     ──▶ SQLite 生成的 Compose 插值
 configs/              ──▶ 渲染给 CLIProxyAPI 的运行文件
 state/gateway/        ──▶ 渲染给 Gateway 的只读快照
 compose.accounts.yml  ──▶ 动态账号服务定义
 ```
 
-SQLite 是人工配置的事实来源；`.env`、Compose overlay 和 JSON 快照只是运行投影，不能与数据库并行手改。
+SQLite 是期望配置和已应用运行状态的事实来源；`.env` 只负责宿主机/Compose 启动身份，
+`state/compose.env`、Compose overlay 和 JSON 快照是可重新生成的运行投影，不能与数据库
+并行手改。应用发布在 SQLite 中区分 `pending` 与 `applied`：待发布组件先驱动 Compose，
+只有完整验收后才成为管理界面展示的当前版本。
 
 ## 部署边界
 

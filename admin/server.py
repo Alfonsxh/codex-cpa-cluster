@@ -329,6 +329,8 @@ class BoundedSWRCache:
     Entries stay available after expiry so read-heavy endpoints can return stale
     data while one daemon thread refreshes them. Generation tokens prevent a
     refresh that started before invalidation from restoring obsolete data.
+    Manual callers can disable stale-while-revalidate; they then wait for one
+    shared newer revision without changing the fast path for ordinary reads.
     """
 
     def __init__(self, max_entries):
@@ -337,6 +339,7 @@ class BoundedSWRCache:
         self.entries = OrderedDict()
         self.refreshing = {}
         self.generation = 0
+        self.revision = 0
 
     @staticmethod
     def _clone(value):
@@ -346,11 +349,13 @@ class BoundedSWRCache:
         cached_payload = self._clone(payload)
         with self.condition:
             if self.generation == token and self.refreshing.get(key) == token:
+                self.revision += 1
                 self.entries[key] = {
                     "expires_at": (
                         time.monotonic() if now is None else float(now)
                     ) + float(ttl_seconds),
                     "payload": cached_payload,
+                    "revision": self.revision,
                 }
                 self.entries.move_to_end(key)
                 while len(self.entries) > self.max_entries:
@@ -382,6 +387,7 @@ class BoundedSWRCache:
         now=None,
     ):
         """Return ``(payload, state)`` where state is hit/miss/stale/refresh."""
+        required_revision = None
         while True:
             refresh_thread = None
             return_cached = False
@@ -390,10 +396,21 @@ class BoundedSWRCache:
                 cached = self.entries.get(key)
                 if cached is not None:
                     self.entries.move_to_end(key)
+                cached_revision = int((cached or {}).get("revision") or 0)
+                if (
+                    force_refresh
+                    and not stale_while_revalidate
+                    and required_revision is None
+                ):
+                    required_revision = cached_revision
+                refresh_satisfied = bool(
+                    required_revision is not None
+                    and cached_revision > required_revision
+                )
                 is_fresh = bool(cached and cache_now < cached["expires_at"])
-                if is_fresh and not force_refresh:
+                if is_fresh and (not force_refresh or refresh_satisfied):
                     payload = cached["payload"]
-                    state = "hit"
+                    state = "refresh" if refresh_satisfied else "hit"
                     return_cached = True
                 else:
                     token = self.generation
@@ -418,7 +435,7 @@ class BoundedSWRCache:
                     else:
                         self.refreshing[key] = token
                         payload = None
-                        state = "miss"
+                        state = "refresh" if force_refresh else "miss"
 
             if refresh_thread is not None:
                 refresh_thread.start()
@@ -926,10 +943,22 @@ class AdminApplication:
         )
 
     def release_status(self, force=False):
-        current_version = os.environ.get("CLIPROXY_RELEASE_VERSION", "").strip()
-        metadata_image = os.environ.get(
-            "CLIPROXY_RELEASE_METADATA_IMAGE", ""
-        ).strip()
+        deployment = self.control.applied_deployment()
+        current_version = str(deployment.get("version") or "").strip()
+        try:
+            metadata_image = str(
+                self.control.configuration()["values"].get(
+                    "delivery.release_metadata_image", ""
+                )
+                or ""
+            ).strip()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return {
+                "configured": bool(current_version),
+                "current_version": current_version,
+                "available": False,
+                "status": "invalid_configuration",
+            }
         if not current_version or not metadata_image:
             return {
                 "configured": False,
@@ -2433,6 +2462,7 @@ class AdminApplication:
         usage_start_at,
         usage_end_at,
         now,
+        force_refresh=False,
     ):
         key = (
             usage_window_seconds,
@@ -2452,6 +2482,7 @@ class AdminApplication:
             ),
             # The outer user-page cache must not extend an expired aggregate.
             # Concurrent cold/expired requests therefore wait for one loader.
+            force_refresh=force_refresh,
             stale_while_revalidate=False,
         )
 
@@ -2490,6 +2521,7 @@ class AdminApplication:
         tag_id="",
         usage_state="all",
         tag_membership="",
+        force_refresh=False,
     ):
         usage_window = self._usage_window_context(
             usage_window_seconds,
@@ -2514,7 +2546,11 @@ class AdminApplication:
         with self.user_summary_cache_lock:
             cache_generation = self.user_management_cache_generation
             cached = self.user_management_cache.get(cache_key)
-            cache_hit = bool(cached and monotonic_now < cached[0])
+            cache_hit = bool(
+                not force_refresh
+                and cached
+                and monotonic_now < cached[0]
+            )
             items = (
                 [dict(item) for item in cached[1]]
                 if cache_hit
@@ -2529,6 +2565,7 @@ class AdminApplication:
                 query_start_at,
                 query_end_at,
                 usage_window["generated_at"],
+                force_refresh=force_refresh,
             )
             default_limit = self.control.configuration()["values"][
                 "user_quota.default_weekly_tokens"
@@ -2899,6 +2936,7 @@ class AdminApplication:
         usage_window_seconds=DEFAULT_USER_USAGE_WINDOW_SECONDS,
         custom_start_at=None,
         custom_end_at=None,
+        force_refresh=False,
     ):
         usage_window = self._usage_window_context(
             usage_window_seconds,
@@ -2926,6 +2964,7 @@ class AdminApplication:
             query_start_at,
             query_end_at,
             usage_window["generated_at"],
+            force_refresh=force_refresh,
         )
         usage = self.usage_store.usage_for_teams(
             [team["id"] for team in teams],
@@ -3856,7 +3895,7 @@ class AdminApplication:
                 custom_end_at,
             ),
         )
-        payload, cache_state = self._cached_read(
+        return self._cached_read(
             self.admin_accounts_cache,
             "accounts",
             key,
@@ -3868,13 +3907,8 @@ class AdminApplication:
                 custom_end_at=custom_end_at,
             ),
             force_refresh=force_quota_refresh,
-            with_state=True,
+            stale_while_revalidate=not force_quota_refresh,
         )
-        if force_quota_refresh and cache_state == "refresh":
-            # Preserve the existing UI contract while the whole account view is
-            # refreshed asynchronously from a stale snapshot.
-            payload["quota_refreshing"] = True
-        return payload
 
     def _load_account_management(
         self,
@@ -4132,6 +4166,7 @@ class AdminApplication:
             ADMIN_OVERVIEW_CACHE_SECONDS,
             self._load_overview,
             force_refresh=force_refresh,
+            stale_while_revalidate=not force_refresh,
         )
 
     def overview_catalog(self, force_refresh=False):
@@ -4142,6 +4177,7 @@ class AdminApplication:
             ADMIN_OVERVIEW_CATALOG_CACHE_SECONDS,
             self._load_overview_catalog,
             force_refresh=force_refresh,
+            stale_while_revalidate=not force_refresh,
         )
 
     def _load_overview_catalog(self):
@@ -4342,6 +4378,7 @@ class AdminApplication:
                 custom_end_at=custom_end_at,
             ),
             force_refresh=force_refresh,
+            stale_while_revalidate=not force_refresh,
         )
 
     def _load_overview_usage(
@@ -5959,6 +5996,7 @@ class AdminRequestHandler(BaseHTTPRequestHandler):
                     usage_range["window"],
                     custom_start_at=usage_range["start_at"],
                     custom_end_at=usage_range["end_at"],
+                    force_refresh=query.get("fresh", [""])[0] == "1",
                 )
             elif path == "/admin/api/teams":
                 payload = self.app.organization_catalog()
@@ -5984,6 +6022,7 @@ class AdminRequestHandler(BaseHTTPRequestHandler):
                         tag_id=query.get("tag_id", [""])[0],
                         usage_state=query.get("usage_state", ["all"])[0],
                         tag_membership=query.get("tag_membership", [""])[0],
+                        force_refresh=query.get("fresh", [""])[0] == "1",
                     )
                 else:
                     payload = self.app.user_management(

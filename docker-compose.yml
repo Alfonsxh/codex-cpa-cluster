@@ -8,7 +8,7 @@ x-json-logging: &json-logging
 
 services:
   admin:
-    image: ${ADMIN_IMAGE:-codex-cpa-admin:local}
+    image: ${ADMIN_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-admin
     restart: unless-stopped
     logging: *json-logging
@@ -22,8 +22,6 @@ services:
       CLIPROXY_GATEWAY_INTERNAL_URL: http://edge:8319
       DEPLOY_ROOT: ${DEPLOY_ROOT:-/opt/codex-cpa-cluster}
       INSTANCE_NAME: ${INSTANCE_NAME:-cliproxy}
-      CLIPROXY_RELEASE_VERSION: ${RELEASE_VERSION:-}
-      CLIPROXY_RELEASE_METADATA_IMAGE: ${RELEASE_METADATA_IMAGE:-}
     expose:
       - "8318"
     volumes:
@@ -38,7 +36,7 @@ services:
       - backend
 
   usage-collector:
-    image: ${ADMIN_IMAGE:-codex-cpa-admin:local}
+    image: ${ADMIN_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-usage-collector
     restart: unless-stopped
     logging: *json-logging
@@ -62,7 +60,7 @@ services:
       - backend
 
   log-maintenance:
-    image: ${ADMIN_IMAGE:-codex-cpa-admin:local}
+    image: ${ADMIN_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-log-maintenance
     restart: unless-stopped
     logging: *json-logging
@@ -95,13 +93,13 @@ services:
       - backend
 
   management:
-    image: ${CLIPROXY_IMAGE:-docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23}
+    image: ${CLIPROXY_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-management
     restart: unless-stopped
     logging: *json-logging
     command: ["./CLIProxyAPI", "-config", "/CLIProxyAPI/configs/config.yaml"]
     ports:
-      - "${MANAGEMENT_LISTEN_ADDRESS:-127.0.0.1}:${MANAGEMENT_PORT:-18318}:8317"
+      - "${MANAGEMENT_LISTEN_ADDRESS:?state/compose.env missing}:${MANAGEMENT_PORT:?state/compose.env missing}:8317"
     volumes:
       - ./management/config:/CLIProxyAPI/configs
       - ./management/auth:/root/.cli-proxy-api
@@ -111,7 +109,7 @@ services:
       - backend
 
   web:
-    image: ${WEB_RUNTIME_IMAGE:-codex-cpa-web:local}
+    image: ${WEB_RUNTIME_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-web
     restart: unless-stopped
     logging: *json-logging
@@ -126,7 +124,7 @@ services:
       - backend
 
   gateway-blue:
-    image: ${GATEWAY_RUNTIME_IMAGE:-codex-cpa-gateway:local}
+    image: ${GATEWAY_RUNTIME_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-gateway-blue
     restart: unless-stopped
     logging: *json-logging
@@ -145,7 +143,7 @@ services:
       - backend
 
   gateway-green:
-    image: ${GATEWAY_RUNTIME_IMAGE:-codex-cpa-gateway:local}
+    image: ${GATEWAY_RUNTIME_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-gateway-green
     restart: unless-stopped
     logging: *json-logging
@@ -164,13 +162,13 @@ services:
       - backend
 
   edge:
-    image: ${EDGE_RUNTIME_IMAGE:-codex-cpa-edge:local}
+    image: ${EDGE_RUNTIME_IMAGE:?state/compose.env missing; run codex-cpa render}
     container_name: ${INSTANCE_NAME:-cliproxy}-edge
     restart: unless-stopped
     logging: *json-logging
     ports:
-      - "${GATEWAY_LISTEN_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-18317}:8317"
-      - "127.0.0.1:${GATEWAY_INTERNAL_PORT:-18316}:8319"
+      - "${GATEWAY_LISTEN_ADDRESS:?state/compose.env missing}:${GATEWAY_PORT:?state/compose.env missing}:8317"
+      - "127.0.0.1:${GATEWAY_INTERNAL_PORT:?state/compose.env missing}:8319"
     volumes:
       - ./state/edge:/var/run/cliproxy-edge:ro
       - ./logs/gateway:/var/log/cliproxy

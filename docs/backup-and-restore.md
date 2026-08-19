@@ -14,7 +14,7 @@ auth/
 .env
 ```
 
-建议同时保存 `configs/`、`compose.accounts.yml` 和 `state/gateway/` 以便诊断，但它们可以从控制面数据库重新渲染。
+建议同时保存 `state/compose.env`、`configs/`、`compose.accounts.yml` 和 `state/gateway/` 以便诊断，但它们可以从控制面数据库重新渲染。
 
 ## 在线备份
 
@@ -24,7 +24,9 @@ auth/
 mkdir -p backups/manual
 chmod 700 backups/manual
 
-docker compose exec -T admin codex-cpa store backup \
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml \
+  exec -T admin codex-cpa store backup \
   "$PWD/backups/manual/control-plane.sqlite3"
 ```
 
@@ -35,7 +37,8 @@ docker compose exec -T admin codex-cpa store backup \
 ## 验证备份
 
 ```bash
-docker compose exec -T admin codex-cpa store verify
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa store verify
 ```
 
 定期在隔离目录执行恢复演练，确认：
@@ -48,10 +51,10 @@ docker compose exec -T admin codex-cpa store verify
 ## 恢复顺序
 
 1. 停止 Admin、采集器和业务 CPA，避免恢复期间继续写入。
-2. 恢复 `.env`、控制面数据库、用量数据库、主密钥和 OAuth 文件。
+2. 恢复启动用 `.env`、控制面数据库、用量数据库、主密钥和 OAuth 文件。
 3. 检查文件所有者与权限，主密钥必须为 `0600`。
 4. 启动 Admin 并执行 `store verify`。
-5. 执行 `codex-cpa render` 重新生成运行投影。
+5. 执行 `codex-cpa render` 重新生成 `state/compose.env` 和其他运行投影。
 6. 启动全部服务并执行 `health` 与 `verify-routing`。
 
 恢复操作应使用与数据库 Schema 兼容的应用版本。

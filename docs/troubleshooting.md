@@ -5,17 +5,24 @@
 优先收集以下只读信息：
 
 ```bash
-docker compose ps
-docker compose exec -T admin codex-cpa status
-docker compose exec -T admin codex-cpa health
-docker compose exec -T admin codex-cpa store verify
-docker compose exec -T admin codex-cpa verify-routing
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml ps
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa status
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa health
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa store verify
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa verify-routing
 ```
 
 查看最近日志：
 
 ```bash
-docker compose logs --tail=200 admin web edge gateway-blue gateway-green
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml \
+  logs --tail=200 admin web edge gateway-blue gateway-green
 ```
 
 提交 Issue 前请移除管理密钥、用户 Key、OAuth 内容、Webhook、邮箱和私有域名。
@@ -25,7 +32,8 @@ docker compose logs --tail=200 admin web edge gateway-blue gateway-green
 检查 `18317` 是否已被旧 Gateway 或其他进程占用：
 
 ```bash
-docker compose ps
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml ps
 docker ps --format 'table {{.Names}}\t{{.Ports}}'
 ```
 
@@ -43,15 +51,19 @@ docker ps --format 'table {{.Names}}\t{{.Ports}}'
 执行：
 
 ```bash
-docker compose exec -T admin codex-cpa render
-docker compose exec -T admin codex-cpa verify-routing
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa render
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa verify-routing
 ```
 
 ## 管理中心可用但用量不更新
 
 ```bash
-docker compose ps usage-collector
-docker compose logs --tail=200 usage-collector
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml ps usage-collector
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml logs --tail=200 usage-collector
 ```
 
 确认 `state/usage.sqlite3` 可写、磁盘空间充足，并检查各 CPA 日志目录是否持续产生事件。
@@ -61,6 +73,7 @@ docker compose logs --tail=200 usage-collector
 ```bash
 docker compose \
   --env-file .env \
+  --env-file state/compose.env \
   -f docker-compose.yml \
   -f compose.accounts.yml \
   config --quiet

@@ -191,10 +191,7 @@ cp "$RELEASE_ROOT/.env.example" "$TARGET/.env"
 chmod 644 "$TARGET/docker-compose.yml"
 chmod 600 "$TARGET/.env"
 
-python3 - \
-  "$TARGET/.env" "$TARGET" \
-  "$ADMIN_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$EDGE_IMAGE" \
-  "$RELEASE_VERSION" "$RELEASE_METADATA_IMAGE" <<'PY'
+python3 - "$TARGET/.env" "$TARGET" <<'PY'
 import os
 import re
 import sys
@@ -203,13 +200,6 @@ from pathlib import Path
 path = Path(sys.argv[1])
 replacements = {
     "DEPLOY_ROOT": sys.argv[2],
-    "ADMIN_IMAGE": sys.argv[3],
-    "WEB_RUNTIME_IMAGE": sys.argv[4],
-    "GATEWAY_RUNTIME_IMAGE": sys.argv[5],
-    "EDGE_RUNTIME_IMAGE": sys.argv[6],
-    "RELEASE_VERSION": sys.argv[7],
-    "RELEASE_METADATA_IMAGE": sys.argv[8],
-    "GATEWAY_ACTIVE_SLOT": "blue",
 }
 rendered = []
 seen = set()
@@ -287,6 +277,8 @@ run_cli() {
 compose() {
   docker compose \
     --project-directory "$TARGET" \
+    --env-file "$TARGET/.env" \
+    --env-file "$TARGET/state/compose.env" \
     -f "$TARGET/docker-compose.yml" \
     -f "$TARGET/compose.accounts.yml" \
     "$@"
@@ -297,6 +289,23 @@ if [ -f "$TARGET/secrets/deployment-profile.json" ]; then
   run_cli profile import-once "$TARGET/secrets/deployment-profile.json"
 fi
 run_cli render
+HEALTH_PORT=$(awk -F= '$1 == "GATEWAY_PORT" {print $2}' "$TARGET/state/compose.env" | tail -n 1)
+INTERNAL_HEALTH_PORT=$(awk -F= '$1 == "GATEWAY_INTERNAL_PORT" {print $2}' "$TARGET/state/compose.env" | tail -n 1)
+HEALTH_PORT=${HEALTH_PORT:-18317}
+INTERNAL_HEALTH_PORT=${INTERNAL_HEALTH_PORT:-18316}
+DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+run_cli stage-deployment \
+  --version "$RELEASE_VERSION" \
+  --commit "$COMMIT_SHA" \
+  --pipeline "$OPERATION_ID" \
+  --deployed-at "$DEPLOYED_AT" \
+  --metadata-image "$RELEASE_METADATA_IMAGE" \
+  --admin-image "$ADMIN_IMAGE" \
+  --web-image "$WEB_IMAGE" \
+  --gateway-image "$GATEWAY_IMAGE" \
+  --edge-image "$EDGE_IMAGE" \
+  --gateway-port "$HEALTH_PORT" \
+  --gateway-internal-port "$INTERNAL_HEALTH_PORT" >/dev/null
 run_cli store verify
 compose config --quiet
 compose pull management
@@ -333,10 +342,6 @@ fi
 compose exec -T edge openresty -t
 compose exec -T gateway-blue openresty -t
 run_cli store verify
-HEALTH_PORT=$(awk -F= '$1 == "GATEWAY_PORT" {print $2}' "$TARGET/.env" | tail -n 1)
-INTERNAL_HEALTH_PORT=$(awk -F= '$1 == "GATEWAY_INTERNAL_PORT" {print $2}' "$TARGET/.env" | tail -n 1)
-HEALTH_PORT=${HEALTH_PORT:-18317}
-INTERNAL_HEALTH_PORT=${INTERNAL_HEALTH_PORT:-18316}
 docker run --rm --network host \
   -v "$TARGET:$TARGET" \
   -w "$TARGET" \
@@ -348,9 +353,18 @@ docker run --rm --network host \
     --public-url "http://127.0.0.1:$HEALTH_PORT" \
     --internal-url "http://127.0.0.1:$INTERNAL_HEALTH_PORT" \
     --label "Fresh install Gateway"
-DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 run_cli record-deployment \
-  --commit "$COMMIT_SHA" --pipeline "$OPERATION_ID" --deployed-at "$DEPLOYED_AT" >/dev/null
+  --version "$RELEASE_VERSION" \
+  --commit "$COMMIT_SHA" \
+  --pipeline "$OPERATION_ID" \
+  --deployed-at "$DEPLOYED_AT" \
+  --metadata-image "$RELEASE_METADATA_IMAGE" \
+  --admin-image "$ADMIN_IMAGE" \
+  --web-image "$WEB_IMAGE" \
+  --gateway-image "$GATEWAY_IMAGE" \
+  --edge-image "$EDGE_IMAGE" \
+  --gateway-port "$HEALTH_PORT" \
+  --gateway-internal-port "$INTERNAL_HEALTH_PORT" >/dev/null
 
 python3 - "$RELEASE_ROOT/codex-cpa" "$TARGET/bin/codex-cpa" <<'PY'
 import os
@@ -366,4 +380,4 @@ PY
 
 echo "安装成功：version=$RELEASE_VERSION target=$TARGET"
 echo "首次登录密钥：$TARGET/secrets/cpa-management.key"
-echo "完成首次登录后，请执行：docker compose --project-directory $TARGET -f $TARGET/docker-compose.yml -f $TARGET/compose.accounts.yml exec -T admin codex-cpa store migrate-secrets --cleanup"
+echo "完成首次登录后，请执行：docker compose --project-directory $TARGET --env-file $TARGET/.env --env-file $TARGET/state/compose.env -f $TARGET/docker-compose.yml -f $TARGET/compose.accounts.yml exec -T admin codex-cpa store migrate-secrets --cleanup"

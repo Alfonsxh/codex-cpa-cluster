@@ -12,9 +12,12 @@
 ## 升级前检查
 
 ```bash
-docker compose exec -T admin codex-cpa store verify
-docker compose exec -T admin codex-cpa health
-docker compose exec -T admin codex-cpa verify-routing
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa store verify
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa health
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa verify-routing
 ```
 
 然后执行一次成对备份，参阅[备份与恢复](backup-and-restore.md)。
@@ -34,10 +37,14 @@ sudo /opt/codex-cpa-cluster/bin/codex-cpa upgrade v1.1.0
 1. 获取目标机运行锁，避免与 CPA 镜像更新并发。
 2. 校验发布清单和组件镜像指纹。
 3. 在线备份控制面与用量数据库。
-4. 验证并应用 Admin、Web 和 Gateway 变化。
+4. 把目标应用组件暂存到 SQLite，生成 `state/compose.env` 后应用 Admin、Web 和 Gateway 变化。
 5. 在 inactive Gateway 完成真实鉴权、额度与路由验证。
 6. 平滑切换 Edge 并等待旧连接排空。
-7. 再次验证数据库、页面、内部 Key 和外部 Key 路由。
+7. 使用各业务 CPA 发布前的不可变 image ID 完成必要的 Compose 对账并验证模型列表。
+8. 再次验证数据库、页面、内部 Key 和外部 Key 路由，最后把暂存版本标记为已应用。
+
+`runtime.cliproxy_image` 可以继续配置为 `:latest`，它只用于显式“拉取镜像”。升级应用本身
+不会拉取或应用该移动标签；候选 CPA 版本必须由账号管理中的镜像更新流程独立验收。
 
 普通升级默认拒绝重建稳定 Edge。确需更新时，应在维护窗口显式设置：
 

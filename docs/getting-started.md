@@ -48,8 +48,16 @@ sudo ./codex-cpa install "$VERSION" \
 
 ```bash
 cd /opt/codex-cpa-cluster
-docker compose -f docker-compose.yml -f compose.accounts.yml ps
-docker compose -f docker-compose.yml -f compose.accounts.yml \
+docker compose \
+  --env-file .env \
+  --env-file state/compose.env \
+  -f docker-compose.yml \
+  -f compose.accounts.yml ps
+docker compose \
+  --env-file .env \
+  --env-file state/compose.env \
+  -f docker-compose.yml \
+  -f compose.accounts.yml \
   exec -T admin codex-cpa store verify
 ```
 
@@ -69,7 +77,11 @@ docker compose -f docker-compose.yml -f compose.accounts.yml \
 
 ```bash
 cd /opt/codex-cpa-cluster
-docker compose -f docker-compose.yml -f compose.accounts.yml \
+docker compose \
+  --env-file .env \
+  --env-file state/compose.env \
+  -f docker-compose.yml \
+  -f compose.accounts.yml \
   exec -T admin codex-cpa store migrate-secrets --cleanup
 ```
 

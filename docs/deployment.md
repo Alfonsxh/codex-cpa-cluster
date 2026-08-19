@@ -27,6 +27,10 @@ backups/
 
 `admin/`、`scripts/`、`edge/`、`web/`、`gateway/`、`portal/` 和 `dashboard/` 是构建上下文或镜像内容，不是稳态运行依赖。
 
+`.env` 只包含部署根路径、实例名、Compose 项目名和 Docker 网络名。版本、端口、组件镜像、
+CPA 更新通道及候选/已应用状态保存在 `state/control-plane.sqlite3`；
+`state/compose.env` 是控制面按需生成的私有 Compose 投影。
+
 生产 `docker-compose.yml` 只声明镜像和运行拓扑，不包含 `build`。源码仓库中的 `docker-compose.dev.yml` 才提供本地构建上下文，发布包和生产部署不会加载它。
 
 ## 本地质量门禁
@@ -110,6 +114,12 @@ sudo ./codex-cpa install v1.1.0 \
 ```
 
 默认从描述器读取镜像前缀。若已把同一批带指纹标签的镜像复制到内部 Registry，可追加 `--image-prefix registry.example.com/team`。
+
+升级器先把目标组件写为 SQLite 的 `pending` 部署并生成 Compose 投影，启动后执行数据库、
+页面、Gateway 和路由验收，成功后再转为 `applied`。Admin 在此期间仍把上一条 `applied`
+版本显示为当前版本。业务 CPA 若需因 Compose 变化而重建，会逐个显式传入发布前容器的
+不可变 image ID；应用升级不会跟随 `:latest`，也不会把某个账号的局部 CPA 更新扩散到
+其他账号。
 
 ## 凭据边界
 

@@ -3,8 +3,10 @@
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -49,7 +51,59 @@ RETIRED_SETTING_KEYS = {
     "gost.port_end",
     "runtime.gost_image",
 }
+LEGACY_ENV_SETTING_KEYS = {
+    "runtime.cliproxy_image",
+    "runtime.gateway_image",
+    "runtime.admin_base_image",
+    "accounts.listen_address",
+    "management.listen_address",
+    "gateway.listen_address",
+    "gateway.port",
+    "gateway.internal_port",
+    "management.port",
+    "delivery.gateway_drain_timeout_seconds",
+    "delivery.release_metadata_image",
+}
 RETIRED_SECRET_NAMES = {"gost_tunnel_auth"}
+
+
+def _valid_legacy_setting_value(key, value_json):
+    try:
+        value = json.loads(value_json)
+    except (TypeError, ValueError):
+        return False
+    if key in {
+        "runtime.cliproxy_image",
+        "runtime.gateway_image",
+        "runtime.admin_base_image",
+        "delivery.release_metadata_image",
+    }:
+        if not isinstance(value, str) or len(value) > 255:
+            return False
+        if key == "delivery.release_metadata_image" and not value:
+            return True
+        if not value or not re.fullmatch(r"[A-Za-z0-9._:/@-]+", value):
+            return False
+        if key in {"runtime.gateway_image", "runtime.admin_base_image"}:
+            return bool(
+                re.fullmatch(r"[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}", value)
+            )
+        return True
+    if key in {
+        "accounts.listen_address",
+        "management.listen_address",
+        "gateway.listen_address",
+    }:
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            return False
+        return address.version == 4 and address.is_loopback
+    if key in {"gateway.port", "gateway.internal_port", "management.port"}:
+        return isinstance(value, int) and not isinstance(value, bool) and 1024 <= value <= 65535
+    if key == "delivery.gateway_drain_timeout_seconds":
+        return isinstance(value, int) and not isinstance(value, bool) and 30 <= value <= 7200
+    return False
 
 
 def _digest(payload):
@@ -261,15 +315,25 @@ def _allowed_settings_migrations(old, new):
     }
     added = set(new_rows) - set(old_rows)
     removed = set(old_rows) - set(new_rows)
-    if added or not removed.issubset(RETIRED_SETTING_KEYS):
+    if not added.issubset(LEGACY_ENV_SETTING_KEYS) or not removed.issubset(
+        RETIRED_SETTING_KEYS
+    ):
         return False, False, False
     changed = {
         key
         for key in set(old_rows) & set(new_rows)
         if old_rows[key] != new_rows[key]
     }
-    allowed = {"gateway.listen_address", "portal.session_ttl_seconds"}
-    if not changed.issubset(allowed) or not (changed or removed):
+    allowed = {
+        "gateway.listen_address",
+        "portal.session_ttl_seconds",
+        "gateway.port",
+        "gateway.internal_port",
+        "delivery.release_metadata_image",
+    }
+    if not changed.issubset(allowed) or not (added or changed or removed):
+        return False, False, False
+    if any(not _valid_legacy_setting_value(key, new_rows[key]) for key in added):
         return False, False, False
     for key in changed:
         try:
@@ -286,7 +350,20 @@ def _allowed_settings_migrations(old, new):
                     return False, False, False
             except (TypeError, ValueError):
                 return False, False, False
-    return True, bool(changed), bool(removed)
+        elif key in ("gateway.port", "gateway.internal_port"):
+            try:
+                if not 1024 <= int(current) <= 65535:
+                    return False, False, False
+            except (TypeError, ValueError):
+                return False, False, False
+        elif key == "delivery.release_metadata_image":
+            if not isinstance(current, str) or not current:
+                return False, False, False
+    security_changes = changed & {
+        "gateway.listen_address",
+        "portal.session_ttl_seconds",
+    }
+    return True, bool(security_changes), bool(removed)
 
 
 def _allowed_account_proxy_mode_migration(old, new):

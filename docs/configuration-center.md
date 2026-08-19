@@ -34,8 +34,23 @@
 高频 `usage_events` 不合并进控制面数据库，继续使用 `state/usage.sqlite3`，避免用量写入与管理配置争用同一事务。事件写入时仍保存当时的 `team_id` 与成员版本作为审计字段；团队报表则从控制面读取当前成员邮箱，并动态聚合所选时间范围内这些用户的全部事件。移动团队会立即改变团队报表归属，但不会改写历史事件。
 
 监听地址、内部探针端口和会话有效期也由配置中心写入 SQLite；需要 Compose 插值的值会
-同步为 `.env` 运行投影。数据库仍是人工配置事实来源，`.env` 不是第二个手工配置入口。
+同步为 `state/compose.env` 运行投影。数据库仍是人工配置事实来源，生成文件不是第二个
+手工配置入口。
 公网安全策略强制 Gateway、Management 和业务 CPA 使用回环监听，内部探针使用独立端口。
+
+## `.env`、SQLite 与 Compose 投影
+
+三者职责固定如下：
+
+| 存储 | 负责 | 不负责 |
+| --- | --- | --- |
+| `.env` | 宿主机路径和 Compose 身份：`DEPLOY_ROOT`、`INSTANCE_NAME`、`COMPOSE_PROJECT_NAME`、`DOCKER_NETWORK_NAME` | 业务配置、端口、镜像版本、发布版本 |
+| `state/control-plane.sqlite3` | 人工期望配置；CPA 更新通道；候选/已应用 CPA 版本和摘要；待发布/已验收应用版本与组件镜像 | OAuth 原文和 Compose 临时语法 |
+| `state/compose.env` | 从 SQLite 原子生成的 Compose 插值，权限 `0600` | 人工编辑和长期事实存储 |
+
+旧版混合 `.env` 第一次由新版控制面读取时，会先把已知配置导入 SQLite，把原文件备份到
+`state/legacy.env`，再将 `.env` 收敛为四个启动项。无法识别的旧键只记录在迁移状态和
+备份中，不会被静默当成新配置继续使用。
 
 ## 品牌与身份配置
 
@@ -80,8 +95,11 @@ HTTP 和 HTTPS 同时可访问，需要外部反向代理分别监听两个协�
 应用和查看：
 
 ```bash
-docker compose exec -T admin codex-cpa profile import-once - < config/profile.example.json
-docker compose exec -T admin codex-cpa profile show
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml \
+  exec -T admin codex-cpa profile import-once - < config/profile.example.json
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa profile show
 ```
 
 档案的 `values` 只允许 `CONFIG_DEFINITIONS` 中已声明的键。可选的 `branding.logo` 对象接受 `filename`、`content_type` 和 `data_base64`，用于在受保护的部署档案中携带组织专用 Logo；所有内容先经过与后台上传相同的类型和安全校验，再写入控制面数据库。未知键或非法值会使导入失败。
@@ -109,7 +127,7 @@ docker compose exec -T admin codex-cpa profile show
 | 重启采集器 | 保存后重启 `usage-collector` |
 | 下次采集生效 | 下一轮生成用户额度快照 |
 | 仅新账号 | 只改变之后自动分配的端口或参数 |
-| 下次部署 | 同步到 `.env`，不主动中断当前网关 |
+| 下次部署 | 重新生成 `state/compose.env`，不主动中断当前网关 |
 
 带运行时操作的更新采用“写入 → 渲染 → 校验 → 应用”顺序；任一步失败时恢复原数据库值，重新渲染在线运行产物并应用原配置。管理 API 会记录操作审计，但不记录完整 Key 或秘密。
 
@@ -132,10 +150,16 @@ docker compose exec -T admin codex-cpa profile show
 - `encrypted_secrets`：控制面数据库中的 AES-256-GCM 加密表，保存管理密钥、用户初始密码、企业微信 Webhook 和默认/账号代理地址。
 - `secrets/control-plane.key`：数据库之外唯一的 32 字节加密主密钥，权限必须为 `0600`；数据库备份必须与对应主密钥成对恢复。
 - `auth/<account>/`：OAuth 文件。
-- `.env`：数据库部署参数和发布镜像标签的 Compose 运行投影，以及 Compose 名称等启动参数；不要与数据库并行手改同一配置。CPA 镜像更新验证成功后会原子同步该投影，发布启动业务 CPA 前也会从 SQLite 修复镜像投影；两者通过目标机运行锁避免并发覆盖。
+- `.env`：只保存宿主机路径和 Compose 身份，不保存版本、端口或业务配置。
+- `state/compose.env`：SQLite 生成的私有 Compose 投影。CPA 镜像更新全部验证成功后才更新；应用发布只暂存组件镜像，最终验收后才把版本标记为已应用。
 - `state/usage.sqlite3`：高频用量事件（含审计用的事件时团队归属）、周额度策略和调整账本；团队报表按控制面当前成员动态聚合。
 
 `configs/`、`compose.accounts.yml`、`state/gateway/` 和 `state/public/` 是从数据库渲染的运行产物。CLIProxyAPI 与 OpenResty 仍需要文件接口，因此这些文件会保留，但不能手工维护。`secrets/issued-keys.tsv` 不再生成；完整 Key 只在创建/轮换响应中展示，并由控制面数据库保存。
+
+CPA 的 `runtime.cliproxy_image` 是拉取通道，可以长期保持 `:latest`。拉取后控制面通过受限、
+无网络的临时容器读取 CLIProxyAPI 版本横幅，把语义版本、镜像 ID 和仓库摘要写入 SQLite；
+界面同时展示语义版本和短 SHA。只有所选运行中 CPA 全部通过模型探测，候选镜像才成为
+已应用镜像，`state/compose.env` 随后固定到带 digest 的引用或本机不可变 image ID。
 
 ## API 与运维命令
 
@@ -152,10 +176,17 @@ docker compose exec -T admin codex-cpa profile show
 数据库检查与在线备份：
 
 ```bash
-docker compose exec -T admin codex-cpa store verify
-docker compose exec -T admin codex-cpa store backup backups/control-plane.sqlite3
-docker compose exec -T admin codex-cpa store cleanup-projections
-docker compose exec -T admin codex-cpa store migrate-secrets --cleanup
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa store verify
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml \
+  exec -T admin codex-cpa store backup backups/control-plane.sqlite3
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml \
+  exec -T admin codex-cpa store cleanup-projections
+docker compose --env-file .env --env-file state/compose.env \
+  -f docker-compose.yml -f compose.accounts.yml \
+  exec -T admin codex-cpa store migrate-secrets --cleanup
 ```
 
 SQLite 备份使用在线 Backup API，而不是在 WAL 模式下直接复制主文件。

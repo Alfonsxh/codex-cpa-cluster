@@ -60,8 +60,51 @@ if ! flock -n 9; then
   exit 1
 fi
 
+target_env_value() {
+  NAME=$1
+  FALLBACK=$2
+  VALUE=
+  for ENV_PATH in "$TARGET/state/compose.env" "$TARGET/.env"; do
+    if [ -f "$ENV_PATH" ]; then
+      VALUE=$(awk -F= -v name="$NAME" '$1 == name {sub(/^[^=]*=/, ""); print}' "$ENV_PATH" | tail -n 1)
+      [ -z "$VALUE" ] || break
+    fi
+  done
+  printf '%s' "${VALUE:-$FALLBACK}"
+}
+
+target_setting_value() {
+  KEY=$1
+  ENV_NAME=$2
+  FALLBACK=$3
+  VALUE=$(python3 - "$TARGET/state/control-plane.sqlite3" "$KEY" <<'PY'
+import json
+import sqlite3
+import sys
+
+path, key = sys.argv[1:]
+try:
+    with sqlite3.connect(path) as connection:
+        row = connection.execute(
+            "SELECT value_json FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+    value = json.loads(row[0]) if row else ""
+except (OSError, sqlite3.Error, TypeError, ValueError):
+    value = ""
+if isinstance(value, bool):
+    print("true" if value else "false")
+elif value is not None:
+    print(value)
+PY
+  )
+  if [ -z "$VALUE" ]; then
+    VALUE=$(target_env_value "$ENV_NAME" "$FALLBACK")
+  fi
+  printf '%s' "${VALUE:-$FALLBACK}"
+}
+
 if [ -z "$HEALTH_PORT" ]; then
-  HEALTH_PORT=$(awk -F= '$1 == "GATEWAY_PORT" {print $2}' "$TARGET/.env" | tail -n 1)
+  HEALTH_PORT=$(target_setting_value gateway.port GATEWAY_PORT 18317)
 fi
 HEALTH_PORT=${HEALTH_PORT:-18317}
 case "$HEALTH_PORT" in
@@ -71,7 +114,7 @@ if [ "$HEALTH_PORT" -lt 1024 ] || [ "$HEALTH_PORT" -gt 65535 ]; then
   echo "健康检查端口必须位于 1024-65535：$HEALTH_PORT" >&2
   exit 1
 fi
-INTERNAL_HEALTH_PORT=$(awk -F= '$1 == "GATEWAY_INTERNAL_PORT" {print $2}' "$TARGET/.env" | tail -n 1)
+INTERNAL_HEALTH_PORT=$(target_setting_value gateway.internal_port GATEWAY_INTERNAL_PORT 18316)
 INTERNAL_HEALTH_PORT=${INTERNAL_HEALTH_PORT:-18316}
 case "$INTERNAL_HEALTH_PORT" in
   *[!0-9]*|'') echo "内部探针端口无效：$INTERNAL_HEALTH_PORT" >&2; exit 1 ;;
@@ -80,7 +123,7 @@ if [ "$INTERNAL_HEALTH_PORT" -lt 1024 ] || [ "$INTERNAL_HEALTH_PORT" -gt 65535 ]
   echo "内部探针端口必须位于 1024-65535：$INTERNAL_HEALTH_PORT" >&2
   exit 1
 fi
-GATEWAY_DRAIN_TIMEOUT_SECONDS=$(awk -F= '$1 == "GATEWAY_DRAIN_TIMEOUT_SECONDS" {print $2}' "$TARGET/.env" | tail -n 1)
+GATEWAY_DRAIN_TIMEOUT_SECONDS=$(target_setting_value delivery.gateway_drain_timeout_seconds GATEWAY_DRAIN_TIMEOUT_SECONDS 3600)
 GATEWAY_DRAIN_TIMEOUT_SECONDS=${GATEWAY_DRAIN_TIMEOUT_SECONDS:-3600}
 case "$GATEWAY_DRAIN_TIMEOUT_SECONDS" in
   *[!0-9]*|'') echo "Gateway 排空超时无效：$GATEWAY_DRAIN_TIMEOUT_SECONDS" >&2; exit 1 ;;
@@ -106,6 +149,7 @@ RUNTIME_BACKUP_FILE="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}-runtime.tar.gz"
 CONTROL_DB_BACKUP_FILE="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}-control-plane.sqlite3"
 USAGE_DB_BACKUP_FILE="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}-usage.sqlite3"
 ENV_BACKUP_FILE="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}.env"
+COMPOSE_ENV_BACKUP_FILE="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}.compose.env"
 DATA_MANIFEST_BEFORE="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}-data-before.json"
 DATA_MANIFEST_AFTER="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}-data-after.json"
 DATA_MANIFEST_CLEAN="$BACKUP_DIR/ci-${PIPELINE_ID}-${COMMIT_SHA}-data-after-clean.json"
@@ -113,12 +157,14 @@ CONTROL_DB_EXISTED=false
 USAGE_DB_EXISTED=false
 MASTER_KEY_EXISTED=false
 TARGET_ENV_EXISTED=false
+TARGET_COMPOSE_ENV_EXISTED=false
 PRE_APPLY_ENV_MUTATED=false
 APPLY_RELEASE_STARTED=false
 [ -f "$TARGET/state/control-plane.sqlite3" ] && CONTROL_DB_EXISTED=true
 [ -f "$TARGET/state/usage.sqlite3" ] && USAGE_DB_EXISTED=true
 [ -f "$TARGET/secrets/control-plane.key" ] && MASTER_KEY_EXISTED=true
 [ -f "$TARGET/.env" ] && TARGET_ENV_EXISTED=true
+[ -f "$TARGET/state/compose.env" ] && TARGET_COMPOSE_ENV_EXISTED=true
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 
@@ -197,7 +243,7 @@ PY
 
 set --
 for SOURCE_PATH in \
-  .dockerignore .env.example .gitignore AGENTS.md LICENSE Makefile README.md \
+  .dockerignore .env.example compose.env.example .gitignore AGENTS.md LICENSE Makefile README.md \
   .git .harness .claude config docs docker-compose.yml admin dashboard edge gateway portal release scripts tests web; do
   if [ -e "$TARGET/$SOURCE_PATH" ]; then
     set -- "$@" "$SOURCE_PATH"
@@ -228,6 +274,10 @@ chmod 600 "$RUNTIME_BACKUP_FILE"
 if [ -f "$TARGET/.env" ]; then
   cp "$TARGET/.env" "$ENV_BACKUP_FILE"
   chmod 600 "$ENV_BACKUP_FILE"
+fi
+if [ -f "$TARGET/state/compose.env" ]; then
+  cp "$TARGET/state/compose.env" "$COMPOSE_ENV_BACKUP_FILE"
+  chmod 600 "$COMPOSE_ENV_BACKUP_FILE"
 fi
 
 set --
@@ -272,10 +322,7 @@ fi
 python3 "$DATA_GUARD" snapshot "$TARGET" "$DATA_MANIFEST_BEFORE"
 
 env_value() {
-  NAME=$1
-  FALLBACK=$2
-  VALUE=$(awk -F= -v name="$NAME" '$1 == name {sub(/^[^=]*=/, ""); print}' "$TARGET/.env" | tail -n 1)
-  printf '%s' "${VALUE:-$FALLBACK}"
+  target_env_value "$1" "$2"
 }
 PREVIOUS_ADMIN_IMAGE=$(env_value ADMIN_IMAGE cliproxy-admin:local)
 PREVIOUS_WEB_IMAGE=$(env_value WEB_RUNTIME_IMAGE codex-cpa-web:local)
@@ -307,10 +354,21 @@ PREVIOUS_ADMIN_APP_ROOT=${PREVIOUS_ADMIN_APP_ROOT:-/opt/codex-cpa-cluster/app}
 PREVIOUS_ADMIN_CLI_PATH="$PREVIOUS_ADMIN_APP_ROOT/scripts/cliproxy.py"
 EDGE_CONTAINER_ID_BEFORE=$(docker inspect --format '{{.Id}}' "$EDGE_CONTAINER_NAME" 2>/dev/null || true)
 EDGE_STARTED_AT_BEFORE=$(docker inspect --format '{{.State.StartedAt}}' "$EDGE_CONTAINER_NAME" 2>/dev/null || true)
-if ! TARGET_COMPOSE_SERVICES=$(docker compose \
-  --project-directory "$TARGET" \
-  -f "$TARGET/docker-compose.yml" \
-  config --services); then
+if [ -f "$TARGET/state/compose.env" ]; then
+  TARGET_COMPOSE_SERVICES=$(docker compose \
+    --project-directory "$TARGET" \
+    --env-file "$TARGET/.env" \
+    --env-file "$TARGET/state/compose.env" \
+    -f "$TARGET/docker-compose.yml" \
+    config --services) || TARGET_COMPOSE_SERVICES=
+else
+  TARGET_COMPOSE_SERVICES=$(docker compose \
+    --project-directory "$TARGET" \
+    --env-file "$TARGET/.env" \
+    -f "$TARGET/docker-compose.yml" \
+    config --services) || TARGET_COMPOSE_SERVICES=
+fi
+if [ -z "$TARGET_COMPOSE_SERVICES" ]; then
   echo "无法解析目标当前 Compose 拓扑，拒绝部署" >&2
   exit 1
 fi
@@ -459,7 +517,7 @@ RELEASE_VERSION_IMAGE="$RELEASE_IMAGE_PREFIX/codex-cpa-release:$RELEASE_VERSION"
 desired_service_config_hash() {
   SERVICE=$1
   EDGE_IMAGE_OVERRIDE=${2:-$EDGE_RUNTIME_IMAGE}
-  if [ -f "$TARGET/compose.accounts.yml" ]; then
+  if [ -f "$TARGET/state/compose.env" ] && [ -f "$TARGET/compose.accounts.yml" ]; then
     ADMIN_IMAGE=$ADMIN_RUNTIME_IMAGE \
     WEB_RUNTIME_IMAGE=$WEB_RUNTIME_IMAGE \
     GATEWAY_RUNTIME_IMAGE=$GATEWAY_RUNTIME_IMAGE \
@@ -467,8 +525,34 @@ desired_service_config_hash() {
     DEPLOY_ROOT=$TARGET \
       docker compose \
         --project-directory "$TARGET" \
+        --env-file "$TARGET/.env" \
+        --env-file "$TARGET/state/compose.env" \
         -f "$RELEASE_ROOT/docker-compose.yml" \
         -f "$TARGET/compose.accounts.yml" \
+        config --hash "$SERVICE"
+  elif [ -f "$TARGET/compose.accounts.yml" ]; then
+    ADMIN_IMAGE=$ADMIN_RUNTIME_IMAGE \
+    WEB_RUNTIME_IMAGE=$WEB_RUNTIME_IMAGE \
+    GATEWAY_RUNTIME_IMAGE=$GATEWAY_RUNTIME_IMAGE \
+    EDGE_RUNTIME_IMAGE=$EDGE_IMAGE_OVERRIDE \
+    DEPLOY_ROOT=$TARGET \
+      docker compose \
+        --project-directory "$TARGET" \
+        --env-file "$TARGET/.env" \
+        -f "$RELEASE_ROOT/docker-compose.yml" \
+        -f "$TARGET/compose.accounts.yml" \
+        config --hash "$SERVICE"
+  elif [ -f "$TARGET/state/compose.env" ]; then
+    ADMIN_IMAGE=$ADMIN_RUNTIME_IMAGE \
+    WEB_RUNTIME_IMAGE=$WEB_RUNTIME_IMAGE \
+    GATEWAY_RUNTIME_IMAGE=$GATEWAY_RUNTIME_IMAGE \
+    EDGE_RUNTIME_IMAGE=$EDGE_IMAGE_OVERRIDE \
+    DEPLOY_ROOT=$TARGET \
+      docker compose \
+        --project-directory "$TARGET" \
+        --env-file "$TARGET/.env" \
+        --env-file "$TARGET/state/compose.env" \
+        -f "$RELEASE_ROOT/docker-compose.yml" \
         config --hash "$SERVICE"
   else
     ADMIN_IMAGE=$ADMIN_RUNTIME_IMAGE \
@@ -478,6 +562,7 @@ desired_service_config_hash() {
     DEPLOY_ROOT=$TARGET \
       docker compose \
         --project-directory "$TARGET" \
+        --env-file "$TARGET/.env" \
         -f "$RELEASE_ROOT/docker-compose.yml" \
         config --hash "$SERVICE"
   fi
@@ -710,95 +795,51 @@ os.chmod(path, 0o600)
 PY
 }
 
-write_stable_edge_ports() {
-  if [ "$LEGACY_TOPOLOGY" = true ]; then
-    return 0
-  fi
-  python3 - "$TARGET/.env" "$STABLE_EDGE_PUBLIC_PORT" "$STABLE_EDGE_INTERNAL_PORT" <<'PY'
-import os
-import re
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-replacements = {
-    "GATEWAY_PORT": sys.argv[2],
-    "GATEWAY_INTERNAL_PORT": sys.argv[3],
-}
-lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-rendered = []
-seen = set()
-for line in lines:
-    match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=", line)
-    if match and match.group(1) in replacements:
-        name = match.group(1)
-        rendered.append("{}={}".format(name, replacements[name]))
-        seen.add(name)
-    else:
-        rendered.append(line)
-for name, value in replacements.items():
-    if name not in seen:
-        rendered.append("{}={}".format(name, value))
-temporary = path.with_name(".{}.{}.tmp".format(path.name, os.getpid()))
-temporary.write_text("\n".join(rendered).rstrip() + "\n", encoding="utf-8")
-os.chmod(temporary, 0o600)
-os.replace(temporary, path)
-os.chmod(path, 0o600)
-PY
-}
-
-write_runtime_image_env() {
-  write_deploy_root_env || return 1
-  python3 - "$TARGET/.env" "$ADMIN_RUNTIME_IMAGE" "$WEB_RUNTIME_IMAGE" \
-    "$GATEWAY_RUNTIME_IMAGE" "$EDGE_RUNTIME_IMAGE" "$ACTIVE_GATEWAY_SLOT" \
-    "$RELEASE_VERSION" "$RELEASE_METADATA_IMAGE" <<'PY'
-import os
-import re
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-replacements = {
-    "ADMIN_IMAGE": sys.argv[2],
-    "WEB_RUNTIME_IMAGE": sys.argv[3],
-    "GATEWAY_RUNTIME_IMAGE": sys.argv[4],
-    "EDGE_RUNTIME_IMAGE": sys.argv[5],
-    "GATEWAY_ACTIVE_SLOT": sys.argv[6],
-    "RELEASE_VERSION": sys.argv[7],
-    "RELEASE_METADATA_IMAGE": sys.argv[8],
-}
-lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-rendered = []
-seen = set()
-for line in lines:
-    match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=", line)
-    if match and match.group(1) in replacements:
-        name = match.group(1)
-        rendered.append("{}={}".format(name, replacements[name]))
-        seen.add(name)
-    else:
-        rendered.append(line)
-for name, value in replacements.items():
-    if name not in seen:
-        rendered.append("{}={}".format(name, value))
-temporary = path.with_name(".{}.{}.tmp".format(path.name, os.getpid()))
-temporary.write_text("\n".join(rendered).rstrip() + "\n", encoding="utf-8")
-os.chmod(temporary, 0o600)
-os.replace(temporary, path)
-os.chmod(path, 0o600)
-PY
-}
-
 compose() {
-  docker compose \
-    --project-directory "$TARGET" \
-    -f "$TARGET/docker-compose.yml" \
-    -f "$TARGET/compose.accounts.yml" \
-    "$@"
+  if [ -f "$TARGET/state/compose.env" ]; then
+    docker compose \
+      --project-directory "$TARGET" \
+      --env-file "$TARGET/.env" \
+      --env-file "$TARGET/state/compose.env" \
+      -f "$TARGET/docker-compose.yml" \
+      -f "$TARGET/compose.accounts.yml" \
+      "$@"
+  else
+    docker compose \
+      --project-directory "$TARGET" \
+      --env-file "$TARGET/.env" \
+      -f "$TARGET/docker-compose.yml" \
+      -f "$TARGET/compose.accounts.yml" \
+      "$@"
+  fi
 }
 
 PREVIOUS_CONFIGURED_CPA_SERVICES=$(compose config --services | awk '/^cliproxy-/ {print}')
 PREVIOUS_RUNNING_CPA_SERVICES=$(compose ps --status running --services | awk '/^cliproxy-/ {print}')
+PRESERVED_CLIPROXY_IMAGE=$(docker inspect --format '{{.Image}}' \
+  "$(env_value INSTANCE_NAME cliproxy)-management" 2>/dev/null || true)
+if [ -z "$PRESERVED_CLIPROXY_IMAGE" ]; then
+  for SERVICE in $PREVIOUS_RUNNING_CPA_SERVICES; do
+    CONTAINER_ID=$(compose ps -q "$SERVICE")
+    [ -n "$CONTAINER_ID" ] || continue
+    PRESERVED_CLIPROXY_IMAGE=$(docker inspect --format '{{.Image}}' \
+      "$CONTAINER_ID" 2>/dev/null || true)
+    [ -z "$PRESERVED_CLIPROXY_IMAGE" ] || break
+  done
+fi
+if [ -z "$PRESERVED_CLIPROXY_IMAGE" ]; then
+  CONFIGURED_CLIPROXY_IMAGE=$(target_env_value CLIPROXY_IMAGE "")
+  if [ -n "$CONFIGURED_CLIPROXY_IMAGE" ]; then
+    PRESERVED_CLIPROXY_IMAGE=$(docker image inspect --format '{{.Id}}' \
+      "$CONFIGURED_CLIPROXY_IMAGE" 2>/dev/null || true)
+  fi
+fi
+if [ -n "$PRESERVED_CLIPROXY_IMAGE" ] \
+  && ! printf '%s' "$PRESERVED_CLIPROXY_IMAGE" \
+    | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+  echo "无法识别当前 CPA 的不可变镜像 ID" >&2
+  exit 1
+fi
 
 assert_edge_unchanged() {
   CURRENT_EDGE_CONTAINER_ID=$(docker inspect --format '{{.Id}}' "$EDGE_CONTAINER_NAME" 2>/dev/null || true)
@@ -897,9 +938,17 @@ root = Path(sys.argv[1]).resolve()
 active_gateway = sys.argv[2]
 compose = [
     "docker", "compose", "--project-directory", str(root),
-    "-f", str(root / "docker-compose.yml"),
-    "-f", str(root / "compose.accounts.yml"),
+    "--env-file", str(root / ".env"),
 ]
+compose_environment = root / "state" / "compose.env"
+if compose_environment.is_file():
+    compose.extend(["--env-file", str(compose_environment)])
+compose.extend(
+    [
+        "-f", str(root / "docker-compose.yml"),
+        "-f", str(root / "compose.accounts.yml"),
+    ]
+)
 expected = set(
     subprocess.check_output(compose + ["config", "--services"], text=True).splitlines()
 )
@@ -1054,7 +1103,7 @@ ensure_and_verify_business_cpas() {
     -e "CLIPROXY_ROOT=$TARGET" \
     -e "DEPLOY_ROOT=$TARGET" \
     "$ADMIN_RUNTIME_IMAGE" \
-    python3 - "$TARGET" <<'PY'
+    python3 - "$TARGET" $PREVIOUS_RUNNING_CPA_SERVICES <<'PY'
 import json
 import sys
 import time
@@ -1062,15 +1111,11 @@ import urllib.request
 from pathlib import Path
 
 root = Path(sys.argv[1])
+previous_running = set(sys.argv[2:])
 sys.path.insert(0, "/opt/codex-cpa-runtime/scripts")
 from cliproxy import ControlPlane
 
 app = ControlPlane(root)
-cliproxy_image = app.configuration()["values"]["runtime.cliproxy_image"]
-# SQLite configuration is authoritative. Repair a stale .env projection before
-# Compose evaluates business CPA services so a release cannot revert an image
-# that the controlled rolling updater already verified.
-app.sync_cliproxy_image_environment(cliproxy_image)
 accounts = app.accounts()
 services = app.services()
 active = app.active_records()
@@ -1089,9 +1134,20 @@ for account, service in services.items():
         app.compose("stop", service)
         print("{} 已停用；保持服务停止并跳过模型验证".format(account), flush=True)
         continue
-    # Use the same authoritative image as the rolling updater even when a
-    # legacy or interrupted deployment left .env stale.
-    app._compose_with_image(cliproxy_image, "up", "-d", "--no-deps", service)
+    if service not in previous_running:
+        app.compose("stop", service)
+        print("{} 发布前未运行；保持服务停止".format(account), flush=True)
+        continue
+    container = app._docker_json(
+        "container", "inspect", app.account_container_name(account)
+    )
+    image_id = str((container or {}).get("Image") or "").strip()
+    if not image_id.startswith("sha256:"):
+        raise RuntimeError("{} 缺少发布前不可变镜像 ID".format(account))
+    # Compose changes may recreate the service, but the exact pre-release
+    # image ID is passed explicitly. Application releases never move a CPA to
+    # the update channel or to another account's partially applied version.
+    app._compose_with_image(image_id, "up", "-d", "--no-deps", service)
     key = shared_internal_key or legacy_keys.get(account, "")
     if not key:
         print("{} 已就绪；当前没有可用于模型探测的有效 Key".format(account), flush=True)
@@ -1267,7 +1323,6 @@ switch_gateway_slot() {
     echo "旧 Gateway 尚有未完成请求，本次发布拒绝标记成功" >&2
     return 1
   fi
-  write_runtime_image_env || return 1
 }
 
 apply_web_release() {
@@ -1427,6 +1482,12 @@ PY
     cp "$ENV_BACKUP_FILE" "$TARGET/.env" || return 1
     chmod 600 "$TARGET/.env" || return 1
   fi
+  if [ "$TARGET_COMPOSE_ENV_EXISTED" = true ]; then
+    cp "$COMPOSE_ENV_BACKUP_FILE" "$TARGET/state/compose.env" || return 1
+    chmod 600 "$TARGET/state/compose.env" || return 1
+  else
+    rm -f "$TARGET/state/compose.env" || return 1
+  fi
   write_deploy_root_env || return 1
   tar -xzf "$BACKUP_FILE" -C "$TARGET" || return 1
   tar -xzf "$STATE_BACKUP_FILE" -C "$TARGET" || return 1
@@ -1543,13 +1604,25 @@ apply_release() {
   # change and can overwrite SQLite while the v3 release is taking over.
   cp "$RELEASE_ROOT/docker-compose.yml" "$TARGET/docker-compose.yml" \
     && chmod 644 "$TARGET/docker-compose.yml" \
-    && write_runtime_image_env \
+    && write_deploy_root_env \
     && compose stop admin usage-collector log-maintenance \
     && release_cli store migrate-secrets \
     && import_profile_once \
     && release_cli store cleanup-projections \
     && release_cli render \
-    && write_stable_edge_ports \
+    && release_cli stage-deployment \
+      --version "$RELEASE_VERSION" \
+      --commit "$COMMIT_SHA" \
+      --pipeline "$PIPELINE_ID" \
+      --deployed-at "$DEPLOYED_AT" \
+      --metadata-image "$RELEASE_METADATA_IMAGE" \
+      --admin-image "$ADMIN_RUNTIME_IMAGE" \
+      --web-image "$WEB_RUNTIME_IMAGE" \
+      --gateway-image "$GATEWAY_RUNTIME_IMAGE" \
+      --edge-image "$EDGE_RUNTIME_IMAGE" \
+      --gateway-port "$HEALTH_PORT" \
+      --gateway-internal-port "$INTERNAL_HEALTH_PORT" \
+      --preserve-cliproxy-image "$PRESERVED_CLIPROXY_IMAGE" \
     && compose config --quiet \
     && release_cli store verify \
     && compose up -d --no-deps \
@@ -1574,9 +1647,23 @@ apply_release() {
     && verify_gateway_routes \
     && verify_data_plane_apply_invariant \
     && python3 "$DATA_GUARD" snapshot "$TARGET" "$DATA_MANIFEST_CLEAN" \
-    && python3 "$DATA_GUARD" compare "$DATA_MANIFEST_BEFORE" "$DATA_MANIFEST_CLEAN"
+    && python3 "$DATA_GUARD" compare "$DATA_MANIFEST_BEFORE" "$DATA_MANIFEST_CLEAN" \
+    && release_cli record-deployment \
+      --version "$RELEASE_VERSION" \
+      --commit "$COMMIT_SHA" \
+      --pipeline "$PIPELINE_ID" \
+      --deployed-at "$DEPLOYED_AT" \
+      --metadata-image "$RELEASE_METADATA_IMAGE" \
+      --admin-image "$ADMIN_RUNTIME_IMAGE" \
+      --web-image "$WEB_RUNTIME_IMAGE" \
+      --gateway-image "$GATEWAY_RUNTIME_IMAGE" \
+      --edge-image "$EDGE_RUNTIME_IMAGE" \
+      --gateway-port "$HEALTH_PORT" \
+      --gateway-internal-port "$INTERNAL_HEALTH_PORT" \
+    && release_cli store verify
 }
 
+DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if ! apply_release; then
   if ! restore_release; then
     echo "自动恢复失败，请使用以下备份手工恢复：" >&2
@@ -1588,10 +1675,6 @@ if ! apply_release; then
   fi
   exit 1
 fi
-
-DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-release_cli record-deployment \
-  --commit "$COMMIT_SHA" --pipeline "$PIPELINE_ID" --deployed-at "$DEPLOYED_AT" >/dev/null
 
 CONTROL_DB_BACKUP_RESULT=not-applicable
 USAGE_DB_BACKUP_RESULT=not-applicable

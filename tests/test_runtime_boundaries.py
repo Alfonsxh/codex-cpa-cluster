@@ -10,9 +10,12 @@ ROOT = Path(__file__).parents[1]
 class RuntimeBoundaryTests(unittest.TestCase):
     def test_legacy_topology_detection_uses_compose_not_stale_containers(self):
         deploy = (ROOT / "scripts/deploy-release.sh").read_text(encoding="utf-8")
+        start = deploy.index(
+            'if [ -f "$TARGET/state/compose.env" ]; then',
+            deploy.index("EDGE_STARTED_AT_BEFORE="),
+        )
         detection = deploy[
-            deploy.index("if ! TARGET_COMPOSE_SERVICES="):
-            deploy.index("\nif [ \"$LEGACY_TOPOLOGY\" != true ]", deploy.index("if ! TARGET_COMPOSE_SERVICES="))
+            start:deploy.index("\ncontainer_published_port()", start)
         ]
         self.assertIn("config --services", detection)
         self.assertIn("grep -Fx gateway", detection)
@@ -91,22 +94,22 @@ class RuntimeBoundaryTests(unittest.TestCase):
             deploy.index("\nif ! apply_release;")
         ]
         self.assertLess(
-            apply.index("release_cli render"), apply.index("write_stable_edge_ports")
+            apply.index("release_cli render"), apply.index("release_cli stage-deployment")
         )
         self.assertLess(
-            apply.index("write_stable_edge_ports"),
+            apply.index("release_cli stage-deployment"),
             apply.index("compose config --quiet"),
         )
         self.assertLess(
             apply.index("compose config --quiet"),
             apply.index("release_cli store verify"),
         )
-        writer = deploy[
-            deploy.index("write_stable_edge_ports() {"):
-            deploy.index("\nwrite_runtime_image_env()")
+        stage = apply[
+            apply.index("release_cli stage-deployment"):
+            apply.index("compose config --quiet")
         ]
-        self.assertIn('"GATEWAY_PORT": sys.argv[2]', writer)
-        self.assertIn('"GATEWAY_INTERNAL_PORT": sys.argv[3]', writer)
+        self.assertIn('--gateway-port "$HEALTH_PORT"', stage)
+        self.assertIn('--gateway-internal-port "$INTERNAL_HEALTH_PORT"', stage)
 
     def test_edge_apply_never_reuses_a_stale_network_endpoint(self):
         deploy = (ROOT / "scripts/deploy-release.sh").read_text(encoding="utf-8")
@@ -272,7 +275,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertLess(
             ensure.index('accounts[account].get("group_enabled") is False'),
             ensure.index(
-                'app._compose_with_image(cliproxy_image, "up", "-d", "--no-deps", service)'
+                'app._compose_with_image(image_id, "up", "-d", "--no-deps", service)'
             ),
         )
 

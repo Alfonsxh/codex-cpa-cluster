@@ -929,7 +929,11 @@
     try {
       state.releaseStatus = await api(`/release${fresh ? "?fresh=1" : ""}`);
       renderReleaseStatus();
-      if (fresh) showToast(state.releaseStatus.available ? "检测到可用新版本" : "当前已是最新版本");
+      if (fresh && state.releaseStatus.status === "ok") {
+        showToast(state.releaseStatus.available ? "检测到可用新版本" : "当前已是最新版本");
+      } else if (fresh) {
+        showToast("版本检查暂不可用，请稍后重试", "error");
+      }
     } catch (error) {
       if (fresh) showToast(error.message, "error");
     } finally {
@@ -967,7 +971,7 @@
     return requestId;
   };
 
-  const userSummaryPath = () => {
+  const userSummaryPath = (fresh = false) => {
     const query = usageRangeQuery(
       state.userUsageWindow,
       state.userCustomRange,
@@ -981,6 +985,7 @@
       }
     );
     if (state.userTeamFilter) query.set("team_id", state.userTeamFilter);
+    if (fresh) query.set("fresh", "1");
     return `/users?${query.toString()}`;
   };
 
@@ -1012,17 +1017,32 @@
   };
 
   const refreshView = async (view = state.view, showFeedback = false) => {
+    const refreshButton = $("#refresh-button");
+    if (showFeedback) {
+      window.clearTimeout(state.refreshTimer);
+      window.clearTimeout(state.overviewUsageTimer);
+      refreshButton.disabled = true;
+    }
     $("#refresh-state").textContent = "正在刷新";
     let quotaRefreshing = false;
     const requestId = nextViewRequestId(view);
     try {
       if (view === "overview") {
-        loadOverviewCatalog(showFeedback);
-        const overview = await api(`/overview${showFeedback ? "?fresh=1" : ""}`);
+        if (showFeedback) {
+          const catalogLoaded = await loadOverviewCatalog(true, false);
+          if (!catalogLoaded) throw new Error(state.overviewCatalogError || "总览筛选项刷新失败");
+        } else {
+          loadOverviewCatalog(false);
+        }
+        const overviewRequest = api(`/overview${showFeedback ? "?fresh=1" : ""}`);
+        const [overview, usageLoaded] = showFeedback
+          ? await Promise.all([overviewRequest, loadOverviewUsage(true, false)])
+          : [await overviewRequest, true];
+        if (!usageLoaded) throw new Error(state.overviewUsageError || "Token 趋势刷新失败");
         if (state.viewRequestIds.get(view) !== requestId) return;
         state.overview = overview;
         renderOverview();
-        if (showFeedback || !state.overviewUsage) loadOverviewUsage(showFeedback);
+        if (!showFeedback && !state.overviewUsage) loadOverviewUsage(false);
         $("#refresh-state").textContent = `总览更新于 ${formatTime(overview.generated_at)}`;
       } else if (view === "accounts") {
         const accountQuery = usageRangeQuery(
@@ -1043,7 +1063,10 @@
           renderImageManager();
           if (state.view === "accounts") renderAccounts();
         });
-        if (state.expandedAccount) loadAccountUsageBreakdown(state.expandedAccount, showFeedback);
+        if (state.expandedAccount) {
+          const breakdownRequest = loadAccountUsageBreakdown(state.expandedAccount, showFeedback);
+          if (showFeedback) await breakdownRequest;
+        }
         const quotaState = quotaRefreshing ? "（后台更新中）" : accounts.quota_cached ? "（缓存）" : "";
         $("#refresh-state").textContent = `额度更新于 ${formatTime(accounts.quota_generated_at || accounts.generated_at)}${quotaState}`;
       } else if (view === "users") {
@@ -1055,8 +1078,8 @@
           state.userCustomRange
         );
         const [users, teamUsageResult] = await Promise.all([
-          api(userSummaryPath()),
-          api(`/teams/usage?${teamUsageQuery.toString()}`)
+          api(userSummaryPath(showFeedback)),
+          api(`/teams/usage?${teamUsageQuery.toString()}${showFeedback ? "&fresh=1" : ""}`)
             .then((payload) => ({ payload }))
             .catch((error) => ({ error }))
         ]);
@@ -1081,12 +1104,16 @@
         renderTeamUsageTrigger();
         renderUsers();
         if (state.expandedUser) {
-          loadUserDetail(state.expandedUser, true);
-          loadUserUsageBreakdown(state.expandedUser);
+          const detailRequests = [
+            loadUserDetail(state.expandedUser, true),
+            loadUserUsageBreakdown(state.expandedUser, showFeedback)
+          ];
+          if (showFeedback) await Promise.all(detailRequests);
         }
+        if (showFeedback && teamUsageResult.error) throw teamUsageResult.error;
         $("#refresh-state").textContent = `用户数据更新于 ${formatTime(users.summary_generated_at || users.generated_at)}${users.summary_cached ? "（缓存）" : ""}`;
       } else if (view === "organization") {
-        await loadOrganizationWorkspace();
+        await loadOrganizationWorkspace(showFeedback);
         if (state.viewRequestIds.get(view) !== requestId) return;
         $("#refresh-state").textContent = "团队数据已刷新";
       } else if (view === "operations") {
@@ -1094,7 +1121,11 @@
         if (state.viewRequestIds.get(view) !== requestId) return;
         state.overview = overview;
         renderOperations();
-        loadJobs();
+        const jobsRequest = loadJobs(false);
+        if (showFeedback && !(await jobsRequest)) {
+          $("#refresh-state").textContent = "任务列表刷新失败";
+          return;
+        }
         $("#refresh-state").textContent = `运行状态更新于 ${formatTime(overview.generated_at)}`;
       } else if (view === "settings") {
         const settings = await api("/settings");
@@ -1106,18 +1137,21 @@
       state.viewLoadedAt.set(view, Date.now());
       if (showFeedback && view !== "overview") {
         showToast(quotaRefreshing ? "表格已刷新，额度正在后台更新" : "数据已刷新");
+      } else if (showFeedback) {
+        showToast("总览与 Token 趋势已刷新");
       }
     } catch (error) {
       $("#refresh-state").textContent = "刷新失败";
       if (state.authenticated) showToast(error.message, "error");
     } finally {
+      if (showFeedback) refreshButton.disabled = false;
       scheduleViewRefresh(quotaRefreshing);
     }
   };
 
   const refreshAll = async (showFeedback = false) => refreshView(state.view, showFeedback);
 
-  const loadOverviewCatalog = async (fresh = false) => {
+  const loadOverviewCatalog = async (fresh = false, reloadUsageOnReconcile = true) => {
     const requestId = ++state.overviewCatalogRequestId;
     state.overviewCatalogLoading = true;
     state.overviewCatalogError = "";
@@ -1128,11 +1162,13 @@
       state.overviewCatalog = payload;
       if (reconcileOverviewUsageSelections() && state.view === "overview") {
         state.overviewUsage = null;
-        loadOverviewUsage(false);
+        if (reloadUsageOnReconcile) loadOverviewUsage(false);
       }
+      return true;
     } catch (error) {
       if (requestId !== state.overviewCatalogRequestId) return;
       state.overviewCatalogError = error.message;
+      return false;
     } finally {
       if (requestId === state.overviewCatalogRequestId) {
         state.overviewCatalogLoading = false;
@@ -1148,9 +1184,14 @@
     state.overviewUsageTimer = window.setTimeout(() => loadOverviewUsage(false), seconds * 1000);
   };
 
-  const loadOverviewUsage = async (showFeedback = false) => {
+  const loadOverviewUsage = async (fresh = false, showFeedback = fresh) => {
     const requestId = ++state.overviewUsageRequestId;
-    const usagePath = overviewUsagePath(showFeedback);
+    const usagePath = overviewUsagePath(fresh);
+    const refreshButton = $("#overview-usage-refresh");
+    if (fresh) {
+      window.clearTimeout(state.overviewUsageTimer);
+      refreshButton.disabled = true;
+    }
     state.overviewUsageLoading = true;
     state.overviewUsageError = "";
     renderOverviewUsage();
@@ -1159,16 +1200,19 @@
       if (requestId !== state.overviewUsageRequestId) return;
       state.overviewUsage = payload;
       if (showFeedback) showToast("Token 趋势已刷新");
+      return true;
     } catch (error) {
       if (requestId !== state.overviewUsageRequestId) return;
       state.overviewUsageError = error.message;
       if (showFeedback) showToast(error.message, "error");
+      return false;
     } finally {
       if (requestId === state.overviewUsageRequestId) {
         state.overviewUsageLoading = false;
         renderOverviewUsage();
         scheduleOverviewUsageRefresh();
       }
+      if (fresh) refreshButton.disabled = false;
     }
   };
 
@@ -2134,6 +2178,7 @@
       const usageUnavailable = accountUsageWindowUnavailable(account);
       const image = imageByAccount.get(account.id) || {};
       const imageLabel = image.image_short_id || "—";
+      const imageVersion = image.version || "版本未知";
       const imageUpdateDisabled = !account.group_enabled || !image.running || !state.imageStatus?.local_image?.available || image.using_target;
       const imageUpdateTitle = !account.group_enabled
         ? "CPA 账号已停用；启用后再更新镜像"
@@ -2173,7 +2218,7 @@
               <div><span>容器</span><strong>${escapeHTML(account.service)}</strong><small class="account-runtime-note">${escapeHTML(account.container_status || "—")}</small></div>
               <div><span>账号状态</span><strong title="${escapeHTML(runtime.reason)}">${escapeHTML(runtime.label)}</strong><small class="account-runtime-note" title="${escapeHTML(runtimeTooltip)}">${escapeHTML(runtimeTooltip)}</small></div>
               <div><span>OAuth 文件</span><strong>${formatNumber(account.auth_files)}</strong></div>
-              <div><span>镜像摘要</span><strong>${escapeHTML(imageLabel)}</strong></div>
+              <div><span>镜像版本</span><strong>${escapeHTML(imageVersion)}</strong><small class="account-runtime-note">SHA ${escapeHTML(imageLabel)}</small></div>
               <div><span>出口代理</span><strong>${escapeHTML(account.proxy_source === "account" ? "账号自定义" : account.proxy_source === "default" ? "控制面默认" : "强制直连")}</strong><small class="account-runtime-note">${escapeHTML(account.proxy_display || "direct")}</small></div>
             </div>
             ${renderAccountUsageFacts(account, usage)}
@@ -2217,7 +2262,9 @@
   const renderImageManager = () => {
     const image = state.imageStatus || {};
     const local = image.local_image || {};
-    const target = image.target_image || "—";
+    const target = image.update_channel || image.target_image || "—";
+    const version = local.version || image.candidate?.version || "版本未知";
+    const shortId = local.short_id || "摘要未知";
     const running = Number(image.running_count) || 0;
     const current = Number(image.current_count) || 0;
     const outdated = Number(image.outdated_count) || 0;
@@ -2234,7 +2281,7 @@
       status.textContent = "已同步";
     }
     $("#cliproxy-image-summary").textContent = local.available
-      ? `${current}/${running} 个运行中的已启用 CPA · ${local.short_id || "摘要未知"}`
+      ? `${version} · ${shortId} · ${current}/${running} 个运行中的已启用 CPA`
       : `${running} 个已启用 CPA 运行中`;
     const updateAll = $("#update-all-cpa-images");
     updateAll.disabled = !local.available || outdated === 0;
@@ -2869,9 +2916,15 @@
     renderOrganizationTeamMembers();
   };
 
-  const loadOrganizationWorkspace = async () => {
+  const loadOrganizationWorkspace = async (fresh = false) => {
     await loadOrganizationCatalog();
-    const usage = await api("/teams/usage?window=all").catch(() => ({ teams: [] }));
+    let usage;
+    try {
+      usage = await api(`/teams/usage?window=all${fresh ? "&fresh=1" : ""}`);
+    } catch (error) {
+      if (fresh) throw error;
+      usage = { teams: [] };
+    }
     state.teamUsage = usage.teams || [];
     renderOrganizationCatalog();
   };
@@ -4252,7 +4305,7 @@
       login: ["开始 OAuth 授权？", "任务输出会显示设备授权地址和一次性验证码。完成浏览器授权前请勿关闭任务窗口。", "开始授权", false],
       stop: ["停止服务？", AdminViewStateUtils.stopOperationMessage(target, stopImpact, stopImpactAvailable), "确认停止", true],
       restart: ["重启服务？", target === "all" ? "将依次重启所有业务服务，短时间内可能无法调用。" : `将重启 ${target}。`, "确认重启", false],
-      "image-update": ["更新 CPA 镜像？", target === "all" ? "将使用已拉取的目标镜像逐个重建运行中的已启用 CPA，停用账号会跳过；失败时自动恢复原镜像。" : `将使用目标镜像重建 ${target}；失败时自动恢复原镜像。`, target === "all" ? "更新全部 CPA" : "更新此 CPA", false]
+      "image-update": ["更新 CPA 镜像？", target === "all" ? "将使用已拉取并锁定版本与摘要的目标镜像逐个重建运行中的已启用 CPA，停用账号会跳过；失败时自动恢复原镜像。" : `将使用已锁定版本与摘要的目标镜像重建 ${target}；失败时自动恢复原镜像。`, target === "all" ? "更新全部 CPA" : "更新此 CPA", false]
     };
     if (action === "login") {
       try {
@@ -4324,11 +4377,20 @@
     } catch (error) { showToast(error.message, "error"); }
   };
 
-  const loadJobs = async () => {
+  const loadJobs = async (showFeedback = false) => {
+    const button = $("#refresh-jobs-button");
+    if (showFeedback) button.disabled = true;
     try {
       const payload = await api("/jobs");
       renderJobList($("#all-jobs"), payload.jobs || [], false);
-    } catch (error) { if (state.authenticated) showToast(error.message, "error"); }
+      if (showFeedback) showToast("任务列表已刷新");
+      return true;
+    } catch (error) {
+      if (state.authenticated) showToast(error.message, "error");
+      return false;
+    } finally {
+      if (showFeedback) button.disabled = false;
+    }
   };
 
   const showLogs = async (target) => {
@@ -5491,7 +5553,7 @@
   $("#overview-usage-refresh").addEventListener("click", () => loadOverviewUsage(true));
   $("#refresh-button").addEventListener("click", () => refreshAll(true));
   $("#release-check-button").addEventListener("click", () => loadReleaseStatus(true));
-  $("#refresh-jobs-button").addEventListener("click", loadJobs);
+  $("#refresh-jobs-button").addEventListener("click", () => loadJobs(true));
   $("#logout-button").addEventListener("click", async () => {
     try { await api("/session", { method: "DELETE" }); } catch { /* local cleanup below */ }
     resetToAuth("");

@@ -113,6 +113,7 @@ make release VERSION=v1.1.0 IMAGE_PREFIX=ghcr.io/alfonsxh
 ```bash
 python3 -m pip install -r requirements.txt
 cp .env.example .env
+python3 scripts/cliproxy.py --root "$PWD" render
 make dev-build
 make verify
 ```

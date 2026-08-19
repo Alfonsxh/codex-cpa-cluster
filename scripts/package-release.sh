@@ -40,6 +40,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs \
   --exclude='*/__pycache__' --exclude='*.pyc' -czf "$OUTPUT" -C "$ROOT_DIR" \
   .dockerignore \
   .env.example \
+  compose.env.example \
   codex-cpa \
   Makefile \
   CHANGELOG.md \

@@ -91,11 +91,13 @@ printf '%s\n' '[6/7] Compose 配置'
 docker compose \
   --project-directory "$ROOT_DIR" \
   --env-file "$ROOT_DIR/.env.example" \
+  --env-file "$ROOT_DIR/compose.env.example" \
   -f "$ROOT_DIR/docker-compose.yml" \
   config --quiet
 docker compose \
   --project-directory "$ROOT_DIR" \
   --env-file "$ROOT_DIR/.env.example" \
+  --env-file "$ROOT_DIR/compose.env.example" \
   -f "$ROOT_DIR/docker-compose.yml" \
   -f "$ROOT_DIR/docker-compose.dev.yml" \
   config --quiet

@@ -55,11 +55,27 @@ UNSET = object()
 INTERNAL_MODELS_PROBE_PATH = "/__internal/probe/models"
 INFLIGHT_STATS_HTTP_TIMEOUT_SECONDS = 1
 INFLIGHT_STATS_MAX_RESPONSE_BYTES = 1024 * 1024
+CLIPROXY_IDENTITY_TIMEOUT_SECONDS = 15
+CLIPROXY_IDENTITY_MAX_OUTPUT_BYTES = 64 * 1024
+CLIPROXY_VERSION_BANNER_RE = re.compile(
+    r"CLIProxyAPI Version:\s*([^,\s]+),\s*Commit:\s*([^,\s]+),\s*BuiltAt:\s*([^\r\n]+)"
+)
+SEMANTIC_VERSION_RE = re.compile(
+    r"v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?"
+)
 CONFIG_VERSION = 1
 INTERNAL_KEYS_VERSION = 1
 GATEWAY_SNAPSHOT_VERSION = 1
 GATEWAY_SNAPSHOT_GID = 65534
 RUNTIME_OPERATION_LOCK_PATH = "state/runtime-operation.lock"
+COMPOSE_ENV_PATH = "state/compose.env"
+COMPOSE_ENV_LOCK_PATH = "state/compose-env.lock"
+LEGACY_ENV_BACKUP_PATH = "state/legacy.env"
+BOOTSTRAP_ENV_DEFAULTS = {
+    "INSTANCE_NAME": "cliproxy",
+    "COMPOSE_PROJECT_NAME": "cliproxy-multi",
+    "DOCKER_NETWORK_NAME": "cliproxy-backend",
+}
 DEFAULT_ADMIN_BASE_IMAGE = (
     "docker.m.daocloud.io/library/docker:27.5.1-cli@"
     "sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c"
@@ -80,7 +96,7 @@ PINNED_DEFAULT_IMAGE_MIGRATIONS = {
         "openresty:1.31.1.1-2-alpine-fat": DEFAULT_GATEWAY_BASE_IMAGE,
     },
 }
-CONFIG_ENV_KEYS = {
+LEGACY_ENV_SETTING_KEYS = {
     "runtime.cliproxy_image": "CLIPROXY_IMAGE",
     "runtime.gateway_image": "GATEWAY_IMAGE",
     "runtime.admin_base_image": "ADMIN_BASE_IMAGE",
@@ -89,7 +105,32 @@ CONFIG_ENV_KEYS = {
     "gateway.listen_address": "GATEWAY_LISTEN_ADDRESS",
     "gateway.port": "GATEWAY_PORT",
     "gateway.internal_port": "GATEWAY_INTERNAL_PORT",
+    "management.port": "MANAGEMENT_PORT",
+    "delivery.gateway_drain_timeout_seconds": "GATEWAY_DRAIN_TIMEOUT_SECONDS",
+    "delivery.release_metadata_image": "RELEASE_METADATA_IMAGE",
 }
+CONFIG_ENV_KEYS = LEGACY_ENV_SETTING_KEYS
+COMPOSE_SETTING_ENV_KEYS = {
+    "accounts.listen_address": "BUSINESS_CPA_LISTEN_ADDRESS",
+    "management.listen_address": "MANAGEMENT_LISTEN_ADDRESS",
+    "management.port": "MANAGEMENT_PORT",
+    "gateway.listen_address": "GATEWAY_LISTEN_ADDRESS",
+    "gateway.port": "GATEWAY_PORT",
+    "gateway.internal_port": "GATEWAY_INTERNAL_PORT",
+}
+LEGACY_DEPLOYMENT_ENV_KEYS = {
+    "RELEASE_VERSION": "version",
+    "ADMIN_IMAGE": "admin_image",
+    "WEB_RUNTIME_IMAGE": "web_image",
+    "GATEWAY_RUNTIME_IMAGE": "gateway_image",
+    "EDGE_RUNTIME_IMAGE": "edge_image",
+}
+BOOTSTRAP_ENV_KEYS = (
+    "DEPLOY_ROOT",
+    "INSTANCE_NAME",
+    "COMPOSE_PROJECT_NAME",
+    "DOCKER_NETWORK_NAME",
+)
 RETIRED_CONFIG_KEYS = {
     "gost.enabled",
     "gost.remote_hosts",
@@ -643,7 +684,7 @@ CONFIG_DEFINITIONS = (
         "key": "runtime.cliproxy_image",
         "group": "部署环境",
         "label": "CLIProxyAPI 镜像",
-        "description": "写入 .env；在账号管理中拉取并更新 CPA 后生效。",
+        "description": "作为更新通道；账号管理拉取后识别真实版本，验证通过才固定为不可变镜像。",
         "type": "image",
         "default": "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23",
         "apply_mode": "deployment",
@@ -690,7 +731,7 @@ CONFIG_DEFINITIONS = (
         "key": "gateway.port",
         "group": "部署环境",
         "label": "网关宿主机端口",
-        "description": "写入 .env；修改后管理中心入口地址也会变化。",
+        "description": "由 SQLite 自动生成 Compose 投影；修改后管理中心入口地址也会变化。",
         "type": "integer",
         "default": 18317,
         "min": 1024,
@@ -708,6 +749,38 @@ CONFIG_DEFINITIONS = (
         "max": 65535,
         "apply_mode": "deployment",
     },
+    {
+        "key": "management.port",
+        "group": "部署环境",
+        "label": "Management 宿主机端口",
+        "description": "仅绑定宿主机回环地址，供本机管理与发布检查使用。",
+        "type": "integer",
+        "default": 18318,
+        "min": 1024,
+        "max": 65535,
+        "apply_mode": "deployment",
+    },
+    {
+        "key": "delivery.gateway_drain_timeout_seconds",
+        "group": "部署环境",
+        "label": "Gateway 排空超时",
+        "description": "蓝绿发布等待旧 Gateway 长连接结束的最长时间。",
+        "type": "integer",
+        "default": 3600,
+        "min": 30,
+        "max": 7200,
+        "unit": "秒",
+        "apply_mode": "deployment",
+    },
+    {
+        "key": "delivery.release_metadata_image",
+        "group": "部署环境",
+        "label": "发布更新通道",
+        "description": "Admin 只读检查项目新版本所使用的 metadata 镜像；可留空关闭提醒。",
+        "type": "optional_image",
+        "default": "",
+        "apply_mode": "deployment",
+    },
 )
 CONFIG_DEFINITION_BY_KEY = {item["key"]: item for item in CONFIG_DEFINITIONS}
 USER_KEY_UUID_RE = re.compile(
@@ -722,6 +795,7 @@ class ControlPlane:
         self.public_accounts_path = self.root / "state" / "public" / "accounts.json"
         self.public_site_config_path = self.root / "state" / "public" / "site-config.json"
         self.accounts_compose_path = self.root / "compose.accounts.yml"
+        self.compose_env_path = self.root / COMPOSE_ENV_PATH
         self.issued_path = self.root / "secrets" / "issued-keys.tsv"
         self.access_log = self.root / "logs" / "gateway" / "access.tsv"
         self.snapshot_dir = self.root / "state" / "gateway"
@@ -742,6 +816,7 @@ class ControlPlane:
         self.store = ControlPlaneStore(self.root)
 
     def ensure_layout(self):
+        legacy_environment = read_env(self.root / ".env")
         relatives = [
             "configs",
             "logs/gateway",
@@ -761,10 +836,137 @@ class ControlPlane:
         if os.geteuid() == 0:
             os.chown(self.snapshot_dir, -1, GATEWAY_SNAPSHOT_GID)
         os.chmod(self.root / "secrets", 0o700)
+        self.migrate_legacy_environment(legacy_environment)
         ensure_active_slot(
             self.root,
-            fallback=read_env(self.root / ".env").get("GATEWAY_ACTIVE_SLOT", "blue"),
+            fallback=legacy_environment.get("GATEWAY_ACTIVE_SLOT", "blue"),
         )
+        self.render_compose_environment()
+
+    def migrate_legacy_environment(self, environment=None):
+        """Import the former mixed .env contract, then retain only host bootstrap keys."""
+        path = self.root / ".env"
+        environment = dict(environment if environment is not None else read_env(path))
+        deployment = self.deployment_runtime_state()
+        applied_deployment = dict(deployment.get("applied") or {})
+        legacy_deployment_values = {}
+        for env_key, field in LEGACY_DEPLOYMENT_ENV_KEYS.items():
+            if applied_deployment.get(field):
+                continue
+            value = str(environment.get(env_key, "") or "").strip()
+            if not value:
+                continue
+            if field == "version":
+                if not SEMANTIC_VERSION_RE.fullmatch(value):
+                    raise ValueError("旧 .env 中的 RELEASE_VERSION 不是语义化版本")
+            else:
+                value = self._normalize_configuration_value(
+                    CONFIG_DEFINITION_BY_KEY["runtime.cliproxy_image"], value
+                )
+            legacy_deployment_values[field] = value
+        stored = self._read_stored_configuration()
+        migrated_settings = []
+        for key, env_key in LEGACY_ENV_SETTING_KEYS.items():
+            if key in stored or env_key not in environment:
+                continue
+            raw = environment[env_key]
+            migrations = PINNED_DEFAULT_IMAGE_MIGRATIONS.get(key)
+            if migrations is not None:
+                raw = migrations.get(raw, raw)
+            if key in {
+                "accounts.listen_address",
+                "management.listen_address",
+                "gateway.listen_address",
+            } and str(raw).strip() in {"0.0.0.0", "::"}:
+                raw = "127.0.0.1"
+            stored[key] = self._normalize_configuration_value(
+                CONFIG_DEFINITION_BY_KEY[key], raw
+            )
+            migrated_settings.append(key)
+
+        if migrated_settings:
+            effective = {}
+            for definition in CONFIG_DEFINITIONS:
+                key = definition["key"]
+                raw = (
+                    self.store.read_secret(DEFAULT_PROXY_SECRET, "")
+                    if key == "cpa.proxy_url"
+                    else stored.get(key, definition["default"])
+                )
+                effective[key] = self._normalize_configuration_value(definition, raw)
+            self._validate_configuration(effective)
+            self._write_configuration(stored)
+
+        migrated_deployment = []
+        for field, value in legacy_deployment_values.items():
+            if value and not applied_deployment.get(field):
+                applied_deployment[field] = value
+                migrated_deployment.append(field)
+        if migrated_deployment:
+            applied_deployment.setdefault("migrated_at", int(time.time()))
+            deployment["applied"] = applied_deployment
+            self.store.write_runtime_state("deployment", deployment)
+
+        bootstrap = {
+            "DEPLOY_ROOT": str(
+                environment.get("DEPLOY_ROOT")
+                or os.environ.get("DEPLOY_ROOT")
+                or self.root
+            ),
+            **{
+                key: str(
+                    environment.get(key)
+                    or os.environ.get(key)
+                    or default
+                )
+                for key, default in BOOTSTRAP_ENV_DEFAULTS.items()
+            },
+        }
+        non_bootstrap_keys = sorted(set(environment) - set(BOOTSTRAP_ENV_KEYS))
+        known_keys = set(LEGACY_ENV_SETTING_KEYS.values()) | set(
+            LEGACY_DEPLOYMENT_ENV_KEYS
+        ) | {"GATEWAY_ACTIVE_SLOT"}
+        unmapped_keys = sorted(set(non_bootstrap_keys) - known_keys)
+        backup_path = None
+        if path.exists() and non_bootstrap_keys:
+            backup_path = self.root / LEGACY_ENV_BACKUP_PATH
+            if backup_path.exists():
+                backup_path = backup_path.with_name(
+                    "{}.{}".format(backup_path.name, time.time_ns())
+                )
+            self._atomic_text(
+                backup_path,
+                path.read_text(encoding="utf-8"),
+                0o600,
+            )
+        content = "# Host/Compose bootstrap only. Runtime values are generated in state/compose.env.\n"
+        content += "\n".join(
+            "{}={}".format(key, bootstrap[key]) for key in BOOTSTRAP_ENV_KEYS
+        ) + "\n"
+        if not path.exists() or path.read_text(encoding="utf-8") != content:
+            self._atomic_text(path, content, 0o600)
+        else:
+            os.chmod(path, 0o600)
+
+        if migrated_settings or migrated_deployment or non_bootstrap_keys:
+            self.store.write_runtime_state(
+                "legacy_environment_migration",
+                {
+                    "migrated_at": int(time.time()),
+                    "settings": migrated_settings,
+                    "deployment_fields": migrated_deployment,
+                    "unmapped_keys": unmapped_keys,
+                    "backup_path": (
+                        str(backup_path.relative_to(self.root)) if backup_path else ""
+                    ),
+                },
+            )
+        return {
+            "settings": migrated_settings,
+            "deployment_fields": migrated_deployment,
+            "unmapped_keys": unmapped_keys,
+            "backup_path": str(backup_path) if backup_path else "",
+        }
 
     @contextlib.contextmanager
     def runtime_operation_lock(self, operation):
@@ -791,6 +993,22 @@ class ControlPlane:
             if locked:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+
+    @contextlib.contextmanager
+    def compose_environment_lock(self):
+        """Serialize projection reads and the atomic replacement across processes."""
+        path = self.root / COMPOSE_ENV_LOCK_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            os.chmod(path, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
     @staticmethod
     def configuration_definitions():
@@ -1072,7 +1290,9 @@ class ControlPlane:
                     raise ValueError("{} 包含无效时间".format(definition["label"]))
                 times.add("{:02d}:{:02d}".format(hour, minute))
             return ",".join(sorted(times))
-        if value_type == "image":
+        if value_type in ("image", "optional_image"):
+            if value_type == "optional_image" and not normalized:
+                return ""
             if not normalized or len(normalized) > 255 or not re.fullmatch(r"[A-Za-z0-9._:/@-]+", normalized):
                 raise ValueError("{} 的镜像名称无效".format(definition["label"]))
             if definition.get("digest_required") and not re.fullmatch(
@@ -1168,7 +1388,6 @@ class ControlPlane:
         if inferred != stored:
             self._write_configuration(inferred)
             stored = inferred
-        environment = read_env(self.root / ".env")
         values = {}
         for definition in CONFIG_DEFINITIONS:
             key = definition["key"]
@@ -1177,9 +1396,6 @@ class ControlPlane:
                 if key == "cpa.proxy_url"
                 else stored.get(key, definition["default"])
             )
-            env_key = CONFIG_ENV_KEYS.get(key)
-            if key not in stored and env_key and env_key in environment:
-                raw = environment[env_key]
             image_migrations = PINNED_DEFAULT_IMAGE_MIGRATIONS.get(key)
             if image_migrations is not None:
                 raw = image_migrations.get(raw, raw)
@@ -1219,6 +1435,15 @@ class ControlPlane:
             raise ValueError("网关内部探针端口不能与公网网关端口相同")
         if values["gateway.internal_port"] in existing_ports:
             raise ValueError("网关内部探针端口不能与现有业务 CPA 端口重复")
+        deployment_ports = {
+            values["gateway.port"],
+            values["gateway.internal_port"],
+            values["management.port"],
+        }
+        if len(deployment_ports) != 3:
+            raise ValueError("Gateway 公网、内部探针和 Management 端口不能重复")
+        if values["management.port"] in existing_ports:
+            raise ValueError("Management 端口不能与现有业务 CPA 端口重复")
         if values["account_failover.stale_after_seconds"] < values["account_failover.poll_seconds"]:
             raise ValueError("账号自动切换额度数据失效时间不能小于检查间隔")
         if values["cpa.proxy_enabled"] and not values["cpa.proxy_url"]:
@@ -1283,7 +1508,6 @@ class ControlPlane:
             for key, value in values.items()
         }
         restored_proxy_url = normalized_stored.pop("cpa.proxy_url", UNSET)
-        environment = read_env(self.root / ".env")
         effective = {}
         for definition in CONFIG_DEFINITIONS:
             key = definition["key"]
@@ -1296,9 +1520,6 @@ class ControlPlane:
                 if key == "cpa.proxy_url"
                 else normalized_stored.get(key, definition["default"])
             )
-            env_key = CONFIG_ENV_KEYS.get(key)
-            if key not in normalized_stored and env_key and env_key in environment:
-                raw = environment[env_key]
             effective[key] = self._normalize_configuration_value(definition, raw)
         self._validate_configuration(effective)
         if restored_proxy_url is not UNSET:
@@ -1440,33 +1661,103 @@ class ControlPlane:
         }
         return result
 
-    def _sync_environment_values(self, replacements, append_order):
-        path = self.root / ".env"
-        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-        rendered = []
-        seen = set()
-        for line in lines:
-            match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=", line)
-            if match and match.group(1) in replacements:
-                name = match.group(1)
-                rendered.append("{}={}".format(name, replacements[name]))
-                seen.add(name)
-            else:
-                rendered.append(line)
-        if rendered and rendered[-1] != "":
-            rendered.append("")
-        for name in append_order:
-            if name not in seen:
-                rendered.append("{}={}".format(name, replacements[name]))
-        self._atomic_text(path, "\n".join(rendered).rstrip() + "\n", 0o600)
+    def cliproxy_image_runtime_state(self):
+        payload = self.store.read_runtime_state("cliproxy_image", {})
+        return dict(payload) if isinstance(payload, dict) else {}
+
+    def deployment_runtime_state(self):
+        """Return normalized pending/applied application deployment state."""
+        payload = self.store.read_runtime_state("deployment", {})
+        payload = dict(payload) if isinstance(payload, dict) else {}
+        if "pending" in payload or "applied" in payload:
+            return {
+                name: dict(payload.get(name) or {})
+                for name in ("pending", "applied")
+                if isinstance(payload.get(name), dict) and payload.get(name)
+            }
+        # Compatibility with the former flat runtime_state payload. The next
+        # deployment or legacy migration rewrites it to the explicit shape.
+        return {"applied": payload} if payload else {}
+
+    def applied_deployment(self):
+        return dict(self.deployment_runtime_state().get("applied") or {})
+
+    def compose_deployment(self):
+        state = self.deployment_runtime_state()
+        return dict(state.get("pending") or state.get("applied") or {})
+
+    def applied_cliproxy_image_ref(self):
+        applied = self.cliproxy_image_runtime_state().get("applied") or {}
+        resolved = str(applied.get("resolved_ref") or "").strip()
+        return resolved or self.configuration()["values"]["runtime.cliproxy_image"]
+
+    def seed_cliproxy_applied_image(self, image_ref):
+        """Record the pre-migration CPA image without replacing newer state."""
+        image_ref = str(image_ref or "").strip()
+        if not image_ref or self.cliproxy_image_runtime_state().get("applied"):
+            return None
+        image = self._docker_json("image", "inspect", image_ref)
+        if not image:
+            raise ValueError("无法读取要保留的 CPA 镜像：{}".format(image_ref))
+        source_ref = self.configuration()["values"]["runtime.cliproxy_image"]
+        identity = self._resolve_cliproxy_image_identity(source_ref, image=image)
+        identity["migration_source"] = "running_container"
+        return self._commit_cliproxy_applied(identity)
+
+    def render_compose_environment(self, cliproxy_image=None):
+        """Project authoritative SQLite state into the private Compose env file."""
+        with self.compose_environment_lock():
+            return self._render_compose_environment_unlocked(
+                cliproxy_image=cliproxy_image
+            )
+
+    def _render_compose_environment_unlocked(self, cliproxy_image=None):
+        values = self.configuration()["values"]
+        deployment = self.compose_deployment()
+        replacements = {
+            "CLIPROXY_IMAGE": str(
+                cliproxy_image or self.applied_cliproxy_image_ref()
+            ).strip(),
+            "ADMIN_IMAGE": str(deployment.get("admin_image") or "codex-cpa-admin:local"),
+            "WEB_RUNTIME_IMAGE": str(deployment.get("web_image") or "codex-cpa-web:local"),
+            "GATEWAY_RUNTIME_IMAGE": str(deployment.get("gateway_image") or "codex-cpa-gateway:local"),
+            "EDGE_RUNTIME_IMAGE": str(deployment.get("edge_image") or "codex-cpa-edge:local"),
+            "ADMIN_BASE_IMAGE": str(values["runtime.admin_base_image"]),
+            "GATEWAY_IMAGE": str(values["runtime.gateway_image"]),
+            "EDGE_IMAGE": str(values["runtime.gateway_image"]),
+        }
+        for key, env_key in COMPOSE_SETTING_ENV_KEYS.items():
+            replacements[env_key] = str(values[key])
+        for name, value in replacements.items():
+            if "\n" in value or "\r" in value:
+                raise ValueError("Compose 环境值包含换行：{}".format(name))
+        order = (
+            "CLIPROXY_IMAGE",
+            "ADMIN_IMAGE",
+            "WEB_RUNTIME_IMAGE",
+            "GATEWAY_RUNTIME_IMAGE",
+            "EDGE_RUNTIME_IMAGE",
+            "ADMIN_BASE_IMAGE",
+            "GATEWAY_IMAGE",
+            "EDGE_IMAGE",
+            "GATEWAY_LISTEN_ADDRESS",
+            "GATEWAY_PORT",
+            "GATEWAY_INTERNAL_PORT",
+            "MANAGEMENT_LISTEN_ADDRESS",
+            "MANAGEMENT_PORT",
+            "BUSINESS_CPA_LISTEN_ADDRESS",
+        )
+        content = "# Generated from state/control-plane.sqlite3; do not edit.\n"
+        content += "\n".join(
+            "{}={}".format(name, replacements[name]) for name in order
+        ) + "\n"
+        self._atomic_text(self.compose_env_path, content, 0o600)
+        return dict(replacements)
 
     def sync_environment_configuration(self, values=None):
-        values = values or self.configuration()["values"]
-        replacements = {
-            env_key: str(values[key])
-            for key, env_key in CONFIG_ENV_KEYS.items()
-        }
-        self._sync_environment_values(replacements, CONFIG_ENV_KEYS.values())
+        # Compatibility facade for Admin/profile callers. SQLite is already
+        # authoritative; only the generated Compose projection is refreshed.
+        return self.render_compose_environment()
 
     def sync_cliproxy_image_environment(self, image_ref=None):
         image_ref = str(
@@ -1475,10 +1766,7 @@ class ControlPlane:
         ).strip()
         if not image_ref:
             raise ValueError("CLIProxyAPI 镜像不能为空")
-        self._sync_environment_values(
-            {"CLIPROXY_IMAGE": image_ref},
-            ("CLIPROXY_IMAGE",),
-        )
+        return self.render_compose_environment(cliproxy_image=image_ref)
 
     def _read_account_records(self):
         return self.store.read_accounts()
@@ -3459,7 +3747,7 @@ class ControlPlane:
             lines.extend(
                 [
                     "  {}:".format(service),
-                    "    image: ${CLIPROXY_IMAGE:-docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23}",
+                    "    image: ${CLIPROXY_IMAGE:?state/compose.env missing; run codex-cpa render}",
                     "    container_name: ${{INSTANCE_NAME:-cliproxy}}-{}".format(account),
                     "    restart: unless-stopped",
                     "    logging:",
@@ -3469,7 +3757,7 @@ class ControlPlane:
                     "        max-file: \"3\"",
                     "    command: [\"./CLIProxyAPI\", \"-config\", \"/CLIProxyAPI/configs/{}.yaml\"]".format(account),
                     "    ports:",
-                    "      - \"${{BUSINESS_CPA_LISTEN_ADDRESS:-127.0.0.1}}:{}:8317\"".format(
+                    "      - \"${{BUSINESS_CPA_LISTEN_ADDRESS:?state/compose.env missing}}:{}:8317\"".format(
                         metadata["port"]
                     ),
                     "    volumes:",
@@ -3490,10 +3778,18 @@ class ControlPlane:
 
     @staticmethod
     def _atomic_text(path, content, mode):
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(content, encoding="utf-8")
-        os.chmod(temporary, mode)
-        os.replace(str(temporary), str(path))
+        temporary = path.with_name(
+            ".{}.{}.tmp".format(path.name, uuid.uuid4().hex)
+        )
+        try:
+            temporary.write_text(content, encoding="utf-8")
+            os.chmod(temporary, mode)
+            os.replace(str(temporary), str(path))
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
     def compose_command(self):
         return [
@@ -3501,6 +3797,10 @@ class ControlPlane:
             "compose",
             "--project-directory",
             str(self.root),
+            "--env-file",
+            str(self.root / ".env"),
+            "--env-file",
+            str(self.compose_env_path),
             "-f",
             str(self.root / "docker-compose.yml"),
             "-f",
@@ -3560,10 +3860,219 @@ class ControlPlane:
         raw = str(value or "")
         return raw.split(":", 1)[-1][:12] if raw else ""
 
+    @staticmethod
+    def _image_repository(image_ref):
+        value = str(image_ref or "").split("@", 1)[0]
+        slash = value.rfind("/")
+        colon = value.rfind(":")
+        return value[:colon] if colon > slash else value
+
+    @staticmethod
+    def _semantic_version_key(value):
+        match = re.fullmatch(
+            r"v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?",
+            str(value or "").strip(),
+        )
+        if match is None:
+            return None
+        prerelease = match.group(4)
+        prerelease_key = tuple(
+            (0, int(part)) if part.isdigit() else (1, part)
+            for part in (prerelease or "").split(".")
+            if part
+        )
+        return (
+            int(match.group(1)),
+            int(match.group(2)),
+            int(match.group(3)),
+            1 if prerelease is None else 0,
+            prerelease_key,
+        )
+
+    def _resolve_cliproxy_image_identity(self, image_ref, image=None):
+        image = image or self._docker_json("image", "inspect", image_ref)
+        if not image:
+            raise ValueError("无法读取 CLIProxyAPI 镜像信息")
+        image_id = str(image.get("Id") or "").strip()
+        repo_digests = [
+            str(value).strip()
+            for value in (image.get("RepoDigests") or [])
+            if str(value).strip()
+        ]
+        source_repository = self._image_repository(image_ref)
+        repo_digest = next(
+            (
+                value
+                for value in repo_digests
+                if value.rsplit("@", 1)[0] == source_repository
+            ),
+            repo_digests[0] if repo_digests else "",
+        )
+        labels = ((image.get("Config") or {}).get("Labels") or {})
+        labels = labels if isinstance(labels, dict) else {}
+        label_version = str(
+            labels.get("org.opencontainers.image.version") or ""
+        ).strip()
+        version = (
+            label_version
+            if SEMANTIC_VERSION_RE.fullmatch(label_version)
+            else ""
+        )
+        commit = str(labels.get("org.opencontainers.image.revision") or "").strip()
+        built_at = str(labels.get("org.opencontainers.image.created") or "").strip()
+        command = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--pids-limit",
+            "64",
+            image_id or image_ref,
+            "-h",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(self.root),
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=CLIPROXY_IDENTITY_TIMEOUT_SECONDS,
+            )
+            output = ((result.stdout or "") + "\n" + (result.stderr or ""))[
+                :CLIPROXY_IDENTITY_MAX_OUTPUT_BYTES
+            ]
+            match = CLIPROXY_VERSION_BANNER_RE.search(output)
+            if match:
+                banner_version, banner_commit, banner_built_at = (
+                    str(match.group(index) or "").strip() for index in range(1, 4)
+                )
+                if not version and SEMANTIC_VERSION_RE.fullmatch(banner_version):
+                    version = banner_version
+                if not commit:
+                    commit = banner_commit
+                if not built_at:
+                    built_at = banner_built_at
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+        if not version:
+            version_tags = []
+            for value in image.get("RepoTags") or []:
+                repository = self._image_repository(value)
+                tag = str(value).split("@", 1)[0][len(repository) + 1 :]
+                if repository == source_repository and SEMANTIC_VERSION_RE.fullmatch(tag):
+                    version_tags.append(tag)
+            if version_tags:
+                version = max(version_tags, key=self._semantic_version_key)
+
+        resolved_ref = repo_digest or image_id or str(image_ref)
+        if version and repo_digest and "@sha256:" in repo_digest:
+            repository, digest = repo_digest.rsplit("@", 1)
+            if re.fullmatch(r"[A-Za-z0-9._-]+", version):
+                resolved_ref = "{}:{}@{}".format(repository, version, digest)
+        return {
+            "source_ref": str(image_ref),
+            "version": version,
+            "commit": commit,
+            "built_at": built_at,
+            "image_id": image_id,
+            "image_short_id": self._short_image_id(image_id),
+            "repo_digest": repo_digest,
+            "repo_digests": repo_digests,
+            "resolved_ref": resolved_ref,
+        }
+
+    def _matching_cliproxy_identity(self, name, image_id):
+        record = self.cliproxy_image_runtime_state().get(name) or {}
+        if not isinstance(record, dict) or str(record.get("image_id") or "") != str(image_id or ""):
+            return {}
+        return dict(record)
+
+    def _known_cliproxy_identity(self, image_id, state=None):
+        image_id = str(image_id or "")
+        if not image_id:
+            return {}
+        state = state if isinstance(state, dict) else self.cliproxy_image_runtime_state()
+        for name in ("applied", "candidate"):
+            record = state.get(name) or {}
+            if isinstance(record, dict) and str(record.get("image_id") or "") == image_id:
+                return dict(record)
+        history = state.get("history") or {}
+        record = history.get(image_id) if isinstance(history, dict) else None
+        return dict(record) if isinstance(record, dict) else {}
+
+    def _write_cliproxy_candidate(self, identity):
+        state = self.cliproxy_image_runtime_state()
+        state["candidate"] = {
+            **dict(identity),
+            "pulled_at": int(time.time()),
+        }
+        self.store.write_runtime_state("cliproxy_image", state)
+        return dict(state["candidate"])
+
+    def _commit_cliproxy_applied(self, identity):
+        previous = self.store.read_runtime_state("cliproxy_image", None)
+        state = dict(previous) if isinstance(previous, dict) else {}
+        history = dict(state.get("history") or {})
+        for record in (state.get("applied"), identity):
+            if not isinstance(record, dict):
+                continue
+            image_id = str(record.get("image_id") or "")
+            if image_id:
+                history[image_id] = dict(record)
+        if len(history) > 32:
+            history = dict(
+                sorted(
+                    history.items(),
+                    key=lambda item: max(
+                        int(item[1].get("applied_at") or 0),
+                        int(item[1].get("pulled_at") or 0),
+                    ),
+                    reverse=True,
+                )[:32]
+            )
+        state["history"] = history
+        state["candidate"] = {
+            **dict(identity),
+            "pulled_at": int((state.get("candidate") or {}).get("pulled_at") or time.time()),
+        }
+        state["applied"] = {
+            **dict(identity),
+            "applied_at": int(time.time()),
+        }
+        self.store.write_runtime_state("cliproxy_image", state)
+        try:
+            self.render_compose_environment()
+        except BaseException:
+            if previous is None:
+                self.store.delete_runtime_state("cliproxy_image")
+            else:
+                self.store.write_runtime_state("cliproxy_image", previous)
+            raise
+        return dict(state["applied"])
+
     def cliproxy_image_status(self):
         image_ref = self.configuration()["values"]["runtime.cliproxy_image"]
         local = self._docker_json("image", "inspect", image_ref)
         local_id = str((local or {}).get("Id", ""))
+        image_state = self.cliproxy_image_runtime_state()
+        candidate_record = image_state.get("candidate") or {}
+        candidate = (
+            dict(candidate_record)
+            if isinstance(candidate_record, dict)
+            and str(candidate_record.get("image_id") or "") == local_id
+            else {}
+        )
+        applied = image_state.get("applied") or {}
+        applied = dict(applied) if isinstance(applied, dict) else {}
         account_metadata = self.accounts()
         services = self.services()
         container_names = {
@@ -3602,6 +4111,7 @@ class ControlPlane:
             image_id = str((container or {}).get("Image", ""))
             state = (container or {}).get("State") or {}
             rollback_ref = self.rollback_image_ref(account)
+            account_identity = self._known_cliproxy_identity(image_id, state=image_state)
             accounts.append(
                 {
                     "account": account,
@@ -3613,6 +4123,7 @@ class ControlPlane:
                     "image_ref": str(((container or {}).get("Config") or {}).get("Image", "")),
                     "image_id": image_id,
                     "image_short_id": self._short_image_id(image_id),
+                    "version": str(account_identity.get("version") or ""),
                     "using_target": bool(local_id and image_id == local_id),
                     "rollback_available": rollback_ref in available_image_refs,
                 }
@@ -3620,12 +4131,19 @@ class ControlPlane:
         eligible_accounts = [item for item in accounts if item["enabled"]]
         return {
             "target_image": image_ref,
+            "update_channel": image_ref,
+            "candidate": candidate,
+            "applied": applied,
             "local_image": {
                 "available": bool(local),
                 "id": local_id,
                 "short_id": self._short_image_id(local_id),
                 "created": str((local or {}).get("Created", "")),
                 "repo_digests": list((local or {}).get("RepoDigests") or []),
+                "version": str(candidate.get("version") or ""),
+                "commit": str(candidate.get("commit") or ""),
+                "built_at": str(candidate.get("built_at") or ""),
+                "resolved_ref": str(candidate.get("resolved_ref") or ""),
             },
             "accounts": accounts,
             "running_count": sum(item["running"] for item in eligible_accounts),
@@ -3649,13 +4167,17 @@ class ControlPlane:
         image = self._docker_json("image", "inspect", image_ref)
         if not image:
             raise ValueError("镜像拉取后仍无法读取本地镜像信息")
+        identity = self._resolve_cliproxy_image_identity(image_ref, image=image)
+        candidate = self._write_cliproxy_candidate(identity)
         print(
-            "镜像已就绪：{} ({})".format(
+            "镜像已就绪：{} · {} ({})".format(
                 image_ref,
+                candidate.get("version") or "版本未知",
                 self._short_image_id(image.get("Id")),
             ),
             flush=True,
         )
+        return candidate
 
     def _compose_with_image(self, image_ref, *args):
         environment = os.environ.copy()
@@ -3735,6 +4257,14 @@ class ControlPlane:
         if not target_image:
             raise ValueError("目标镜像尚未拉取，请先执行“拉取镜像”")
         target_image_id = str(target_image.get("Id", ""))
+        identity = self._matching_cliproxy_identity("candidate", target_image_id)
+        if not identity:
+            identity = self._write_cliproxy_candidate(
+                self._resolve_cliproxy_image_identity(image_ref, image=target_image)
+            )
+        resolved_ref = str(identity.get("resolved_ref") or "").strip()
+        if not resolved_ref:
+            raise ValueError("目标镜像缺少可应用的不可变标识")
         if target == "all":
             selected = []
             for account, metadata in accounts.items():
@@ -3745,6 +4275,7 @@ class ControlPlane:
         else:
             selected = [target]
         snapshots = []
+        already_current = []
         for account in selected:
             service = self.services()[account]
             container = self._docker_json(
@@ -3757,6 +4288,7 @@ class ControlPlane:
             old_image_id = str(container.get("Image", ""))
             if old_image_id == target_image_id:
                 print("跳过 {}：已经运行目标镜像".format(account), flush=True)
+                already_current.append(account)
                 continue
             rollback_ref = self.rollback_image_ref(account)
             self._docker("image", "tag", old_image_id, rollback_ref)
@@ -3769,8 +4301,13 @@ class ControlPlane:
                 }
             )
         if not snapshots:
-            self.sync_cliproxy_image_environment(image_ref)
-            print("没有需要更新的运行中 CPA", flush=True)
+            if not already_current:
+                print("没有运行中的 CPA；未改变已应用版本", flush=True)
+                return
+            for account in already_current:
+                self._probe_account_service(account)
+            self._commit_cliproxy_applied(identity)
+            print("运行中的 CPA 已验证；已固定目标版本", flush=True)
             return
 
         attempted = []
@@ -3788,7 +4325,7 @@ class ControlPlane:
                     flush=True,
                 )
                 self._compose_with_image(
-                    image_ref,
+                    resolved_ref,
                     "up",
                     "-d",
                     "--no-deps",
@@ -3799,7 +4336,7 @@ class ControlPlane:
             # Commit the Compose projection only after every selected running
             # CPA has passed its model probe. A failed atomic write follows the
             # same rollback path as a failed container update.
-            self.sync_cliproxy_image_environment(image_ref)
+            self._commit_cliproxy_applied(identity)
         except BaseException as error:
             print("镜像更新失败，正在恢复已处理的 CPA：{}".format(error), flush=True)
             rollback_errors = []
@@ -4147,14 +4684,14 @@ class ControlPlane:
         configured = os.environ.get("CLIPROXY_GATEWAY_URL", "").strip().rstrip("/")
         if configured:
             return configured
-        port = read_env(self.root / ".env").get("GATEWAY_PORT", "18317")
+        port = self.configuration()["values"]["gateway.port"]
         return "http://127.0.0.1:{}".format(port)
 
     def gateway_internal_url(self):
         configured = os.environ.get("CLIPROXY_GATEWAY_INTERNAL_URL", "").strip().rstrip("/")
         if configured:
             return configured
-        port = read_env(self.root / ".env").get("GATEWAY_INTERNAL_PORT", "18316")
+        port = self.configuration()["values"]["gateway.internal_port"]
         return "http://127.0.0.1:{}".format(port)
 
     def gateway_probe_urls(self):
@@ -4319,10 +4856,20 @@ def build_parser():
         "cleanup-projections",
         help="验证 SQLite 后删除已废弃的控制面 JSON 投影",
     )
-    deployment = sub.add_parser("record-deployment")
-    deployment.add_argument("--commit", required=True)
-    deployment.add_argument("--pipeline", required=True)
-    deployment.add_argument("--deployed-at", required=True)
+    for command in ("stage-deployment", "record-deployment"):
+        deployment = sub.add_parser(command)
+        deployment.add_argument("--version", required=True)
+        deployment.add_argument("--commit", required=True)
+        deployment.add_argument("--pipeline", required=True)
+        deployment.add_argument("--deployed-at", required=True)
+        deployment.add_argument("--metadata-image", required=True)
+        deployment.add_argument("--admin-image", required=True)
+        deployment.add_argument("--web-image", required=True)
+        deployment.add_argument("--gateway-image", required=True)
+        deployment.add_argument("--edge-image", required=True)
+        deployment.add_argument("--gateway-port", required=True)
+        deployment.add_argument("--gateway-internal-port", required=True)
+        deployment.add_argument("--preserve-cliproxy-image", default="")
     return parser
 
 
@@ -4501,14 +5048,88 @@ def main(argv=None):
                 print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
                 if not result["ok"]:
                     return 1
-        elif args.command == "record-deployment":
+        elif args.command in ("stage-deployment", "record-deployment"):
+            if not SEMANTIC_VERSION_RE.fullmatch(str(args.version)):
+                raise ValueError("部署版本必须是语义化版本")
+            metadata_image = app._normalize_configuration_value(
+                CONFIG_DEFINITION_BY_KEY["delivery.release_metadata_image"],
+                args.metadata_image,
+            )
             payload = {
+                "version": str(args.version),
                 "commit": str(args.commit),
                 "pipeline": str(args.pipeline),
                 "deployed_at": str(args.deployed_at),
+                "admin_image": str(args.admin_image),
+                "web_image": str(args.web_image),
+                "gateway_image": str(args.gateway_image),
+                "edge_image": str(args.edge_image),
             }
-            app.store.write_runtime_state("deployment", payload)
-            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+            previous_deployment = app.store.read_runtime_state("deployment", None)
+            previous_cliproxy_image = app.store.read_runtime_state(
+                "cliproxy_image", None
+            )
+            previous_settings = app._read_stored_configuration()
+            try:
+                updated_settings = dict(previous_settings)
+                updated_settings["delivery.release_metadata_image"] = metadata_image
+                updated_settings["gateway.port"] = app._normalize_configuration_value(
+                    CONFIG_DEFINITION_BY_KEY["gateway.port"], args.gateway_port
+                )
+                updated_settings["gateway.internal_port"] = app._normalize_configuration_value(
+                    CONFIG_DEFINITION_BY_KEY["gateway.internal_port"],
+                    args.gateway_internal_port,
+                )
+                effective = dict(app.configuration()["values"])
+                effective.update(updated_settings)
+                app._validate_configuration(effective)
+                app._write_configuration(updated_settings)
+                if args.preserve_cliproxy_image:
+                    app.seed_cliproxy_applied_image(
+                        args.preserve_cliproxy_image
+                    )
+                deployment_state = app.deployment_runtime_state()
+                if args.command == "stage-deployment":
+                    deployment_state["pending"] = payload
+                else:
+                    pending = deployment_state.get("pending")
+                    if pending and pending != payload:
+                        raise ValueError("已暂存部署与待验收部署信息不一致")
+                    deployment_state["applied"] = payload
+                    deployment_state.pop("pending", None)
+                app.store.write_runtime_state("deployment", deployment_state)
+                app.render_compose_environment()
+            except BaseException:
+                app._write_configuration(previous_settings)
+                if previous_deployment is None:
+                    app.store.delete_runtime_state("deployment")
+                else:
+                    app.store.write_runtime_state("deployment", previous_deployment)
+                if previous_cliproxy_image is None:
+                    app.store.delete_runtime_state("cliproxy_image")
+                else:
+                    app.store.write_runtime_state(
+                        "cliproxy_image", previous_cliproxy_image
+                    )
+                try:
+                    app.render_compose_environment()
+                except Exception:
+                    pass
+                raise
+            print(
+                json.dumps(
+                    {
+                        **payload,
+                        "status": (
+                            "pending"
+                            if args.command == "stage-deployment"
+                            else "applied"
+                        ),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
         else:
             services = target_services(app, args.target)
             if args.command == "up":

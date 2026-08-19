@@ -101,7 +101,7 @@ class PortalTests(unittest.TestCase):
     def test_deploy_release_persists_one_canonical_deploy_root(self):
         deploy = (ROOT / "scripts" / "deploy-release.sh").read_text(encoding="utf-8")
         start = deploy.index("write_deploy_root_env() {")
-        end = deploy.index("\nwrite_runtime_image_env()", start)
+        end = deploy.index("\ncompose()", start)
         helper = deploy[start:end]
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -129,14 +129,13 @@ class PortalTests(unittest.TestCase):
 
     def test_application_build_base_images_are_digest_pinned(self):
         values = {}
-        for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
+        for line in (ROOT / "compose.env.example").read_text(encoding="utf-8").splitlines():
             if "=" in line:
                 key, value = line.split("=", 1)
                 values[key] = value
 
         for key in (
             "ADMIN_BASE_IMAGE",
-            "WEB_BASE_IMAGE",
             "GATEWAY_IMAGE",
             "EDGE_IMAGE",
         ):
@@ -368,7 +367,7 @@ class PortalTests(unittest.TestCase):
             "ADMIN_BASE_IMAGE: ${ADMIN_BASE_IMAGE:-docker.m.daocloud.io/library/docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c}",
             dev_compose,
         )
-        self.assertIn("GATEWAY_RUNTIME_IMAGE:-codex-cpa-gateway:local", compose)
+        self.assertIn("GATEWAY_RUNTIME_IMAGE:?state/compose.env missing", compose)
         self.assertNotIn("./gateway:/usr/local/openresty", compose)
         self.assertNotIn("./portal:/usr/local/openresty", compose)
         for service in ("gateway-blue", "gateway-green", "edge", "web"):
@@ -683,7 +682,7 @@ class PortalTests(unittest.TestCase):
         self.assertIn("/admin/app.css?v=20260818-password-visibility-v1", html)
         self.assertIn("/admin/monitor-utils.js?v=20260812-adaptive-chart-points", html)
         self.assertIn("/admin/view-state-utils.js?v=20260819-view-state-v1", html)
-        self.assertIn("/admin/app.js?v=20260819-view-state-v1", html)
+        self.assertIn("/admin/app.js?v=20260819-refresh-consistency-v1", html)
         self.assertLess(
             html.index("/admin/view-state-utils.js"),
             html.index("/admin/app.js"),
@@ -1106,7 +1105,7 @@ class PortalTests(unittest.TestCase):
             html.index('<div class="notice account-usage-notice"')
         ]
         self.assertNotIn("CPA IMAGE", image_manager)
-        self.assertEqual(image_manager.count("容器镜像"), 1)
+        self.assertEqual(image_manager.count("更新通道"), 1)
         self.assertLess(
             image_manager.index('id="cliproxy-target-image"'),
             image_manager.index('id="cliproxy-image-summary"'),
@@ -1120,6 +1119,8 @@ class PortalTests(unittest.TestCase):
         self.assertIn('api("/images/cliproxy")', script)
         self.assertIn('data-operation="image-update"', script)
         self.assertIn("renderImageManager", script)
+        self.assertIn('const version = local.version || image.candidate?.version || "版本未知"', script)
+        self.assertIn("<span>镜像版本</span>", script)
         self.assertIn("失败时自动恢复原镜像", script)
         self.assertIn("!account.group_enabled || !image.running", script)
         self.assertIn("CPA 账号已停用；启用后再更新镜像", script)
@@ -1757,7 +1758,7 @@ class PortalTests(unittest.TestCase):
         self.assertIn('/admin/app.css?v=20260818-password-visibility-v1', admin_html)
         self.assertIn('/admin/monitor-utils.js?v=20260812-adaptive-chart-points', admin_html)
         self.assertIn('/admin/view-state-utils.js?v=20260819-view-state-v1', admin_html)
-        self.assertIn('/admin/app.js?v=20260819-view-state-v1', admin_html)
+        self.assertIn('/admin/app.js?v=20260819-refresh-consistency-v1', admin_html)
         self.assertIn('if (showFeedback) accountQuery.set("fresh", "1");', admin_script)
         self.assertIn("accounts.quota_generated_at", admin_script)
         self.assertIn("accounts.quota_cached", admin_script)
@@ -1793,7 +1794,7 @@ class PortalTests(unittest.TestCase):
         )
 
         self.assertIn(
-            'if (showFeedback || !state.overviewUsage) loadOverviewUsage(showFeedback);',
+            'if (!showFeedback && !state.overviewUsage) loadOverviewUsage(false);',
             admin_script,
         )
         self.assertIn(
@@ -1804,7 +1805,13 @@ class PortalTests(unittest.TestCase):
         self.assertIn("if (!state.authenticated || document.hidden) return;", admin_script)
         self.assertIn('state.view !== "overview"', admin_script)
         self.assertIn('if (fresh) query.set("fresh", "1");', admin_script)
-        self.assertIn('const usagePath = overviewUsagePath(showFeedback);', admin_script)
+        self.assertIn('const usagePath = overviewUsagePath(fresh);', admin_script)
+        self.assertIn(
+            'await Promise.all([overviewRequest, loadOverviewUsage(true, false)])',
+            admin_script,
+        )
+        self.assertIn('if (fresh) query.set("fresh", "1");', admin_script)
+        self.assertIn('api(userSummaryPath(showFeedback))', admin_script)
         self.assertIn(
             'api(`/overview${showFeedback ? "?fresh=1" : ""}`)',
             admin_script,

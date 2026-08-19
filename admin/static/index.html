@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="zh-CN" data-brand-page="管理中心" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>管理中心 · Codex CPA Cluster</title>
+  <link id="app-favicon" rel="icon" href="/portal/assets/codex-cpa-cluster-favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/app.css?v=20260818-password-visibility-v1">
+  <link id="reasoning-effort-colors" rel="stylesheet" href="/admin/reasoning-effort-colors.css">
+  <script src="/portal/branding.js?v=20260812-theme-branding" defer></script>
+  <script src="/portal/token-usage.js?v=20260720-token-units" defer></script>
+  <script src="/admin/monitor-utils.js?v=20260812-adaptive-chart-points" defer></script>
+  <script src="/admin/view-state-utils.js?v=20260819-view-state-v1" defer></script>
+  <script src="/admin/app.js?v=20260819-view-state-v1" defer></script>
+</head>
+<body>
+  <section class="auth-screen" id="auth-screen">
+    <div class="auth-card">
+      <img class="auth-brand-logo" data-brand-logo src="/portal/assets/codex-cpa-cluster-logo.svg" alt="Codex CPA Cluster">
+      <h1>进入管理中心</h1>
+      <p class="eyebrow">CONTROL PLANE</p>
+      <p class="auth-copy">业务 CPA、用户管理、OAuth 授权和容器维护集中在一个界面。管理操作需要 CPA 管理密钥。</p>
+      <form id="auth-form" class="auth-form">
+        <label for="management-key">管理密钥</label>
+        <div class="password-row">
+          <input id="management-key" name="management-key" type="password" autocomplete="current-password" required autofocus>
+          <button class="button primary" type="submit">验证并进入</button>
+        </div>
+        <p class="form-error" id="auth-error" role="alert"></p>
+      </form>
+      <a class="quiet-link" href="/usage/">进入使用中心 →</a>
+    </div>
+  </section>
+
+  <div class="app-shell" id="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><img id="sidebar-brand-mark" src="/portal/assets/codex-cpa-cluster-mark.svg" alt=""></div>
+        <div><strong data-brand-product-name>Codex CPA Cluster</strong><span>Control Plane</span></div>
+      </div>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" type="button" data-view="overview">
+          <span class="nav-icon">⌂</span><span>运行总览</span>
+        </button>
+        <button class="nav-item" type="button" data-view="accounts">
+          <span class="nav-icon">▣</span><span>账号管理</span>
+        </button>
+        <button class="nav-item" type="button" data-view="users">
+          <span class="nav-icon">◎</span><span>用户管理</span>
+        </button>
+        <button class="nav-item" type="button" data-view="organization">
+          <span class="nav-icon">◇</span><span>团队管理</span>
+        </button>
+        <button class="nav-item" type="button" data-view="operations">
+          <span class="nav-icon">⌘</span><span>运行维护</span>
+        </button>
+        <button class="nav-item" type="button" data-view="settings">
+          <span class="nav-icon">⚙</span><span>系统设置</span>
+        </button>
+      </nav>
+      <section class="sidebar-switcher" aria-label="界面切换">
+        <div class="switcher-heading"><span>界面切换</span><small>SWITCH</small></div>
+        <div class="switcher-links">
+          <a href="/">
+            <span class="switcher-index">01</span>
+            <span class="switcher-copy"><strong>服务入口</strong><small>返回界面选择</small></span>
+            <span class="switcher-arrow">›</span>
+          </a>
+          <a href="/usage/">
+            <span class="switcher-index">02</span>
+            <span class="switcher-copy"><strong>使用中心</strong><small>Key、账号与用量</small></span>
+            <span class="switcher-arrow">›</span>
+          </a>
+        </div>
+      </section>
+      <div class="sidebar-foot">
+        <span class="secure-dot"></span>
+        <span>管理 API 已鉴权</span>
+        <span class="release-version" id="release-version" hidden></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h2 id="page-title"><span id="page-title-base">运行总览</span><span class="page-heading-path" id="page-title-path" hidden><span class="page-heading-separator" aria-hidden="true">/</span><span id="page-title-detail"></span></span></h2>
+          <p class="eyebrow" id="page-eyebrow"><span id="page-eyebrow-base">OPERATIONS OVERVIEW</span><span class="page-heading-path" id="page-eyebrow-path" hidden><span class="page-heading-separator" aria-hidden="true">/</span><span id="page-eyebrow-detail"></span></span></p>
+        </div>
+        <div class="topbar-actions">
+          <span class="refresh-state" id="refresh-state">等待刷新</span>
+          <button class="theme-toggle" type="button" id="theme-toggle" aria-label="切换为深色主题" title="切换主题"><span class="theme-toggle-icon" aria-hidden="true">☾</span><span class="theme-toggle-label">深色</span></button>
+          <button class="button ghost" type="button" id="refresh-button">刷新</button>
+          <button class="button ghost danger-text" type="button" id="logout-button">退出</button>
+        </div>
+      </header>
+
+      <section class="release-notice" id="release-notice" role="status" hidden>
+        <div><strong id="release-notice-title">发现新版本</strong><p id="release-notice-copy"></p></div>
+        <button class="button secondary" type="button" id="release-check-button">重新检查</button>
+      </section>
+
+      <section class="view active" id="view-overview" data-view-panel="overview">
+        <div class="notice-stack" id="overview-warnings"></div>
+        <div class="metric-grid" id="metric-grid" aria-label="关键指标"></div>
+
+        <section class="usage-monitor" aria-labelledby="usage-monitor-title">
+          <div class="usage-monitor-toolbar panel">
+            <div class="usage-monitor-title">
+              <h3 id="usage-monitor-title">Token 使用</h3>
+              <p class="section-kicker">TOKEN MONITOR</p>
+              <small>Dashboard</small>
+            </div>
+            <div class="usage-monitor-filters" aria-label="Token Dashboard 变量">
+              <fieldset class="usage-time-control">
+                <legend>时间范围</legend>
+                <div class="usage-time-segments" id="overview-usage-window" aria-label="Token 使用时间范围">
+                  <button type="button" data-overview-window="3600">1 小时</button>
+                  <button type="button" data-overview-window="21600">6 小时</button>
+                  <button type="button" data-overview-window="today" aria-pressed="true">今日</button>
+                  <button type="button" data-overview-window="86400">24 小时</button>
+                  <button type="button" data-overview-window="604800">7 天</button>
+                  <button type="button" data-overview-window="2592000">30 天</button>
+                  <button type="button" data-overview-window="since_reset">本周期</button>
+                  <button type="button" data-overview-window="custom" title="选择自定义时间范围"><span data-overview-custom-range-label>自定义</span></button>
+                </div>
+              </fieldset>
+              <div class="usage-variable" id="overview-usage-account" data-variable="account">
+                <span class="usage-variable-label">CPA</span>
+                <button class="usage-variable-trigger" type="button" data-variable-trigger aria-expanded="false" aria-controls="overview-usage-account-menu">
+                  <span data-variable-value>全部 CPA</span><span class="usage-variable-caret" aria-hidden="true">⌄</span>
+                </button>
+                <div class="usage-variable-menu" id="overview-usage-account-menu" data-variable-menu hidden>
+                  <label class="usage-variable-search"><span aria-hidden="true">⌕</span><input type="search" data-variable-search placeholder="搜索 CPA" autocomplete="off"></label>
+                  <label class="usage-variable-option usage-variable-all"><input type="checkbox" data-variable-all><span>全部 CPA</span></label>
+                  <div class="usage-variable-options" data-variable-options></div>
+                  <small class="usage-variable-hint">支持多选；选择后立即更新图表</small>
+                </div>
+              </div>
+              <div class="usage-variable" id="overview-usage-user" data-variable="user">
+                <span class="usage-variable-label">用户</span>
+                <button class="usage-variable-trigger" type="button" data-variable-trigger aria-expanded="false" aria-controls="overview-usage-user-menu">
+                  <span data-variable-value>全部用户</span><span class="usage-variable-caret" aria-hidden="true">⌄</span>
+                </button>
+                <div class="usage-variable-menu" id="overview-usage-user-menu" data-variable-menu hidden>
+                  <label class="usage-variable-search"><span aria-hidden="true">⌕</span><input type="search" data-variable-search placeholder="搜索用户邮箱" autocomplete="off"></label>
+                  <label class="usage-variable-option usage-variable-all"><input type="checkbox" data-variable-all><span>全部用户</span></label>
+                  <div class="usage-variable-options" data-variable-options></div>
+                  <small class="usage-variable-hint">支持多选；选择后立即更新图表</small>
+                </div>
+              </div>
+              <label class="usage-variable-select"><span>用户范围</span><select id="overview-usage-user-limit">
+                <option value="10" selected>Top 10</option>
+                <option value="20">Top 20</option>
+                <option value="50">Top 50</option>
+              </select></label>
+              <div class="usage-refresh-cluster">
+                <label class="usage-variable-select usage-refresh-control"><span>自动刷新</span><select id="overview-usage-refresh-interval">
+                  <option value="0">关闭</option>
+                  <option value="10">10 秒</option>
+                  <option value="30" selected>30 秒</option>
+                  <option value="60">1 分钟</option>
+                  <option value="300">5 分钟</option>
+                </select></label>
+                <button class="button ghost usage-monitor-refresh" type="button" id="overview-usage-refresh" title="刷新 Token Dashboard" aria-label="刷新 Token Dashboard"><span aria-hidden="true">↻</span><span>刷新</span></button>
+              </div>
+            </div>
+            <div class="usage-monitor-meta">
+              <span class="status-chip neutral" id="overview-usage-collector">等待采集</span>
+              <time id="overview-usage-generated">—</time>
+            </div>
+          </div>
+
+          <div class="notice usage-monitor-notice" id="overview-usage-notice" role="status" hidden></div>
+
+          <article class="panel usage-monitor-panel usage-summary-panel" aria-labelledby="overview-summary-usage-title">
+            <header class="usage-monitor-panel-head usage-summary-panel-head">
+              <div class="usage-summary-heading"><h4 id="overview-summary-usage-title">所有账号 Token 使用量</h4><small id="overview-summary-usage-subtitle">全部 CPA · 全部用户 · 今日 · 聚合间隔 15 分钟</small></div>
+              <dl class="usage-summary-metrics" aria-label="账号 Token 使用量汇总值">
+                <div><dt>范围内总量</dt><dd id="overview-summary-usage-total">—</dd></div>
+                <div><dt>平均值</dt><dd id="overview-summary-usage-average">—</dd></div>
+                <div><dt>最大值</dt><dd id="overview-summary-usage-maximum">—</dd></div>
+              </dl>
+            </header>
+            <div class="usage-monitor-chart usage-summary-chart" id="overview-summary-usage-chart"></div>
+            <footer class="usage-summary-foot">
+              <span class="usage-summary-legend"><i class="usage-series-color-0" aria-hidden="true"></i><span id="overview-summary-usage-legend">全部账号合计</span></span>
+              <span id="overview-summary-usage-unit">单位：Token / 聚合间隔</span>
+            </footer>
+          </article>
+
+          <article class="panel usage-monitor-panel" aria-labelledby="overview-account-usage-title">
+            <header class="usage-monitor-panel-head">
+              <div><h4 id="overview-account-usage-title">CPA 账号 Token 使用趋势</h4><small id="overview-account-usage-subtitle">按账号统计实际记录 Token</small></div>
+              <span>单位：Token / 聚合间隔</span>
+            </header>
+            <div class="usage-monitor-chart" id="overview-account-usage-chart"></div>
+            <div class="usage-monitor-table-wrap">
+              <table class="usage-monitor-table" data-monitor-table="account">
+                <thead><tr>
+                  <th aria-sort="none"><button class="sort-button" type="button" data-monitor-sort="name">CPA</button></th>
+                  <th aria-sort="none"><button class="sort-button" type="button" data-monitor-sort="status">状态</button></th>
+                  <th aria-sort="none"><span class="usage-monitor-heading"><button class="sort-button" type="button" data-monitor-sort="current">当前值</button><button class="usage-monitor-help" type="button" data-tooltip="所选时间范围内，最新聚合间隔的 Token 使用值；该间隔可能尚未结束。" aria-label="当前值说明">?</button></span></th>
+                  <th aria-sort="none"><span class="usage-monitor-heading"><button class="sort-button" type="button" data-monitor-sort="average">平均值</button><button class="usage-monitor-help" type="button" data-tooltip="所选时间范围内各聚合间隔的平均 Token 使用值；没有请求的间隔按 0 计算。" aria-label="平均值说明">?</button></span></th>
+                  <th aria-sort="none"><span class="usage-monitor-heading"><button class="sort-button" type="button" data-monitor-sort="maximum">最大值</button><button class="usage-monitor-help" type="button" data-tooltip="所选时间范围内，单个聚合间隔的最高 Token 使用值。" aria-label="最大值说明">?</button></span></th>
+                  <th aria-sort="descending"><button class="sort-button active" type="button" data-monitor-sort="total" data-direction="desc">范围内总量</button></th>
+                </tr></thead>
+                <tbody id="overview-account-usage-table"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel usage-monitor-panel" aria-labelledby="overview-user-usage-title">
+            <header class="usage-monitor-panel-head">
+              <div><h4 id="overview-user-usage-title">用户 Token 使用趋势</h4><small id="overview-user-usage-subtitle">当前时间范围内 Token 用量 Top 10</small></div>
+              <span>单位：Token / 聚合间隔</span>
+            </header>
+            <div class="usage-monitor-chart" id="overview-user-usage-chart"></div>
+            <div class="usage-monitor-table-wrap">
+              <table class="usage-monitor-table" data-monitor-table="user">
+                <thead><tr>
+                  <th aria-sort="none"><button class="sort-button" type="button" data-monitor-sort="name">用户</button></th>
+                  <th aria-sort="none"><button class="sort-button" type="button" data-monitor-sort="status">状态</button></th>
+                  <th aria-sort="none"><span class="usage-monitor-heading"><button class="sort-button" type="button" data-monitor-sort="current">当前值</button><button class="usage-monitor-help" type="button" data-tooltip="所选时间范围内，最新聚合间隔的 Token 使用值；该间隔可能尚未结束。" aria-label="当前值说明">?</button></span></th>
+                  <th aria-sort="none"><span class="usage-monitor-heading"><button class="sort-button" type="button" data-monitor-sort="average">平均值</button><button class="usage-monitor-help" type="button" data-tooltip="所选时间范围内各聚合间隔的平均 Token 使用值；没有请求的间隔按 0 计算。" aria-label="平均值说明">?</button></span></th>
+                  <th aria-sort="none"><span class="usage-monitor-heading"><button class="sort-button" type="button" data-monitor-sort="maximum">最大值</button><button class="usage-monitor-help" type="button" data-tooltip="所选时间范围内，单个聚合间隔的最高 Token 使用值。" aria-label="最大值说明">?</button></span></th>
+                  <th aria-sort="descending"><button class="sort-button active" type="button" data-monitor-sort="total" data-direction="desc">范围内总量</button></th>
+                </tr></thead>
+                <tbody id="overview-user-usage-table"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <div class="section-heading">
+          <div><h3>最近任务</h3><p class="section-kicker">ACTIVITY</p></div>
+          <button class="text-button" type="button" data-view="operations">查看全部任务 →</button>
+        </div>
+        <div class="panel" id="recent-jobs"></div>
+      </section>
+
+      <section class="view" id="view-accounts" data-view-panel="accounts">
+        <div class="toolbar panel-toolbar account-toolbar management-toolbar">
+          <label class="search-field">
+            <span aria-hidden="true">⌕</span>
+            <input id="account-search" type="search" placeholder="搜索账号、名称或邮箱">
+          </label>
+          <div class="account-toolbar-actions management-toolbar-controls">
+            <div class="management-filter-grid account-filter-grid">
+              <label class="compact-select filter-field"><span>运行状态</span>
+                <select id="account-runtime-filter" data-enhance-select>
+                  <option value="all">全部</option>
+                  <option value="running">运行中</option>
+                  <option value="stopped">已停止</option>
+                  <option value="disabled">已停用</option>
+                </select>
+              </label>
+              <label class="compact-select filter-field"><span>OAuth</span>
+                <select id="account-auth-filter" data-enhance-select>
+                  <option value="all">全部</option>
+                  <option value="configured">已授权</option>
+                  <option value="pending">待授权</option>
+                </select>
+              </label>
+              <label class="compact-select filter-field usage-window-field"><span>用量范围</span>
+                <select id="account-usage-window" data-enhance-select>
+                  <option value="3600">1 小时</option>
+                  <option value="today" selected>今日</option>
+                  <option value="86400">24 小时</option>
+                  <option value="604800">7 天</option>
+                  <option value="2592000">30 天</option>
+                  <option value="since_reset">本周期</option>
+                  <option value="all">全部</option>
+                  <option value="custom">自定义…</option>
+                </select>
+              </label>
+            </div>
+            <div class="management-primary-actions"><button class="button primary" type="button" id="add-account-button">添加 CPA</button></div>
+          </div>
+        </div>
+        <div class="image-manager" id="cliproxy-image-manager">
+          <div class="image-manager-copy">
+            <h3>容器镜像</h3>
+            <code id="cliproxy-target-image">正在读取…</code>
+            <small id="cliproxy-image-summary">—</small>
+          </div>
+          <div class="image-manager-state">
+            <span class="status-chip neutral" id="cliproxy-image-state">未知</span>
+          </div>
+          <div class="button-group image-manager-actions">
+            <button class="button secondary" type="button" data-operation="image-pull" data-target="all">拉取镜像</button>
+            <button class="button primary" type="button" id="update-all-cpa-images" data-operation="image-update" data-target="all">更新全部 CPA</button>
+          </div>
+        </div>
+        <div class="notice account-usage-notice" id="account-usage-notice" role="status" hidden></div>
+        <div class="panel table-panel account-table-panel">
+          <div class="table-wrap">
+            <table class="account-table">
+              <thead><tr>
+                <th class="table-index-column">序号</th>
+                <th class="account-toggle-column" aria-label="展开"></th>
+                <th><button class="sort-button" type="button" data-account-sort="account">CPA 账号</button></th>
+                <th><button class="sort-button" type="button" data-account-sort="runtime">账号状态</button></th>
+                <th><button class="sort-button" type="button" data-account-sort="auth">OAuth</button></th>
+                <th aria-sort="ascending"><button class="sort-button active" type="button" data-account-sort="quota" data-direction="asc">额度与重置</button></th>
+                <th><button class="sort-button" type="button" data-account-sort="activity" title="按请求数排序">使用情况</button></th>
+                <th><button class="sort-button" type="button" data-account-sort="tokens">Token</button></th>
+                <th><button class="sort-button" type="button" data-account-sort="last_used">最后使用</button></th>
+              </tr></thead>
+              <tbody id="account-table-body"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="account-empty" hidden>
+            <div class="empty-icon">▣</div>
+            <h3>还没有 CPA 账号</h3>
+            <button class="button primary" type="button" data-action="open-add-account">添加 CPA</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-users" data-view-panel="users">
+        <div class="toolbar panel-toolbar management-toolbar user-management-toolbar">
+          <label class="search-field">
+            <span aria-hidden="true">⌕</span>
+            <input id="user-search" type="search" placeholder="搜索用户邮箱">
+          </label>
+          <div class="user-toolbar-actions management-toolbar-controls">
+            <div class="management-filter-grid user-filter-grid">
+              <label class="window-field filter-field"><span>团队</span>
+                <select id="user-team-filter" data-enhance-select><option value="">全部团队</option><option value="unassigned">未分组</option></select>
+              </label>
+              <label class="window-field filter-field usage-window-field"><span>统计范围</span>
+                <select id="user-usage-window" data-enhance-select>
+                  <option value="3600">1 小时</option>
+                  <option value="today" selected>今日</option>
+                  <option value="86400">24 小时</option>
+                  <option value="604800">7 天</option>
+                  <option value="2592000">30 天</option>
+                  <option value="all">全部</option>
+                  <option value="custom">自定义…</option>
+                </select>
+              </label>
+            </div>
+            <div class="management-primary-actions user-primary-actions">
+              <button class="button team-usage-trigger" type="button" id="team-usage-button" aria-haspopup="dialog" aria-controls="team-usage-drawer" disabled><span class="team-usage-trigger-icon" aria-hidden="true">↗</span><span id="team-usage-button-label">选择团队后查看用量</span></button>
+              <button class="button secondary" type="button" id="manage-organization-button">进入团队管理</button>
+              <button class="button primary" type="button" id="add-user-button">添加用户</button>
+            </div>
+          </div>
+        </div>
+        <div class="notice user-usage-notice" id="user-usage-notice" role="status" hidden></div>
+        <div class="user-selection-bar" id="user-selection-bar" hidden>
+          <div class="user-selection-summary">
+            <span class="selection-count" id="user-selection-count">已选择 0 位用户</span>
+            <small>批量操作只影响已勾选用户，并保留原始用量和审计记录。</small>
+          </div>
+          <div class="user-selection-actions">
+            <button class="button ghost" type="button" id="user-selection-clear">取消选择</button>
+            <button class="button secondary" type="button" id="user-bulk-team">分配团队</button>
+            <button class="button secondary" type="button" id="user-bulk-restore-default">恢复组织默认</button>
+            <button class="button danger-outline" type="button" id="user-bulk-reset-usage">清零本周已用量</button>
+          </div>
+        </div>
+        <div class="panel table-panel">
+          <div class="table-wrap">
+            <table class="user-table">
+              <thead><tr>
+                <th class="table-index-column">序号</th>
+                <th class="user-select-column"><input id="user-select-page" type="checkbox" aria-label="选择本页用户"></th>
+                <th class="user-toggle-column" aria-label="展开"></th>
+                <th><button class="sort-button" type="button" data-user-sort="email">用户</button></th>
+                <th>团队</th>
+                <th>状态</th>
+                <th>CPA</th>
+                <th><button class="sort-button" type="button" data-user-sort="requests">使用次数</button></th>
+                <th class="user-token-column" aria-sort="descending"><button class="sort-button active" type="button" data-user-sort="tokens" data-direction="desc">Token 用量</button></th>
+                <th class="user-quota-column"><button class="sort-button" type="button" data-user-sort="quota">周额度状态</button></th>
+                <th><button class="sort-button" type="button" data-user-sort="last_used">最后使用</button></th>
+              </tr></thead>
+              <tbody id="user-table-body"></tbody>
+            </table>
+          </div>
+          <div class="table-pagination" id="user-pagination" aria-label="用户分页" hidden>
+            <span class="pagination-summary" id="user-pagination-summary"></span>
+            <div class="pagination-actions">
+              <label class="pagination-size" for="user-page-size">
+                <span>每页</span>
+                <select id="user-page-size">
+                  <option value="25">25</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                </select>
+                <span>条</span>
+              </label>
+              <nav class="pagination-controls" aria-label="用户列表页码">
+                <button class="pagination-nav" type="button" id="user-page-prev">上一页</button>
+                <div class="pagination-pages" id="user-page-buttons"></div>
+                <button class="pagination-nav" type="button" id="user-page-next">下一页</button>
+              </nav>
+            </div>
+          </div>
+          <div class="empty-state" id="user-empty" hidden>
+            <div class="empty-icon">◎</div>
+            <h3>还没有用户</h3>
+            <p>添加用户邮箱后，创建一个统一 API Key 并关联全部 CPA。</p>
+            <button class="button primary" type="button" data-action="open-add-user">添加第一个用户</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-organization" data-view-panel="organization">
+        <div class="panel table-panel organization-catalog-panel" id="organization-teams-panel">
+          <div class="organization-table-toolbar">
+            <div class="organization-table-filters">
+              <label class="search-field"><span aria-hidden="true">⌕</span><input id="organization-team-search" type="search" placeholder="搜索团队名称或说明"></label>
+              <label class="organization-status-filter"><span class="visually-hidden">团队状态</span><select id="organization-team-status"><option value="all">全部团队</option><option value="active">有成员</option><option value="empty">空团队</option></select></label>
+            </div>
+            <div><span id="organization-team-summary">0 个团队</span><button class="button primary" type="button" id="organization-create-team">创建团队</button></div>
+          </div>
+          <div class="table-wrap"><table class="organization-catalog-table"><thead><tr><th class="table-index-column">序号</th><th>团队</th><th>当前成员</th><th>活跃成员</th><th>全部历史 Token</th><th>更新时间</th><th class="organization-action-column">操作</th></tr></thead><tbody id="team-catalog-list"></tbody></table></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-operations" data-view-panel="operations">
+        <div class="bulk-actions">
+          <div><h3>批量操作</h3><p class="section-kicker">STACK CONTROL</p></div>
+          <div class="button-group">
+            <button class="button secondary" type="button" data-operation="up" data-target="all">启动全部</button>
+            <button class="button secondary" type="button" data-operation="restart" data-target="all">重启全部</button>
+            <button class="button secondary" type="button" data-log-target="all">全部日志</button>
+            <button class="button danger-outline" type="button" data-operation="stop" data-target="all">停止业务服务</button>
+          </div>
+        </div>
+
+        <div class="panel table-panel">
+          <div class="panel-title"><div><h3>容器服务</h3><p class="section-kicker">SERVICES</p></div></div>
+          <div class="table-wrap">
+            <table class="service-table">
+              <thead><tr><th class="table-index-column">序号</th><th>服务</th><th>容器</th><th>状态</th><th>说明</th><th>操作</th></tr></thead>
+              <tbody id="service-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section-heading">
+          <div><h3>诊断工具</h3><p class="section-kicker">DIAGNOSTICS</p></div>
+          <p>对应原有终端检查命令</p>
+        </div>
+        <div class="diagnostic-grid">
+          <button class="diagnostic-card" type="button" data-operation="health" data-target="all">
+            <span>01</span><strong>健康检查</strong><small>检查 Key、OAuth 文件和可用模型</small>
+          </button>
+          <button class="diagnostic-card" type="button" data-operation="verify-routing" data-target="all">
+            <span>02</span><strong>路由验证</strong><small>逐个验证有效 Key 的目标 CPA</small>
+          </button>
+          <button class="diagnostic-card" type="button" data-operation="render" data-target="all">
+            <span>03</span><strong>配置校验</strong><small>重新渲染并校验 Compose 配置</small>
+          </button>
+        </div>
+
+        <div class="section-heading">
+          <div><h3>任务记录</h3><p class="section-kicker">JOB HISTORY</p></div>
+          <button class="text-button" type="button" id="refresh-jobs-button">刷新任务</button>
+        </div>
+        <div class="panel" id="all-jobs"></div>
+      </section>
+
+      <section class="view" id="view-settings" data-view-panel="settings">
+        <div class="settings-workspace">
+          <aside class="settings-navigation" aria-label="配置中心导航">
+            <div class="settings-navigation-fixed">
+              <label class="configuration-search" for="configuration-search-input">
+                <span aria-hidden="true">⌕</span>
+                <input id="configuration-search-input" type="search" placeholder="搜索名称、说明或 Key" autocomplete="off">
+              </label>
+              <div class="configuration-search-results" id="configuration-search-results" hidden></div>
+
+              <label class="settings-mobile-selector" for="settings-section-select">
+                <span>当前分类</span>
+                <select id="settings-section-select" aria-label="选择配置分类"></select>
+              </label>
+
+              <p class="settings-navigation-label settings-category-label">配置分类</p>
+            </div>
+
+            <div class="settings-navigation-scroll">
+              <div class="settings-navigation-desktop">
+                <nav class="configuration-navigation" id="configuration-navigation" aria-label="配置分类"></nav>
+                <p class="settings-navigation-label settings-management-label">系统管理</p>
+                <nav class="settings-management-navigation" aria-label="系统管理">
+                  <button type="button" data-settings-section="access"><span>访问凭据</span><small>密钥与初始密码</small></button>
+                  <button type="button" data-settings-section="backups"><span>安全归档</span><small id="settings-backup-nav-count">0</small></button>
+                  <button type="button" data-settings-section="storage"><span>本地数据</span><small>路径与权限</small></button>
+                  <button type="button" data-settings-section="audit"><span>审计记录</span><small>最近操作</small></button>
+                </nav>
+              </div>
+            </div>
+          </aside>
+
+          <div class="settings-workspace-content">
+            <form class="configuration-panel" id="configuration-form" data-settings-panel="configuration" aria-labelledby="page-title">
+              <header class="configuration-panel-head">
+                <p id="configuration-group-description">配置加载后可在左侧切换分类。</p>
+                <span class="configuration-field-count" id="configuration-field-count">—</span>
+              </header>
+              <div class="configuration-groups" id="configuration-groups"></div>
+              <div class="configuration-empty" id="configuration-empty" hidden>
+                <strong>没有匹配的配置项</strong>
+                <p>尝试搜索字段名称、说明或完整 Key。</p>
+              </div>
+              <p class="form-error" id="configuration-error" role="alert"></p>
+              <div class="configuration-actions" id="configuration-actions">
+                <div class="configuration-change-summary">
+                  <span class="status-chip neutral" id="configuration-change-state">未修改</span>
+                  <div class="configuration-impact-summary" id="configuration-impact-summary"><span>修改后将在这里汇总生效影响</span></div>
+                </div>
+                <div class="configuration-action-buttons">
+                  <button class="button ghost" type="button" id="configuration-revert-button" disabled>撤销未保存修改</button>
+                  <button class="button primary" type="submit" id="configuration-save-button" disabled>保存配置</button>
+                </div>
+              </div>
+            </form>
+
+            <section class="settings-secondary-panel" data-settings-panel="access" aria-labelledby="page-title" hidden>
+              <div class="settings-panel-meta"><span class="status-chip success" id="management-key-state">管理密钥已配置</span></div>
+              <div class="settings-panel-body">
+                <p>管理密钥用于进入本界面；用户初始密码只用于新建或重置用户，均保存在控制面加密数据库中。</p>
+                <div class="settings-panel-callout"><strong>用户初始密码</strong><span id="initial-password-state">正在检查配置</span></div>
+                <div class="settings-panel-callout"><strong>变更影响</strong><span>更换初始密码不会修改已有用户；更换管理密钥会退出后台并重启相关服务。</span></div>
+              </div>
+              <footer><div class="button-group"><button class="button secondary" type="button" id="set-initial-password-button">设置用户初始密码</button><button class="button secondary" type="button" id="rotate-management-key-button">更换管理密钥</button></div></footer>
+            </section>
+
+            <section class="settings-secondary-panel" data-settings-panel="backups" aria-labelledby="page-title" hidden>
+              <div class="settings-panel-meta"><strong id="backup-count">0 个归档</strong></div>
+              <div class="settings-panel-body">
+                <p>删除 CPA 或清除 OAuth 前会自动归档配置、授权文件和相关记录。</p>
+                <div class="settings-panel-callout"><strong>最近归档</strong><span class="settings-path" id="latest-backup">暂无归档</span></div>
+              </div>
+            </section>
+
+            <section class="settings-secondary-panel" data-settings-panel="storage" aria-labelledby="page-title" hidden>
+              <p class="settings-panel-intro">敏感注册表只显示路径与权限，不展示内容</p>
+              <div class="panel table-panel settings-table-panel">
+                <div class="table-wrap">
+                  <table class="storage-table">
+                    <thead><tr><th class="table-index-column">序号</th><th>数据</th><th>本地路径</th><th>状态</th><th>权限</th></tr></thead>
+                    <tbody id="storage-table-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-secondary-panel" data-settings-panel="audit" aria-labelledby="page-title" hidden>
+              <p class="settings-panel-intro">只记录动作、目标与结果，不记录管理密钥或完整 Key</p>
+              <div class="panel table-panel settings-table-panel">
+                <div class="table-wrap">
+                  <table class="audit-table">
+                    <thead><tr><th class="table-index-column">序号</th><th>时间</th><th>动作</th><th>目标</th><th>结果</th></tr></thead>
+                    <tbody id="audit-table-body"></tbody>
+                  </table>
+                </div>
+                <div class="empty-state compact-empty" id="audit-empty" hidden><h3>暂无管理操作</h3><p>后续变更会显示在这里。</p></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="custom-usage-range-dialog" class="dialog form-dialog custom-usage-range-dialog" aria-labelledby="custom-usage-range-title">
+    <form method="dialog" class="dialog-card" id="custom-usage-range-form">
+      <header><div><h3 id="custom-usage-range-title">自定义统计范围</h3><p class="section-kicker">CUSTOM USAGE RANGE</p><p class="dialog-subtitle" id="custom-usage-range-subtitle">选择开始和结束时间</p></div><button class="icon-button" type="button" data-close-dialog="custom-usage-range-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body custom-usage-range-body">
+        <div class="custom-range-boundaries">
+          <section class="custom-boundary-card" data-custom-boundary="start" aria-labelledby="custom-usage-start-label">
+            <div class="custom-boundary-heading"><span id="custom-usage-start-label">开始时间</span><small>包含</small></div>
+            <div class="custom-boundary-controls">
+              <button class="custom-date-value" id="custom-usage-start-date" type="button" data-custom-date-focus="start"><span>日期</span><strong>—</strong></button>
+              <label class="custom-time-field"><span>时间</span><input id="custom-usage-start-time" type="text" inputmode="numeric" maxlength="5" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="00:00" autocomplete="off" required></label>
+            </div>
+            <div class="custom-calendar" data-custom-calendar="start">
+              <header><button type="button" data-calendar-nav="start:-1" aria-label="开始日期上个月">‹</button><strong data-calendar-month>—</strong><button type="button" data-calendar-nav="start:1" aria-label="开始日期下个月">›</button></header>
+              <div class="custom-calendar-weekdays" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+              <div class="custom-calendar-days" data-calendar-days></div>
+            </div>
+          </section>
+          <section class="custom-boundary-card" data-custom-boundary="end" aria-labelledby="custom-usage-end-label">
+            <div class="custom-boundary-heading"><span id="custom-usage-end-label">结束时间</span><small>不包含</small></div>
+            <div class="custom-boundary-controls">
+              <button class="custom-date-value" id="custom-usage-end-date" type="button" data-custom-date-focus="end"><span>日期</span><strong>—</strong></button>
+              <label class="custom-time-field"><span>时间</span><input id="custom-usage-end-time" type="text" inputmode="numeric" maxlength="5" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="00:00" autocomplete="off" required></label>
+            </div>
+            <div class="custom-calendar" data-custom-calendar="end">
+              <header><button type="button" data-calendar-nav="end:-1" aria-label="结束日期上个月">‹</button><strong data-calendar-month>—</strong><button type="button" data-calendar-nav="end:1" aria-label="结束日期下个月">›</button></header>
+              <div class="custom-calendar-weekdays" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+              <div class="custom-calendar-days" data-calendar-days></div>
+            </div>
+          </section>
+        </div>
+        <div class="custom-range-selection"><span>已选范围</span><strong id="custom-usage-range-preview">—</strong></div>
+        <p class="field-help">时间按当前浏览器所在时区解释；查询包含开始时刻，不包含结束时刻。</p>
+        <p class="form-error" id="custom-usage-range-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="custom-usage-range-dialog">取消</button><button class="button primary" type="submit">应用范围</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="add-account-dialog" class="dialog form-dialog">
+    <form method="dialog" class="dialog-card" id="add-account-form">
+      <header><div><h3>添加业务 CPA</h3><p class="section-kicker">NEW BUSINESS CPA</p></div><button class="icon-button" type="button" data-close-dialog="add-account-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <label class="field account-email-field"><span>账号标识</span><input id="new-account-id" type="text" inputmode="latin" minlength="2" maxlength="32" pattern="[a-z][a-z0-9\-]{1,31}" placeholder="例如 codex-team-2" required></label>
+        <p class="field-help">用于容器名、配置文件名和 Key 路由，只能填写小写字母、数字和连字符。</p>
+        <label class="field account-email-field"><span>上游账号邮箱</span><input id="new-account-email" type="email" placeholder="account@example.com" required></label>
+        <label class="field account-email-field"><span>出口代理</span><select id="new-account-proxy-mode"><option value="inherit">继承控制面默认代理</option><option value="custom">使用账号自定义代理</option><option value="direct">强制直连</option></select></label>
+        <div class="field account-email-field" id="new-account-proxy-url-field" hidden><label for="new-account-proxy-url">账号代理 URL</label><input id="new-account-proxy-url" type="password" autocomplete="new-password" placeholder="例如 socks5://user:pass@host:1080"></div>
+        <p class="field-help">账号设置优先于控制面默认代理；支持 HTTP、HTTPS 和 SOCKS5。</p>
+        <div class="provision-list" aria-label="自动执行内容">
+          <span>解析出口代理</span><span>生成 CPA 配置</span><span>创建认证目录</span><span>后台补齐已有用户 Key</span><span>启动容器并刷新路由</span>
+        </div>
+        <div class="inline-notice">添加 CPA 后会在后台关联全部已有用户的统一 Key；账号创建后请继续完成 OAuth。</div>
+        <p class="form-error" id="add-account-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="add-account-dialog">取消</button><button class="button primary" type="submit">创建并启动</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="quota-reset-dialog" class="dialog form-dialog quota-reset-dialog">
+    <form class="dialog-card" id="quota-reset-form">
+      <header><div><h3 id="quota-reset-title">重置周限额</h3><p class="section-kicker">WEEKLY QUOTA RESET</p></div><button class="icon-button" type="button" data-close-dialog="quota-reset-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <div class="warning-banner">重置会消耗 1 次重置额度，并立即刷新当前已耗尽的周限额。操作不可撤销。</div>
+        <p class="quota-reset-credit-summary" id="quota-reset-credit-summary"></p>
+        <p class="quota-reset-targets" id="quota-reset-targets"></p>
+        <label class="field"><span>选择要使用的重置额度</span><select id="quota-reset-credit" required></select></label>
+        <p class="field-help">日期表示该次 Full reset 的到期时间。提交前系统会重新读取额度状态；如果所选额度已使用或过期，本次操作会自动停止。</p>
+        <p class="form-error" id="quota-reset-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="quota-reset-dialog">取消</button><button class="button danger-outline" type="submit">确认重置</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="add-user-dialog" class="dialog form-dialog">
+    <form method="dialog" class="dialog-card" id="add-user-form">
+      <header><div><h3>添加用户</h3><p class="section-kicker">NEW USER</p></div><button class="icon-button" type="button" data-close-dialog="add-user-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <label class="field"><span>用户邮箱</span><input id="new-user-email" type="email" data-brand-email-placeholder placeholder="name@example.com" required></label>
+        <label class="field add-user-team-field"><span>所属团队</span><select id="new-user-team"><option value="">未分组</option></select><small id="new-user-team-help">可选；团队仅用于用量统计，不影响 CPA 自动分配。</small></label>
+        <div class="inline-notice">系统会创建统一 API Key，并为用户设置系统默认初始密码。API Key 只显示一次；用户首次登录必须修改默认密码。</div>
+        <p class="form-error" id="add-user-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="add-user-dialog">取消</button><button class="button primary" type="submit">创建用户</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="user-classification-dialog" class="dialog form-dialog" aria-labelledby="user-classification-title">
+    <form class="dialog-card" id="user-classification-form">
+      <header><div><h3 id="user-classification-title">设置团队</h3><p class="section-kicker">TEAM ASSIGNMENT</p><p class="dialog-subtitle" id="user-classification-target"></p></div><button class="icon-button" type="button" data-close-dialog="user-classification-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <label class="field"><span>统计团队</span><select id="user-classification-team"><option value="">未分组</option></select><small>每位用户只能属于一个团队，用于团队用量统计。</small></label>
+        <div class="inline-notice">保存后，团队报表会按当前成员动态汇总所选范围内的 Token；历史事件本身不会改写。</div>
+        <p class="form-error" id="user-classification-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="user-classification-dialog">取消</button><button class="button primary" type="submit" id="user-classification-submit">保存团队</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="organization-catalog-dialog" class="dialog form-dialog" aria-labelledby="organization-catalog-dialog-title">
+    <form class="dialog-card" id="organization-catalog-form">
+      <header><div><h3 id="organization-catalog-dialog-title">创建团队</h3><p class="section-kicker" id="organization-catalog-kicker">TEAM CATALOG</p></div><button class="icon-button" type="button" data-close-dialog="organization-catalog-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <input id="organization-catalog-id" type="hidden">
+        <label class="field"><span id="organization-catalog-name-label">团队名称</span><input id="organization-catalog-name" maxlength="64" required></label>
+        <label class="field" id="organization-catalog-description-field"><span>团队说明</span><textarea id="organization-catalog-description" maxlength="200" rows="3" placeholder="说明团队职责或成员范围（可选）"></textarea></label>
+        <div class="inline-notice" id="organization-catalog-notice">每位用户只能属于一个团队；报表按当前成员动态汇总所选范围内的 Token。</div>
+        <p class="form-error" id="organization-catalog-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="organization-catalog-dialog">取消</button><button class="button primary" type="submit" id="organization-catalog-submit">创建团队</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="organization-members-dialog" class="dialog organization-members-dialog" aria-labelledby="organization-members-title">
+    <div class="dialog-card">
+      <header><div><h3 id="organization-members-title">团队成员</h3><p class="section-kicker" id="organization-members-kicker">TEAM MEMBERS</p></div><button class="icon-button" type="button" data-close-dialog="organization-members-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body organization-members-body">
+        <div class="organization-member-toolbar">
+          <label class="search-field"><span aria-hidden="true">⌕</span><input id="organization-user-search" type="search" placeholder="搜索用户邮箱"></label>
+          <label class="window-field filter-field"><span>成员范围</span><select id="organization-user-scope" data-enhance-select><option value="current" selected>当前团队成员</option><option value="unassigned">未分组用户</option><option value="all">全部用户</option></select></label>
+          <label class="window-field filter-field"><span>Token 状态</span><select id="organization-usage-state" data-enhance-select><option value="all" selected>不限用量</option><option value="used">已产生 Token</option><option value="unused">未产生 Token</option></select></label>
+          <label class="window-field filter-field"><span>统计范围</span><select id="organization-usage-window" data-enhance-select><option value="today">今日</option><option value="604800">近 7 天</option><option value="2592000">近 30 天</option><option value="all" selected>全部历史</option></select></label>
+        </div>
+        <div class="organization-team-context" id="organization-team-context" hidden><span>当前管理团队</span><strong id="organization-team-context-name">—</strong><span id="organization-team-context-count">0 位成员</span></div>
+        <div class="organization-select-all" id="organization-select-all" hidden><span id="organization-match-summary"></span><button class="inline-action" type="button" id="organization-select-matches">选择全部匹配用户</button></div>
+        <div class="organization-member-table-wrap" id="organization-team-member-table"><table class="organization-member-table"><thead><tr><th class="table-index-column">序号</th><th class="user-select-column"><input id="organization-select-page" type="checkbox" aria-label="选择本页用户"></th><th>用户</th><th>团队归属</th><th>Token 用量</th><th id="organization-team-relation-header">与当前团队的关系</th></tr></thead><tbody id="organization-member-body"><tr><td colspan="6" class="team-usage-state">正在加载成员…</td></tr></tbody></table></div>
+        <div class="table-pagination organization-pagination" id="organization-pagination" hidden><span class="pagination-summary" id="organization-pagination-summary"></span><div class="pagination-controls"><button class="pagination-nav" type="button" id="organization-page-prev">上一页</button><span id="organization-page-label"></span><button class="pagination-nav" type="button" id="organization-page-next">下一页</button></div></div>
+        <div class="organization-bulk-bar" id="organization-team-bulk" hidden><div><strong id="organization-selection-count">已选择 0 位用户</strong><small>已有团队成员不会被静默移动。</small></div><button class="button ghost" type="button" id="organization-selection-clear">取消选择</button><button class="button secondary" type="button" id="organization-team-remove">移出当前团队</button><button class="button secondary" type="button" id="organization-team-move">从其他团队移动</button><button class="button primary" type="button" id="organization-team-assign">加入当前团队</button></div>
+        <p class="form-error organization-error" id="organization-team-error" role="alert"></p>
+      </div>
+      <footer><button class="button secondary" type="button" data-close-dialog="organization-members-dialog">完成</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="team-usage-drawer" class="dialog team-usage-drawer" aria-labelledby="team-usage-drawer-title">
+    <div class="dialog-card">
+      <header><div><h3 id="team-usage-drawer-title">团队 Token 用量</h3><p class="section-kicker">TEAM TOKEN ANALYTICS</p><p class="dialog-subtitle" id="team-usage-drawer-subtitle">选择团队后查看模型与推理强度</p></div><button class="icon-button" type="button" data-close-dialog="team-usage-drawer" aria-label="关闭">×</button></header>
+      <div class="dialog-body" id="team-usage-content"><div class="team-usage-state">正在加载团队用量…</div></div>
+      <footer><button class="button secondary" type="button" data-close-dialog="team-usage-drawer">关闭</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="user-quota-dialog" class="dialog user-quota-drawer" aria-labelledby="user-quota-title">
+    <form class="dialog-card" id="user-quota-form">
+      <header><div><h3 id="user-quota-title">配置用户周额度</h3><p class="section-kicker">USER WEEKLY QUOTA</p><p class="dialog-subtitle" id="user-quota-email"></p></div><button class="icon-button" type="button" data-close-dialog="user-quota-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <dl class="user-quota-summary" id="user-quota-summary"></dl>
+        <div class="inline-notice">额度按该用户在全部 CPA 的 Token 总量汇总。达到额度后只拒绝新请求，已经开始的请求（含流式输出）可以完成。</div>
+        <fieldset class="quota-policy-options">
+          <legend>额度策略</legend>
+          <label><input type="radio" name="user-quota-mode" value="inherit"><span><strong>继承组织默认</strong><small id="user-quota-default-copy">当前默认不限额</small></span></label>
+          <label><input type="radio" name="user-quota-mode" value="unlimited"><span><strong>单独不限额</strong><small>不受以后组织默认值变化影响</small></span></label>
+          <label><input type="radio" name="user-quota-mode" value="custom"><span><strong>自定义额度</strong><small>每个自然周一 00:00 重新计算</small></span></label>
+        </fieldset>
+        <label class="field" id="user-quota-custom-field"><span>每周 Token</span><div class="token-input-control"><input id="user-quota-custom-tokens" type="number" inputmode="numeric" min="1" max="1000000000000" step="1" placeholder="例如 100000000" data-token-input data-token-empty-label="请输入自定义周额度" aria-label="每周 Token"><div class="token-input-preview" data-token-input-preview data-state="empty" aria-live="polite"><small>请输入自定义周额度</small></div></div></label>
+        <section class="user-quota-operations" aria-labelledby="user-quota-operations-title">
+          <div class="user-quota-operations-head">
+            <div><strong id="user-quota-operations-title">本周额度操作</strong><small>仅作用于当前自然周，不修改原始用量记录。</small></div>
+            <span class="status-chip neutral" id="user-quota-adjustment-count">暂无调整</span>
+          </div>
+          <div class="user-quota-operation-grid">
+            <button class="quota-operation-card" type="button" id="user-quota-add-bonus">
+              <span>追加本周额度</span>
+              <small>临时增加可用额度，下周自动失效</small>
+            </button>
+            <button class="quota-operation-card" type="button" id="user-quota-restore-default">
+              <span>恢复组织默认</span>
+              <small>删除个人策略，当前周临时调整保持不变</small>
+            </button>
+            <button class="quota-operation-card danger" type="button" id="user-quota-reset-usage">
+              <span>清零本周已用量</span>
+              <small>保留历史事件，以调整账本抵扣当前用量</small>
+            </button>
+          </div>
+          <div class="quota-adjustment-history" id="user-quota-adjustment-history"></div>
+        </section>
+        <p class="form-error" id="user-quota-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="user-quota-dialog">取消</button><button class="button primary" type="submit">保存额度策略</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="user-quota-action-dialog" class="dialog form-dialog quota-action-dialog" aria-labelledby="user-quota-action-title">
+    <form class="dialog-card" id="user-quota-action-form">
+      <header><div><h3 id="user-quota-action-title">额度操作</h3><p class="section-kicker">QUOTA ADJUSTMENT</p><p class="dialog-subtitle" id="user-quota-action-subtitle"></p></div><button class="icon-button" type="button" data-close-dialog="user-quota-action-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <div class="quota-action-impact" id="user-quota-action-impact"></div>
+        <label class="field" id="user-quota-action-token-field" hidden><span>追加 Token</span><div class="token-input-control"><input id="user-quota-action-tokens" type="number" inputmode="numeric" min="1" max="1000000000000" step="1" placeholder="例如 100000000" data-token-input data-token-empty-label="请输入本周追加额度" aria-label="追加 Token"><div class="token-input-preview" data-token-input-preview data-state="empty" aria-live="polite"><small>请输入本周追加额度</small></div></div></label>
+        <label class="field"><span>操作原因</span><textarea id="user-quota-action-reason" maxlength="200" rows="3" placeholder="说明业务原因或异常情况，最多 200 字" required></textarea></label>
+        <label class="field confirmation-field" id="user-quota-action-confirm-field" hidden><span id="user-quota-action-confirm-label">输入确认文字</span><input id="user-quota-action-confirm" type="text" autocomplete="off"></label>
+        <div class="inline-notice" id="user-quota-action-notice"></div>
+        <p class="form-error" id="user-quota-action-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="user-quota-action-dialog">取消</button><button class="button primary" type="submit" id="user-quota-action-submit">确认操作</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="account-detail-dialog" class="dialog detail-dialog">
+    <div class="dialog-card">
+      <header><div><h3 id="detail-account-id">CPA 管理</h3><p class="section-kicker">BUSINESS CPA</p></div><button class="icon-button" type="button" data-close-dialog="account-detail-dialog" aria-label="关闭">×</button></header>
+      <form id="account-update-form">
+        <div class="dialog-body">
+          <div class="detail-facts" id="account-detail-facts"></div>
+          <label class="field account-email-field"><span>CPA 标识</span><input id="detail-account-new-id" type="text" pattern="[a-z][a-z0-9\-]{1,31}" maxlength="32" required></label>
+          <label class="field account-email-field"><span>显示邮箱</span><input id="detail-account-email" type="email" required></label>
+          <label class="field account-email-field"><span>出口代理</span><select id="detail-account-proxy-mode"><option value="inherit">继承控制面默认代理</option><option value="custom">使用账号自定义代理</option><option value="direct">强制直连</option></select></label>
+          <div class="field account-email-field" id="detail-account-proxy-url-field" hidden><label for="detail-account-proxy-url">账号代理 URL</label><input id="detail-account-proxy-url" type="password" autocomplete="new-password" placeholder="留空保持现有代理；支持 HTTP、HTTPS、SOCKS5"></div>
+          <p class="field-help" id="detail-account-proxy-help">账号代理设置优先；修改后只重建当前 CPA，不影响 Gateway 和其他 CPA。</p>
+          <p class="field-help">修改 CPA 标识会迁移容器、路由、OAuth、日志和 Key 关联，并短暂重启该业务 CPA；显示邮箱不会替换 OAuth 登录身份。</p>
+          <p class="form-error" id="account-update-error" role="alert"></p>
+          <div class="danger-zone account-danger-zone">
+            <div><strong>危险操作</strong><p>清除授权或删除 CPA 前都会自动创建本地安全归档。</p></div>
+            <div class="button-group"><button class="button danger-outline" type="button" id="clear-account-auth-button">清除 OAuth</button><button class="button danger-outline" type="button" id="open-delete-account-button">删除 CPA</button></div>
+          </div>
+        </div>
+        <footer><button class="button ghost" type="button" data-close-dialog="account-detail-dialog">取消</button><button class="button primary" type="submit">保存修改</button></footer>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="account-policy-dialog" class="dialog form-dialog">
+    <form method="dialog" class="dialog-card" id="account-policy-form">
+      <header><div><h3 id="account-policy-title">调整 CPA 状态</h3><p class="section-kicker">ROUTING AVAILABILITY</p></div><button class="icon-button" type="button" data-close-dialog="account-policy-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <div class="warning-banner" id="account-policy-message"></div>
+        <label class="field" id="account-policy-fallback-field" hidden><span>现有用户切换到</span><select id="account-policy-fallback"></select></label>
+        <p class="form-error" id="account-policy-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="account-policy-dialog">取消</button><button class="button primary" type="submit" id="account-policy-submit">确认</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="delete-account-dialog" class="dialog form-dialog">
+    <form method="dialog" class="dialog-card" id="delete-account-form">
+      <header><div><h3>删除业务 CPA</h3><p class="section-kicker">DESTRUCTIVE ACTION</p></div><button class="icon-button" type="button" data-close-dialog="delete-account-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <div class="warning-banner">容器、路由、授权目录和用户关联记录将被移除；统一 Key 在其他 CPA 中继续有效。</div>
+        <label class="field" id="delete-account-fallback-field"><span>用户切换到</span><select id="delete-account-fallback"></select></label>
+        <label class="field"><span>输入 CPA 标识以确认</span><input id="delete-account-confirm" type="text" autocomplete="off" required></label>
+        <label class="check-row" id="delete-account-keys-row"><input id="delete-account-revoke-keys" type="checkbox"><span>同时停用该 CPA 仍然独占的 Key</span></label>
+        <p class="form-error" id="delete-account-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="delete-account-dialog">取消</button><button class="button danger-outline" type="submit">确认删除</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="management-key-dialog" class="dialog form-dialog">
+    <form method="dialog" class="dialog-card" id="management-key-form">
+      <header><div><h3>更换管理密钥</h3><p class="section-kicker">ACCESS CONTROL</p></div><button class="icon-button" type="button" data-close-dialog="management-key-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <div class="warning-banner">更新会短暂重启全部业务 CPA 和插件服务。成功后当前会话立即失效。</div>
+        <div class="field"><label for="new-management-key">新管理密钥</label><input id="new-management-key" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></div>
+        <div class="field account-email-field"><label for="confirm-management-key">再次输入</label><input id="confirm-management-key" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></div>
+        <p class="form-error" id="management-key-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="management-key-dialog">取消</button><button class="button primary" type="submit">更新并重新进入</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="initial-password-dialog" class="dialog form-dialog">
+    <form method="dialog" class="dialog-card" id="initial-password-form">
+      <header><div><h3>设置用户初始密码</h3><p class="section-kicker">ENCRYPTED USER SECRET</p></div><button class="icon-button" type="button" data-close-dialog="initial-password-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <div class="warning-banner">仅影响后续新建或重置的用户。密码以 AES-GCM 加密保存在控制面数据库中，页面不会读取或回显现值。</div>
+        <div class="field"><label for="new-initial-password">新初始密码</label><input id="new-initial-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></div>
+        <div class="field account-email-field"><label for="confirm-initial-password">再次输入</label><input id="confirm-initial-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></div>
+        <p class="form-error" id="initial-password-error" role="alert"></p>
+      </div>
+      <footer><button class="button ghost" type="button" data-close-dialog="initial-password-dialog">取消</button><button class="button primary" type="submit">安全保存</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="secret-dialog" class="dialog secret-dialog">
+    <div class="dialog-card">
+      <header><div><h3>保存新生成的凭据</h3><p class="section-kicker">ONE-TIME SECRET</p></div><button class="icon-button" type="button" data-close-dialog="secret-dialog" aria-label="关闭">×</button></header>
+      <div class="dialog-body">
+        <div class="warning-banner">关闭后平台不会再次展示完整凭据。</div>
+        <div id="secret-list" class="secret-list"></div>
+      </div>
+      <footer><button class="button secondary" type="button" id="copy-all-secrets">复制全部</button><button class="button primary" type="button" data-close-dialog="secret-dialog">我已保存</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog confirm-dialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-body"><div class="confirm-icon" id="confirm-icon">!</div><h3 id="confirm-title">确认操作</h3><p id="confirm-message"></p></div>
+      <footer><button class="button ghost" value="cancel">取消</button><button class="button primary" id="confirm-submit" value="confirm">确认</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="output-dialog" class="dialog output-dialog">
+    <div class="dialog-card">
+      <header><div><h3 id="output-title">任务输出</h3><p class="section-kicker" id="output-kicker">TASK OUTPUT</p></div><button class="icon-button" type="button" data-close-dialog="output-dialog" aria-label="关闭">×</button></header>
+      <div class="job-meta" id="output-meta"></div>
+      <section class="oauth-copy-panel" id="oauth-copy-panel" hidden>
+        <div class="oauth-copy-head">
+          <div><strong>设备授权</strong><span>复制设备码，然后打开授权页面完成登录</span></div>
+          <a class="button primary" id="oauth-open-link" href="#" target="_blank" rel="noreferrer">打开授权页 ↗</a>
+        </div>
+        <div class="oauth-copy-grid">
+          <div><label>授权地址</label><div class="copy-value"><code id="oauth-url-value">—</code><button class="button secondary" type="button" id="copy-oauth-url">复制地址</button></div></div>
+          <div><label>设备码</label><div class="copy-value"><code class="device-code" id="oauth-code-value">—</code><button class="button secondary" type="button" id="copy-oauth-code">复制设备码</button></div></div>
+        </div>
+      </section>
+      <pre id="output-content">等待输出…</pre>
+      <footer><button class="button secondary" type="button" id="copy-output-button">复制完整输出</button><button class="button danger-outline" type="button" id="cancel-job-button" hidden>取消任务</button><button class="button ghost" type="button" data-close-dialog="output-dialog">关闭</button></footer>
+    </div>
+  </dialog>
+
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+</body>
+</html>

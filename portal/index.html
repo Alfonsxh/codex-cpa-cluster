@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN" data-brand-page="服务入口" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Codex CPA Cluster</title>
+  <link id="portal-favicon" rel="icon" href="/portal/assets/codex-cpa-cluster-favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/portal/app.css?v=20260815-theme-password-actions">
+  <script src="/portal/branding.js" defer></script>
+  <script src="/portal/landing.js?v=20260815-shared-theme" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="mast-copy">
+        <img class="portal-brand-logo" data-brand-logo src="/portal/assets/codex-cpa-cluster-logo.svg" alt="Codex CPA Cluster">
+        <h1>选择要进入的界面</h1>
+        <p class="subtitle">添加和管理业务 CPA，或进入使用中心查看自己的 Key、账号与用量。</p>
+      </div>
+      <div class="portal-header-actions">
+        <div class="environment"><span></span><b data-brand-environment>Self-hosted service</b></div>
+        <button class="portal-theme-toggle" id="portal-theme-toggle" type="button" aria-label="切换为深色主题">
+          <span class="portal-theme-toggle-icon" aria-hidden="true">☾</span>
+          <span class="portal-theme-toggle-label">深色</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="choices" aria-label="可用界面">
+      <a class="choice primary" href="/admin/">
+        <div class="choice-top">
+          <span class="number">01</span>
+          <span class="access guarded">需要管理密钥</span>
+        </div>
+        <div class="choice-content">
+          <span class="choice-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5h16M7 3.5v6M17 3.5v6M6 12h5v5H6zM14 12h4M14 16h4M4 20.5h16"/></svg>
+          </span>
+          <p class="kicker">CONTROL PLANE</p>
+          <h2>综合管理平台</h2>
+          <p>添加业务 CPA、管理用户与 Key、OAuth 授权、容器、日志和诊断任务。</p>
+        </div>
+        <span class="enter">进入管理平台 <b>→</b></span>
+      </a>
+
+      <a class="choice" href="/usage/">
+        <div class="choice-top">
+          <span class="number">02</span>
+          <span class="access public">邮箱进入</span>
+        </div>
+        <div class="choice-content">
+          <span class="choice-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 19.5V14m5 5.5V9m5 10.5V12m5 7.5V5M3 20.5h18"/></svg>
+          </span>
+          <p class="kicker">ACCESS &amp; OBSERVABILITY</p>
+          <h2>使用中心</h2>
+          <p>查看唯一 API Key，切换 CPA 账号，并统计各账号的请求和 Token 用量。</p>
+        </div>
+        <span class="enter">进入使用中心 <b>→</b></span>
+      </a>
+    </section>
+
+    <footer>
+      <span data-brand-product-name>Codex CPA Cluster</span>
+      <span>选择界面后再执行对应操作</span>
+    </footer>
+  </main>
+</body>
+</html>

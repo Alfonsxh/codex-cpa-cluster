@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "values": {
+    "branding.product_name": "Codex CPA Cluster",
+    "branding.short_name": "Codex CPA",
+    "branding.environment_label": "Self-hosted service",
+    "branding.public_base_url": "https://cpa.example.com",
+    "identity.allowed_email_domains": [
+      "example.com",
+      "example.org"
+    ],
+    "identity.key_prefix": "cpa_",
+    "portal.provider_name": "Codex CPA",
+    "portal.api_key_env": "CPA_API_KEY",
+    "portal.default_model": "gpt-5.6-sol"
+  }
+}

@@ -1,0 +1,45 @@
+name: Feature request
+description: 提议一个有明确使用场景的改进
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景
+      description: 先描述需要解决的问题，而不是具体实现。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 说明方案、替代方案和取舍。
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: 影响范围
+      options:
+        - Documentation only
+        - Admin / UI
+        - Gateway / Edge
+        - Storage / Migration
+        - Deployment / Release
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: 兼容性考虑
+      description: 是否影响已有配置、数据、API 或部署方式？
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交检查
+      options:
+        - label: 我已搜索现有 Issue，未发现相同建议。
+          required: true

@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.sqlite3
+
+.env
+dist/
+
+# Local-only agent harness and deployment environment context
+/.harness/
+/AGENTS.md
+
+# 远程部署运行态与敏感数据
+state/
+secrets/
+auth/
+logs/
+backups/
+configs/
+compose.accounts.yml
+management/auth/
+management/logs/
+management/plugins/
+
+# 根据账号和 Key 动态生成的网关映射
+gateway/keys.map.conf
+gateway/accounts.map.conf
+gateway/backends.map.conf

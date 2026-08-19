@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lua5.4
+          python3 -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run local quality gate
+        run: make verify
+
+  package:
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Build release archive
+        run: sh scripts/package-release.sh "dist/codex-cpa-cluster-${GITHUB_SHA::12}.tar.gz"
+
+      - name: Verify release archive
+        run: |
+          archive="dist/codex-cpa-cluster-${GITHUB_SHA::12}.tar.gz"
+          tar -tzf "$archive"
+          tar -tzf "$archive" | grep -Fx gateway/gateway_state.lua
+          tar -tzf "$archive" | grep -Fx gateway/request_gate.lua
+          tar -tzf "$archive" | grep -Fx gateway/Dockerfile
+          tar -tzf "$archive" | grep -Fx admin/Dockerfile
+          tar -tzf "$archive" | grep -Fx web/Dockerfile
+          tar -tzf "$archive" | grep -Fx edge/Dockerfile
+          tar -tzf "$archive" | grep -Fx release-manifest.json
+          tar -tzf "$archive" | grep -Fx scripts/release_manifest.py
+          tar -tzf "$archive" | grep -Fx scripts/edge_slot.py
+          tar -tzf "$archive" | grep -Fx scripts/gateway_release_probe.py
+          tar -tzf "$archive" | grep -Fx admin/account_failover.py
+          tar -tzf "$archive" | grep -Fx scripts/runtime_data_guard.py
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-cpa-cluster-${{ github.sha }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30

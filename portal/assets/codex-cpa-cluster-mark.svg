@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title desc">
+  <title id="title">Codex CPA Cluster mark</title>
+  <desc id="desc">The letter C connected to three cluster nodes.</desc>
+  <g transform="translate(18 18)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M101 37a49 49 0 1 0 0 70" stroke="#1D2437" stroke-width="14"/>
+    <path d="M102 37l23-23M112 72h32M102 107l23 23" stroke="#9AA5B5" stroke-width="6"/>
+    <circle cx="130" cy="10" r="9" fill="#6374D8" stroke="none"/>
+    <circle cx="150" cy="72" r="9" fill="#6374D8" stroke="none"/>
+    <circle cx="130" cy="134" r="9" fill="#6374D8" stroke="none"/>
+  </g>
+</svg>

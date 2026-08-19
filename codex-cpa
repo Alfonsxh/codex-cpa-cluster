@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""Download, verify, and apply a Codex CPA Cluster release."""
+
+import argparse
+import hashlib
+import json
+import os
+import posixpath
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path, PurePosixPath
+
+
+DEFAULT_REPOSITORY = "Alfonsxh/codex-cpa-cluster"
+DEFAULT_TARGET = "/opt/codex-cpa-cluster"
+SEMVER_PATTERN = re.compile(r"^v?\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$")
+REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+IMAGE_PREFIX_PATTERN = re.compile(
+    r"^[A-Za-z0-9.-]+(?::[0-9]+)?/[A-Za-z0-9._/-]+$"
+)
+HEX_PATTERN = re.compile(r"^[0-9a-f]+$")
+
+
+class ReleaseError(RuntimeError):
+    """A user-facing release validation or execution error."""
+
+
+def parse_checksums(path):
+    """Return a strict basename-to-SHA256 mapping."""
+    records = {}
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if not parts:
+            continue
+        if len(parts) != 2 or not re.fullmatch(r"[0-9a-f]{64}", parts[0]):
+            raise ReleaseError("SHA256SUMS 格式无效")
+        name = parts[1].lstrip("*").strip()
+        if not name or Path(name).name != name or name in records:
+            raise ReleaseError("SHA256SUMS 包含无效或重复文件名")
+        records[name] = parts[0]
+    return records
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_release_assets(archive, descriptor, checksums):
+    records = parse_checksums(checksums)
+    for path in (Path(archive), Path(descriptor)):
+        expected = records.get(path.name)
+        if expected is None:
+            raise ReleaseError("SHA256SUMS 缺少 {}".format(path.name))
+        if file_sha256(path) != expected:
+            raise ReleaseError("发布附件校验失败：{}".format(path.name))
+
+
+def validate_descriptor(path, version, archive_name):
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ReleaseError("发布描述器不可读：{}".format(error)) from error
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ReleaseError("发布描述器版本不受支持")
+    if payload.get("release_version") != version:
+        raise ReleaseError("发布描述器版本与请求版本不一致")
+    if payload.get("archive", {}).get("name") != archive_name:
+        raise ReleaseError("发布描述器中的归档文件名不一致")
+    revision = str(payload.get("revision") or "").lower()
+    if len(revision) < 7 or HEX_PATTERN.fullmatch(revision) is None:
+        raise ReleaseError("发布描述器 revision 无效")
+
+    components = payload.get("components")
+    if not isinstance(components, dict):
+        raise ReleaseError("发布描述器缺少组件")
+    image_prefix = None
+    for component in ("admin", "web", "gateway", "edge"):
+        record = components.get(component)
+        if not isinstance(record, dict):
+            raise ReleaseError("发布描述器缺少 {} 组件".format(component))
+        source_digest = str(record.get("source_sha256") or "")
+        if re.fullmatch(r"[0-9a-f]{64}", source_digest) is None:
+            raise ReleaseError("{} 组件指纹无效".format(component))
+        suffix = "/codex-cpa-{}:sha256-{}".format(component, source_digest)
+        image = str(record.get("image") or "")
+        if not image.endswith(suffix):
+            raise ReleaseError("{} 组件镜像与指纹不一致".format(component))
+        current_prefix = image[: -len(suffix)]
+        if IMAGE_PREFIX_PATTERN.fullmatch(current_prefix) is None:
+            raise ReleaseError("发布描述器镜像前缀无效")
+        if image_prefix is None:
+            image_prefix = current_prefix
+        elif current_prefix != image_prefix:
+            raise ReleaseError("发布描述器组件镜像前缀不一致")
+    expected_metadata = "{}/codex-cpa-release:{}".format(image_prefix, version)
+    if payload.get("metadata_image") != expected_metadata:
+        raise ReleaseError("发布元数据镜像与版本不一致")
+    return {"revision": revision, "image_prefix": image_prefix}
+
+
+def _member_destination(member):
+    path = PurePosixPath(member.name)
+    if path.is_absolute() or not path.parts or ".." in path.parts:
+        raise ReleaseError("发布包包含不安全路径：{}".format(member.name))
+    if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+        raise ReleaseError("发布包包含不支持的文件类型：{}".format(member.name))
+    if member.issym() or member.islnk():
+        link = PurePosixPath(member.linkname)
+        if link.is_absolute():
+            raise ReleaseError("发布包包含绝对链接：{}".format(member.name))
+        base = path.parent.as_posix() if member.issym() else "."
+        resolved = posixpath.normpath(posixpath.join(base, link.as_posix()))
+        if resolved == ".." or resolved.startswith("../"):
+            raise ReleaseError("发布包链接越过解压目录：{}".format(member.name))
+
+
+def extract_release(archive, destination):
+    try:
+        with tarfile.open(archive, "r:gz") as handle:
+            for member in handle.getmembers():
+                _member_destination(member)
+            # All paths and link targets were constrained to the extraction root.
+            handle.extractall(destination)
+    except (OSError, tarfile.TarError) as error:
+        raise ReleaseError("发布包无法解压：{}".format(error)) from error
+
+
+def download(url, destination):
+    headers = {"User-Agent": "codex-cpa-release-client/1"}
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = "Bearer {}".format(token)
+    request = urllib.request.Request(url, headers=headers)
+    temporary = Path(destination).with_name(".{}.download".format(Path(destination).name))
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response, temporary.open(
+            "wb"
+        ) as output:
+            shutil.copyfileobj(response, output)
+        os.replace(str(temporary), str(destination))
+    except (OSError, urllib.error.URLError) as error:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise ReleaseError("下载失败 {}：{}".format(url, error)) from error
+
+
+def resolve_assets(args, directory):
+    archive_name = "codex-cpa-cluster-{}.tar.gz".format(args.version)
+    descriptor_name = "release-{}.json".format(args.version)
+    if args.archive:
+        archive = Path(args.archive).expanduser().resolve()
+        descriptor = Path(
+            args.descriptor or archive.parent / descriptor_name
+        ).expanduser().resolve()
+        checksums = Path(
+            args.checksums or archive.parent / "SHA256SUMS"
+        ).expanduser().resolve()
+        for path in (archive, descriptor, checksums):
+            if not path.is_file():
+                raise ReleaseError("发布附件不存在：{}".format(path))
+        if archive.name != archive_name:
+            raise ReleaseError("发布包文件名应为 {}".format(archive_name))
+        return archive, descriptor, checksums
+
+    base = "https://github.com/{}/releases/download/{}".format(
+        args.repository, args.version
+    )
+    archive = directory / archive_name
+    descriptor = directory / descriptor_name
+    checksums = directory / "SHA256SUMS"
+    for name, path in (
+        (archive_name, archive),
+        (descriptor_name, descriptor),
+        ("SHA256SUMS", checksums),
+    ):
+        print("下载 {}".format(name), flush=True)
+        download("{}/{}".format(base, name), path)
+    return archive, descriptor, checksums
+
+
+def install_cli(source, target):
+    """Atomically retain the verified CLI inside the deployment directory."""
+    destination = Path(target) / "bin" / "codex-cpa"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(".codex-cpa.{}.tmp".format(os.getpid()))
+    temporary.write_bytes(Path(source).read_bytes())
+    os.chmod(temporary, 0o755)
+    os.replace(str(temporary), str(destination))
+
+
+def add_common_arguments(parser):
+    parser.add_argument("version", help="目标语义化版本，例如 v1.1.0")
+    parser.add_argument("--target", default=DEFAULT_TARGET, help="绝对部署目录")
+    parser.add_argument(
+        "--repository", default=DEFAULT_REPOSITORY, help="GitHub owner/repository"
+    )
+    parser.add_argument("--archive", help="使用本地发布包，不从 GitHub 下载")
+    parser.add_argument("--descriptor", help="本地发布描述器；默认与发布包同目录")
+    parser.add_argument("--checksums", help="本地 SHA256SUMS；默认与发布包同目录")
+    parser.add_argument("--image-prefix", help="已复制同版本镜像的 Registry 前缀")
+    parser.add_argument("--profile", help="首次导入或升级登记的 JSON 配置档案")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="安装或升级 Codex CPA Cluster 的版本化发布产物"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    install = subparsers.add_parser("install", help="安装到一个空目录")
+    add_common_arguments(install)
+    upgrade = subparsers.add_parser("upgrade", help="安全升级现有部署")
+    add_common_arguments(upgrade)
+    upgrade.add_argument("--health-port", type=int, help="显式健康检查端口")
+    upgrade.add_argument(
+        "--allow-edge-recreate",
+        action="store_true",
+        help="维护窗口内允许重建稳定 Edge",
+    )
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if SEMVER_PATTERN.fullmatch(args.version) is None:
+        raise ReleaseError("版本必须是语义化版本：{}".format(args.version))
+    if REPOSITORY_PATTERN.fullmatch(args.repository) is None:
+        raise ReleaseError("repository 必须是 owner/repository")
+    target = Path(args.target).expanduser()
+    if not target.is_absolute() or str(target) == "/" or re.fullmatch(
+        r"/[A-Za-z0-9._/-]+", str(target)
+    ) is None:
+        raise ReleaseError("target 必须是使用安全字符的绝对路径，且不能是根目录")
+    target = target.resolve()
+    if args.image_prefix and IMAGE_PREFIX_PATTERN.fullmatch(args.image_prefix) is None:
+        raise ReleaseError("image-prefix 无效")
+    if args.profile:
+        args.profile = str(Path(args.profile).expanduser().resolve())
+        if not Path(args.profile).is_file():
+            raise ReleaseError("配置档案不存在：{}".format(args.profile))
+
+    with tempfile.TemporaryDirectory(prefix="codex-cpa-release-") as temporary:
+        temporary_root = Path(temporary)
+        archive, descriptor, checksums = resolve_assets(args, temporary_root)
+        verify_release_assets(archive, descriptor, checksums)
+        release = validate_descriptor(descriptor, args.version, archive.name)
+        release_root = temporary_root / "release"
+        release_root.mkdir()
+        extract_release(archive, release_root)
+
+        script_name = (
+            "install-release.sh" if args.command == "install" else "deploy-release.sh"
+        )
+        script = release_root / "scripts" / script_name
+        verified_cli = release_root / "codex-cpa"
+        if not script.is_file() or not verified_cli.is_file():
+            raise ReleaseError("发布包缺少统一部署入口")
+
+        image_prefix = args.image_prefix or release["image_prefix"]
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "RELEASE_VERSION": args.version,
+                "RELEASE_IMAGE_PREFIX": image_prefix,
+                "RELEASE_METADATA_IMAGE": "{}/codex-cpa-release:latest".format(
+                    image_prefix
+                ),
+                "RELEASE_COMMIT_SHA": release["revision"],
+                "RELEASE_OPERATION_ID": "codex-cpa-{}".format(os.getpid()),
+                "ALLOW_EDGE_RECREATE": str(
+                    bool(getattr(args, "allow_edge_recreate", False))
+                ).lower(),
+            }
+        )
+        profile = args.profile or ""
+        if args.command == "install":
+            command = ["sh", str(script), str(archive), str(target), profile]
+        else:
+            health_port = str(args.health_port) if args.health_port else ""
+            command = [
+                "sh",
+                str(script),
+                str(archive),
+                str(target),
+                health_port,
+                profile,
+            ]
+        subprocess.run(command, check=True, env=environment)
+        try:
+            install_cli(verified_cli, target)
+        except OSError as error:
+            print(
+                "警告：部署已完成，但无法更新 {}/bin/codex-cpa：{}".format(
+                    target, error
+                ),
+                file=sys.stderr,
+            )
+        print("统一入口：{}/bin/codex-cpa".format(target))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except ReleaseError as error:
+        print("错误：{}".format(error), file=sys.stderr)
+        raise SystemExit(2)
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(error.returncode) from error

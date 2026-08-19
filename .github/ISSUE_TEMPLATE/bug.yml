@@ -1,0 +1,64 @@
+name: Bug report
+description: 报告可以稳定复现的问题
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请移除管理密钥、用户 Key、OAuth、Webhook、邮箱、私有域名和生产地址。
+        安全漏洞请使用仓库的私有漏洞报告入口，不要创建公开 Issue。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 例如 v1.0.14
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: 组件
+      options:
+        - Admin
+        - Portal / Usage
+        - Gateway
+        - Edge
+        - CPA account
+        - Deploy / Upgrade
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 说明实际行为和预期行为。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 已脱敏的诊断信息
+      description: 可包含 docker compose ps、codex-cpa health 和必要日志。
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交检查
+      options:
+        - label: 我已移除所有秘密与个人信息。
+          required: true
+        - label: 我已搜索现有 Issue，未发现相同问题。
+          required: true

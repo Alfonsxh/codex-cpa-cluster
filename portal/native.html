@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN" data-brand-page="业务 CPA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>业务 CPA · Codex CPA Cluster</title>
+  <link rel="icon" href="/portal/assets/codex-cpa-cluster-favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/portal/app.css?v=20260815-theme-password-actions">
+  <script src="/portal/branding.js" defer></script>
+  <script src="/portal/native.js" defer></script>
+</head>
+<body>
+  <main class="shell native-shell">
+    <a class="back-link" href="/">← 返回服务入口</a>
+    <header class="native-head">
+      <div>
+        <p class="eyebrow"><span data-brand-product-name>Codex CPA Cluster</span> · BUSINESS ACCOUNTS</p>
+        <h1>业务 CPA</h1>
+        <p class="subtitle">每个上游账号对应一个独立 CPA。选择账号进入原生管理界面，管理员可以继续添加账号。</p>
+      </div>
+      <div class="environment"><span></span><b id="account-count">正在读取</b></div>
+    </header>
+
+    <section class="native-grid" id="native-grid" aria-label="业务 CPA 原生管理入口">
+      <a class="native-card add-card" id="add-account-link" href="/admin/?action=add-account">
+        <div class="native-card-top"><span class="native-index">＋</span><span class="access guarded">仅管理员</span></div>
+        <div><p class="kicker">EXPAND ACCOUNT POOL</p><h2>添加业务 CPA</h2><p>验证管理密钥后填写账号标识与邮箱，系统自动分配端口、生成配置并启动容器。</p></div>
+        <div class="native-meta"><span>自动持久化</span><b>添加 →</b></div>
+      </a>
+    </section>
+
+    <div class="native-error" id="native-error" role="alert" hidden>
+      <strong>业务 CPA 列表读取失败</strong>
+      <span>请稍后刷新，或进入管理中心检查服务状态。</span>
+    </div>
+
+    <section class="api-note native-note">
+      <div><p class="kicker">ACCESS CONTROL</p><h2>新增操作只允许管理员执行</h2></div>
+      <span>账号信息保存在控制面数据库；公开页面不会展示管理密钥。</span>
+    </section>
+  </main>
+</body>
+</html>

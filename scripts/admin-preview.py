@@ -12,10 +12,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -453,13 +455,9 @@ class MockAdminData:
         page = min(page, total_pages)
         users = users[(page - 1) * page_size:page * page_size]
         return {
-            "generated_at": self.now,
+            **self.usage_window_context(query),
             "summary_generated_at": self.now,
             "summary_cached": True,
-            "window": query.get("window", ["today"])[0],
-            "window_start_at": self.now - 86400,
-            "window_end_at": self.now,
-            "window_seconds": 86400,
             "users": users,
             "accounts": {account["id"]: {"email": account["email"]} for account in self.accounts},
             "teams": self.teams,
@@ -482,23 +480,41 @@ class MockAdminData:
             })
         return {"generated_at": self.now, "window": "today", "window_start_at": self.now - 86400, "window_end_at": self.now, "window_seconds": 86400, "user": {**summary, "accounts": accounts}}
 
-    def teams_usage(self):
+    def usage_window_context(self, query):
+        window = query.get("window", ["today"])[0]
+        if window == "custom":
+            start_at = int(query.get("start_at", [self.now - 86400])[0])
+            end_at = int(query.get("end_at", [self.now])[0])
+            return {"generated_at": self.now, "window": window, "window_start_at": start_at, "window_end_at": end_at, "window_seconds": end_at - start_at}
+        if window == "current_week":
+            timezone_name = "Asia/Shanghai"
+            local_now = datetime.fromtimestamp(self.now, ZoneInfo(timezone_name))
+            start = (local_now - timedelta(days=local_now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            end = start + timedelta(days=7)
+            return {"generated_at": self.now, "window": window, "window_start_at": int(start.timestamp()), "window_end_at": int(end.timestamp()), "window_seconds": None, "window_timezone": timezone_name}
+        if window == "today":
+            timezone_name = "Asia/Shanghai"
+            local_now = datetime.fromtimestamp(self.now, ZoneInfo(timezone_name))
+            start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            return {"generated_at": self.now, "window": window, "window_start_at": int(start.timestamp()), "window_end_at": self.now, "window_seconds": None, "window_timezone": timezone_name}
+        if window == "all":
+            return {"generated_at": self.now, "window": window, "window_start_at": None, "window_end_at": self.now, "window_seconds": None}
+        window_seconds = int(window)
+        return {"generated_at": self.now, "window": window, "window_start_at": self.now - window_seconds, "window_end_at": self.now, "window_seconds": window_seconds}
+
+    def teams_usage(self, query):
         rows = []
         for index, team in enumerate(self.teams):
             rows.append({**team, "current_user_count": team["user_count"], "usage": {**usage_record(12_400_000 - index * 3_100_000, requests=140 - index * 30, last_used_at=self.now - 600), "active_users": team["user_count"]}})
         rows.append({"id": "unassigned", "name": "未分组", "description": "尚未分配团队的用户", "user_count": 1, "current_user_count": 1, "usage": {**usage_record(880_000, requests=21, last_used_at=self.now - 900), "active_users": 1}})
-        return {"generated_at": self.now, "window": "all", "window_start_at": self.now - 30 * 86400, "window_end_at": self.now, "window_seconds": 30 * 86400, "teams": rows}
+        return {**self.usage_window_context(query), "teams": rows}
 
-    def team_breakdown(self, team_id):
+    def team_breakdown(self, team_id, query):
         details = model_breakdown(self.now, factor=1.1, weighted=True)
         team_users = [user for user in self.users if (user["team_id"] or "unassigned") == team_id]
         return {
             "definition": "team_model_reasoning_effort_tokens",
-            "generated_at": self.now,
-            "window": "today",
-            "window_start_at": self.now - 86400,
-            "window_end_at": self.now,
-            "window_seconds": 86400,
+            **self.usage_window_context(query),
             "team_id": team_id,
             "totals": details["totals"],
             "users": [{"user": user["email"], **user["usage"]} for user in team_users],
@@ -512,6 +528,7 @@ class MockAdminData:
         fields = [
             {"key": "branding.product_name", "label": "产品名称", "description": "公开界面展示名称。", "type": "string", "value": "Codex CPA Cluster", "default": "Codex CPA Cluster", "editable": True, "apply_mode": "live"},
             {"key": "user_quota.default_weekly_tokens", "label": "默认周额度", "description": "用户未配置个人策略时使用。", "type": "integer", "value": 20_000_000, "default": 20_000_000, "unit": "Token", "min": 0, "editable": True, "apply_mode": "quota"},
+            {"key": "user_quota.reset_personal_weekly_on_new_week", "label": "新周恢复默认个人额度", "description": "开启后，个人额度策略只在当前自然周生效。", "type": "boolean", "value": True, "default": True, "editable": True, "apply_mode": "quota"},
         ]
         return {
             "management_key_configured": True,
@@ -519,7 +536,7 @@ class MockAdminData:
             "notifications": {"webhook_configured": False, "webhook_url": "", "last_success_at": 0, "next_schedule_at": 0, "last_error": ""},
             "account_failover": {"enabled": True, "status": "healthy"},
             "user_quota_operations": {"total_users": len(self.users), "users_with_usage": len(self.users), "total_used_tokens": sum(user["weekly_quota"]["used_tokens"] for user in self.users), "total_raw_used_tokens": sum(user["weekly_quota"]["raw_used_tokens"] for user in self.users), "users_with_personal_policy": 0, "users_with_bonus": 0, "users_with_usage_reset": 0, "week_start_at": self.now - 2 * 86400, "week_end_at": self.now + 5 * 86400},
-            "configuration": {"version": 1, "groups": [{"name": "品牌与身份", "fields": [fields[0]]}, {"name": "用户额度", "fields": [fields[1]]}]},
+            "configuration": {"version": 1, "groups": [{"name": "品牌与身份", "fields": [fields[0]]}, {"name": "用户额度", "fields": fields[1:]}]},
             "storage": [{"label": "控制面数据库", "path": "state/control-plane.sqlite3", "exists": True, "mode": "600"}, {"label": "控制面加密主密钥", "path": "secrets/control-plane.key", "exists": True, "mode": "600"}],
             "backups": {"count": 3, "latest": "backups/accounts/preview"},
             "recent_audit": [{"timestamp": self.now - 1800, "action": "preview.open", "target": "local-mock", "outcome": "accepted"}],
@@ -555,9 +572,9 @@ class MockAdminData:
         if path in ("/admin/api/teams", "/admin/api/tags"):
             return HTTPStatus.OK, {"teams": self.teams, "tags": self.tags}
         if path == "/admin/api/teams/usage":
-            return HTTPStatus.OK, self.teams_usage()
+            return HTTPStatus.OK, self.teams_usage(query)
         if path == "/admin/api/teams/usage-breakdown":
-            return HTTPStatus.OK, self.team_breakdown(query.get("team_id", ["unassigned"])[0])
+            return HTTPStatus.OK, self.team_breakdown(query.get("team_id", ["unassigned"])[0], query)
         if path == "/admin/api/settings":
             return HTTPStatus.OK, self.settings()
         if path == "/admin/api/release":

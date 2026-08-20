@@ -40,7 +40,11 @@ sys.path.insert(0, str(APPLICATION_ROOT / "scripts"))
 sys.path.insert(0, str(APPLICATION_ROOT / "admin"))
 import cliproxy  # noqa: E402
 from account_failover import AccountFailoverScheduler, AccountFailoverService  # noqa: E402
-from usage_store import MAX_WEEKLY_QUOTA_TOKENS, UsageStore  # noqa: E402
+from usage_store import (  # noqa: E402
+    MAX_WEEKLY_QUOTA_TOKENS,
+    UsageStore,
+    natural_week_bounds,
+)
 from wecom_notifications import (  # noqa: E402
     NotificationScheduler,
     WeComNotificationService,
@@ -104,6 +108,7 @@ LOGGABLE_EXTRA_SERVICES = (
 DEFAULT_USER_USAGE_WINDOW_SECONDS = 24 * 60 * 60
 USER_USAGE_WINDOWS = {60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60, 30 * 24 * 60 * 60}
 TODAY_USER_USAGE_WINDOW = "today"
+CURRENT_WEEK_USAGE_WINDOW = "current_week"
 ACCOUNT_USAGE_SINCE_RESET = "since_reset"
 CUSTOM_USAGE_WINDOW = "custom"
 OVERVIEW_USAGE_BUCKETS = {
@@ -163,6 +168,8 @@ def parse_user_usage_window(value):
         return None
     if raw == TODAY_USER_USAGE_WINDOW:
         return TODAY_USER_USAGE_WINDOW
+    if raw == CURRENT_WEEK_USAGE_WINDOW:
+        return CURRENT_WEEK_USAGE_WINDOW
     try:
         window = int(raw)
     except ValueError:
@@ -856,6 +863,9 @@ class AdminApplication:
         self.usage_store = UsageStore(
             self.root / "state" / "usage.sqlite3",
             week_timezone=configuration["user_quota.timezone"],
+            reset_personal_weekly_on_new_week=configuration[
+                "user_quota.reset_personal_weekly_on_new_week"
+            ],
         )
         self._disable_legacy_default_portal_credentials()
         self.notifications = WeComNotificationService(self.root, store=self.control.store)
@@ -1137,6 +1147,25 @@ class AdminApplication:
                 "window": TODAY_USER_USAGE_WINDOW,
                 "window_seconds": None,
                 "window_start_at": start_at,
+                "window_end_at": generated_at,
+                "window_timezone": timezone_name,
+            }
+        if usage_window == CURRENT_WEEK_USAGE_WINDOW:
+            timezone_name = self._configuration_value(
+                "user_quota.timezone",
+                "UTC",
+            )
+            start_at, end_at = natural_week_bounds(
+                generated_at,
+                timezone_name,
+            )
+            return {
+                "generated_at": generated_at,
+                "window": CURRENT_WEEK_USAGE_WINDOW,
+                "window_seconds": None,
+                "window_start_at": start_at,
+                "window_end_at": end_at,
+                "window_timezone": timezone_name,
             }
         if usage_window == ACCOUNT_USAGE_SINCE_RESET:
             return {
@@ -1151,6 +1180,7 @@ class AdminApplication:
                 "window": "all",
                 "window_seconds": None,
                 "window_start_at": None,
+                "window_end_at": generated_at,
             }
         window_seconds = int(usage_window)
         return {
@@ -1158,6 +1188,7 @@ class AdminApplication:
             "window": window_seconds,
             "window_seconds": window_seconds,
             "window_start_at": generated_at - window_seconds,
+            "window_end_at": generated_at,
         }
 
     def _usage_limit_cache_seconds(self):
@@ -2532,6 +2563,7 @@ class AdminApplication:
         bounded_start_window = (
             custom_window
             or usage_window["window"] == TODAY_USER_USAGE_WINDOW
+            or usage_window["window"] == CURRENT_WEEK_USAGE_WINDOW
         )
         query_start_at = (
             usage_window["window_start_at"] if bounded_start_window else None
@@ -2953,7 +2985,9 @@ class AdminApplication:
         custom_window = usage_window["window"] == CUSTOM_USAGE_WINDOW
         query_start_at = (
             usage_window["window_start_at"]
-            if custom_window or usage_window["window"] == TODAY_USER_USAGE_WINDOW
+            if custom_window
+            or usage_window["window"] == TODAY_USER_USAGE_WINDOW
+            or usage_window["window"] == CURRENT_WEEK_USAGE_WINDOW
             else None
         )
         query_end_at = usage_window.get("window_end_at") if custom_window else None
@@ -3056,14 +3090,17 @@ class AdminApplication:
         known_users = {record["user"] for record in self.control._read_registry()}
         if user not in known_users:
             raise APIError(HTTPStatus.NOT_FOUND, "用户不存在", "user_not_found")
-        default_limit = self.control.configuration()["values"][
-            "user_quota.default_weekly_tokens"
+        configuration = self.control.configuration()["values"]
+        default_limit = configuration["user_quota.default_weekly_tokens"]
+        weekly_quota = self.usage_store.weekly_quotas(
+            [user], default_limit
+        )[user]
+        weekly_quota["personal_policy_reset_enabled"] = configuration[
+            "user_quota.reset_personal_weekly_on_new_week"
         ]
         return {
             "user": user,
-            "weekly_quota": self.usage_store.weekly_quotas(
-                [user], default_limit
-            )[user],
+            "weekly_quota": weekly_quota,
             "adjustments": self.usage_store.quota_adjustment_history(user),
         }
 
@@ -3073,12 +3110,16 @@ class AdminApplication:
         if user not in known_users:
             raise APIError(HTTPStatus.NOT_FOUND, "用户不存在", "user_not_found")
         mode = str(body.get("mode") or "").strip().lower()
+        reset_on_new_week = self.control.configuration()["values"][
+            "user_quota.reset_personal_weekly_on_new_week"
+        ]
         with self.action_lock:
             self.usage_store.set_quota_policy(
                 user,
                 mode,
                 body.get("weekly_tokens"),
                 created_by="admin",
+                reset_on_new_week=reset_on_new_week,
             )
             self.audit("user.quota.update", "{}:{}".format(user, mode))
         payload = self.user_quota(user)
@@ -3870,8 +3911,11 @@ class AdminApplication:
         custom_start_at=None,
         custom_end_at=None,
     ):
-        if usage_window == TODAY_USER_USAGE_WINDOW:
-            return self._usage_window_context(TODAY_USER_USAGE_WINDOW)[
+        if usage_window in (
+            TODAY_USER_USAGE_WINDOW,
+            CURRENT_WEEK_USAGE_WINDOW,
+        ):
+            return self._usage_window_context(usage_window)[
                 "window_start_at"
             ]
         if usage_window == CUSTOM_USAGE_WINDOW:
@@ -5262,6 +5306,14 @@ class AdminApplication:
                     self.usage_store.set_week_timezone(
                         result["values"]["user_quota.timezone"]
                     )
+                if (
+                    "user_quota.reset_personal_weekly_on_new_week" in changed
+                ):
+                    self.usage_store.configure_personal_quota_weekly_reset(
+                        result["values"][
+                            "user_quota.reset_personal_weekly_on_new_week"
+                        ]
+                    )
                 if "collector" in modes:
                     self.control.compose("restart", "usage-collector")
             except Exception as error:
@@ -5287,6 +5339,14 @@ class AdminApplication:
                     if "user_quota.timezone" in changed:
                         self.usage_store.set_week_timezone(
                             result["before"]["user_quota.timezone"]
+                        )
+                    if (
+                        "user_quota.reset_personal_weekly_on_new_week" in changed
+                    ):
+                        self.usage_store.configure_personal_quota_weekly_reset(
+                            result["before"][
+                                "user_quota.reset_personal_weekly_on_new_week"
+                            ]
                         )
                     if "collector" in modes:
                         self.control.compose("restart", "usage-collector")

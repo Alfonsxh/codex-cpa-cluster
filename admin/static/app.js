@@ -82,8 +82,11 @@
     organizationUsers: [],
     organizationPagination: { page: 1, page_size: 50, total: 0, total_pages: 1 },
     organizationPage: 1,
+    organizationUsageWindow: "current_week",
+    organizationUsageCustomRange: null,
+    organizationUsageContext: null,
+    organizationTeamUsage: [],
     organizationSelectedUsers: new Map(),
-    organizationAllMatches: false,
     selectedUser: "",
     selectedUserQuota: null,
     quotaAction: null,
@@ -233,6 +236,22 @@
     }).format(new Date(value * 1000));
   };
 
+  const formatFullTimeInZone = (timestamp, timeZone = "") => {
+    const value = Number(timestamp);
+    if (!Number.isFinite(value) || value <= 0) return "—";
+    const options = {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false
+    };
+    if (timeZone) options.timeZone = timeZone;
+    try {
+      return new Intl.DateTimeFormat("zh-CN", options).format(new Date(value * 1000));
+    } catch {
+      delete options.timeZone;
+      return new Intl.DateTimeFormat("zh-CN", options).format(new Date(value * 1000));
+    }
+  };
+
   const customUsageRangeLabel = (range) => {
     if (!range?.startAt || !range?.endAt) return "选择时间范围";
     const start = new Date(Number(range.startAt) * 1000);
@@ -273,6 +292,14 @@
         windowKey: "overviewUsageWindow",
         rangeKey: "overviewUsageCustomRange",
         select: "#overview-usage-window"
+      };
+    }
+    if (target === "organization") {
+      return {
+        label: "团队管理",
+        windowKey: "organizationUsageWindow",
+        rangeKey: "organizationUsageCustomRange",
+        select: "#organization-usage-window"
       };
     }
     return target === "account" ? {
@@ -416,6 +443,10 @@
 
   const clearUsageRangeCaches = (target) => {
     if (target === "overview") return;
+    if (target === "organization") {
+      state.organizationUsageContext = null;
+      return;
+    }
     if (target === "account") {
       state.accountUsageBreakdowns.clear();
       state.accountUsageBreakdownLoading.clear();
@@ -990,20 +1021,24 @@
   };
 
   const organizationTeamScope = () => $("#organization-user-scope").value;
-  const organizationTeamQuery = (page = state.organizationPage, pageSize = 50) => {
-    const query = new URLSearchParams({
-      view: "summary",
-      window: $("#organization-usage-window").value,
-      page: String(page),
-      page_size: String(pageSize),
-      q: $("#organization-user-search").value.trim(),
-      sort: "tokens",
-      direction: "desc",
-      usage_state: $("#organization-usage-state").value
-    });
+  const organizationTeamQuery = (page = state.organizationPage, pageSize = 50, fresh = false) => {
+    const query = usageRangeQuery(
+      state.organizationUsageWindow,
+      state.organizationUsageCustomRange,
+      {
+        view: "summary",
+        page: String(page),
+        page_size: String(pageSize),
+        q: $("#organization-user-search").value.trim(),
+        sort: "tokens",
+        direction: "desc",
+        usage_state: $("#organization-usage-state").value
+      }
+    );
     const scope = organizationTeamScope();
     if (scope === "unassigned") query.set("team_id", "unassigned");
     if (scope === "current" && state.organizationTeamId) query.set("team_id", state.organizationTeamId);
+    if (fresh) query.set("fresh", "1");
     return query;
   };
 
@@ -2615,6 +2650,19 @@
 
   const hydrateUserQuotaDrawer = (email, quota = {}, adjustments = []) => {
     state.selectedUserQuota = quota;
+    const configuredReset = configurationField(
+      "user_quota.reset_personal_weekly_on_new_week"
+    );
+    const resetOnNewWeek = typeof quota.personal_policy_reset_enabled === "boolean"
+      ? quota.personal_policy_reset_enabled
+      : configuredReset
+        ? Boolean(configurationDraftValue(configuredReset))
+        : true;
+    const policyLifetimeCopy = resetOnNewWeek
+      ? "仅本周生效，下周恢复组织默认"
+      : "持续生效，直到手动恢复组织默认";
+    $("#user-quota-unlimited-copy").textContent = policyLifetimeCopy;
+    $("#user-quota-custom-copy").textContent = policyLifetimeCopy;
     $("#user-quota-email").textContent = email;
     $("#user-quota-default-copy").textContent = quota.default_limit_tokens == null
       ? "当前组织默认不限额"
@@ -2828,7 +2876,74 @@
       <div class="team-trend-axis"><span>${escapeHTML(formatFullTime(series.start_at))}</span><strong>峰值 ${renderTokenUsage(maximum)}</strong><span>${escapeHTML(formatFullTime(series.end_at))}</span></div></section>`;
   };
 
+  const organizationUsageWindowLabel = () => ({
+    current_week: "本周期",
+    today: "今日",
+    "604800": "近 7 天",
+    "2592000": "近 30 天",
+    all: "全部历史",
+    custom: "自定义范围"
+  })[state.organizationUsageWindow] || "当前范围";
+
+  const organizationUsageQuery = (fresh = false) => {
+    const query = usageRangeQuery(
+      state.organizationUsageWindow,
+      state.organizationUsageCustomRange
+    );
+    if (fresh) query.set("fresh", "1");
+    return query;
+  };
+
+  const rememberOrganizationUsageContext = (payload = {}) => {
+    state.organizationUsageContext = {
+      generated_at: payload.generated_at,
+      window: payload.window,
+      window_start_at: payload.window_start_at,
+      window_end_at: payload.window_end_at,
+      window_timezone: payload.window_timezone || ""
+    };
+  };
+
+  const organizationUsageRangeBoundaries = (verbose = false) => {
+    const context = state.organizationUsageContext || {};
+    const custom = state.organizationUsageCustomRange;
+    const startAt = Number(context.window_start_at)
+      || (state.organizationUsageWindow === "custom" ? Number(custom?.startAt) : 0);
+    const endAt = Number(context.window_end_at)
+      || (state.organizationUsageWindow === "custom" ? Number(custom?.endAt) : 0);
+    const timeZone = String(context.window_timezone || "");
+    const zoneLabel = timeZone || "本地时间";
+    if (state.organizationUsageWindow === "all") {
+      return endAt
+        ? `从最早记录至 ${formatFullTimeInZone(endAt, timeZone)}${verbose ? ` · ${zoneLabel} · 结束时间不包含` : ""}`
+        : "从最早用量记录开始统计";
+    }
+    if (startAt && endAt) {
+      return `${formatFullTimeInZone(startAt, timeZone)} – ${formatFullTimeInZone(endAt, timeZone)}${verbose ? ` · ${zoneLabel} · 结束时间不包含` : ""}`;
+    }
+    return "正在读取周期边界…";
+  };
+
+  const renderOrganizationUsageRange = () => {
+    const label = organizationUsageWindowLabel();
+    const boundaries = organizationUsageRangeBoundaries();
+    const boundaryDetails = organizationUsageRangeBoundaries(true);
+    const catalogHeader = $("#organization-token-column-label");
+    const memberHeader = $("#organization-member-token-label");
+    if (catalogHeader) catalogHeader.textContent = `${label} Token`;
+    if (memberHeader) memberHeader.textContent = `${label} Token`;
+    const rangeLabel = $("#organization-usage-range-label");
+    const rangeBoundaries = $("#organization-usage-range-boundaries");
+    if (rangeLabel) rangeLabel.textContent = label;
+    if (rangeBoundaries) {
+      rangeBoundaries.textContent = boundaries;
+      rangeBoundaries.title = boundaryDetails;
+    }
+  };
+
   const renderOrganizationCatalog = () => {
+    renderCustomUsageRangeControl("organization");
+    renderOrganizationUsageRange();
     const teamSearch = $("#organization-team-search")?.value.trim().toLowerCase() || "";
     const teamStatus = $("#organization-team-status")?.value || "all";
     const teams = state.teams.filter((team) => {
@@ -2838,7 +2953,7 @@
         || (teamStatus === "empty" && Number(team.user_count) === 0);
       return matchesSearch && matchesStatus;
     });
-    const usageByTeam = new Map(state.teamUsage.map((item) => [item.id, item.usage || {}]));
+    const usageByTeam = new Map(state.organizationTeamUsage.map((item) => [item.id, item.usage || {}]));
     $("#team-catalog-list").innerHTML = teams.map((team, index) => {
       const usage = usageByTeam.get(team.id) || {};
       return `<tr><td class="table-index-cell">${index + 1}</td><td><span class="organization-catalog-name"><strong>${escapeHTML(team.name)}</strong><small>${escapeHTML(team.description || "无说明")}</small></span></td><td class="number-cell">${formatNumber(team.user_count)}</td><td class="number-cell">${formatNumber(usage.active_users || 0)}</td><td class="number-cell token-total">${renderTokenUsage(usage.weighted_tokens || 0)}</td><td>${formatTime(team.updated_at)}</td><td><div class="organization-row-actions"><button class="inline-action" type="button" data-organization-members="${escapeHTML(team.id)}">成员</button><button class="inline-action" type="button" data-organization-edit="${escapeHTML(team.id)}">编辑</button><button class="inline-action danger-text" type="button" data-organization-delete="${escapeHTML(team.id)}" ${team.user_count ? 'disabled title="请先移出团队成员"' : ""}>删除</button></div></td></tr>`;
@@ -2858,7 +2973,6 @@
   };
 
   const selectedOrganizationTeam = () => state.teams.find((team) => team.id === state.organizationTeamId) || null;
-  const organizationUsageWindowLabel = () => ({ today: "今日", "604800": "近 7 天", "2592000": "近 30 天", all: "全部历史" }[$("#organization-usage-window").value] || "当前范围");
 
   const organizationTeamRow = (user, index) => {
     const selected = state.organizationSelectedUsers.has(user.email);
@@ -2877,10 +2991,10 @@
     if (!team) {
       $("#organization-member-body").innerHTML = '<tr><td colspan="6" class="team-usage-state">请选择一个团队</td></tr>';
       $("#organization-pagination").hidden = true;
-      $("#organization-select-all").hidden = true;
       $("#organization-team-bulk").hidden = true;
       return;
     }
+    renderOrganizationUsageRange();
     $("#organization-member-body").innerHTML = state.organizationUsers.map(organizationTeamRow).join("") || '<tr><td colspan="6" class="team-usage-state">当前条件没有匹配用户</td></tr>';
     const pagination = state.organizationPagination;
     $("#organization-pagination").hidden = !pagination.total;
@@ -2888,12 +3002,6 @@
     $("#organization-page-label").textContent = `${pagination.page} / ${pagination.total_pages}`;
     $("#organization-page-prev").disabled = pagination.page <= 1;
     $("#organization-page-next").disabled = pagination.page >= pagination.total_pages;
-    $("#organization-select-all").hidden = !pagination.total;
-    const scopeLabel = ({ current: "当前团队成员", unassigned: "未分组用户", all: "全部用户" })[organizationTeamScope()] || "全部用户";
-    const usageLabel = ({ used: "已产生 Token", unused: "未产生 Token", all: "不限用量" })[$("#organization-usage-state").value] || "不限用量";
-    $("#organization-match-summary").textContent = `${scopeLabel} · ${usageLabel} · ${organizationUsageWindowLabel()}，共 ${formatNumber(pagination.total)} 位`;
-    $("#organization-select-matches").textContent = state.organizationAllMatches ? "已选择全部匹配用户" : `选择全部匹配的 ${formatNumber(pagination.total)} 位用户`;
-    $("#organization-select-matches").disabled = state.organizationAllMatches;
     const selectionCount = state.organizationSelectedUsers.size;
     $("#organization-team-bulk").hidden = selectionCount === 0;
     $("#organization-selection-count").textContent = `已选择 ${formatNumber(selectionCount)} 位用户`;
@@ -2902,30 +3010,37 @@
     $("#organization-select-page").indeterminate = !everyVisible && state.organizationUsers.some((user) => state.organizationSelectedUsers.has(user.email));
   };
 
-  const loadOrganizationTeamMembers = async () => {
+  const loadOrganizationTeamMembers = async (fresh = false) => {
     if (!state.organizationTeamId) return renderOrganizationTeamMembers();
     $("#organization-team-error").textContent = "";
+    const usageQuery = organizationUsageQuery(fresh);
     const [users, usage] = await Promise.all([
-      api(`/users?${organizationTeamQuery().toString()}`),
-      api(`/teams/usage?window=${encodeURIComponent($("#organization-usage-window").value)}`)
+      api(`/users?${organizationTeamQuery(state.organizationPage, 50, fresh).toString()}`),
+      api(`/teams/usage?${usageQuery.toString()}`)
     ]);
     state.organizationUsers = users.users || [];
     state.organizationPagination = users.pagination || { page: 1, page_size: 50, total: 0, total_pages: 1 };
-    state.teamUsage = usage.teams || [];
+    state.organizationTeamUsage = usage.teams || [];
+    rememberOrganizationUsageContext(usage);
     renderOrganizationCatalog();
     renderOrganizationTeamMembers();
   };
 
   const loadOrganizationWorkspace = async (fresh = false) => {
     await loadOrganizationCatalog();
+    if ($("#organization-members-dialog")?.open && state.organizationTeamId) {
+      await loadOrganizationTeamMembers(fresh);
+      return;
+    }
     let usage;
     try {
-      usage = await api(`/teams/usage?window=all${fresh ? "&fresh=1" : ""}`);
+      usage = await api(`/teams/usage?${organizationUsageQuery(fresh).toString()}`);
     } catch (error) {
       if (fresh) throw error;
       usage = { teams: [] };
     }
-    state.teamUsage = usage.teams || [];
+    state.organizationTeamUsage = usage.teams || [];
+    rememberOrganizationUsageContext(usage);
     renderOrganizationCatalog();
   };
 
@@ -2972,19 +3087,15 @@
   const openOrganizationMembersDialog = async (id) => {
     state.organizationTeamId = id;
     state.organizationSelectedUsers.clear();
-    state.organizationAllMatches = false;
     const item = selectedOrganizationTeam();
     if (!item) return;
     $("#organization-members-kicker").textContent = "TEAM MEMBERS";
     $("#organization-members-title").textContent = `${item.name} · 成员管理`;
-    $("#organization-team-context").hidden = false;
-    $("#organization-team-context-name").textContent = item.name;
-    $("#organization-team-context-count").textContent = `${formatNumber(item.user_count)} 位现有成员`;
     $("#organization-team-relation-header").textContent = `与“${item.name}”的关系`;
     $("#organization-pagination").hidden = true;
     $("#organization-team-bulk").hidden = true;
-    $("#organization-select-all").hidden = true;
     $("#organization-team-error").textContent = "";
+    renderOrganizationUsageRange();
     $("#organization-members-dialog").showModal();
     try {
       await loadOrganizationTeamMembers();
@@ -3005,21 +3116,6 @@
     } catch (error) {
       showToast(error.message, "error");
     }
-  };
-
-  const loadAllOrganizationMatches = async () => {
-    const selected = new Map();
-    let page = 1;
-    let totalPages = 1;
-    do {
-      const payload = await api(`/users?${organizationTeamQuery(page, 100).toString()}`);
-      (payload.users || []).forEach((user) => selected.set(user.email, user.team_id || null));
-      totalPages = payload.pagination?.total_pages || 1;
-      page += 1;
-    } while (page <= totalPages);
-    state.organizationSelectedUsers = selected;
-    state.organizationAllMatches = true;
-    renderOrganizationTeamMembers();
   };
 
   const submitOrganizationTeamAssignment = async (mode = "join") => {
@@ -3056,7 +3152,6 @@
       }
       showToast(`已更新 ${eligible.length} 位用户的团队归属`);
       state.organizationSelectedUsers.clear();
-      state.organizationAllMatches = false;
       state.viewLoadedAt.delete("users");
       await loadOrganizationWorkspace();
     } catch (error) {
@@ -3309,7 +3404,7 @@
     "CPA 请求": "统一作用于所有业务 CPA",
     "用量与额度": "额度查询与用量事件策略",
     "账号自动切换": "官方账号额度耗尽后按剩余资源批量迁移用户路由",
-    "用户额度": "全部用户的系统默认周额度与网关故障策略",
+    "用户额度": "全部用户的系统默认周额度、个人策略自动恢复与网关故障策略",
     "推理强度策略": "同一处管理用户额度倍率和账号 Token 明细配色；两类配置独立生效",
     "企业微信通知": "定时发送 markdown_v2 额度表格并执行阈值预警",
     "会话与采集": "用户会话和采集器吞吐",
@@ -5338,7 +5433,6 @@
       const user = state.organizationUsers.find((item) => item.email === event.target.dataset.organizationUser);
       if (event.target.checked) state.organizationSelectedUsers.set(user.email, user.team_id || null);
       else state.organizationSelectedUsers.delete(event.target.dataset.organizationUser);
-      state.organizationAllMatches = false;
       renderOrganizationTeamMembers();
       return;
     }
@@ -5347,7 +5441,6 @@
         if (event.target.checked) state.organizationSelectedUsers.set(user.email, user.team_id || null);
         else state.organizationSelectedUsers.delete(user.email);
       });
-      state.organizationAllMatches = false;
       renderOrganizationTeamMembers();
       return;
     }
@@ -5380,12 +5473,8 @@
 
   $("#add-user-button").addEventListener("click", openAddUser);
   $("#manage-organization-button").addEventListener("click", openOrganizationCatalog);
-  $("#organization-select-matches").addEventListener("click", () => {
-    loadAllOrganizationMatches().catch((error) => { $("#organization-team-error").textContent = error.message; });
-  });
   $("#organization-selection-clear").addEventListener("click", () => {
     state.organizationSelectedUsers.clear();
-    state.organizationAllMatches = false;
     renderOrganizationTeamMembers();
   });
   $("#organization-team-assign").addEventListener("click", () => submitOrganizationTeamAssignment("join"));
@@ -5495,12 +5584,24 @@
     window.clearTimeout(organizationSearchTimer);
     state.organizationPage = 1;
     state.organizationSelectedUsers.clear();
-    state.organizationAllMatches = false;
     organizationSearchTimer = window.setTimeout(() => loadOrganizationTeamMembers().catch((error) => { $("#organization-team-error").textContent = error.message; }), 220);
   };
   $("#organization-user-search").addEventListener("input", scheduleOrganizationTeamLoad);
-  ["organization-user-scope", "organization-usage-state", "organization-usage-window"].forEach((id) => {
+  ["organization-user-scope", "organization-usage-state"].forEach((id) => {
     $(`#${id}`).addEventListener("change", (event) => { syncEnhancedSelect(event.target); scheduleOrganizationTeamLoad(); });
+  });
+  $("#organization-usage-window").addEventListener("change", async (event) => {
+    if (event.target.value === "custom") {
+      event.target.value = state.organizationUsageWindow;
+      syncEnhancedSelect(event.target);
+      openCustomUsageRange("organization");
+      return;
+    }
+    state.organizationUsageWindow = event.target.value;
+    syncEnhancedSelect(event.target);
+    clearUsageRangeCaches("organization");
+    renderOrganizationUsageRange();
+    await refreshAll(false);
   });
   $("#organization-team-search").addEventListener("input", renderOrganizationCatalog);
   $("#organization-team-status").addEventListener("change", renderOrganizationCatalog);

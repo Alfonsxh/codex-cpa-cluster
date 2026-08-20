@@ -532,6 +532,15 @@ CONFIG_DEFINITIONS = (
         "apply_mode": "quota",
     },
     {
+        "key": "user_quota.reset_personal_weekly_on_new_week",
+        "group": "用户额度",
+        "label": "新周恢复默认个人额度",
+        "description": "开启后，所有用户的单独不限额或自定义额度只在当前自然周生效，下周开始时自动恢复继承系统默认值。",
+        "type": "boolean",
+        "default": True,
+        "apply_mode": "quota",
+    },
+    {
         "key": "user_quota.timezone",
         "group": "用户额度",
         "label": "用户自然周时区",

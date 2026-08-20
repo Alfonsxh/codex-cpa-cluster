@@ -930,9 +930,10 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 48%, transpar
 .field small { color: var(--faint); font-size: 8px; }
 .organization-catalog-panel { overflow: hidden; }
 .organization-table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
-.organization-table-filters { display: grid !important; width: min(620px, 100%); min-width: 0; grid-template-columns: minmax(260px, 1fr) 150px; gap: 8px !important; }
+.organization-table-filters { display: grid !important; width: min(800px, 100%); min-width: 0; grid-template-columns: minmax(250px, 1fr) 150px 170px; gap: 8px !important; }
 .organization-table-toolbar .search-field { width: 100%; }
-.organization-status-filter select { width: 100%; min-height: 38px; }
+.organization-status-filter, .organization-usage-filter { display: block; min-width: 0; }
+.organization-status-filter select, .organization-usage-filter select { width: 100%; min-height: 38px; }
 .organization-table-toolbar > div { display: flex; align-items: center; gap: 12px; }
 .organization-table-toolbar > div > span { color: var(--faint); font-size: 9px; }
 .organization-catalog-table { width: 100%; min-width: 0; table-layout: fixed; }
@@ -962,13 +963,12 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 48%, transpar
 .organization-row-actions .inline-action { white-space: nowrap; }
 .organization-members-dialog .dialog-card { display: grid; width: min(1240px, calc(100vw - 32px)); height: min(760px, calc(100dvh - 32px)); max-height: none; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
 .organization-members-body { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 0 !important; }
-.organization-member-toolbar { display: grid; grid-template-columns: minmax(210px, 1fr) repeat(3, minmax(120px, .42fr)); align-items: end; gap: 10px; padding: 14px 20px; }
+.organization-member-toolbar { display: grid; grid-template-columns: minmax(210px, 1fr) repeat(2, minmax(120px, .42fr)) minmax(210px, .58fr); align-items: end; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
 .organization-member-toolbar .search-field { width: 100%; }
-.organization-team-context { display: flex; min-height: 40px; align-items: center; justify-content: center; gap: 9px; padding: 8px 20px; color: var(--faint); background: var(--surface-2); border-block: 1px solid var(--line); font-size: 9px; }
-.organization-team-context strong { color: var(--ink); font-size: 10px; }
-.organization-team-context strong::before { display: inline-block; width: 6px; height: 6px; margin-right: 6px; background: var(--accent); border-radius: 50%; content: ""; vertical-align: 1px; }
-.organization-team-context span:last-child { padding-left: 9px; border-left: 1px solid var(--line); }
-.organization-select-all { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 14px; color: var(--faint); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); border-block: 1px solid var(--line); font-size: 9px; }
+.organization-usage-range-readonly { display: grid; min-width: 0; min-height: 38px; align-content: center; gap: 3px; padding: 1px 2px; }
+.organization-usage-range-readonly > span { color: var(--faint); font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.organization-usage-range-readonly strong { color: var(--ink); font-size: 10px; }
+.organization-usage-range-readonly small { overflow: hidden; color: var(--faint); font: 8px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .organization-member-table-wrap { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; border-bottom: 1px solid var(--line); scrollbar-width: none; }
 .organization-member-table-wrap::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .organization-member-table { width: 100%; min-width: 0; table-layout: fixed; }
@@ -1646,6 +1646,8 @@ body:has(.dialog[open]) { overflow: hidden !important; }
   .organization-table-filters { grid-template-columns: minmax(0, 1fr); }
   .organization-table-toolbar > div { justify-content: space-between; }
   .organization-member-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .organization-catalog-panel > .table-wrap, .organization-member-table-wrap { overflow-x: auto; }
+  .organization-catalog-table, .organization-member-table { min-width: 900px; }
   .management-toolbar { gap: 14px; }
   .management-toolbar-controls { grid-template-columns: minmax(0, 1fr); }
   .management-filter-grid, .account-filter-grid, .user-filter-grid { grid-template-columns: minmax(0, 1fr); }

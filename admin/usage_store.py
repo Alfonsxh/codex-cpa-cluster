@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - production and CI use Python 3.9+
     ZoneInfo = None
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 USAGE_BREAKDOWN_STARTED_AT_KEY = "usage_breakdown_started_at"
 WEEKLY_USAGE_BACKFILL_KEY = "weekly_usage_backfill_version"
 WEEKLY_USAGE_BACKFILL_VERSION = "2"
@@ -173,11 +173,23 @@ def natural_week_bounds(value=None, timezone_name=DEFAULT_WEEK_TIMEZONE):
 
 
 class UsageStore:
-    def __init__(self, path, week_timezone=DEFAULT_WEEK_TIMEZONE):
+    def __init__(
+        self,
+        path,
+        week_timezone=DEFAULT_WEEK_TIMEZONE,
+        reset_personal_weekly_on_new_week=True,
+    ):
         self.path = Path(path).resolve()
         self.week_timezone, unused_zone = _week_timezone(week_timezone)
+        self.reset_personal_weekly_on_new_week = bool(
+            reset_personal_weekly_on_new_week
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
+        self.configure_personal_quota_weekly_reset(
+            self.reset_personal_weekly_on_new_week,
+            reschedule=True,
+        )
 
     def _connect(self):
         connection = sqlite3.connect(str(self.path), timeout=10)
@@ -273,7 +285,8 @@ class UsageStore:
                     weekly_tokens INTEGER CHECK(weekly_tokens IS NULL OR weekly_tokens > 0),
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
-                    created_by TEXT NOT NULL DEFAULT 'admin'
+                    created_by TEXT NOT NULL DEFAULT 'admin',
+                    reset_at INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS user_weekly_usage (
@@ -374,6 +387,16 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE user_weekly_usage "
                     "ADD COLUMN weighted_tokens INTEGER NOT NULL DEFAULT 0"
+                )
+            quota_policy_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(user_quota_policies)"
+                )
+            }
+            if "reset_at" not in quota_policy_columns:
+                connection.execute(
+                    "ALTER TABLE user_quota_policies ADD COLUMN reset_at INTEGER"
                 )
             # Email-only sessions issued before password authentication could
             # otherwise be used to claim another user's initial password. The
@@ -1944,6 +1967,7 @@ class UsageStore:
         weekly_tokens=None,
         now=None,
         created_by="admin",
+        reset_on_new_week=None,
     ):
         """Persist a user quota policy; inherit is represented by no row."""
         now = int(time.time()) if now is None else int(now)
@@ -1981,24 +2005,44 @@ class UsageStore:
                         MAX_WEEKLY_QUOTA_TOKENS
                     )
                 )
+        reset_enabled = (
+            self.reset_personal_weekly_on_new_week
+            if reset_on_new_week is None
+            else bool(reset_on_new_week)
+        )
+        reset_at = (
+            natural_week_bounds(now, self.week_timezone)[1]
+            if reset_enabled
+            else None
+        )
         with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO user_quota_policies(
-                    user_email, weekly_tokens, created_at, updated_at, created_by
-                ) VALUES (?, ?, ?, ?, ?)
+                    user_email, weekly_tokens, created_at, updated_at, created_by,
+                    reset_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_email) DO UPDATE SET
                     weekly_tokens = excluded.weekly_tokens,
                     updated_at = excluded.updated_at,
-                    created_by = excluded.created_by
+                    created_by = excluded.created_by,
+                    reset_at = excluded.reset_at
                 """,
-                (user, normalized_tokens, now, now, str(created_by)),
+                (
+                    user,
+                    normalized_tokens,
+                    now,
+                    now,
+                    str(created_by),
+                    reset_at,
+                ),
             )
         return {
             "mode": mode,
             "weekly_tokens": normalized_tokens,
             "updated_at": now,
             "updated_by": str(created_by),
+            "reset_at": reset_at,
         }
 
     def clear_quota_policy(self, user_email):
@@ -2028,6 +2072,50 @@ class UsageStore:
                 users,
             )
         return cursor.rowcount
+
+    def configure_personal_quota_weekly_reset(
+        self,
+        enabled,
+        now=None,
+        reschedule=False,
+    ):
+        """Apply the global personal-policy lifetime without resetting mid-week."""
+        now = int(time.time()) if now is None else int(now)
+        self.reset_personal_weekly_on_new_week = bool(enabled)
+        week_start, week_end = natural_week_bounds(now, self.week_timezone)
+        with self._connection() as connection:
+            expired = connection.execute(
+                "DELETE FROM user_quota_policies "
+                "WHERE reset_at IS NOT NULL AND reset_at <= ?",
+                (now,),
+            ).rowcount
+            scheduled = 0
+            cancelled = 0
+            if self.reset_personal_weekly_on_new_week:
+                if reschedule:
+                    scheduled = connection.execute(
+                        "UPDATE user_quota_policies SET reset_at = ?",
+                        (week_end,),
+                    ).rowcount
+                else:
+                    scheduled = connection.execute(
+                        "UPDATE user_quota_policies SET reset_at = ? "
+                        "WHERE reset_at IS NULL",
+                        (week_end,),
+                    ).rowcount
+            else:
+                cancelled = connection.execute(
+                    "UPDATE user_quota_policies SET reset_at = NULL "
+                    "WHERE reset_at IS NOT NULL"
+                ).rowcount
+        return {
+            "enabled": self.reset_personal_weekly_on_new_week,
+            "week_start_at": week_start,
+            "week_end_at": week_end,
+            "expired_policies": expired,
+            "scheduled_policies": scheduled,
+            "cancelled_schedules": cancelled,
+        }
 
     @staticmethod
     def _quota_adjustment_reason(value):
@@ -2259,11 +2347,11 @@ class UsageStore:
                         "weighted_tokens": int(row["weighted_tokens"] or 0),
                     }
                 for row in connection.execute(
-                    "SELECT user_email, weekly_tokens, updated_at, created_by "
-                    "FROM user_quota_policies WHERE user_email IN ({})".format(
-                        placeholders
-                    ),
-                    batch,
+                    "SELECT user_email, weekly_tokens, updated_at, created_by, "
+                    "reset_at FROM user_quota_policies "
+                    "WHERE user_email IN ({}) "
+                    "AND (reset_at IS NULL OR reset_at > ?)".format(placeholders),
+                    (*batch, now),
                 ):
                     policies[row["user_email"]] = row
                 for row in connection.execute(
@@ -2346,6 +2434,11 @@ class UsageStore:
                 ),
                 "policy_updated_at": int(policy["updated_at"]) if policy is not None else None,
                 "policy_updated_by": str(policy["created_by"]) if policy is not None else None,
+                "policy_reset_at": (
+                    int(policy["reset_at"])
+                    if policy is not None and policy["reset_at"] is not None
+                    else None
+                ),
                 "default_limit_tokens": (
                     None if default_weekly_tokens is None else int(default_weekly_tokens)
                 ),
@@ -2453,7 +2546,16 @@ class UsageStore:
 
     def set_week_timezone(self, value, now=None):
         self.week_timezone, unused_zone = _week_timezone(value)
-        return self.ensure_week_timezone(now=now)
+        result = self.ensure_week_timezone(now=now)
+        if result["changed"]:
+            result["quota_policy_reset"] = (
+                self.configure_personal_quota_weekly_reset(
+                    self.reset_personal_weekly_on_new_week,
+                    now=now,
+                    reschedule=True,
+                )
+            )
+        return result
 
     def ensure_weekly_usage_backfilled(self, now=None):
         """Backfill historical usage once before any quota snapshot can be published."""

@@ -75,6 +75,8 @@ HTTP 和 HTTPS 同时可访问，需要外部反向代理分别监听两个协�
 
 用户周额度与“今日”统计使用独立的 `user_quota.timezone`，开源默认值为 `UTC`；通知调度的 `notification.timezone` 也默认为 `UTC`。已有部署可在部署档案中显式保留原时区。修改用户额度时区会重新划分历史周聚合和调整记录，并重启采集器。
 
+`user_quota.reset_personal_weekly_on_new_week` 默认开启。开启时，管理员为用户设置的“单独不限额”或“自定义额度”只持续到当前自然周结束，下一周开始后恢复继承 `user_quota.default_weekly_tokens`；本周追加额度和用量清零调整仍按原规则随周结束失效。关闭开关后，现有及后续个人额度策略会持续生效，直到管理员手动恢复默认。首次升级到包含该开关的版本时，已有个人策略会保留到当前周结束，不会在部署当日立即清除。
+
 页面 Logo 通过“品牌与身份”中的上传控件管理。允许 PNG、JPEG、GIF、WebP 和 SVG，最大 2 MiB。SVG 会拒绝脚本、事件处理器、外部资源、`foreignObject`、实体和危险 URL；原始文件作为 BLOB 存入控制面数据库，通过 `/branding/logo` 输出。
 
 ## JSON 配置档案

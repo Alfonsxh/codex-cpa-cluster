@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).parents[1]
@@ -260,6 +261,12 @@ class UsageStoreTests(unittest.TestCase):
                         "PRAGMA table_info(user_weekly_usage)"
                     )
                 }
+                quota_policy_columns = {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(user_quota_policies)"
+                    )
+                }
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
             self.assertIn("alias", columns)
             self.assertIn("reasoning_effort", columns)
@@ -269,8 +276,46 @@ class UsageStoreTests(unittest.TestCase):
             self.assertIn("team_id", columns)
             self.assertIn("team_membership_version", columns)
             self.assertIn("weighted_tokens", weekly_columns)
-            self.assertEqual(version, 9)
+            self.assertIn("reset_at", quota_policy_columns)
+            self.assertEqual(version, 10)
             self.assertEqual(store.usage_breakdown_started_at(), 0)
+
+    def test_schema_upgrade_preserves_existing_personal_policy_until_next_week(self):
+        path = Path(self.tmp.name) / "legacy-quota.sqlite3"
+        zone = datetime.timezone(datetime.timedelta(hours=8))
+        now = int(datetime.datetime(2026, 8, 20, 12, 0, tzinfo=zone).timestamp())
+        unused_start, week_end = self.module.natural_week_bounds(
+            now,
+            "Asia/Shanghai",
+        )
+        with closing(sqlite3.connect(str(path))) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE user_quota_policies (
+                    user_email TEXT PRIMARY KEY,
+                    weekly_tokens INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    created_by TEXT NOT NULL DEFAULT 'admin'
+                );
+                INSERT INTO user_quota_policies VALUES (
+                    'alice@example.com', 500, 100, 100, 'admin'
+                );
+                PRAGMA user_version = 9;
+                """
+            )
+
+        with mock.patch.object(self.module.time, "time", return_value=now):
+            self.module.UsageStore(path, week_timezone="Asia/Shanghai")
+
+        with closing(sqlite3.connect(str(path))) as connection:
+            policy = connection.execute(
+                "SELECT weekly_tokens, reset_at FROM user_quota_policies "
+                "WHERE user_email = 'alice@example.com'"
+            ).fetchone()
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(policy, (500, week_end))
+        self.assertEqual(version, 10)
 
     def test_team_reports_follow_current_membership_without_rewriting_events(self):
         now = 20_000
@@ -530,6 +575,9 @@ class UsageStoreTests(unittest.TestCase):
                 2026, 8, 2, 18, 0, tzinfo=datetime.timezone.utc
             ).timestamp()
         )
+        self.store.set_quota_policy(
+            "alice@example.com", "custom", weekly_tokens=500, now=event_at
+        )
         self.store.ingest_events(
             "gamma",
             [self.event(self.records[0]["key"], "timezone-change", event_at)],
@@ -549,6 +597,9 @@ class UsageStoreTests(unittest.TestCase):
         self.assertEqual(after["timezone"], "Asia/Shanghai")
         self.assertNotEqual(before["week_start_at"], after["week_start_at"])
         self.assertEqual(after["weighted_raw_used_tokens"], 140)
+        self.assertEqual(before["policy_reset_at"], before["week_end_at"])
+        self.assertEqual(after["policy_reset_at"], after["week_end_at"])
+        self.assertNotEqual(before["policy_reset_at"], after["policy_reset_at"])
 
     def test_weekly_quota_aggregates_accounts_and_persists_policy_modes(self):
         zone = datetime.timezone(datetime.timedelta(hours=8))
@@ -582,13 +633,31 @@ class UsageStoreTests(unittest.TestCase):
         self.store.set_quota_policy(
             "alice@example.com", "custom", weekly_tokens=500, now=now
         )
+        current_custom = self.store.weekly_quotas(
+            ["alice@example.com"], None, now=now
+        )["alice@example.com"]
+        self.assertEqual(current_custom["policy_mode"], "custom")
+        self.assertEqual(
+            current_custom["policy_reset_at"],
+            current_custom["week_end_at"],
+        )
         next_week = now + 7 * 24 * 60 * 60
-        custom = self.store.weekly_quotas(
+        restored = self.store.weekly_quotas(
             ["alice@example.com"], None, now=next_week
         )["alice@example.com"]
-        self.assertEqual(custom["policy_mode"], "custom")
-        self.assertEqual(custom["limit_tokens"], 500)
-        self.assertEqual(custom["used_tokens"], 0)
+        self.assertEqual(restored["policy_mode"], "inherit")
+        self.assertTrue(restored["unlimited"])
+
+        self.store.configure_personal_quota_weekly_reset(False, now=next_week)
+        self.store.set_quota_policy(
+            "alice@example.com", "custom", weekly_tokens=700, now=next_week
+        )
+        persistent = self.store.weekly_quotas(
+            ["alice@example.com"], None, now=next_week + 7 * 24 * 60 * 60
+        )["alice@example.com"]
+        self.assertEqual(persistent["policy_mode"], "custom")
+        self.assertEqual(persistent["limit_tokens"], 700)
+        self.assertIsNone(persistent["policy_reset_at"])
 
         self.store.clear_quota_policy("alice@example.com")
         inherited_unlimited = self.store.weekly_quotas(
@@ -606,6 +675,68 @@ class UsageStoreTests(unittest.TestCase):
                         "custom",
                         weekly_tokens=value,
                     )
+
+    def test_enabling_weekly_policy_reset_waits_for_next_boundary(self):
+        zone = datetime.timezone(datetime.timedelta(hours=8))
+        now = int(datetime.datetime(2026, 8, 20, 12, 0, tzinfo=zone).timestamp())
+        self.store.set_week_timezone("Asia/Shanghai", now=now)
+        self.store.configure_personal_quota_weekly_reset(False, now=now)
+        self.store.set_quota_policy(
+            "alice@example.com", "custom", weekly_tokens=500, now=now
+        )
+
+        scheduled = self.store.configure_personal_quota_weekly_reset(
+            True,
+            now=now,
+        )
+        current = self.store.weekly_quotas(
+            ["alice@example.com"], 1_000, now=now
+        )["alice@example.com"]
+
+        self.assertEqual(scheduled["expired_policies"], 0)
+        self.assertEqual(scheduled["scheduled_policies"], 1)
+        self.assertEqual(current["policy_mode"], "custom")
+        self.assertEqual(current["policy_reset_at"], current["week_end_at"])
+
+        restored = self.store.weekly_quotas(
+            ["alice@example.com"], 1_000, now=current["week_end_at"]
+        )["alice@example.com"]
+        cleanup = self.store.configure_personal_quota_weekly_reset(
+            True,
+            now=current["week_end_at"],
+        )
+        with self.store._connection() as connection:
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM user_quota_policies"
+            ).fetchone()[0]
+        self.assertEqual(restored["policy_mode"], "inherit")
+        self.assertEqual(restored["limit_tokens"], 1_000)
+        self.assertEqual(cleanup["expired_policies"], 1)
+        self.assertEqual(remaining, 0)
+
+    def test_disabling_reset_after_boundary_does_not_restore_expired_policy(self):
+        zone = datetime.timezone(datetime.timedelta(hours=8))
+        now = int(datetime.datetime(2026, 8, 20, 12, 0, tzinfo=zone).timestamp())
+        self.store.set_week_timezone("Asia/Shanghai", now=now)
+        self.store.set_quota_policy(
+            "alice@example.com", "custom", weekly_tokens=500, now=now
+        )
+        current = self.store.weekly_quotas(
+            ["alice@example.com"], 1_000, now=now
+        )["alice@example.com"]
+
+        disabled = self.store.configure_personal_quota_weekly_reset(
+            False,
+            now=current["week_end_at"],
+        )
+        restored = self.store.weekly_quotas(
+            ["alice@example.com"], 1_000, now=current["week_end_at"]
+        )["alice@example.com"]
+
+        self.assertEqual(disabled["expired_policies"], 1)
+        self.assertEqual(disabled["cancelled_schedules"], 0)
+        self.assertEqual(restored["policy_mode"], "inherit")
+        self.assertEqual(restored["limit_tokens"], 1_000)
 
     def test_weekly_quota_adjustments_preserve_raw_usage_and_expire_next_week(self):
         zone = datetime.timezone(datetime.timedelta(hours=8))

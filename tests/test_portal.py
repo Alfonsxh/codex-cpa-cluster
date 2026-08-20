@@ -679,10 +679,10 @@ class PortalTests(unittest.TestCase):
         self.assertIn('event.target.closest("#send-notification-button")', script)
         self.assertIn('api("/notifications/send"', script)
         self.assertIn("notification-webhook-state", script)
-        self.assertIn("/admin/app.css?v=20260818-password-visibility-v1", html)
+        self.assertIn("/admin/app.css?v=20260820-team-period-v1", html)
         self.assertIn("/admin/monitor-utils.js?v=20260812-adaptive-chart-points", html)
         self.assertIn("/admin/view-state-utils.js?v=20260819-view-state-v1", html)
-        self.assertIn("/admin/app.js?v=20260819-refresh-consistency-v1", html)
+        self.assertIn("/admin/app.js?v=20260820-team-period-weekly-policy-v1", html)
         self.assertLess(
             html.index("/admin/view-state-utils.js"),
             html.index("/admin/app.js"),
@@ -691,11 +691,20 @@ class PortalTests(unittest.TestCase):
         self.assertIn("${renderModelEffortProgress(model)}", script)
         self.assertIn("色块表示该模型各推理强度 Token 占比", script)
         self.assertIn('width: min(780px, 100vw)', style)
-        self.assertIn('id="organization-team-context"', html)
+        self.assertNotIn('id="organization-team-context"', html)
+        self.assertNotIn('id="organization-select-all"', html)
+        self.assertIn('class="organization-usage-range-readonly"', html)
+        self.assertIn('<option value="current_week" selected>本周期</option>', html)
+        self.assertIn('id="organization-token-column-label">本周期 Token</th>', html)
         self.assertIn('id="organization-team-relation-header"', html)
         self.assertIn('<option value="current" selected>当前团队成员</option>', html)
         self.assertIn('<option value="all" selected>不限用量</option>', html)
-        self.assertIn('$("#organization-team-context-name").textContent = item.name;', script)
+        self.assertIn('organizationUsageWindow: "current_week"', script)
+        self.assertIn('openCustomUsageRange("organization")', script)
+        self.assertIn('renderOrganizationUsageRange();', script)
+        self.assertIn('organizationTeamQuery(state.organizationPage, 50, fresh)', script)
+        self.assertIn('const usageQuery = organizationUsageQuery(fresh);', script)
+        self.assertNotIn('$("#organization-team-context-name").textContent = item.name;', script)
         self.assertIn('$("#organization-team-relation-header").textContent = `与“${item.name}”的关系`;', script)
         self.assertIn("本团队成员", script)
         self.assertIn("属于其他团队", script)
@@ -858,7 +867,7 @@ class PortalTests(unittest.TestCase):
         html = (ROOT / "admin" / "static" / "index.html").read_text(encoding="utf-8")
         style = (ROOT / "admin" / "static" / "app.css").read_text(encoding="utf-8")
 
-        self.assertIn('/admin/app.css?v=20260818-password-visibility-v1', html)
+        self.assertIn('/admin/app.css?v=20260820-team-period-v1', html)
         self.assertIn("#view-overview.active {\n  scrollbar-color: transparent transparent;", style)
         self.assertIn("scrollbar-gutter: stable;", style)
         self.assertIn("#view-overview.active:hover,\n#view-overview.active:focus-within", style)
@@ -1006,7 +1015,7 @@ class PortalTests(unittest.TestCase):
         script = (ROOT / "admin" / "static" / "app.js").read_text(encoding="utf-8")
         style = (ROOT / "admin" / "static" / "app.css").read_text(encoding="utf-8")
 
-        self.assertIn('/admin/app.css?v=20260818-password-visibility-v1', html)
+        self.assertIn('/admin/app.css?v=20260820-team-period-v1', html)
         self.assertIn('<div class="topbar-heading">', html)
         self.assertLess(html.index('id="page-title"'), html.index('id="page-eyebrow"'))
         self.assertLess(html.index('<h1>进入管理中心</h1>'), html.index('<p class="eyebrow">CONTROL PLANE</p>'))
@@ -1287,7 +1296,7 @@ class PortalTests(unittest.TestCase):
         style = (ROOT / "admin" / "static" / "app.css").read_text(encoding="utf-8")
         server = (ROOT / "admin" / "server.py").read_text(encoding="utf-8")
 
-        self.assertEqual(html.count('<option value="custom">自定义…</option>'), 2)
+        self.assertEqual(html.count('<option value="custom">自定义…</option>'), 3)
         for element_id in (
             "custom-usage-range-dialog",
             "custom-usage-start-date",
@@ -1514,8 +1523,17 @@ class PortalTests(unittest.TestCase):
         self.assertIn('"group": "用户额度"', quota_settings)
         self.assertIn('"label": "用户周额度系统默认值"', quota_settings)
         self.assertIn('"type": "nullable_integer"', quota_settings)
+        self.assertIn(
+            '"key": "user_quota.reset_personal_weekly_on_new_week"',
+            quota_settings,
+        )
+        self.assertIn('"label": "新周恢复默认个人额度"', quota_settings)
+        self.assertIn('"default": True', quota_settings)
         self.assertIn('"key": "user_quota.fail_open_after_seconds"', quota_settings)
-        self.assertIn('"用户额度": "全部用户的系统默认周额度与网关故障策略"', script)
+        self.assertIn(
+            '"用户额度": "全部用户的系统默认周额度、个人策略自动恢复与网关故障策略"',
+            script,
+        )
         self.assertIn('"group": "推理强度策略"', control)
         self.assertIn('("max", "Max", 2.0)', control)
         self.assertIn(
@@ -1572,6 +1590,8 @@ class PortalTests(unittest.TestCase):
             'id="user-quota-action-dialog"',
             'id="user-quota-action-reason"',
             'id="user-quota-action-confirm"',
+            'id="user-quota-unlimited-copy"',
+            'id="user-quota-custom-copy"',
         ):
             self.assertIn(marker, html)
         self.assertIn('data-user-select="${escapeHTML(user.email)}"', script)
@@ -1579,6 +1599,8 @@ class PortalTests(unittest.TestCase):
         self.assertIn('"reset_all_current_week_usage"', script)
         self.assertIn('"确认清零全部"', script)
         self.assertIn("quotaSystemDangerZone", script)
+        self.assertIn("仅本周生效，下周恢复组织默认", script)
+        self.assertIn("持续生效，直到手动恢复组织默认", script)
         self.assertIn('id="quota-reset-all-users"', script)
         self.assertIn("AdminViewStateUtils.allUserQuotaImpact(summary)", script)
         self.assertIn('users: scope === "all" ? [] : targetUsers.map', script)
@@ -1755,10 +1777,10 @@ class PortalTests(unittest.TestCase):
             admin_html.index("/portal/token-usage.js"),
             admin_html.index("/admin/app.js"),
         )
-        self.assertIn('/admin/app.css?v=20260818-password-visibility-v1', admin_html)
+        self.assertIn('/admin/app.css?v=20260820-team-period-v1', admin_html)
         self.assertIn('/admin/monitor-utils.js?v=20260812-adaptive-chart-points', admin_html)
         self.assertIn('/admin/view-state-utils.js?v=20260819-view-state-v1', admin_html)
-        self.assertIn('/admin/app.js?v=20260819-refresh-consistency-v1', admin_html)
+        self.assertIn('/admin/app.js?v=20260820-team-period-weekly-policy-v1', admin_html)
         self.assertIn('if (showFeedback) accountQuery.set("fresh", "1");', admin_script)
         self.assertIn("accounts.quota_generated_at", admin_script)
         self.assertIn("accounts.quota_cached", admin_script)

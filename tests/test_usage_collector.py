@@ -3,6 +3,7 @@ import io
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -189,6 +190,56 @@ class UsageCollectorTests(unittest.TestCase):
                 [call.args[0] for call in drain.call_args_list],
                 ["cliproxy-alpha", "cliproxy-beta", "cliproxy-gamma"],
             )
+
+    def test_first_new_week_collection_publishes_default_quota(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seed_control_plane(root)
+            (root / "secrets").mkdir(parents=True, exist_ok=True)
+            (root / "secrets" / "cpa-management.key").write_text(
+                "test-management-key\n", encoding="utf-8"
+            )
+            control = self.module.cliproxy.ControlPlane(root)
+            control.ensure_layout()
+            control.create_user("alice@example.com", apply=False)
+            control.update_configuration(
+                {"user_quota.default_weekly_tokens": 1_000}
+            )
+            collector = self.module.UsageCollector(root)
+            now = int(datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc).timestamp())
+            collector.store.set_quota_policy(
+                "alice@example.com",
+                "custom",
+                weekly_tokens=500,
+                now=now,
+            )
+            current = collector.store.weekly_quotas(
+                ["alice@example.com"],
+                1_000,
+                now=now,
+            )["alice@example.com"]
+
+            with (
+                mock.patch.object(
+                    self.module.time,
+                    "time",
+                    return_value=current["week_end_at"],
+                ),
+                mock.patch.object(collector, "_drain", return_value=()),
+            ):
+                result = collector.run_once()
+
+            self.assertEqual(result["errors"], [])
+            snapshot = json.loads(
+                control.quota_snapshot_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(snapshot["records"]), 1)
+            self.assertEqual(snapshot["records"][0]["limit_tokens"], 1_000)
+            with collector.store._connection() as connection:
+                policies = connection.execute(
+                    "SELECT COUNT(*) FROM user_quota_policies"
+                ).fetchone()[0]
+            self.assertEqual(policies, 0)
 
 
 if __name__ == "__main__":

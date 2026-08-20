@@ -1277,6 +1277,11 @@ class ControlTests(unittest.TestCase):
         self.assertFalse(configuration["values"]["notification.enabled"])
         self.assertEqual(configuration["values"]["notification.timezone"], "UTC")
         self.assertEqual(configuration["values"]["user_quota.timezone"], "UTC")
+        self.assertTrue(
+            configuration["values"][
+                "user_quota.reset_personal_weekly_on_new_week"
+            ]
+        )
 
         self.assertEqual(
             configuration["values"]["notification.daily_times"],
@@ -1529,6 +1534,12 @@ class ControlTests(unittest.TestCase):
             {"user_quota.default_weekly_tokens": ""}
         )
         self.assertIsNone(result["values"]["user_quota.default_weekly_tokens"])
+        result = self.app.update_configuration(
+            {"user_quota.reset_personal_weekly_on_new_week": False}
+        )
+        self.assertFalse(
+            result["values"]["user_quota.reset_personal_weekly_on_new_week"]
+        )
 
     def test_notification_times_are_normalized_sorted_and_deduplicated(self):
         result = self.app.update_configuration(

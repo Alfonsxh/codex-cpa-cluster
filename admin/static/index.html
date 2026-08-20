@@ -6,13 +6,13 @@
   <meta name="color-scheme" content="light dark">
   <title>管理中心 · Codex CPA Cluster</title>
   <link id="app-favicon" rel="icon" href="/portal/assets/codex-cpa-cluster-favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/admin/app.css?v=20260818-password-visibility-v1">
+  <link rel="stylesheet" href="/admin/app.css?v=20260820-team-period-v1">
   <link id="reasoning-effort-colors" rel="stylesheet" href="/admin/reasoning-effort-colors.css">
   <script src="/portal/branding.js?v=20260812-theme-branding" defer></script>
   <script src="/portal/token-usage.js?v=20260720-token-units" defer></script>
   <script src="/admin/monitor-utils.js?v=20260812-adaptive-chart-points" defer></script>
   <script src="/admin/view-state-utils.js?v=20260819-view-state-v1" defer></script>
-  <script src="/admin/app.js?v=20260819-refresh-consistency-v1" defer></script>
+  <script src="/admin/app.js?v=20260820-team-period-weekly-policy-v1" defer></script>
 </head>
 <body>
   <section class="auth-screen" id="auth-screen">
@@ -414,10 +414,11 @@
             <div class="organization-table-filters">
               <label class="search-field"><span aria-hidden="true">⌕</span><input id="organization-team-search" type="search" placeholder="搜索团队名称或说明"></label>
               <label class="organization-status-filter"><span class="visually-hidden">团队状态</span><select id="organization-team-status"><option value="all">全部团队</option><option value="active">有成员</option><option value="empty">空团队</option></select></label>
+              <label class="organization-usage-filter"><span class="visually-hidden">统计范围</span><select id="organization-usage-window" data-enhance-select><option value="current_week" selected>本周期</option><option value="today">今日</option><option value="604800">近 7 天</option><option value="2592000">近 30 天</option><option value="all">全部历史</option><option value="custom">自定义…</option></select></label>
             </div>
             <div><span id="organization-team-summary">0 个团队</span><button class="button primary" type="button" id="organization-create-team">创建团队</button></div>
           </div>
-          <div class="table-wrap"><table class="organization-catalog-table"><thead><tr><th class="table-index-column">序号</th><th>团队</th><th>当前成员</th><th>活跃成员</th><th>全部历史 Token</th><th>更新时间</th><th class="organization-action-column">操作</th></tr></thead><tbody id="team-catalog-list"></tbody></table></div>
+          <div class="table-wrap"><table class="organization-catalog-table"><thead><tr><th class="table-index-column">序号</th><th>团队</th><th>当前成员</th><th>活跃成员</th><th id="organization-token-column-label">本周期 Token</th><th>更新时间</th><th class="organization-action-column">操作</th></tr></thead><tbody id="team-catalog-list"></tbody></table></div>
         </div>
       </section>
 
@@ -689,11 +690,9 @@
           <label class="search-field"><span aria-hidden="true">⌕</span><input id="organization-user-search" type="search" placeholder="搜索用户邮箱"></label>
           <label class="window-field filter-field"><span>成员范围</span><select id="organization-user-scope" data-enhance-select><option value="current" selected>当前团队成员</option><option value="unassigned">未分组用户</option><option value="all">全部用户</option></select></label>
           <label class="window-field filter-field"><span>Token 状态</span><select id="organization-usage-state" data-enhance-select><option value="all" selected>不限用量</option><option value="used">已产生 Token</option><option value="unused">未产生 Token</option></select></label>
-          <label class="window-field filter-field"><span>统计范围</span><select id="organization-usage-window" data-enhance-select><option value="today">今日</option><option value="604800">近 7 天</option><option value="2592000">近 30 天</option><option value="all" selected>全部历史</option></select></label>
+          <div class="organization-usage-range-readonly" aria-label="当前统计范围"><span>统计范围</span><strong id="organization-usage-range-label">本周期</strong><small id="organization-usage-range-boundaries">正在读取周期边界…</small></div>
         </div>
-        <div class="organization-team-context" id="organization-team-context" hidden><span>当前管理团队</span><strong id="organization-team-context-name">—</strong><span id="organization-team-context-count">0 位成员</span></div>
-        <div class="organization-select-all" id="organization-select-all" hidden><span id="organization-match-summary"></span><button class="inline-action" type="button" id="organization-select-matches">选择全部匹配用户</button></div>
-        <div class="organization-member-table-wrap" id="organization-team-member-table"><table class="organization-member-table"><thead><tr><th class="table-index-column">序号</th><th class="user-select-column"><input id="organization-select-page" type="checkbox" aria-label="选择本页用户"></th><th>用户</th><th>团队归属</th><th>Token 用量</th><th id="organization-team-relation-header">与当前团队的关系</th></tr></thead><tbody id="organization-member-body"><tr><td colspan="6" class="team-usage-state">正在加载成员…</td></tr></tbody></table></div>
+        <div class="organization-member-table-wrap" id="organization-team-member-table"><table class="organization-member-table"><thead><tr><th class="table-index-column">序号</th><th class="user-select-column"><input id="organization-select-page" type="checkbox" aria-label="选择本页用户"></th><th>用户</th><th>团队归属</th><th id="organization-member-token-label">本周期 Token</th><th id="organization-team-relation-header">与当前团队的关系</th></tr></thead><tbody id="organization-member-body"><tr><td colspan="6" class="team-usage-state">正在加载成员…</td></tr></tbody></table></div>
         <div class="table-pagination organization-pagination" id="organization-pagination" hidden><span class="pagination-summary" id="organization-pagination-summary"></span><div class="pagination-controls"><button class="pagination-nav" type="button" id="organization-page-prev">上一页</button><span id="organization-page-label"></span><button class="pagination-nav" type="button" id="organization-page-next">下一页</button></div></div>
         <div class="organization-bulk-bar" id="organization-team-bulk" hidden><div><strong id="organization-selection-count">已选择 0 位用户</strong><small>已有团队成员不会被静默移动。</small></div><button class="button ghost" type="button" id="organization-selection-clear">取消选择</button><button class="button secondary" type="button" id="organization-team-remove">移出当前团队</button><button class="button secondary" type="button" id="organization-team-move">从其他团队移动</button><button class="button primary" type="button" id="organization-team-assign">加入当前团队</button></div>
         <p class="form-error organization-error" id="organization-team-error" role="alert"></p>
@@ -719,8 +718,8 @@
         <fieldset class="quota-policy-options">
           <legend>额度策略</legend>
           <label><input type="radio" name="user-quota-mode" value="inherit"><span><strong>继承组织默认</strong><small id="user-quota-default-copy">当前默认不限额</small></span></label>
-          <label><input type="radio" name="user-quota-mode" value="unlimited"><span><strong>单独不限额</strong><small>不受以后组织默认值变化影响</small></span></label>
-          <label><input type="radio" name="user-quota-mode" value="custom"><span><strong>自定义额度</strong><small>每个自然周一 00:00 重新计算</small></span></label>
+          <label><input type="radio" name="user-quota-mode" value="unlimited"><span><strong>单独不限额</strong><small id="user-quota-unlimited-copy">仅本周生效，下周恢复组织默认</small></span></label>
+          <label><input type="radio" name="user-quota-mode" value="custom"><span><strong>自定义额度</strong><small id="user-quota-custom-copy">仅本周生效，下周恢复组织默认</small></span></label>
         </fieldset>
         <label class="field" id="user-quota-custom-field"><span>每周 Token</span><div class="token-input-control"><input id="user-quota-custom-tokens" type="number" inputmode="numeric" min="1" max="1000000000000" step="1" placeholder="例如 100000000" data-token-input data-token-empty-label="请输入自定义周额度" aria-label="每周 Token"><div class="token-input-preview" data-token-input-preview data-state="empty" aria-live="polite"><small>请输入自定义周额度</small></div></div></label>
         <section class="user-quota-operations" aria-labelledby="user-quota-operations-title">

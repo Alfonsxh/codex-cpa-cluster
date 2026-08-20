@@ -100,6 +100,9 @@ class UsageCollector:
         self.store = UsageStore(
             self.root / "state" / "usage.sqlite3",
             week_timezone=configuration["user_quota.timezone"],
+            reset_personal_weekly_on_new_week=configuration[
+                "user_quota.reset_personal_weekly_on_new_week"
+            ],
         )
         self.batch_size = max(1, min(int(batch_size), 500))
         self.heartbeat_stale_after_seconds = max(5, int(heartbeat_stale_after_seconds))
@@ -169,6 +172,11 @@ class UsageCollector:
         try:
             quota_configuration = self.control.configuration()["values"]
             multipliers = reasoning_effort_multipliers(quota_configuration)
+            self.store.configure_personal_quota_weekly_reset(
+                quota_configuration[
+                    "user_quota.reset_personal_weekly_on_new_week"
+                ]
+            )
         except Exception as error:
             errors.append(
                 "quota configuration: {}: {}".format(type(error).__name__, error)

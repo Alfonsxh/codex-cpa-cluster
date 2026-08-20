@@ -89,7 +89,7 @@ class PreviewServerCase(PreviewTestSupport, unittest.TestCase):
             "/admin/api/users/detail?email=lin.chen%40example.com&window=today",
             "/admin/api/users/usage-breakdown?email=lin.chen%40example.com&window=today",
             "/admin/api/teams",
-            "/admin/api/teams/usage?window=all",
+            "/admin/api/teams/usage?window=current_week",
             "/admin/api/teams/usage-breakdown?team_id=platform&window=today",
             "/admin/api/settings",
             "/admin/api/release",

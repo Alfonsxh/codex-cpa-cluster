@@ -1426,6 +1426,8 @@ class AdminServerTests(unittest.TestCase):
         custom = json.loads(raw)["weekly_quota"]
         self.assertEqual(custom["policy_mode"], "custom")
         self.assertEqual(custom["limit_tokens"], 500)
+        self.assertTrue(custom["personal_policy_reset_enabled"])
+        self.assertEqual(custom["policy_reset_at"], custom["week_end_at"])
 
         status, _, raw = self.request("/admin/api/users")
         self.assertEqual(status, 200)
@@ -1433,6 +1435,30 @@ class AdminServerTests(unittest.TestCase):
             json.loads(raw)["users"][0]["weekly_quota"]["source"],
             "user_custom",
         )
+
+        status, _, raw = self.request(
+            "/admin/api/settings/configuration",
+            method="POST",
+            body={
+                "values": {
+                    "user_quota.reset_personal_weekly_on_new_week": False
+                },
+                "confirm": "save",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertIn(
+            "user_quota.reset_personal_weekly_on_new_week",
+            json.loads(raw)["changed"],
+        )
+        status, _, raw = self.request(
+            "/admin/api/users/quota?email=alice%40example.com"
+        )
+        self.assertEqual(status, 200)
+        persistent = json.loads(raw)["weekly_quota"]
+        self.assertFalse(persistent["personal_policy_reset_enabled"])
+        self.assertIsNone(persistent["policy_reset_at"])
+        self.assertEqual(persistent["policy_mode"], "custom")
 
         status, _, raw = self.request(
             "/admin/api/users/quota?email=alice%40example.com",
@@ -1964,6 +1990,79 @@ class AdminServerTests(unittest.TestCase):
             midnight_overview = self.app.overview_usage("today")
         self.assertEqual(midnight_overview["window_start_at"], next_midnight)
         self.assertEqual(midnight_overview["buckets"], [next_midnight])
+
+    def test_current_week_window_uses_user_quota_timezone_for_users_and_teams(self):
+        self.control.update_configuration(
+            {"user_quota.timezone": "Asia/Shanghai"}
+        )
+        self.app.usage_store.set_week_timezone("Asia/Shanghai")
+        records = self.control.create_user("alice@example.com", apply=False)
+        team = self.control.store.create_team("Platform")
+        self.control.store.set_user_teams(["alice@example.com"], team["id"])
+        zone = timezone(timedelta(hours=8))
+        now = int(datetime(2026, 7, 22, 12, 0, tzinfo=zone).timestamp())
+        week_start = int(datetime(2026, 7, 20, 0, 0, tzinfo=zone).timestamp())
+        week_end = int(datetime(2026, 7, 27, 0, 0, tzinfo=zone).timestamp())
+        self.app.usage_store.sync_identities(self.control._read_registry(), now=now)
+        self.app.usage_store.sync_user_teams(
+            self.control.store.read_user_classifications(["alice@example.com"])
+        )
+        self.app.usage_store.ensure_usage_breakdown_started(now=week_start - 60)
+        self.app.usage_store.ingest_events(
+            records[0]["account"],
+            [
+                {
+                    "timestamp": week_start - 1,
+                    "model": "gpt-5.6-sol",
+                    "api_key": records[0]["key"],
+                    "request_id": "before-current-week",
+                    "failed": False,
+                    "tokens": {"total_tokens": 100},
+                },
+                {
+                    "timestamp": week_start,
+                    "model": "gpt-5.6-sol",
+                    "api_key": records[0]["key"],
+                    "request_id": "inside-current-week",
+                    "failed": False,
+                    "tokens": {"total_tokens": 200},
+                },
+            ],
+            now=now,
+        )
+
+        with mock.patch.object(
+            self.server_module, "utc_timestamp", return_value=now
+        ):
+            status, _, raw = self.request(
+                "/admin/api/teams/usage?window=current_week"
+            )
+            self.assertEqual(status, 200)
+            teams = json.loads(raw)
+            status, _, raw = self.request(
+                "/admin/api/users?view=summary&window=current_week"
+                f"&team_id={team['id']}"
+            )
+            self.assertEqual(status, 200)
+            users = json.loads(raw)
+            status, _, raw = self.request(
+                "/admin/api/teams/usage-breakdown?window=current_week"
+                f"&team_id={team['id']}"
+            )
+            self.assertEqual(status, 200)
+            breakdown = json.loads(raw)
+
+        for payload in (teams, users, breakdown):
+            self.assertEqual(payload["window"], "current_week")
+            self.assertIsNone(payload["window_seconds"])
+            self.assertEqual(payload["window_start_at"], week_start)
+            self.assertEqual(payload["window_end_at"], week_end)
+            self.assertEqual(payload["window_timezone"], "Asia/Shanghai")
+        team_usage = next(item for item in teams["teams"] if item["id"] == team["id"])
+        self.assertEqual(team_usage["usage"]["total_tokens"], 200)
+        self.assertEqual(users["users"][0]["usage"]["total_tokens"], 200)
+        self.assertEqual(breakdown["totals"]["total_tokens"], 200)
+        self.assertEqual(breakdown["series"]["end_at"], now)
 
     def test_legacy_key_preview_remains_compatible(self):
         record = {

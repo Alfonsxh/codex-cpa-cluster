@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { KeyOutlined, SaveOutlined, UndoOutlined, UploadOutlined } from "@ant-design/icons";
+import { KeyOutlined, ReloadOutlined, SaveOutlined, UndoOutlined, UploadOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Avatar, Button, Card, Col, Form, Input, Modal, Popconfirm, Result, Row, Skeleton, Space, Tag, Typography } from "antd";
+import { Alert, Avatar, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Skeleton, Space, Tag, Typography } from "antd";
 import { Controller, useForm } from "react-hook-form";
 import { useEffect, useState } from "react";
 import { z } from "zod";
@@ -16,8 +16,10 @@ import {
   type GeneralSettings,
   type GeneralSettingsValues
 } from "../api/general-settings";
-import { InitialPasswordModal } from "./InitialPasswordModal";
+import { PageState } from "./components/PageState";
+import { PageToolbar } from "./components/PageToolbar";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
+import { InitialPasswordModal } from "./InitialPasswordModal";
 
 const { Paragraph, Text } = Typography;
 
@@ -111,9 +113,15 @@ export function GeneralSettingsPage({
     }
   });
   const managementKeyMutation = useMutation({
-    mutationFn: (values: ManagementKeyFormValues) => rotateManagementKey(values.new_key, values.confirmation, csrfToken),
+    gcTime: 0,
+    mutationFn: () => rotateManagementKey(
+      managementKeyForm.getValues("new_key"),
+      managementKeyForm.getValues("confirmation"),
+      csrfToken
+    ),
     onSuccess: (result) => {
       managementKeyForm.reset();
+      managementKeyMutation.reset();
       setManagementKeyOpen(false);
       onManagementKeyRotated(result.message);
     }
@@ -125,11 +133,11 @@ export function GeneralSettingsPage({
   if (settings.isError) {
     return (
       <section className="page-content">
-        <Result
-          status="warning"
+        <PageState
+          kind="error"
           title="通用设置加载失败"
-          subTitle={settings.error instanceof Error ? settings.error.message : "请稍后重试"}
-          extra={<Button type="primary" onClick={() => void settings.refetch()}>重新加载</Button>}
+          detail={settings.error instanceof Error ? settings.error.message : "请稍后重试"}
+          onAction={() => void settings.refetch()}
         />
       </section>
     );
@@ -138,11 +146,14 @@ export function GeneralSettingsPage({
   return (
     <section className="page-content settings-page">
       <ConfigurationSectionNav />
-      <div className="page-intro">
-        <Paragraph>
-          这里只管理可实时生效的品牌、登录域名和客户端导出字段。代理、配额、部署镜像等需要专用事务或重建的配置不会混入本接口。
-        </Paragraph>
-      </div>
+      <PageToolbar
+        description="这里只管理可实时生效的品牌、登录域名和客户端导出字段。代理、配额、部署镜像等需要专用事务或重建的配置不会混入本接口。"
+        actions={(
+          <Button icon={<ReloadOutlined aria-hidden="true" />} loading={settings.isFetching} onClick={() => void settings.refetch()}>
+            刷新当前页
+          </Button>
+        )}
+      />
       {notice ? <Alert className="page-alert" type="success" showIcon closable title={notice} onClose={() => setNotice("")} /> : null}
       {mutation.isError ? (
         <Alert className="page-alert" type="error" showIcon title="设置未保存" description={mutation.error instanceof Error ? mutation.error.message : "请求失败"} />
@@ -236,7 +247,7 @@ export function GeneralSettingsPage({
           </Row>
           <Space>
             <Button type="primary" htmlType="submit" icon={<SaveOutlined aria-hidden="true" />} loading={mutation.isPending}>保存通用设置</Button>
-            <Button type="default" disabled={mutation.isPending || !form.formState.isDirty} onClick={() => form.reset(toFormValues(settings.data.values))}>撤销修改</Button>
+            <Button type="default" icon={<UndoOutlined aria-hidden="true" />} disabled={mutation.isPending || !form.formState.isDirty} onClick={() => form.reset(toFormValues(settings.data.values))}>撤销修改</Button>
           </Space>
         </Card>
       </form>
@@ -302,7 +313,7 @@ export function GeneralSettingsPage({
           managementKeyForm.reset();
           managementKeyMutation.reset();
         }}
-        onOk={() => void managementKeyForm.handleSubmit((values) => managementKeyMutation.mutate(values))()}
+        onOk={() => void managementKeyForm.handleSubmit(() => managementKeyMutation.mutate())()}
         destroyOnHidden
       >
         <Alert

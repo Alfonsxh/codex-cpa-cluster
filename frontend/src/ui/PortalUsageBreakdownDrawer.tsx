@@ -25,6 +25,7 @@ import {
   type PortalUsageWindow
 } from "../api/portal";
 import type { UsageMetrics } from "../api/usage";
+import { formatTokens } from "./formatters";
 
 type ModelRow = UsageMetrics & { model: string };
 
@@ -179,10 +180,6 @@ const effortLabels: Record<string, string> = {
   auto: "自动",
   unknown: "未知"
 };
-
-function formatTokens(value: number) {
-  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 2 }).format(value);
-}
 
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";

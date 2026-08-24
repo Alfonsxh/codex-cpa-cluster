@@ -31,7 +31,11 @@ describe("OverviewPage legacy dashboard contract", () => {
       unavailable_accounts: [],
       bucket_seconds: 900,
       buckets: [1_799_996_400, 1_799_997_300],
-      accounts: [{ name: "alpha", values: [100, 200], current: 200, average: 150, maximum: 200, total: 300 }],
+      accounts: Array.from({ length: 15 }, (_, index) => index === 0
+        ? { name: "alpha", values: [100, 200], current: 200, average: 150, maximum: 200, total: 300 }
+        : index === 1
+          ? { name: "cpa-02", values: [2_000_000, 0], current: 0, average: 1_000_000, maximum: 2_000_000, total: 2_000_000 }
+        : { name: `cpa-${String(index + 1).padStart(2, "0")}`, values: [0, 0], current: 0, average: 0, maximum: 0, total: 0 }),
       users: [{ name: "alice@example.com", values: [100, 200], current: 200, average: 150, maximum: 200, total: 300 }],
       selected_account: null,
       selected_user: null,
@@ -75,8 +79,18 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getAllByText("alpha")).not.toHaveLength(0);
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
     expect(screen.getByText("重启 alpha")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "用户" }));
+    const userOption = await screen.findByTitle("alice@example.com");
+    const identityPopup = userOption.closest(".overview-identity-select-popup");
+    expect(identityPopup).not.toBeNull();
+    expect(identityPopup).toHaveStyle({ width: "420px" });
+
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/usage?window=today&user_limit=10")).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/release"))).toBe(false);
+
+    expect(await screen.findByRole("img", { name: /所有账号 Token 使用趋势/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /分项 Token 使用趋势：alpha/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "6 小时" }));
     expect(await waitForRequest(fetchMock, "/admin/api/overview/usage?window=21600&user_limit=10")).toBe(true);

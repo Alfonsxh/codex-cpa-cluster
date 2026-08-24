@@ -5,8 +5,8 @@ export type { AdminSession } from "./generated";
 
 export const sessionQueryKey = ["admin-session"] as const;
 
-export function readSession(): Promise<AdminSession> {
-  return apiRequest<AdminSession>("/admin/api/session");
+export function readSession(signal?: AbortSignal): Promise<AdminSession> {
+  return apiRequest<AdminSession>("/admin/api/session", { signal });
 }
 
 export function login(managementKey: string): Promise<AdminSession> {

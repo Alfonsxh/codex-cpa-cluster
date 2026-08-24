@@ -43,14 +43,14 @@ export function usersQueryKey(params: UserListParams) {
   ] as const;
 }
 
-export function listUsers(params: UserListParams): Promise<UserCatalog> {
+export function listUsers(params: UserListParams, signal?: AbortSignal): Promise<UserCatalog> {
   const query = new URLSearchParams({
     page: String(params.page),
     page_size: String(params.pageSize)
   });
   if (params.query) query.set("q", params.query);
   if (params.teamId) query.set("team_id", params.teamId);
-  return apiRequest<UserCatalog>(`/admin/api/users?${query.toString()}`);
+  return apiRequest<UserCatalog>(`/admin/api/users?${query.toString()}`, { signal });
 }
 
 export function createUser(email: string, teamId: string | null, csrfToken: string) {
@@ -97,9 +97,9 @@ export function userQuotaQueryKey(email: string) {
   return [...usersQueryRoot, "quota", email] as const;
 }
 
-export function readUserQuota(email: string) {
+export function readUserQuota(email: string, signal?: AbortSignal) {
   const query = new URLSearchParams({ email });
-  return apiRequest<UserQuotaResult>(`/admin/api/users/quota?${query.toString()}`);
+  return apiRequest<UserQuotaResult>(`/admin/api/users/quota?${query.toString()}`, { signal });
 }
 
 export function updateUserQuota(

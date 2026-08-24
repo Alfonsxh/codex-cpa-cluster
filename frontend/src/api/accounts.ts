@@ -31,8 +31,8 @@ export type {
 
 export const accountsQueryKey = ["accounts"] as const;
 
-export function listAccounts(): Promise<AccountCatalog> {
-  return apiRequest<AccountCatalog>("/admin/api/accounts");
+export function listAccounts(signal?: AbortSignal): Promise<AccountCatalog> {
+  return apiRequest<AccountCatalog>("/admin/api/accounts", { signal });
 }
 
 export function createAccount(

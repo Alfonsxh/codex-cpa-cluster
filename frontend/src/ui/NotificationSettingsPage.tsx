@@ -16,7 +16,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Result,
   Row,
   Space,
   Switch,
@@ -39,6 +38,8 @@ import {
   testNotification,
   type NotificationValues
 } from "../api/notifications";
+import { PageState } from "./components/PageState";
+import { PageToolbar } from "./components/PageToolbar";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
 
 const { Paragraph, Text } = Typography;
@@ -70,7 +71,7 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
   const [clearOpen, setClearOpen] = useState(false);
   const settings = useQuery({
     queryKey: notificationSettingsQueryKey,
-    queryFn: readNotificationSettings,
+    queryFn: ({ signal }) => readNotificationSettings(signal),
     staleTime: 0,
     gcTime: 0,
     refetchInterval: 10_000,
@@ -91,8 +92,6 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
   });
   const webhookForm = useForm<WebhookValues>({
     resolver: zodResolver(webhookSchema),
-    values: settings.data ? { webhook_url: settings.data.notifications.webhook_url } : undefined,
-    resetOptions: { keepDirtyValues: true },
     defaultValues: { webhook_url: "" }
   });
 
@@ -108,9 +107,10 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
     }
   });
   const webhookMutation = useMutation({
-    mutationFn: (values: WebhookValues) => saveNotificationWebhook(values.webhook_url, csrfToken),
+    gcTime: 0,
+    mutationFn: () => saveNotificationWebhook(webhookForm.getValues("webhook_url"), csrfToken),
     onSuccess: async (result) => {
-      webhookForm.reset({ webhook_url: result.notifications.webhook_url });
+      webhookForm.reset({ webhook_url: "" });
       await refresh(result.message);
     }
   });
@@ -138,11 +138,11 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
   if (settings.isError) {
     return (
       <section className="page-content">
-        <Result
-          status="warning"
+        <PageState
+          kind="error"
           title="通知配置加载失败"
-          subTitle={settings.error instanceof Error ? settings.error.message : "请稍后重试"}
-          extra={<Button type="primary" onClick={() => void settings.refetch()}>重新加载</Button>}
+          detail={settings.error instanceof Error ? settings.error.message : "请稍后重试"}
+          onAction={() => void settings.refetch()}
         />
       </section>
     );
@@ -154,14 +154,15 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
   return (
     <section className="page-content notification-page">
       <ConfigurationSectionNav />
-      <div className="page-intro account-page-intro">
-        <Paragraph>
-          本页只请求通知配置和运行状态；打开期间每 10 秒刷新一次。额度明细仅在手动发送或后台任务到期时读取。
-        </Paragraph>
-        <Button icon={<ReloadOutlined aria-hidden="true" />} loading={settings.isFetching} onClick={() => void settings.refetch()}>
-          刷新当前页
-        </Button>
-      </div>
+      <PageToolbar
+        className="account-page-intro"
+        description="本页只请求通知配置和运行状态；打开期间每 10 秒刷新一次。额度明细仅在手动发送或后台任务到期时读取。"
+        actions={(
+          <Button icon={<ReloadOutlined aria-hidden="true" />} loading={settings.isFetching} onClick={() => void settings.refetch()}>
+            刷新当前页
+          </Button>
+        )}
+      />
 
       {notice ? <Alert className="page-alert" type="success" showIcon closable message={notice} onClose={() => setNotice("")} /> : null}
       {mutationError ? (
@@ -202,7 +203,7 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
                   type="primary"
                   icon={<SaveOutlined aria-hidden="true" />}
                   loading={webhookMutation.isPending}
-                  onClick={() => void webhookForm.handleSubmit((values) => webhookMutation.mutate(values))()}
+                  onClick={() => void webhookForm.handleSubmit(() => webhookMutation.mutate())()}
                 >
                   保存 Webhook
                 </Button>

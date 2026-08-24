@@ -5,14 +5,11 @@ import {
   Col,
   Descriptions,
   Drawer,
-  Empty,
   Modal,
   Result,
   Row,
   Skeleton,
   Space,
-  Statistic,
-  Table,
   Tag,
   Typography,
   type TableColumnsType
@@ -49,8 +46,12 @@ import {
   type RuntimeJobRequest,
   type RuntimeService
 } from "../api/runtime";
+import { AdminTable } from "./components/AdminTable";
+import { MetricCard } from "./components/MetricCard";
+import { PageState } from "./components/PageState";
+import { PageToolbar } from "./components/PageToolbar";
 
-const { Paragraph, Text } = Typography;
+const { Text } = Typography;
 type RuntimeAction = RuntimeJobRequest["action"];
 type PendingOperation = { action: RuntimeAction; target: string; service: RuntimeService };
 
@@ -114,7 +115,7 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
 
   if (services.isPending || jobs.isPending) {
     return (
-      <section className="page-content runtime-page">
+      <section className="page-content runtime-page" aria-label="正在加载运行维护">
         <Skeleton active paragraph={{ rows: 7 }} />
       </section>
     );
@@ -122,11 +123,11 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
   if (services.isError) {
     return (
       <section className="page-content">
-        <Result
-          status="warning"
+        <PageState
+          kind="error"
           title="Docker 运行状态加载失败"
-          subTitle={services.error instanceof Error ? services.error.message : "请稍后重试"}
-          extra={<Button type="primary" onClick={() => void services.refetch()}>重新加载</Button>}
+          detail={services.error instanceof Error ? services.error.message : "请稍后重试"}
+          onAction={() => void services.refetch()}
         />
       </section>
     );
@@ -134,19 +135,18 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
 
   return (
     <section className="page-content runtime-page">
-      <div className="page-intro">
-        <Paragraph>
-          本页只请求当前 Compose 项目的服务、任务和已打开的日志。操作通过有界队列串行执行；
-          Edge、Gateway 与 Admin 仅允许查看日志，不能从管理 API 停止。
-        </Paragraph>
-        <Button
-          icon={<ReloadOutlined aria-hidden="true" />}
-          loading={services.isFetching || jobs.isFetching || images.isFetching}
-          onClick={() => void Promise.all([services.refetch(), jobs.refetch(), images.refetch()])}
-        >
-          刷新当前页
-        </Button>
-      </div>
+      <PageToolbar
+        description="本页只请求当前 Compose 项目的服务、任务和已打开的日志。操作通过有界队列串行执行；Edge、Gateway 与 Admin 仅允许查看日志，不能从管理 API 停止。"
+        actions={(
+          <Button
+            icon={<ReloadOutlined aria-hidden="true" />}
+            loading={services.isFetching || jobs.isFetching || images.isFetching}
+            onClick={() => void Promise.all([services.refetch(), jobs.refetch(), images.refetch()])}
+          >
+            刷新当前页
+          </Button>
+        )}
+      />
 
       {jobs.isError ? (
         <Alert
@@ -176,40 +176,33 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
             status="warning"
             title="CPA 镜像状态加载失败"
             subTitle={images.error instanceof Error ? images.error.message : "服务和日志仍可继续查看"}
-            extra={<Button onClick={() => void images.refetch()}>重试镜像查询</Button>}
+            extra={<Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => void images.refetch()}>重试镜像查询</Button>}
           />
         ) : null}
         {images.data ? <CPAImagePanel status={images.data} /> : null}
       </Card>
 
       <Card className="runtime-card" title="Compose 服务">
-        {services.data.services.length ? (
-          <Table<RuntimeService>
-            rowKey="service"
-            columns={columns}
-            dataSource={services.data.services}
-            pagination={false}
-            scroll={{ x: 940 }}
-            size="middle"
-          />
-        ) : (
-          <Empty description="当前 Compose 项目没有可见容器" />
-        )}
+        <AdminTable<RuntimeService>
+          rowKey="service"
+          columns={columns}
+          dataSource={services.data.services}
+          minWidth={940}
+          maxBodyHeight="min(44vh, 440px)"
+          emptyText="当前 Compose 项目没有可见容器"
+        />
       </Card>
 
       <Card className="runtime-card runtime-job-card" title="最近任务">
-        {jobs.data?.jobs.length ? (
-          <Table<RuntimeJob>
-            rowKey="id"
-            columns={runtimeJobColumns((jobID) => cancel.mutate(jobID), cancel.isPending)}
-            dataSource={jobs.data.jobs}
-            pagination={false}
-            scroll={{ x: 820 }}
-            size="small"
-          />
-        ) : (
-          <Empty description="暂无运行维护任务" />
-        )}
+        <AdminTable<RuntimeJob>
+          rowKey="id"
+          columns={runtimeJobColumns((jobID) => cancel.mutate(jobID), cancel.isPending)}
+          dataSource={jobs.data?.jobs ?? []}
+          minWidth={820}
+          maxBodyHeight="min(40vh, 400px)"
+          size="small"
+          emptyText="暂无运行维护任务"
+        />
       </Card>
 
       <Modal
@@ -247,7 +240,7 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
       <Drawer
         title={logTarget ? `${logTarget} · 最近 200 行` : "运行日志"}
         open={logTarget !== null}
-        width="min(860px, 92vw)"
+        size="min(860px, 92vw)"
         onClose={() => setLogTarget(null)}
         extra={logTarget ? (
           <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => void logs.refetch()} loading={logs.isFetching}>
@@ -281,12 +274,17 @@ function CPAImagePanel({ status }: { status: CpaImageStatus }) {
   return (
     <>
       <Row gutter={[16, 16]} className="runtime-image-summary">
-        <Col xs={12} md={6}><Statistic title="运行账号" value={status.running_count} /></Col>
-        <Col xs={12} md={6}><Statistic title="当前镜像" value={status.current_count} /></Col>
-        <Col xs={12} md={6}><Statistic title="待更新" value={status.outdated_count} valueStyle={status.outdated_count ? { color: "#ad6b21" } : undefined} /></Col>
-        <Col xs={12} md={6}><Statistic title="本地镜像" value={status.local_image.available ? "已就绪" : "未拉取"} /></Col>
+        <Col xs={12} lg={12} xl={6}><MetricCard title="运行账号" value={status.running_count} /></Col>
+        <Col xs={12} lg={12} xl={6}><MetricCard title="当前镜像" value={status.current_count} /></Col>
+        <Col xs={12} lg={12} xl={6}><MetricCard title="待更新" value={status.outdated_count} tone={status.outdated_count ? "warning" : "default"} /></Col>
+        <Col xs={12} lg={12} xl={6}><MetricCard title="本地镜像" value={status.local_image.available ? "已就绪" : "未拉取"} /></Col>
       </Row>
-      <Descriptions className="runtime-image-details" bordered size="small" column={{ xs: 1, md: 2 }}>
+      <Descriptions
+        className="runtime-image-details"
+        bordered
+        size="small"
+        column={{ xs: 1, sm: 1, md: 1, lg: 1, xl: 2, xxl: 2 }}
+      >
         <Descriptions.Item label="目标镜像"><Text code copyable>{status.target_image}</Text></Descriptions.Item>
         <Descriptions.Item label="更新通道"><Text code>{status.update_channel || "—"}</Text></Descriptions.Item>
         <Descriptions.Item label="候选版本">{candidateVersion || "—"}</Descriptions.Item>
@@ -294,15 +292,15 @@ function CPAImagePanel({ status }: { status: CpaImageStatus }) {
         <Descriptions.Item label="本地镜像 ID"><Text code>{status.local_image.short_id || "—"}</Text></Descriptions.Item>
         <Descriptions.Item label="构建提交"><Text code>{status.local_image.commit || "—"}</Text></Descriptions.Item>
       </Descriptions>
-      <Table<CpaAccountImage>
+      <AdminTable<CpaAccountImage>
         className="runtime-image-table"
         rowKey="account"
         columns={cpaImageColumns}
         dataSource={status.accounts}
-        pagination={false}
-        scroll={{ x: 900 }}
+        minWidth={900}
+        maxBodyHeight="min(40vh, 400px)"
         size="small"
-        locale={{ emptyText: "暂无业务账号镜像记录" }}
+        emptyText="暂无业务账号镜像记录"
       />
     </>
   );

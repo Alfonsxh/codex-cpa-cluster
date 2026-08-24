@@ -1,6 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { loadEnv } from "vite";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
+
+import { adminCodeSplitting } from "./vite.shared.ts";
 
 export default defineConfig(({ mode }) => {
   const proxyTarget = loadEnv(mode, ".", "CPA_").CPA_DEV_PROXY_TARGET || "http://127.0.0.1:8318";
@@ -8,6 +10,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: "/admin/",
+    cacheDir: "node_modules/.vite-admin",
     plugins: [react()],
     server: {
       host: "127.0.0.1",
@@ -23,10 +26,12 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: "dist/admin",
       emptyOutDir: true,
-      sourcemap: true
+      sourcemap: true,
+      rolldownOptions: { output: { codeSplitting: adminCodeSplitting } }
     },
     test: {
       environment: "jsdom",
+      exclude: [...configDefaults.exclude, "e2e/**"],
       // Ant Design mounts portals and runs layout effects for most admin pages.
       // Running every page file in parallel makes the shared local validation
       // gate CPU-bound and causes otherwise healthy interaction tests to exceed

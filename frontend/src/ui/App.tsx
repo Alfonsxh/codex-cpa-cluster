@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useCallback, useEffect } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 import { useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
@@ -23,7 +23,7 @@ export function App() {
   const [loginNotice, setLoginNotice] = useState("");
   const session = useQuery({
     queryKey: sessionQueryKey,
-    queryFn: readSession,
+    queryFn: ({ signal }) => readSession(signal),
     retry: false,
     refetchOnWindowFocus: false
   });
@@ -141,8 +141,15 @@ export function AdminShell({
   const location = useLocation();
   const page = currentAdminPage(location.pathname);
   const selectedPath = currentNavigationPath(location.pathname);
+  const navigationRef = useRef<HTMLElement>(null);
   const [overviewRefreshRevision, setOverviewRefreshRevision] = useState(0);
   const [overviewRefreshing, setOverviewRefreshing] = useState(false);
+  useEffect(() => {
+    const navigation = navigationRef.current;
+    const selectedItem = navigation?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!navigation || !selectedItem || navigation.scrollWidth <= navigation.clientWidth) return;
+    selectedItem.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
+  }, [selectedPath]);
   return (
     <div className="app-shell">
       <aside className="side-nav" aria-label="管理中心导航">
@@ -158,7 +165,7 @@ export function AdminShell({
             <small>Control Plane</small>
           </span>
         </Link>
-        <nav className="admin-nav" aria-label="主导航">
+        <nav ref={navigationRef} className="admin-nav" aria-label="主导航">
           {adminNavigation.map((item) => (
             <Link
               key={item.to}

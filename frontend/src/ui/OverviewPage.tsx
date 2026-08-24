@@ -1,7 +1,13 @@
 import { Alert, Button, Empty, Modal, Result, Select, Skeleton, Spin, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState
+} from "react";
 
 import {
   overviewSummaryQueryKey,
@@ -13,6 +19,7 @@ import {
 } from "../api/overview";
 import { listRuntimeJobs, runtimeJobsQueryKey, type RuntimeJob } from "../api/runtime";
 import { useAdminToolbar } from "./AdminToolbarContext";
+import { formatTokens } from "./formatters";
 
 const { Text } = Typography;
 
@@ -43,6 +50,10 @@ const chartColors = [
   "#6374d8", "#4b8ccf", "#c58a34", "#9070c5", "#5263aa",
   "#c45757", "#d16f4f", "#b96894", "#447a9d", "#8b6d48"
 ];
+
+const EChartsUsageChart = lazy(() => import("./components/UsageChart").then((module) => ({
+  default: module.UsageChart
+})));
 
 export function OverviewPage() {
   const [usageWindow, setUsageWindow] = useState<OverviewUsageWindow>("today");
@@ -216,6 +227,8 @@ export function OverviewPage() {
                 mode="multiple"
                 allowClear
                 maxTagCount="responsive"
+                popupMatchSelectWidth={360}
+                classNames={{ popup: { root: "overview-identity-select-popup" } }}
                 aria-label="CPA"
                 placeholder="全部 CPA"
                 value={selectedAccounts}
@@ -229,6 +242,8 @@ export function OverviewPage() {
                 mode="multiple"
                 allowClear
                 maxTagCount="responsive"
+                popupMatchSelectWidth={420}
+                classNames={{ popup: { root: "overview-identity-select-popup" } }}
                 aria-label="用户"
                 placeholder="全部用户"
                 value={selectedUsers}
@@ -368,7 +383,12 @@ function UsageDashboard({
             <div><dt>最大值</dt><dd>{formatTokens(aggregate.maximum)}</dd></div>
           </dl>
         </header>
-        <LineChart buckets={payload.buckets} series={[aggregate]} summary />
+        <UsageChartLoader
+          buckets={payload.buckets}
+          series={[aggregate]}
+          summary
+          ariaLabel={`所有账号 Token 使用趋势：全部账号合计 ${formatTokens(aggregate.total)}`}
+        />
         <footer className="overview-legacy-summary-footer">
           <span><i style={{ background: chartColors[0] }} />全部账号合计</span>
           <span>单位：Token / {interval}</span>
@@ -416,7 +436,13 @@ function SeriesPanel({
         <div><h3>{title}</h3><small>{subtitle}</small></div>
         <span>单位：Token / 聚合间隔</span>
       </header>
-      {series.length ? <LineChart buckets={buckets} series={series} /> : (
+      {series.length ? (
+        <UsageChartLoader
+          buckets={buckets}
+          series={series}
+          ariaLabel={`分项 Token 使用趋势：${series.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，")}`}
+        />
+      ) : (
         <div className="overview-legacy-chart-empty"><strong>暂无趋势</strong><span>{emptyText}</span></div>
       )}
       <SeriesTable subjectLabel={subjectLabel} series={series} emptyText={emptyText} />
@@ -424,56 +450,20 @@ function SeriesPanel({
   );
 }
 
-function LineChart({ buckets, series, summary = false }: {
+function UsageChartLoader({ buckets, series, summary = false, ariaLabel }: {
   buckets: number[];
   series: TokenSeries[];
   summary?: boolean;
+  ariaLabel: string;
 }) {
-  const width = 1200;
-  const height = summary ? 260 : 300;
-  const left = 58;
-  const right = width - 16;
-  const top = 22;
-  const bottom = height - 34;
-  const dataMaximum = Math.max(0, ...series.flatMap((item) => item.values));
-  const scaleMaximum = Math.max(1, dataMaximum);
-  const xFor = (index: number) => buckets.length <= 1 ? left : left + (index / (buckets.length - 1)) * (right - left);
-  const yFor = (value: number) => bottom - (value / scaleMaximum) * (bottom - top);
-  const tickIndexes = uniqueIndexes(buckets.length);
   return (
-    <div className={`overview-legacy-chart${summary ? " summary" : ""}`} role="img" aria-label={`${series.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，") || "暂无 Token 数据"}`}>
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-          const y = bottom - ratio * (bottom - top);
-          return (
-            <g key={ratio}>
-              <line x1={left} y1={y} x2={right} y2={y} />
-              <text x={8} y={y + 3}>{formatTokens(dataMaximum * ratio)}</text>
-            </g>
-          );
-        })}
-        {tickIndexes.map((index) => (
-          <text key={index} x={xFor(index)} y={height - 8} textAnchor={index === 0 ? "start" : index === buckets.length - 1 ? "end" : "middle"}>
-            {formatChartTime(buckets[index] ?? 0)}
-          </text>
-        ))}
-        {series.map((item, seriesIndex) => {
-          const points = buckets.map((_, index) => `${xFor(index)},${yFor(item.values[index] ?? 0)}`).join(" ");
-          const area = summary && buckets.length
-            ? `${left},${bottom} ${points} ${right},${bottom}`
-            : "";
-          return (
-            <g key={item.name}>
-              {area ? <polygon points={area} fill={chartColors[seriesIndex % chartColors.length]} opacity="0.13" /> : null}
-              <polyline points={points} stroke={chartColors[seriesIndex % chartColors.length]} />
-              {summary ? buckets.map((_, index) => (
-                <circle key={index} cx={xFor(index)} cy={yFor(item.values[index] ?? 0)} r="2.5" stroke={chartColors[seriesIndex % chartColors.length]} />
-              )) : null}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
+    <Suspense fallback={(
+      <div className={`overview-legacy-chart overview-legacy-chart-loading${summary ? " summary" : ""}`} role="status">
+        <Spin size="small" /><span>正在加载趋势图</span>
+      </div>
+    )}>
+      <EChartsUsageChart buckets={buckets} series={series} summary={summary} ariaLabel={ariaLabel} />
+    </Suspense>
   );
 }
 
@@ -625,11 +615,6 @@ function actionLabel(action: RuntimeJob["action"]) {
   return { start: "启动服务", stop: "停止服务", restart: "重启服务" }[action];
 }
 
-function uniqueIndexes(length: number) {
-  if (length <= 0) return [];
-  return Array.from(new Set([0, Math.round((length - 1) * 0.25), Math.round((length - 1) * 0.5), Math.round((length - 1) * 0.75), length - 1]));
-}
-
 function windowDisplayLabel(window: OverviewUsageWindow, customRange: CustomRange | null) {
   if (window === "custom") return customRange?.label ?? "自定义";
   return standardWindows.find((item) => item.value === window)?.label ?? window;
@@ -640,20 +625,6 @@ function formatBucketInterval(seconds: number) {
   if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`;
   if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时`;
   return `${Math.round(seconds / 86400)} 天`;
-}
-
-function formatTokens(value: number) {
-  const absolute = Math.abs(value);
-  const format = (scaled: number, suffix: string) => `${Number(scaled.toFixed(scaled >= 100 ? 0 : 1))} ${suffix}`;
-  if (absolute >= 1_000_000_000) return format(value / 1_000_000_000, "B");
-  if (absolute >= 1_000_000) return format(value / 1_000_000, "M");
-  if (absolute >= 1_000) return format(value / 1_000, "K");
-  return `${Math.round(value)} Token`;
-}
-
-function formatChartTime(timestamp: number) {
-  if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp * 1000));
 }
 
 function formatTimestamp(timestamp: number) {

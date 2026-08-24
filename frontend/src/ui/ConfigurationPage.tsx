@@ -15,8 +15,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Result,
-  Select,
   Skeleton,
   Space,
   Switch,
@@ -34,6 +32,9 @@ import {
   type ConfigurationField,
   type ConfigurationValue
 } from "../api/configuration";
+import { PageState } from "./components/PageState";
+import { PageToolbar } from "./components/PageToolbar";
+import { WideSelect } from "./components/WideSelect";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
 
 const { Paragraph, Text, Title } = Typography;
@@ -102,11 +103,11 @@ export function ConfigurationPage({ csrfToken }: { csrfToken: string }) {
   if (catalog.isError || !catalog.data) {
     return (
       <section className="page-content">
-        <Result
-          status="warning"
+        <PageState
+          kind="error"
           title="配置中心加载失败"
-          subTitle={catalog.error instanceof Error ? catalog.error.message : "请稍后重试"}
-          extra={<Button type="primary" onClick={() => void catalog.refetch()}>重新加载</Button>}
+          detail={catalog.error instanceof Error ? catalog.error.message : "请稍后重试"}
+          onAction={() => void catalog.refetch()}
         />
       </section>
     );
@@ -125,14 +126,15 @@ export function ConfigurationPage({ csrfToken }: { csrfToken: string }) {
   return (
     <section className="page-content configuration-page">
       <ConfigurationSectionNav />
-      <div className="page-intro configuration-page-intro">
-        <Paragraph>
-          进入本页时才读取完整配置。每次保存只提交已修改字段；默认代理为只写秘密，页面只显示是否已配置。
-        </Paragraph>
-        <Button icon={<ReloadOutlined aria-hidden="true" />} loading={catalog.isFetching} onClick={() => void catalog.refetch()}>
-          刷新当前页
-        </Button>
-      </div>
+      <PageToolbar
+        className="configuration-page-intro"
+        description="进入本页时才读取完整配置。每次保存只提交已修改字段；默认代理为只写秘密，页面只显示是否已配置。"
+        actions={(
+          <Button icon={<ReloadOutlined aria-hidden="true" />} loading={catalog.isFetching} onClick={() => void catalog.refetch()}>
+            刷新当前页
+          </Button>
+        )}
+      />
 
       {notice ? <Alert className="page-alert" type="success" showIcon closable title={notice} onClose={() => setNotice("")} /> : null}
       {mutation.isError ? (
@@ -312,7 +314,7 @@ function ConfigurationControl({ field, value, onChange }: {
   }
   if (field.type === "choice") {
     return (
-      <Select
+      <WideSelect
         aria-label={field.label}
         value={String(value ?? "")}
         options={(field.choices ?? []).map((choice) => ({ value: choice.value, label: choice.label }))}
@@ -321,7 +323,7 @@ function ConfigurationControl({ field, value, onChange }: {
     );
   }
   if (["integer", "number", "nullable_integer"].includes(field.type)) {
-    return (
+    const input = (
       <InputNumber
         aria-label={field.label}
         value={typeof value === "number" ? value : null}
@@ -329,11 +331,16 @@ function ConfigurationControl({ field, value, onChange }: {
         max={field.max}
         step={field.type === "number" ? 0.1 : 1}
         stringMode={false}
-        addonAfter={field.unit}
         placeholder={field.type === "nullable_integer" ? "不限额" : undefined}
         onChange={(next) => onChange(typeof next === "number" ? next : null)}
       />
     );
+    return field.unit ? (
+      <Space.Compact block>
+        {input}
+        <span className="configuration-unit-addon">{field.unit}</span>
+      </Space.Compact>
+    ) : input;
   }
   if (field.type === "domain_list") {
     return (
@@ -356,7 +363,7 @@ function ConfigurationControl({ field, value, onChange }: {
   }
   const secret = field.type === "proxy_url_secret";
   const InputComponent = secret ? Input.Password : Input;
-  return (
+  const input = (
     <InputComponent
       aria-label={field.label}
       value={String(value ?? "")}
@@ -365,10 +372,15 @@ function ConfigurationControl({ field, value, onChange }: {
       placeholder={secret
         ? (field.configured ? "已配置；留空保持不变" : "socks5://user:pass@host:1080")
         : undefined}
-      addonAfter={field.unit}
       onChange={(event) => onChange(event.target.value)}
     />
   );
+  return field.unit ? (
+    <Space.Compact block>
+      {input}
+      <span className="configuration-unit-addon">{field.unit}</span>
+    </Space.Compact>
+  ) : input;
 }
 
 function flattenConfiguration(catalog?: ConfigurationCatalog): EditorField[] {

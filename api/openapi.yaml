@@ -1381,11 +1381,26 @@ paths:
         - portalSession: []
       responses:
         "200":
-          description: Current user and API Key
+          description: Current user metadata without API Key material
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalProfile"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/key:
+    get:
+      operationId: getPortalKey
+      tags: [portal]
+      security:
+        - portalSession: []
+      responses:
+        "200":
+          description: Current API Key returned only for an explicit one-time reveal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalKeyResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /usage/me/accounts:
@@ -2448,7 +2463,10 @@ components:
         - next_schedule_at
       properties:
         webhook_configured: { type: boolean }
-        webhook_url: { type: string }
+        webhook_url:
+          type: string
+          maxLength: 0
+          description: Always empty on reads so the Webhook credential never enters a browser cache.
         heartbeat_at: { type: [integer, "null"], format: int64 }
         last_success_at: { type: [integer, "null"], format: int64 }
         last_error: { type: string }
@@ -2637,11 +2655,19 @@ components:
     PortalProfile:
       type: object
       additionalProperties: false
-      required: [user, api_key, current_group, generated_at]
+      required: [user, current_group, generated_at]
       properties:
         user: { type: string, format: email }
-        api_key: { type: string }
         current_group: { type: string }
+        generated_at: { type: integer, format: int64 }
+    PortalKeyResponse:
+      type: object
+      additionalProperties: false
+      required: [api_key, generated_at]
+      properties:
+        api_key:
+          type: string
+          description: One-time browser-memory reveal; clients must not cache or persist this value.
         generated_at: { type: integer, format: int64 }
     PortalAccountStatus:
       type: object

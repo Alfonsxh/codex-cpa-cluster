@@ -2,6 +2,7 @@ import importlib.util
 import datetime
 import sqlite3
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -1522,6 +1523,86 @@ class UsageStoreTests(unittest.TestCase):
         self.assertEqual(accounts["gamma"]["average"], 17)
         self.assertEqual(accounts["alpha"]["average"], 7)
         self.assertEqual(payload["users"][0]["total"], 280)
+
+    def test_token_time_series_30_day_performance_and_index_plan(self):
+        now = 2_000_000_000
+        accounts = ["cpa-{}".format(index) for index in range(8)]
+        users = ["user-{:03d}@example.com".format(index) for index in range(200)]
+        row_count = 120_000
+        rows = (
+            (
+                "synthetic-event-{}".format(index),
+                accounts[index % len(accounts)],
+                users[index % len(users)],
+                "synthetic",
+                now - (index % (30 * 24 * 60 * 60)),
+                "synthetic-request-{}".format(index),
+                100 + (index % 1_000),
+            )
+            for index in range(row_count)
+        )
+        with closing(sqlite3.connect(str(self.db))) as connection:
+            connection.executemany(
+                "INSERT INTO usage_events("
+                "event_key, account, user_email, key_label, occurred_at, request_id, total_tokens"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            connection.commit()
+
+        # A WAL reader must continue while the collector owns the independent
+        # writer transaction; the overview path does not take an application
+        # write lock merely to aggregate the chart.
+        with closing(sqlite3.connect(str(self.db), timeout=0.1)) as writer:
+            writer.execute("BEGIN IMMEDIATE")
+            writer.execute(
+                "INSERT OR REPLACE INTO usage_meta(key, value) VALUES (?, ?)",
+                ("performance-probe", "pending"),
+            )
+            started = time.perf_counter()
+            payload = self.store.token_time_series(
+                accounts,
+                users,
+                window_seconds=30 * 24 * 60 * 60,
+                bucket_seconds=6 * 60 * 60,
+                now=now,
+                user_limit=10,
+            )
+            elapsed = time.perf_counter() - started
+            writer.rollback()
+
+        self.assertLess(elapsed, 0.5, "30-day 120k-row series must complete within 500 ms")
+        self.assertEqual(len(payload["buckets"]), 121)
+        self.assertEqual(len(payload["accounts"]), len(accounts))
+        self.assertEqual(len(payload["users"]), 10)
+
+        placeholders = ",".join("?" for _ in accounts)
+        with closing(sqlite3.connect(str(self.db))) as connection:
+            plans = {
+                "usage_events_account_time": connection.execute(
+                    "EXPLAIN QUERY PLAN SELECT account, user_email, "
+                    "CAST(occurred_at / 21600 AS INTEGER) * 21600 AS bucket_at, "
+                    "SUM(total_tokens) FROM usage_events "
+                    "WHERE account IN ({}) AND occurred_at >= ? AND occurred_at <= ? "
+                    "GROUP BY account, user_email, bucket_at".format(placeholders),
+                    (*accounts, now - 30 * 24 * 60 * 60, now),
+                ).fetchall(),
+                "usage_events_user_time": connection.execute(
+                    "EXPLAIN QUERY PLAN SELECT SUM(total_tokens) FROM usage_events "
+                    "WHERE user_email = ? AND occurred_at >= ? AND occurred_at <= ?",
+                    (users[0], now - 30 * 24 * 60 * 60, now),
+                ).fetchall(),
+                "usage_events_time_user": connection.execute(
+                    "EXPLAIN QUERY PLAN SELECT user_email, SUM(total_tokens) "
+                    "FROM usage_events INDEXED BY usage_events_time_user "
+                    "WHERE occurred_at >= ? AND occurred_at <= ? GROUP BY user_email",
+                    (now - 30 * 24 * 60 * 60, now),
+                ).fetchall(),
+            }
+
+        for index_name, rows in plans.items():
+            detail = " ".join(str(row[3]) for row in rows)
+            self.assertIn(index_name, detail, "query plan must use {}: {}".format(index_name, detail))
 
     def test_one_key_is_attributed_to_the_actual_cpa_and_account_activity(self):
         shared_key = "cpa_alice_0123456789abcdef"

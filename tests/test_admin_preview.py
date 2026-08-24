@@ -2,6 +2,7 @@ import importlib.util
 import json
 import ssl
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -67,6 +68,13 @@ class PreviewTestSupport:
 
 class PreviewServerCase(PreviewTestSupport, unittest.TestCase):
 
+    def test_mock_clock_can_be_fixed_for_visual_regression(self):
+        first = self.preview.MockAdminData(now=1_787_500_800)
+        second = self.preview.MockAdminData(now=1_787_500_800)
+
+        self.assertEqual(first.now, 1_787_500_800)
+        self.assertEqual(first.overview_usage({"window": ["2592000"]}), second.overview_usage({"window": ["2592000"]}))
+
     def test_mock_mode_serves_complete_core_get_surface_without_404(self):
         _, base = self.start_preview("mock")
         status, headers, raw = self.request(
@@ -80,8 +88,10 @@ class PreviewServerCase(PreviewTestSupport, unittest.TestCase):
         paths = (
             "/admin/api/session",
             "/admin/api/overview",
+            "/admin/api/overview/summary",
             "/admin/api/overview/catalog",
             "/admin/api/overview/usage?window=today",
+            "/admin/api/overview/usage?window=2592000&user_limit=10",
             "/admin/api/accounts?window=today",
             "/admin/api/accounts/usage-breakdown?account=cpa-main&window=today",
             "/admin/api/images/cliproxy",
@@ -92,7 +102,13 @@ class PreviewServerCase(PreviewTestSupport, unittest.TestCase):
             "/admin/api/teams/usage?window=current_week",
             "/admin/api/teams/usage-breakdown?team_id=platform&window=today",
             "/admin/api/settings",
+            "/admin/api/settings/configuration",
+            "/admin/api/settings/general",
+            "/admin/api/settings/notifications",
             "/admin/api/release",
+            "/admin/api/runtime/services",
+            "/admin/api/runtime/jobs?limit=30",
+            "/admin/api/runtime/logs?target=edge",
             "/admin/api/operations/impact?action=stop&target=cpa-main",
         )
         for path in paths:
@@ -100,6 +116,70 @@ class PreviewServerCase(PreviewTestSupport, unittest.TestCase):
                 status, _, raw = self.request(base, path, headers={"Cookie": cookie})
                 self.assertEqual(status, HTTPStatus.OK, raw.decode("utf-8", errors="replace"))
                 self.assertIsInstance(json.loads(raw), dict)
+
+    def test_mock_mode_matches_current_react_catalog_shapes(self):
+        _, base = self.start_preview("mock")
+        status, headers, raw = self.request(
+            base,
+            "/admin/api/session",
+            method="POST",
+            headers={"X-Management-Key": "preview-only"},
+        )
+        self.assertEqual(status, HTTPStatus.CREATED, raw)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+
+        def payload(path):
+            status, _, raw = self.request(base, path, headers={"Cookie": cookie})
+            self.assertEqual(status, HTTPStatus.OK, raw.decode("utf-8", errors="replace"))
+            return json.loads(raw)
+
+        summary = payload("/admin/api/overview/summary")
+        self.assertEqual(summary["source"], "control-plane")
+        self.assertIn("incomplete_key_matrices", summary["summary"])
+
+        started_at = time.perf_counter()
+        usage = payload("/admin/api/overview/usage?window=2592000&user_limit=10")
+        elapsed = time.perf_counter() - started_at
+        self.assertLess(elapsed, 0.5, "30-day mock API must complete within 500 ms")
+        self.assertEqual(len(usage["buckets"]), 121)
+        self.assertTrue(all(len(series["values"]) == 121 for series in usage["accounts"]))
+        self.assertEqual(usage["user_limit"], 10)
+        self.assertFalse(usage["cached"])
+        self.assertIn("last_error", usage["collector"])
+
+        accounts = payload("/admin/api/accounts")
+        self.assertEqual(accounts["warnings"], [])
+        self.assertIn("account_state", accounts["accounts"][0])
+        self.assertIn("proxy_mode", accounts["accounts"][0])
+
+        users = payload("/admin/api/users?page=1&page_size=50")
+        self.assertIn("route_account_id", users["users"][0])
+        self.assertIn("team_membership_version", users["users"][0])
+
+        services = payload("/admin/api/runtime/services")
+        self.assertIn("container_id", services["services"][0])
+        self.assertIn("image", services["services"][0])
+
+        configuration = payload("/admin/api/settings/configuration")
+        self.assertEqual(
+            configuration["field_count"],
+            sum(len(group["fields"]) for group in configuration["groups"]),
+        )
+        failover = next(
+            field
+            for group in configuration["groups"]
+            for field in group["fields"]
+            if field["key"] == "account_failover.mode"
+        )
+        self.assertEqual([choice["value"] for choice in failover["choices"]], ["off", "active"])
+
+        general = payload("/admin/api/settings/general")
+        self.assertEqual(general["apply_mode"], "live")
+        self.assertIn("allowed_email_domains", general["values"])
+
+        notifications = payload("/admin/api/settings/notifications")
+        self.assertIn("notifications", notifications)
+        self.assertIn("weekly_threshold_percent", notifications["values"])
 
     def test_mock_static_files_are_current_workspace_files_and_writes_are_local_only(self):
         _, base = self.start_preview("mock")
@@ -260,6 +340,21 @@ class RemoteReadOnlyPreviewTests(PreviewTestSupport, unittest.TestCase):
         self.assertIsNone(proxied["authorization"])
         self.assertIsNone(proxied["csrf"])
 
+    def test_current_react_get_routes_are_allowlisted(self):
+        cookie, _, _ = self.login()
+        for path in (
+            "/admin/api/overview/summary",
+            "/admin/api/runtime/services",
+            "/admin/api/runtime/jobs?limit=30",
+            "/admin/api/runtime/logs?target=edge",
+            "/admin/api/settings/configuration",
+            "/admin/api/settings/general",
+            "/admin/api/settings/notifications",
+        ):
+            with self.subTest(path=path):
+                status, _, raw = self.request(self.base, path, headers={"Cookie": cookie})
+                self.assertEqual(status, HTTPStatus.OK, raw.decode("utf-8", errors="replace"))
+
     def test_business_writes_and_unknown_get_routes_never_reach_upstream(self):
         cookie, _, payload = self.login()
         request_count = len(FakeUpstreamHandler.requests)
@@ -342,6 +437,29 @@ class RemoteReadWritePreviewTests(PreviewTestSupport, unittest.TestCase):
         self.assertIsNone(proxied["authorization"])
         self.assertIsNone(proxied["csrf"])
         self.assertEqual(json.loads(proxied["body"]), body)
+
+    def test_current_react_write_routes_are_allowlisted(self):
+        cookie, session = self.login()
+        requests = (
+            ("POST", "/admin/api/accounts/rebalance-all", {"confirm": "rebalance-all"}),
+            ("POST", "/admin/api/runtime/jobs", {"action": "restart", "target": "edge", "confirm": "restart:edge"}),
+            ("POST", "/admin/api/runtime/jobs/job-1/cancel", {}),
+            ("PUT", "/admin/api/settings/general", {"confirm": "save", "values": {}}),
+            ("PUT", "/admin/api/settings/notifications", {"confirm": "save", "values": {}}),
+        )
+        for method, path, body in requests:
+            with self.subTest(path=path):
+                status, _, raw = self.request(
+                    self.base,
+                    path,
+                    method=method,
+                    body=body,
+                    headers={"Cookie": cookie, "X-CSRF-Token": session["csrf_token"]},
+                )
+                self.assertEqual(status, HTTPStatus.OK, raw.decode("utf-8", errors="replace"))
+                proxied = FakeUpstreamHandler.requests[-1]
+                self.assertEqual(proxied["method"], method)
+                self.assertEqual(proxied["path"], path)
 
     def test_write_requires_local_session_csrf_and_allowlisted_route(self):
         cookie, session = self.login()

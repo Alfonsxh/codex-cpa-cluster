@@ -31,5 +31,12 @@ class TestResizeObserver {
 
 vi.stubGlobal("ResizeObserver", TestResizeObserver);
 
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  configurable: true,
+  value: vi.fn(() => ({
+    measureText: (text: string) => ({ width: String(text).length * 7 })
+  }))
+});
+
 const getComputedStyle = window.getComputedStyle.bind(window);
 window.getComputedStyle = (element: Element) => getComputedStyle(element);

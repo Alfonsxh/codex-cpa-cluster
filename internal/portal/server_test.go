@@ -86,6 +86,8 @@ func TestPortalRequiresInitialPasswordChangeAndKeepsOnlyCurrentSession(t *testin
 
 	blocked := fixture.request(http.MethodGet, "/usage/me/profile", "", "current-session")
 	assertPortalError(t, blocked, http.StatusForbidden, "password_change_required")
+	blockedKey := fixture.request(http.MethodGet, "/usage/me/key", "", "current-session")
+	assertPortalError(t, blockedKey, http.StatusForbidden, "password_change_required")
 
 	changed := fixture.request(
 		http.MethodPut,
@@ -108,9 +110,14 @@ func TestPortalRequiresInitialPasswordChangeAndKeepsOnlyCurrentSession(t *testin
 	}
 
 	profile := fixture.request(http.MethodGet, "/usage/me/profile", "", "current-session")
-	if profile.Code != http.StatusOK || !strings.Contains(profile.Body.String(), "old-key") ||
-		strings.Contains(profile.Body.String(), "bob-key") {
+	if profile.Code != http.StatusOK || strings.Contains(profile.Body.String(), "old-key") ||
+		strings.Contains(profile.Body.String(), "bob-key") || !strings.Contains(profile.Body.String(), "alice@example.com") {
 		t.Fatalf("profile = %d %s", profile.Code, profile.Body.String())
+	}
+	key := fixture.request(http.MethodGet, "/usage/me/key", "", "current-session")
+	if key.Code != http.StatusOK || !strings.Contains(key.Body.String(), "old-key") ||
+		strings.Contains(key.Body.String(), "bob-key") || key.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("key reveal = %d %#v %s", key.Code, key.Header(), key.Body.String())
 	}
 }
 

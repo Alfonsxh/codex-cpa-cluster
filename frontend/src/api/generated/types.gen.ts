@@ -519,6 +519,9 @@ export type InitialPasswordResponse = {
 
 export type NotificationStatus = {
     webhook_configured: boolean;
+    /**
+     * Always empty on reads so the Webhook credential never enters a browser cache.
+     */
     webhook_url: string;
     heartbeat_at: number | null;
     last_success_at: number | null;
@@ -633,8 +636,15 @@ export type PortalSession = {
 
 export type PortalProfile = {
     user: string;
-    api_key: string;
     current_group: string;
+    generated_at: number;
+};
+
+export type PortalKeyResponse = {
+    /**
+     * One-time browser-memory reveal; clients must not cache or persist this value.
+     */
+    api_key: string;
     generated_at: number;
 };
 
@@ -3221,12 +3231,37 @@ export type GetPortalProfileError = GetPortalProfileErrors[keyof GetPortalProfil
 
 export type GetPortalProfileResponses = {
     /**
-     * Current user and API Key
+     * Current user metadata without API Key material
      */
     200: PortalProfile;
 };
 
 export type GetPortalProfileResponse = GetPortalProfileResponses[keyof GetPortalProfileResponses];
+
+export type GetPortalKeyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/usage/me/key';
+};
+
+export type GetPortalKeyErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetPortalKeyError = GetPortalKeyErrors[keyof GetPortalKeyErrors];
+
+export type GetPortalKeyResponses = {
+    /**
+     * Current API Key returned only for an explicit one-time reveal
+     */
+    200: PortalKeyResponse;
+};
+
+export type GetPortalKeyResponse = GetPortalKeyResponses[keyof GetPortalKeyResponses];
 
 export type ListPortalAccountsData = {
     body?: never;

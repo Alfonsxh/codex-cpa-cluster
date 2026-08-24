@@ -1765,7 +1765,9 @@ type NotificationStatus struct {
 	LastSuccessAt     *int64 `json:"last_success_at"`
 	NextScheduleAt    *int64 `json:"next_schedule_at"`
 	WebhookConfigured bool   `json:"webhook_configured"`
-	WebhookUrl        string `json:"webhook_url"`
+
+	// WebhookUrl Always empty on reads so the Webhook credential never enters a browser cache.
+	WebhookUrl string `json:"webhook_url"`
 }
 
 // NotificationValues defines model for NotificationValues.
@@ -1910,6 +1912,13 @@ type PortalAccounts struct {
 	Window       PortalWindow    `json:"window"`
 }
 
+// PortalKeyResponse defines model for PortalKeyResponse.
+type PortalKeyResponse struct {
+	// ApiKey One-time browser-memory reveal; clients must not cache or persist this value.
+	ApiKey      string `json:"api_key"`
+	GeneratedAt int64  `json:"generated_at"`
+}
+
 // PortalLoginRequest defines model for PortalLoginRequest.
 type PortalLoginRequest struct {
 	Email    openapi_types.Email `json:"email"`
@@ -1933,7 +1942,6 @@ type PortalPasswordResponsePasswordChangeRequired bool
 
 // PortalProfile defines model for PortalProfile.
 type PortalProfile struct {
-	ApiKey       string              `json:"api_key"`
 	CurrentGroup string              `json:"current_group"`
 	GeneratedAt  int64               `json:"generated_at"`
 	User         openapi_types.Email `json:"user"`

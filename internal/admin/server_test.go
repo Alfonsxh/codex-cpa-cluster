@@ -1431,8 +1431,15 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/settings/notification-webhook", map[string]any{
 		"confirm": "save", "webhook_url": webhook,
 	}, headers, nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), webhook) {
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), webhook) {
 		t.Fatalf("save webhook = %d, %s", response.Code, response.Body.String())
+	}
+	var savedWebhook struct {
+		Notifications notificationStatus `json:"notifications"`
+	}
+	decodeAdminResponse(t, response, &savedWebhook)
+	if !savedWebhook.Notifications.WebhookConfigured || savedWebhook.Notifications.WebhookURL != "" {
+		t.Fatalf("saved webhook status leaked credential = %#v", savedWebhook.Notifications)
 	}
 	stored, found, err := store.ReadSecret(context.Background(), "wecom_webhook")
 	if err != nil || !found || stored != webhook {
@@ -1454,6 +1461,13 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 	if err != nil || settings["notification.daily_times"] != "09:00,18:00" ||
 		settings["notification.timezone"] != "Asia/Shanghai" {
 		t.Fatalf("stored notification settings = (%#v, %v)", settings, err)
+	}
+	response = performAdminRequest(server, http.MethodGet, "/admin/api/settings/notifications", nil, headers, nil)
+	var redacted notificationSettingsResponse
+	decodeAdminResponse(t, response, &redacted)
+	if !redacted.Notifications.WebhookConfigured || redacted.Notifications.WebhookURL != "" ||
+		strings.Contains(response.Body.String(), webhook) {
+		t.Fatalf("read notification settings leaked webhook = %s", response.Body.String())
 	}
 
 	resetAt := int64(1_900_000_000)

@@ -7,10 +7,7 @@ import {
   Empty,
   Result,
   Row,
-  Select,
   Space,
-  Statistic,
-  Table,
   Tag,
   Typography,
   type TableColumnsType
@@ -25,6 +22,10 @@ import {
   type UsageCombination,
   type UsageWindow
 } from "../api/usage";
+import { AdminTable } from "./components/AdminTable";
+import { MetricCard } from "./components/MetricCard";
+import { TokenValue } from "./components/TokenValue";
+import { WideSelect } from "./components/WideSelect";
 
 const { Text } = Typography;
 
@@ -59,7 +60,7 @@ export function UsageBreakdownDrawer({
       destroyOnHidden
       extra={(
         <Space wrap>
-          <Select<UsageWindow>
+          <WideSelect<UsageWindow>
             aria-label="用量时间范围"
             value={window}
             options={usageWindowOptions}
@@ -111,31 +112,29 @@ function UsageBreakdownContent({
   return (
     <>
       <Row gutter={[12, 12]}>
-        <Col xs={12} lg={6}><Card><Statistic title="请求数" value={data.totals.request_count} /></Card></Col>
-        <Col xs={12} lg={6}><Card><Statistic title="成功" value={data.totals.success_count} /></Card></Col>
-        <Col xs={12} lg={6}><Card><Statistic title="失败" value={data.totals.failed_count} /></Card></Col>
+        <Col xs={12} lg={6}><MetricCard title="请求数" value={data.totals.request_count} /></Col>
+        <Col xs={12} lg={6}><MetricCard title="成功" value={data.totals.success_count} /></Col>
+        <Col xs={12} lg={6}><MetricCard title="失败" value={data.totals.failed_count} /></Col>
         <Col xs={12} lg={6}>
-          <Card>
-            <Statistic
-              title={kind === "user" ? "加权 Token" : "Token"}
-              value={kind === "user" ? data.totals.weighted_tokens ?? 0 : data.totals.total_tokens}
-              formatter={(value) => formatTokens(Number(value))}
-            />
-          </Card>
+          <MetricCard
+            title={kind === "user" ? "加权 Token" : "Token"}
+            value={kind === "user" ? data.totals.weighted_tokens ?? 0 : data.totals.total_tokens}
+            formatter={(value) => <TokenValue value={Number(value)} suffix="" />}
+          />
         </Col>
       </Row>
       <Card
         title="模型与推理强度"
         extra={<Text type="secondary">数据时间：{formatTimestamp(data.generated_at)}</Text>}
       >
-        <Table<UsageCombination>
+        <AdminTable<UsageCombination>
           rowKey={(item) => `${item.account ?? "all"}:${item.model}:${item.reasoning_effort}`}
           columns={combinationColumns(kind)}
           dataSource={data.combinations}
-          pagination={false}
-          locale={{ emptyText: "当前范围没有模型明细" }}
-          scroll={{ x: 700 }}
+          minWidth={700}
+          maxBodyHeight="min(48vh, 480px)"
           size="small"
+          emptyText="当前范围没有模型明细"
         />
       </Card>
     </>
@@ -161,7 +160,7 @@ function combinationColumns(kind: "account" | "user"): TableColumnsType<UsageCom
       title: kind === "user" ? "加权 Token" : "Token",
       align: "right",
       width: 125,
-      render: (_, item) => formatTokens(kind === "user" ? item.weighted_tokens ?? 0 : item.total_tokens)
+      render: (_, item) => <TokenValue value={kind === "user" ? item.weighted_tokens ?? 0 : item.total_tokens} />
     },
     { title: "最后使用", dataIndex: "last_used_at", width: 165, render: formatTimestamp }
   ];
@@ -186,10 +185,6 @@ const effortLabels: Record<string, string> = {
   auto: "自动",
   unknown: "未知"
 };
-
-function formatTokens(value: number) {
-  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 2 }).format(value);
-}
 
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";

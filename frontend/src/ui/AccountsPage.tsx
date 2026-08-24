@@ -18,25 +18,20 @@ import {
   Checkbox,
   Col,
   Dropdown,
-  Empty,
   Form,
   Input,
   Modal,
   Progress,
-  Result,
   Row,
-  Select,
   Skeleton,
   Space,
-  Statistic,
   Switch,
-  Table,
   Tag,
   Typography,
   type MenuProps,
   type TableColumnsType
 } from "antd";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -59,6 +54,11 @@ import {
   type AccountUpdateResponse,
   type RebalanceResponse
 } from "../api/accounts";
+import { AdminTable } from "./components/AdminTable";
+import { MetricCard } from "./components/MetricCard";
+import { PageState } from "./components/PageState";
+import { PageToolbar } from "./components/PageToolbar";
+import { WideSelect } from "./components/WideSelect";
 import { UsageBreakdownDrawer } from "./UsageBreakdownDrawer";
 
 const { Paragraph, Text } = Typography;
@@ -85,8 +85,12 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   const [usageAccount, setUsageAccount] = useState<string | null>(null);
   const [editorAccount, setEditorAccount] = useState<Account | "create" | null>(null);
   const [destructiveAction, setDestructiveAction] = useState<DestructiveAction | null>(null);
-  const accounts = useQuery({ queryKey: accountsQueryKey, queryFn: listAccounts });
+  const accounts = useQuery({
+    queryKey: accountsQueryKey,
+    queryFn: ({ signal }) => listAccounts(signal)
+  });
   const lifecycle = useMutation({
+    gcTime: 0,
     mutationFn: (command: AccountLifecycleCommand): Promise<AccountLifecycleResponse> => {
       switch (command.kind) {
         case "create": return createAccount(command.request, csrfToken);
@@ -99,6 +103,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
       setEditorAccount(null);
       setDestructiveAction(null);
       setNotice(result.message);
+      lifecycle.reset();
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey, exact: true });
     }
   });
@@ -110,16 +115,30 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
       await queryClient.invalidateQueries({ queryKey: accountsQueryKey, exact: true });
     }
   });
+  const resetLifecycle = lifecycle.reset;
+  const openEditor = useCallback((account: Account | "create") => {
+    resetLifecycle();
+    setEditorAccount(account);
+  }, [resetLifecycle]);
+  const openDestructiveAction = useCallback((action: DestructiveAction) => {
+    resetLifecycle();
+    setDestructiveAction(action);
+  }, [resetLifecycle]);
+  const columns = useMemo(() => accountColumns({
+    onOpenUsage: setUsageAccount,
+    onEdit: openEditor,
+    onDestructiveAction: openDestructiveAction
+  }), [openDestructiveAction, openEditor]);
 
   if (accounts.isPending) return <AccountPageSkeleton />;
   if (accounts.isError) {
     return (
       <section className="page-content">
-        <Result
-          status="warning"
+        <PageState
+          kind="error"
           title="账号数据加载失败"
-          subTitle={accounts.error instanceof Error ? accounts.error.message : "请稍后重试"}
-          extra={<Button type="primary" onClick={() => void accounts.refetch()}>重新加载</Button>}
+          detail={accounts.error instanceof Error ? accounts.error.message : "请稍后重试"}
+          onAction={() => void accounts.refetch()}
         />
       </section>
     );
@@ -128,22 +147,14 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   const enabledAccounts = accounts.data.accounts.filter((account) => account.enabled).length;
   const routedUsers = accounts.data.accounts.reduce((total, account) => total + account.routed_users, 0);
   const activeUsers = accounts.data.accounts.reduce((total, account) => total + (account.active_users_1h ?? 0), 0);
-  const openEditor = (account: Account | "create") => {
-    lifecycle.reset();
-    setEditorAccount(account);
-  };
-  const openDestructiveAction = (action: DestructiveAction) => {
-    lifecycle.reset();
-    setDestructiveAction(action);
-  };
 
   return (
     <section className="page-content account-page">
-      <div className="page-intro account-page-intro">
-        <Paragraph>
-          仅在进入本页时请求账号目录、额度状态和近 1 小时活跃数；创建、更新和删除均在 Gateway 新快照激活后才返回成功。
-        </Paragraph>
-        <Space wrap>
+      <PageToolbar
+        className="account-page-intro"
+        description="仅在进入本页时请求账号目录、额度状态和近 1 小时活跃数；创建、更新和删除均在 Gateway 新快照激活后才返回成功。"
+        actions={(
+          <>
           <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => void accounts.refetch()} loading={accounts.isFetching}>
             刷新当前页
           </Button>
@@ -161,8 +172,9 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
           >
             一键负载均衡
           </Button>
-        </Space>
-      </div>
+          </>
+        )}
+      />
 
       {notice ? (
         <Alert className="page-alert" type="success" showIcon closable message={notice} onClose={() => setNotice("")} />
@@ -183,9 +195,9 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
       ) : null}
 
       <Row gutter={[16, 16]} className="account-stat-grid">
-        <Col xs={24} sm={8}><Card><Statistic title="启用账号" value={enabledAccounts} suffix={`/ ${accounts.data.accounts.length}`} /></Card></Col>
-        <Col xs={24} sm={8}><Card><Statistic title="已路由用户" value={routedUsers} /></Card></Col>
-        <Col xs={24} sm={8}><Card><Statistic title="1h 活跃数合计" value={activeUsers} suffix={accounts.data.warnings.length ? "*" : ""} /></Card></Col>
+        <Col xs={24} sm={8}><MetricCard title="启用账号" value={enabledAccounts} suffix={`/ ${accounts.data.accounts.length}`} /></Col>
+        <Col xs={24} sm={8}><MetricCard title="已路由用户" value={routedUsers} /></Col>
+        <Col xs={24} sm={8}><MetricCard title="1h 活跃数合计" value={activeUsers} suffix={accounts.data.warnings.length ? "*" : ""} /></Col>
       </Row>
 
       <Card
@@ -193,24 +205,14 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
         title="账号负载与额度"
         extra={<Text type="secondary">数据时间：{formatTimestamp(accounts.data.generated_at)}</Text>}
       >
-        {accounts.data.accounts.length === 0 ? (
-          <Empty description="还没有业务账号" image={Empty.PRESENTED_IMAGE_SIMPLE}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor("create")}>创建第一个账号</Button>
-          </Empty>
-        ) : (
-          <Table<Account>
-            rowKey="id"
-            columns={accountColumns({
-              onOpenUsage: setUsageAccount,
-              onEdit: openEditor,
-              onDestructiveAction: openDestructiveAction
-            })}
-            dataSource={accounts.data.accounts}
-            pagination={false}
-            scroll={{ x: 1180 }}
-            size="middle"
-          />
-        )}
+        <AdminTable<Account>
+          rowKey="id"
+          columns={columns}
+          dataSource={accounts.data.accounts}
+          minWidth={1180}
+          emptyText="还没有业务账号"
+          emptyAction={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor("create")}>创建第一个账号</Button>}
+        />
       </Card>
 
       <AccountEditorModal
@@ -476,7 +478,7 @@ function AccountEditorModal({
               name="proxy_mode"
               render={({ field, fieldState }) => (
                 <Form.Item label="出口策略" validateStatus={fieldState.error ? "error" : undefined} help={fieldState.error?.message}>
-                  <Select
+                  <WideSelect
                     {...field}
                     aria-label="出口策略"
                     options={[
@@ -566,7 +568,13 @@ function AccountEditorModal({
                     validateStatus={fieldState.error ? "error" : undefined}
                     help={fieldState.error?.message ?? "当前账号上的用户和默认路由会原子迁移到该账号。"}
                   >
-                    <Select {...field} aria-label="备用账号" options={fallbackOptions} placeholder="选择已启用账号" notFoundContent="没有可用的备用账号" />
+                    <WideSelect
+                      {...field}
+                      aria-label="备用账号"
+                      options={fallbackOptions}
+                      placeholder="选择已启用账号"
+                      notFoundContent="没有可用的备用账号"
+                    />
                   </Form.Item>
                 )}
               />
@@ -671,7 +679,12 @@ function AccountDestructiveModal({
                 validateStatus={fieldState.error ? "error" : undefined}
                 help={fieldState.error?.message ?? `将迁移 ${account.routed_users} 个已路由用户。`}
               >
-                <Select {...field} aria-label="删除备用账号" options={fallbackOptions} placeholder="选择已启用账号" />
+                <WideSelect
+                  {...field}
+                  aria-label="删除备用账号"
+                  options={fallbackOptions}
+                  placeholder="选择已启用账号"
+                />
               </Form.Item>
             )}
           />

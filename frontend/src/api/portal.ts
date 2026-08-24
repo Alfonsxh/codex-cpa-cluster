@@ -1,6 +1,7 @@
 import { apiRequest } from "./client";
 import type {
   PortalAccounts,
+  PortalKeyResponse,
   PortalProfile,
   PortalRoute,
   PortalSession,
@@ -12,6 +13,7 @@ export type {
   PortalAccount,
   PortalAccounts,
   PortalAccountStatus,
+  PortalKeyResponse,
   PortalProfile,
   PortalRoute,
   PortalSession,
@@ -49,6 +51,10 @@ export function logoutPortal(): Promise<{ logged_out: true }> {
 
 export function readPortalProfile(signal?: AbortSignal): Promise<PortalProfile> {
   return apiRequest<PortalProfile>("/usage/me/profile", { signal });
+}
+
+export function readPortalKey(signal?: AbortSignal): Promise<PortalKeyResponse> {
+  return apiRequest<PortalKeyResponse>("/usage/me/key", { signal });
 }
 
 export function readPortalRoute(signal?: AbortSignal): Promise<PortalRoute> {

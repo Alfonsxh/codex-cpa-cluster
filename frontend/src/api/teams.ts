@@ -6,8 +6,8 @@ export type TeamInput = GeneratedTeamInput & { id?: string };
 
 export const teamsQueryKey = ["teams"] as const;
 
-export function listTeams(): Promise<{ teams: Team[] }> {
-  return apiRequest<{ teams: Team[] }>("/admin/api/teams");
+export function listTeams(signal?: AbortSignal): Promise<{ teams: Team[] }> {
+  return apiRequest<{ teams: Team[] }>("/admin/api/teams", { signal });
 }
 
 export function createTeam(input: TeamInput, csrfToken: string) {

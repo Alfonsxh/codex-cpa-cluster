@@ -1,6 +1,6 @@
 import { App as AntApp, ConfigProvider } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +9,6 @@ import { UsageDashboard } from "./UsageDashboard";
 
 const profile = {
   user: "alice@example.com",
-  api_key: "old-secret-api-key-1234",
   current_group: "alpha",
   generated_at: 10_000
 };
@@ -186,22 +185,29 @@ describe("UsageDashboard", () => {
 
     expect((await screen.findAllByText("CPA 1")).length).toBeGreaterThan(0);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("usage-breakdown"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
     await user.click(screen.getAllByRole("button", { name: "用量明细" })[0]);
     expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/usage-breakdown?window=86400&account=alpha")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Close" }));
 
-    await user.click(screen.getByRole("button", { name: "显示" }));
-    expect(screen.getByText("old-secret-api-key-1234")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看 API Key" }));
+    const keyInput = await screen.findByLabelText("API Key");
+    expect(keyInput).toHaveValue("old-secret-api-key-1234");
+    const keyModal = keyInput.closest(".ant-modal");
+    if (!keyModal) throw new Error("API Key 弹框未渲染");
+    await user.click(within(keyModal as HTMLElement).getByRole("button", { name: "关闭并清除" }));
+    expect(keyInput).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("old-secret-api-key-1234")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "刷新 Key" }));
     await user.click(screen.getByRole("button", { name: "确认刷新并使旧 Key 失效" }));
-    expect(await screen.findByText("new-secret-api-key-9876")).toBeInTheDocument();
-    expect(screen.queryByText("old-secret-api-key-1234")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("API Key")).toHaveValue("new-secret-api-key-9876");
     expect(storageSpy).not.toHaveBeenCalled();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/usage/me/key/rotate", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ confirm: true })
     })));
-  });
+  }, 15_000);
 });
 
 function renderPortal(element: React.ReactNode) {
@@ -219,6 +225,7 @@ function renderPortal(element: React.ReactNode) {
 
 function portalReadResponse(path: string) {
   if (path === "/usage/me/profile") return jsonResponse(profile);
+  if (path === "/usage/me/key") return jsonResponse({ api_key: "old-secret-api-key-1234", generated_at: 10_000 });
   if (path === "/usage/me/route") return jsonResponse({ current_group: "alpha", generated_at: 10_000 });
   if (path === "/usage/me/accounts?window=today") return jsonResponse(accounts);
   throw new Error(`unexpected request: ${path}`);

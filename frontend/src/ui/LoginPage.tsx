@@ -21,9 +21,11 @@ export function LoginPage({ notice = "" }: { notice?: string }) {
     defaultValues: { managementKey: "" }
   });
   const mutation = useMutation({
-    mutationFn: ({ managementKey }: LoginValues) => login(managementKey),
+    gcTime: 0,
+    mutationFn: () => login(form.getValues("managementKey")),
     onSuccess: (session) => {
       form.reset();
+      mutation.reset();
       queryClient.setQueryData(sessionQueryKey, session);
     }
   });
@@ -32,7 +34,7 @@ export function LoginPage({ notice = "" }: { notice?: string }) {
     <main className="login-layout auth-screen">
       <form
         className="login-card auth-card"
-        onSubmit={form.handleSubmit((values) => mutation.mutate(values))}
+        onSubmit={form.handleSubmit(() => mutation.mutate())}
         noValidate
       >
         <div className="login-card-brand">

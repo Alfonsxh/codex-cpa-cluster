@@ -22,9 +22,11 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
     defaultValues: { email: "", password: "" }
   });
   const login = useMutation({
-    mutationFn: (values: LoginValues) => loginPortal(values.email, values.password),
+    gcTime: 0,
+    mutationFn: () => loginPortal(form.getValues("email"), form.getValues("password")),
     onSuccess: (session) => {
       form.reset();
+      login.reset();
       queryClient.setQueryData(portalSessionQueryKey, session);
     }
   });
@@ -33,7 +35,7 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
       <form
         className={`login-card auth-card usage-login-card ${overlay ? "usage-login-card-overlay" : ""}`}
         noValidate
-        onSubmit={form.handleSubmit((values) => login.mutate(values))}
+        onSubmit={form.handleSubmit(() => login.mutate())}
       >
         {!overlay ? <div className="login-card-toolbar">
           <a href="/" aria-label="返回 Codex CPA 首页">

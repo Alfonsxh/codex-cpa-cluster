@@ -8,7 +8,7 @@ import { NotificationSettingsPage } from "./NotificationSettingsPage";
 const settings = {
   notifications: {
     webhook_configured: true,
-    webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-placeholder",
+    webhook_url: "",
     heartbeat_at: 1_800_000_000,
     last_success_at: null,
     last_error: "",

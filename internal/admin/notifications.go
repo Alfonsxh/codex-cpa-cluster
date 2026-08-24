@@ -88,9 +88,8 @@ func (server *Server) notificationStatus(ctx context.Context) (notificationStatu
 		return notificationStatus{}, err
 	}
 	if found {
-		if validated, validationError := notifications.ValidateWebhookURL(webhook); validationError == nil {
+		if _, validationError := notifications.ValidateWebhookURL(webhook); validationError == nil {
 			status.WebhookConfigured = true
-			status.WebhookURL = validated
 		}
 	}
 	return status, nil

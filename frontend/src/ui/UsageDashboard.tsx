@@ -5,6 +5,8 @@ import {
   Card,
   Col,
   Empty,
+  Form,
+  Input,
   Modal,
   Progress,
   Result,
@@ -22,7 +24,6 @@ import {
   BarChartOutlined,
   CheckCircleOutlined,
   CopyOutlined,
-  EyeInvisibleOutlined,
   EyeOutlined,
   KeyOutlined,
   LockOutlined,
@@ -30,7 +31,8 @@ import {
   SwapOutlined
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { ApiError } from "../api/client";
 import {
@@ -38,16 +40,17 @@ import {
   portalProfileQueryKey,
   portalRouteQueryKey,
   readPortalAccounts,
+  readPortalKey,
   readPortalProfile,
   readPortalRoute,
   rotatePortalKey,
   switchPortalAccount,
   type PortalAccount,
-  type PortalProfile,
   type PortalUsageWindow
 } from "../api/portal";
 import { PortalPasswordModal } from "./PortalPasswordModal";
 import { PortalUsageBreakdownDrawer } from "./PortalUsageBreakdownDrawer";
+import { formatTokens } from "./formatters";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -58,6 +61,11 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const { message } = AntApp.useApp();
   const [window, setWindow] = useState<PortalUsageWindow>("today");
   const [showKey, setShowKey] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
+  const [keyValue, setKeyValue] = useState("");
+  const [keyLoading, setKeyLoading] = useState(false);
+  const [keyError, setKeyError] = useState("");
+  const keyRequest = useRef<AbortController | null>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [rotationOpen, setRotationOpen] = useState(false);
   const [switchTarget, setSwitchTarget] = useState<PortalAccount | null>(null);
@@ -93,6 +101,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       onSessionExpired();
     }
   }, [accounts.error, onSessionExpired, profile.error, route.error]);
+  useEffect(() => () => keyRequest.current?.abort(), []);
 
   const currentGroup = route.data?.current_group ?? accounts.data?.current_group ?? profile.data?.current_group ?? "";
   const currentAccount = accounts.data?.accounts.find((item) => item.id === currentGroup);
@@ -113,28 +122,63 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
     }
   });
   const rotation = useMutation({
+    gcTime: 0,
     mutationFn: rotatePortalKey,
     onSuccess: (result) => {
-      queryClient.setQueryData<PortalProfile>(portalProfileQueryKey, (current) => current ? {
-        ...current,
-        api_key: result.api_key,
-        generated_at: Math.floor(Date.now() / 1000)
-      } : current);
+      setKeyValue(result.api_key);
+      setKeyError("");
       setShowKey(true);
+      setKeyOpen(true);
       setRotationOpen(false);
+      rotation.reset();
       void message.success("API Key 已刷新；旧 Key 已立即失效");
     }
   });
 
   const copyKey = async () => {
-    const key = profile.data?.api_key;
-    if (!key) return;
+    if (!keyValue) return;
     try {
-      await navigator.clipboard.writeText(key);
+      await navigator.clipboard.writeText(keyValue);
       void message.success("API Key 已复制");
     } catch {
       void message.error("浏览器未允许复制，请展开后手动复制");
     }
+  };
+  const revealKey = async () => {
+    keyRequest.current?.abort();
+    const request = new AbortController();
+    keyRequest.current = request;
+    setKeyValue("");
+    setKeyError("");
+    setShowKey(false);
+    setKeyLoading(true);
+    setKeyOpen(true);
+    try {
+      const result = await readPortalKey(request.signal);
+      if (keyRequest.current === request) setKeyValue(result.api_key);
+    } catch (error) {
+      if (!request.signal.aborted && keyRequest.current === request) {
+        setKeyError(errorMessage(error));
+      }
+    } finally {
+      if (keyRequest.current === request) {
+        keyRequest.current = null;
+        setKeyLoading(false);
+      }
+    }
+  };
+  const closeKey = () => {
+    keyRequest.current?.abort();
+    keyRequest.current = null;
+    // Ant Design keeps closing modal contents mounted for its exit animation.
+    // Flush the secret-bearing field first so Key bytes leave the DOM immediately.
+    flushSync(() => {
+      setKeyValue("");
+      setKeyError("");
+      setKeyLoading(false);
+      setShowKey(false);
+    });
+    setKeyOpen(false);
   };
 
   return (
@@ -158,7 +202,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       </div>
 
       {accounts.data?.warnings.map((warning) => (
-        <Alert key={warning} className="page-alert" type="warning" showIcon message={warning} />
+        <Alert key={warning} className="page-alert" type="warning" showIcon title={warning} />
       ))}
 
       <Row gutter={[16, 16]} className="portal-summary-grid">
@@ -167,25 +211,22 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
             {profile.isError ? (
               <Result
                 status="warning"
-                title="API Key 加载失败"
+                title="身份信息加载失败"
                 subTitle={errorMessage(profile.error)}
                 extra={<Button onClick={() => void profile.refetch()}>重新加载</Button>}
               />
             ) : profile.data ? (
               <Space orientation="vertical" size={18} className="portal-card-stack">
                 <Space className="portal-card-title"><KeyOutlined aria-hidden="true" /><Text strong>我的 API Key</Text></Space>
-                <div className="portal-key-value" aria-label="API Key">
-                  {showKey ? profile.data.api_key : maskAPIKey(profile.data.api_key)}
+                <div className="portal-key-value" aria-label="API Key 安全状态">
+                  出于安全，仅在需要时读取
                 </div>
                 <Space wrap>
                   <Button
-                    icon={showKey ? <EyeInvisibleOutlined aria-hidden="true" /> : <EyeOutlined aria-hidden="true" />}
-                    onClick={() => setShowKey((value) => !value)}
+                    icon={<EyeOutlined aria-hidden="true" />}
+                    onClick={() => void revealKey()}
                   >
-                    {showKey ? "隐藏" : "显示"}
-                  </Button>
-                  <Button type="primary" icon={<CopyOutlined aria-hidden="true" />} onClick={() => void copyKey()}>
-                    复制 API Key
+                    查看 API Key
                   </Button>
                   <Button danger icon={<SwapOutlined aria-hidden="true" />} onClick={() => {
                     rotation.reset();
@@ -287,10 +328,49 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
           <Alert
             type="info"
             showIcon
-            message="现有 API Key 不会改变"
+            title="现有 API Key 不会改变"
             description="只更新你的目标 CPA。系统会原子写入路由、发布鉴权快照并等待 Gateway 确认；失败时自动恢复原路由。"
           />
-          {accountSwitch.isError ? <Alert type="error" showIcon message="账号切换失败" description={errorMessage(accountSwitch.error)} /> : null}
+          {accountSwitch.isError ? <Alert type="error" showIcon title="账号切换失败" description={errorMessage(accountSwitch.error)} /> : null}
+        </Space>
+      </Modal>
+
+      <Modal
+        title="我的 API Key"
+        open={keyOpen}
+        footer={(
+          <Button onClick={closeKey}>
+            关闭并清除
+          </Button>
+        )}
+        onCancel={closeKey}
+        destroyOnHidden
+      >
+        <Space orientation="vertical" size={16} className="portal-form-stack">
+          <Alert
+            type="warning"
+            showIcon
+            title="API Key 只保留在当前弹框内存中"
+            description="关闭弹框后立即清除；页面不会把它写入查询缓存、URL 或浏览器存储。"
+          />
+          {keyLoading ? <Skeleton.Input active block /> : null}
+          {keyError ? <Alert type="error" showIcon title="API Key 读取失败" description={keyError} /> : null}
+          {keyValue ? (
+            <Form.Item label="API Key">
+              <Space.Compact block>
+                <Input.Password
+                  value={keyValue}
+                  readOnly
+                  visibilityToggle={{ visible: showKey, onVisibleChange: setShowKey }}
+                  aria-label="API Key"
+                  autoComplete="off"
+                />
+                <Button type="primary" icon={<CopyOutlined aria-hidden="true" />} onClick={() => void copyKey()}>
+                  复制
+                </Button>
+              </Space.Compact>
+            </Form.Item>
+          ) : null}
         </Space>
       </Modal>
 
@@ -309,10 +389,10 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
           <Alert
             type="warning"
             showIcon
-            message="旧 API Key 会立即失效"
+            title="旧 API Key 会立即失效"
             description="刷新成功后，请立刻把新 Key 更新到 Codex 客户端。系统仅在 Gateway 已激活新鉴权快照后返回成功。"
           />
-          {rotation.isError ? <Alert type="error" showIcon message="API Key 刷新失败" description={errorMessage(rotation.error)} /> : null}
+          {rotation.isError ? <Alert type="error" showIcon title="API Key 刷新失败" description={errorMessage(rotation.error)} /> : null}
         </Space>
       </Modal>
 
@@ -420,17 +500,8 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "请稍后重试";
 }
 
-function maskAPIKey(value: string) {
-  if (value.length <= 12) return "••••••••••••";
-  return `${value.slice(0, 10)}••••••••${value.slice(-4)}`;
-}
-
 function windowLabel(window: PortalUsageWindow) {
   return portalWindowOptions.find((item) => item.value === window)?.label ?? "当前范围";
-}
-
-function formatTokens(value: number) {
-  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
 function formatTimestamp(timestamp: number) {

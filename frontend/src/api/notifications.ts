@@ -5,8 +5,8 @@ export type { NotificationSettings, NotificationStatus, NotificationValues } fro
 
 export const notificationSettingsQueryKey = ["notification-settings"] as const;
 
-export function readNotificationSettings(): Promise<NotificationSettings> {
-  return apiRequest<NotificationSettings>("/admin/api/settings/notifications");
+export function readNotificationSettings(signal?: AbortSignal): Promise<NotificationSettings> {
+  return apiRequest<NotificationSettings>("/admin/api/settings/notifications", { signal });
 }
 
 export function saveNotificationSettings(values: NotificationValues, csrfToken: string) {

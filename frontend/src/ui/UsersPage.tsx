@@ -6,7 +6,6 @@ import {
   Checkbox,
   Descriptions,
   Dropdown,
-  Empty,
   Form,
   Input,
   InputNumber,
@@ -14,10 +13,8 @@ import {
   Modal,
   Radio,
   Result,
-  Select,
   Space,
   Spin,
-  Table,
   Tag,
   Typography,
   type TableColumnsType,
@@ -64,7 +61,14 @@ import {
   type UserQuotaResult,
   type UserSummary
 } from "../api/users";
+import { AdminTable } from "./components/AdminTable";
+import { PageState } from "./components/PageState";
+import { PageToolbar } from "./components/PageToolbar";
+import { TokenValue } from "./components/TokenValue";
+import { WideSelect } from "./components/WideSelect";
 import { UsageBreakdownDrawer } from "./UsageBreakdownDrawer";
+import { formatTokens } from "./formatters";
+import { useDebouncedValue } from "./hooks/useDebouncedValue";
 
 const { Paragraph, Text } = Typography;
 
@@ -102,6 +106,13 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [revokeOnDelete, setRevokeOnDelete] = useState(false);
   const [secretReveal, setSecretReveal] = useState<SecretReveal | null>(null);
+  const debouncedSearch = useDebouncedValue(searchDraft.trim(), 300);
+
+  useEffect(() => {
+    if (debouncedSearch === query) return;
+    setQuery(debouncedSearch);
+    setPage(1);
+  }, [debouncedSearch, query]);
 
   const params = useMemo<UserListParams>(
     () => ({ query, teamId, page, pageSize }),
@@ -109,9 +120,12 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
   );
   const users = useQuery({
     queryKey: usersQueryKey(params),
-    queryFn: () => listUsers(params)
+    queryFn: ({ signal }) => listUsers(params, signal)
   });
-  const teams = useQuery({ queryKey: teamsQueryKey, queryFn: listTeams });
+  const teams = useQuery({
+    queryKey: teamsQueryKey,
+    queryFn: ({ signal }) => listTeams(signal)
+  });
   const assignMutation = useMutation({
     mutationFn: async (input: TeamAssignment) => {
       if (input.users.length === 1 && input.expectedTeamId !== undefined) {
@@ -190,6 +204,29 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
       ]);
     }
   });
+  const resetAssignment = assignMutation.reset;
+  const resetLifecycle = lifecycleMutation.reset;
+  const columns = useMemo(() => userColumns({
+    onOpenUsage: setUsageUser,
+    onAdjustTeam: (user) => {
+      resetAssignment();
+      setAssignment({
+        users: [user.email],
+        targetTeamId: user.team_id,
+        expectedTeamId: user.team_id
+      });
+    },
+    onManage: (key, user) => {
+      if (key === "quota") {
+        setQuotaUser(user.email);
+        return;
+      }
+      setDeleteConfirmation("");
+      setRevokeOnDelete(false);
+      resetLifecycle();
+      setLifecycleAction({ kind: key, user });
+    }
+  }), [resetAssignment, resetLifecycle]);
 
   if (users.isPending || teams.isPending) {
     return <UsersPageSkeleton />;
@@ -198,11 +235,11 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
     const error = users.error ?? teams.error;
     return (
       <section className="page-content">
-        <Result
-          status="warning"
+        <PageState
+          kind="error"
           title="用户目录加载失败"
-          subTitle={error instanceof Error ? error.message : "请稍后重试"}
-          extra={<Button type="primary" onClick={() => void Promise.all([users.refetch(), teams.refetch()])}>重新加载</Button>}
+          detail={error instanceof Error ? error.message : "请稍后重试"}
+          onAction={() => void Promise.all([users.refetch(), teams.refetch()])}
         />
       </section>
     );
@@ -211,113 +248,6 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
   const teamOptions = [
     { value: "unassigned", label: "未分配团队" },
     ...teams.data.teams.map((team) => ({ value: team.id, label: team.name }))
-  ];
-  const columns: TableColumnsType<UserSummary> = [
-    {
-      title: "用户",
-      dataIndex: "email",
-      fixed: "left",
-      width: 260,
-      render: (email: string) => (
-        <Space>
-          <UserOutlined aria-hidden="true" />
-          <Text strong>{email}</Text>
-        </Space>
-      )
-    },
-    {
-      title: "状态",
-      dataIndex: "status",
-      align: "center",
-      width: 100,
-      render: (status: UserSummary["status"]) =>
-        status === "active" ? <Tag color="success">有效</Tag> : <Tag>已停用</Tag>
-    },
-    {
-      title: "有效账号",
-      dataIndex: "active_accounts",
-      align: "center",
-      width: 110
-    },
-    {
-      title: "当前路由",
-      dataIndex: "route_account_id",
-      align: "center",
-      width: 150,
-      render: (route: string | null) => route ?? <Text type="secondary">未分配</Text>
-    },
-    {
-      title: "团队",
-      align: "center",
-      width: 170,
-      render: (_, user) => user.team?.name ?? <Text type="secondary">未分配</Text>
-    },
-    {
-      title: "最近更新",
-      dataIndex: "updated_at",
-      align: "center",
-      width: 170,
-      render: formatTimestamp
-    },
-    {
-      title: "操作",
-      fixed: "right",
-      align: "center",
-      width: 260,
-      render: (_, user) => (
-        <Space size={0}>
-          <Button
-            type="link"
-            icon={<BarChartOutlined aria-hidden="true" />}
-            aria-label={`查看 ${user.email} 的用量`}
-            onClick={() => setUsageUser(user.email)}
-          >
-            用量
-          </Button>
-          <Button
-            type="link"
-            aria-label={`调整 ${user.email} 的团队`}
-            onClick={() => {
-              assignMutation.reset();
-              setAssignment({
-                users: [user.email],
-                targetTeamId: user.team_id,
-                expectedTeamId: user.team_id
-              });
-            }}
-          >
-            调整团队
-          </Button>
-          <Dropdown
-            trigger={["click"]}
-            menu={{
-              items: [
-                { key: "quota", icon: <DashboardOutlined />, label: "额度策略" },
-                { key: "rotate", icon: <KeyOutlined />, label: "轮换 API Key", disabled: user.status !== "active" },
-                { key: "reset-password", icon: <LockOutlined />, label: "重置密码" },
-                { key: "revoke", icon: <StopOutlined />, label: "停用 API Key", disabled: user.status !== "active", danger: true },
-                { type: "divider" },
-                { key: "delete", icon: <DeleteOutlined />, label: "删除用户", danger: true }
-              ],
-              onClick: ({ key }) => {
-                if (key === "quota") {
-                  setQuotaUser(user.email);
-                  return;
-                }
-                setDeleteConfirmation("");
-                setRevokeOnDelete(false);
-                lifecycleMutation.reset();
-                setLifecycleAction({ kind: key as LifecycleAction["kind"], user });
-              }
-            }}
-          >
-            <Button type="link" icon={<MoreOutlined aria-hidden="true" />} aria-label={`管理 ${user.email}`}>
-              更多
-            </Button>
-          </Dropdown>
-        </Space>
-      )
-    }
   ];
 
   const pagination: TablePaginationConfig = {
@@ -331,11 +261,11 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
 
   return (
     <section className="page-content user-page">
-      <div className="page-intro account-page-intro">
-        <Paragraph>
-          初始只读取控制面用户目录、路由和团队归属；Token 用量仅在点击单个用户的“用量”后查询。
-        </Paragraph>
-        <Space wrap>
+      <PageToolbar
+        className="account-page-intro"
+        description="初始只读取控制面用户目录、路由和团队归属；Token 用量仅在点击单个用户的“用量”后查询。"
+        actions={(
+          <>
           <Button
             type="primary"
             icon={<PlusOutlined aria-hidden="true" />}
@@ -363,8 +293,9 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
           >
             批量分配团队{selectedUsers.length ? `（${selectedUsers.length}）` : ""}
           </Button>
-        </Space>
-      </div>
+          </>
+        )}
+      />
 
       {notice ? <Alert className="page-alert" type="success" showIcon closable message={notice} onClose={() => setNotice("")} /> : null}
 
@@ -381,7 +312,7 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
               setPage(1);
             }}
           />
-          <Select
+          <WideSelect
             value={teamId || "all"}
             aria-label="按团队筛选"
             options={[{ value: "all", label: "全部团队" }, ...teamOptions]}
@@ -391,27 +322,24 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
             }}
           />
         </Space>
-        {users.data.users.length === 0 ? (
-          <Empty description="当前条件下没有用户" />
-        ) : (
-          <Table<UserSummary>
-            rowKey="email"
-            columns={columns}
-            dataSource={users.data.users}
-            loading={users.isFetching}
-            rowSelection={{
-              selectedRowKeys: selectedUsers,
-              preserveSelectedRowKeys: false,
-              onChange: (keys) => setSelectedUsers(keys.map(String))
-            }}
-            pagination={pagination}
-            scroll={{ x: 1160 }}
-            onChange={(next) => {
-              setPage(next.current ?? 1);
-              setPageSize(next.pageSize ?? 50);
-            }}
-          />
-        )}
+        <AdminTable<UserSummary>
+          rowKey="email"
+          columns={columns}
+          dataSource={users.data.users}
+          loading={users.isFetching}
+          rowSelection={{
+            selectedRowKeys: selectedUsers,
+            preserveSelectedRowKeys: false,
+            onChange: (keys) => setSelectedUsers(keys.map(String))
+          }}
+          pagination={pagination}
+          minWidth={1160}
+          emptyText="当前条件下没有用户"
+          onChange={(next) => {
+            setPage(next.current ?? 1);
+            setPageSize(next.pageSize ?? 50);
+          }}
+        />
       </Card>
 
       <Modal
@@ -428,7 +356,7 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
           <Paragraph>
             团队报表按当前成员动态聚合；修改归属不会改写历史用量事件。
           </Paragraph>
-          <Select
+          <WideSelect
             value={assignment?.targetTeamId ?? "unassigned"}
             aria-label="目标团队"
             options={teamOptions}
@@ -517,7 +445,7 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
         title={secretReveal?.title ?? "一次性凭据"}
         open={secretReveal !== null}
         closable={false}
-        maskClosable={false}
+        mask={{ closable: false }}
         keyboard={false}
         footer={[
           <Button key="done" type="primary" onClick={() => setSecretReveal(null)}>我已安全保存</Button>
@@ -547,6 +475,93 @@ export function UsersPage({ csrfToken }: { csrfToken: string }) {
       ) : null}
     </section>
   );
+}
+
+function userColumns({
+  onOpenUsage,
+  onAdjustTeam,
+  onManage
+}: {
+  onOpenUsage: (email: string) => void;
+  onAdjustTeam: (user: UserSummary) => void;
+  onManage: (key: "quota" | LifecycleAction["kind"], user: UserSummary) => void;
+}): TableColumnsType<UserSummary> {
+  return [
+    {
+      title: "用户",
+      dataIndex: "email",
+      fixed: "left",
+      width: 260,
+      render: (email: string) => (
+        <Space>
+          <UserOutlined aria-hidden="true" />
+          <Text strong>{email}</Text>
+        </Space>
+      )
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      align: "center",
+      width: 100,
+      render: (status: UserSummary["status"]) =>
+        status === "active" ? <Tag color="success">有效</Tag> : <Tag>已停用</Tag>
+    },
+    { title: "有效账号", dataIndex: "active_accounts", align: "center", width: 110 },
+    {
+      title: "当前路由",
+      dataIndex: "route_account_id",
+      align: "center",
+      width: 150,
+      render: (route: string | null) => route ?? <Text type="secondary">未分配</Text>
+    },
+    {
+      title: "团队",
+      align: "center",
+      width: 170,
+      render: (_, user) => user.team?.name ?? <Text type="secondary">未分配</Text>
+    },
+    { title: "最近更新", dataIndex: "updated_at", align: "center", width: 170, render: formatTimestamp },
+    {
+      title: "操作",
+      fixed: "right",
+      align: "center",
+      width: 260,
+      render: (_, user) => (
+        <Space size={0}>
+          <Button
+            type="link"
+            icon={<BarChartOutlined aria-hidden="true" />}
+            aria-label={`查看 ${user.email} 的用量`}
+            onClick={() => onOpenUsage(user.email)}
+          >
+            用量
+          </Button>
+          <Button type="link" aria-label={`调整 ${user.email} 的团队`} onClick={() => onAdjustTeam(user)}>
+            调整团队
+          </Button>
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: [
+                { key: "quota", icon: <DashboardOutlined />, label: "额度策略" },
+                { key: "rotate", icon: <KeyOutlined />, label: "轮换 API Key", disabled: user.status !== "active" },
+                { key: "reset-password", icon: <LockOutlined />, label: "重置密码" },
+                { key: "revoke", icon: <StopOutlined />, label: "停用 API Key", disabled: user.status !== "active", danger: true },
+                { type: "divider" },
+                { key: "delete", icon: <DeleteOutlined />, label: "删除用户", danger: true }
+              ],
+              onClick: ({ key }) => onManage(key as "quota" | LifecycleAction["kind"], user)
+            }}
+          >
+            <Button type="link" icon={<MoreOutlined aria-hidden="true" />} aria-label={`管理 ${user.email}`}>
+              更多
+            </Button>
+          </Dropdown>
+        </Space>
+      )
+    }
+  ];
 }
 
 const userQuotaSchema = z.object({
@@ -579,7 +594,7 @@ function UserQuotaModal({
   const quotaKey = userQuotaQueryKey(user);
   const quota = useQuery({
     queryKey: quotaKey,
-    queryFn: () => readUserQuota(user),
+    queryFn: ({ signal }) => readUserQuota(user, signal),
     staleTime: 0,
     gcTime: 0,
     refetchOnMount: "always"
@@ -664,7 +679,7 @@ function UserQuotaModal({
                 renderItem={(item) => (
                   <List.Item>
                     <List.Item.Meta
-                      title={item.action === "bonus" ? `追加 ${formatQuotaTokens(item.token_amount)} Token` : `重置 ${formatQuotaTokens(item.token_amount)} Token 用量`}
+                      title={item.action === "bonus" ? `追加 ${formatTokens(item.token_amount)}` : `重置 ${formatTokens(item.token_amount)} 用量`}
                       description={`${item.reason} · ${item.created_by} · ${formatTimestamp(item.created_at)}`}
                     />
                   </List.Item>
@@ -748,11 +763,11 @@ function quotaDescriptionItems(result: UserQuotaResult) {
   return [
     { key: "mode", label: "当前策略", children: quotaModeLabel(current.policy_mode) },
     { key: "timezone", label: "自然周时区", children: current.timezone },
-    { key: "used", label: "本周已用", children: `${formatQuotaTokens(current.used_tokens)} 加权 Token` },
+    { key: "used", label: "本周已用", children: <TokenValue value={current.used_tokens} suffix="加权 Token" /> },
     {
       key: "remaining",
       label: "本周剩余",
-      children: current.remaining_tokens === null ? "不限额" : `${formatQuotaTokens(current.remaining_tokens)} Token`
+      children: current.remaining_tokens === null ? "不限额" : <TokenValue value={current.remaining_tokens} />
     },
     { key: "week-end", label: "本周结束", children: formatTimestamp(current.week_end_at) },
     {
@@ -765,10 +780,6 @@ function quotaDescriptionItems(result: UserQuotaResult) {
 
 function quotaModeLabel(mode: UserQuotaMode) {
   return { inherit: "继承组织默认", unlimited: "不限额", custom: "自定义" }[mode];
-}
-
-function formatQuotaTokens(value: number) {
-  return new Intl.NumberFormat("zh-CN").format(value);
 }
 
 function quotaMutationMessage(error: unknown) {
@@ -835,7 +846,11 @@ function CreateUserModal({
         name="teamId"
         render={({ field }) => (
           <Form.Item label="团队">
-            <Select {...field} aria-label="新增用户团队" options={teams} />
+            <WideSelect
+              {...field}
+              aria-label="新增用户团队"
+              options={teams}
+            />
           </Form.Item>
         )}
       />

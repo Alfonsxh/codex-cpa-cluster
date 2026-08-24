@@ -15,9 +15,10 @@ class MigrationHTTPContractTests(unittest.TestCase):
     def test_openapi_operations_preserve_explicit_anonymous_logout(self):
         operations = {item.key: item for item in MODULE.parse_openapi_operations()}
 
-        self.assertEqual(len(operations), 77)
+        self.assertEqual(len(operations), 78)
         self.assertEqual(operations["DELETE /usage/session"].security, ())
         self.assertEqual(operations["GET /usage/session"].security, ("portalSession",))
+        self.assertEqual(operations["GET /usage/me/key"].security, ("portalSession",))
         self.assertEqual(operations["GET /admin/api/accounts"].security, ("adminSession",))
         self.assertTrue(operations["POST /admin/api/accounts"].csrf)
         self.assertFalse(operations["POST /usage/me/key/rotate"].csrf)

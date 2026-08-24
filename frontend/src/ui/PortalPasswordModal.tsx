@@ -37,9 +37,14 @@ export function PortalPasswordModal({
     defaultValues: { currentPassword: "", newPassword: "", confirmation: "" }
   });
   const change = useMutation({
-    mutationFn: (values: PasswordValues) => changePortalPassword(values.currentPassword, values.newPassword),
+    gcTime: 0,
+    mutationFn: () => changePortalPassword(
+      form.getValues("currentPassword"),
+      form.getValues("newPassword")
+    ),
     onSuccess: () => {
       form.reset();
+      change.reset();
       onSuccess();
     }
   });
@@ -76,7 +81,7 @@ export function PortalPasswordModal({
         <form
           className="portal-password-form"
           noValidate
-          onSubmit={form.handleSubmit((values) => change.mutate(values))}
+          onSubmit={form.handleSubmit(() => change.mutate())}
         >
           <Form.Item
             label="当前密码"

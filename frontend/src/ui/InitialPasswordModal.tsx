@@ -36,10 +36,12 @@ export function InitialPasswordModal({
     defaultValues: { initialPassword: "", confirmation: "" }
   });
   const mutation = useMutation({
-    mutationKey: ["settings-initial-password"],
     gcTime: 0,
-    mutationFn: (values: InitialPasswordValues) =>
-      saveInitialPassword(values.initialPassword, values.confirmation, csrfToken),
+    mutationFn: () => saveInitialPassword(
+      form.getValues("initialPassword"),
+      form.getValues("confirmation"),
+      csrfToken
+    ),
     onSuccess: (result) => {
       form.reset();
       mutation.reset();
@@ -73,7 +75,7 @@ export function InitialPasswordModal({
             description={mutation.error instanceof ApiError ? mutation.error.message : "请稍后重试"}
           />
         ) : null}
-        <form noValidate onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
+        <form noValidate onSubmit={form.handleSubmit(() => mutation.mutate())}>
           <Form.Item
             label="初始密码"
             htmlFor="settings-initial-password"

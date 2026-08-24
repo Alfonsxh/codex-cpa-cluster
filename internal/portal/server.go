@@ -169,6 +169,7 @@ func (server *Server) Register(router gin.IRouter) {
 	usageRoutes.GET("/session", server.readSession)
 	usageRoutes.DELETE("/session", server.deleteSession)
 	usageRoutes.GET("/me/profile", server.readProfile)
+	usageRoutes.GET("/me/key", server.readKey)
 	usageRoutes.GET("/me/accounts", server.readAccounts)
 	usageRoutes.GET("/me/route", server.readRoute)
 	usageRoutes.GET("/me/usage-breakdown", server.readUsageBreakdown)
@@ -407,8 +408,18 @@ func (server *Server) readProfile(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"user": auth.Session.User, "api_key": auth.APIKey,
+		"user":          auth.Session.User,
 		"current_group": routes[auth.Session.User], "generated_at": server.now().Unix(),
+	})
+}
+
+func (server *Server) readKey(c *gin.Context) {
+	auth, ok := server.requireAuth(c, false)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"api_key": auth.APIKey, "generated_at": server.now().Unix(),
 	})
 }
 

@@ -54,6 +54,7 @@ PUBLIC_REMOTE_GET_PATHS = {
 REMOTE_ADMIN_GET_PATHS = {
     "/admin/api/session",
     "/admin/api/overview",
+    "/admin/api/overview/summary",
     "/admin/api/overview/catalog",
     "/admin/api/overview/usage",
     "/admin/api/accounts",
@@ -68,10 +69,16 @@ REMOTE_ADMIN_GET_PATHS = {
     "/admin/api/teams/usage",
     "/admin/api/teams/usage-breakdown",
     "/admin/api/settings",
+    "/admin/api/settings/configuration",
+    "/admin/api/settings/general",
+    "/admin/api/settings/notifications",
     "/admin/api/release",
     "/admin/api/native-accounts",
     "/admin/api/jobs",
     "/admin/api/logs",
+    "/admin/api/runtime/services",
+    "/admin/api/runtime/jobs",
+    "/admin/api/runtime/logs",
     "/admin/api/operations/impact",
 }
 REMOTE_ADMIN_WRITE_PATHS = {
@@ -86,6 +93,7 @@ REMOTE_ADMIN_WRITE_PATHS = {
         "/admin/api/accounts/reset-quota",
         "/admin/api/accounts/policy",
         "/admin/api/accounts/rebalance",
+        "/admin/api/accounts/rebalance-all",
         "/admin/api/accounts/clear-auth",
         "/admin/api/accounts/delete",
         "/admin/api/users/revoke",
@@ -97,6 +105,7 @@ REMOTE_ADMIN_WRITE_PATHS = {
         "/admin/api/keys/revoke",
         "/admin/api/operations",
         "/admin/api/jobs/cancel",
+        "/admin/api/runtime/jobs",
         "/admin/api/settings/management-key",
         "/admin/api/settings/initial-password",
         "/admin/api/settings/configuration",
@@ -112,6 +121,8 @@ REMOTE_ADMIN_WRITE_PATHS = {
         "/admin/api/tags",
         "/admin/api/users/team",
         "/admin/api/users/tags",
+        "/admin/api/settings/general",
+        "/admin/api/settings/notifications",
     },
     "DELETE": {
         "/admin/api/users/quota",
@@ -227,8 +238,8 @@ def model_breakdown(now, factor=1.0, weighted=False):
 class MockAdminData:
     """Deterministic, UI-shaped preview data with no persistent writes."""
 
-    def __init__(self):
-        self.now = int(time.time())
+    def __init__(self, now=None):
+        self.now = int(time.time()) if now is None else int(now)
         self.teams = [
             {"id": "platform", "name": "平台研发", "description": "核心平台与基础设施", "user_count": 2, "created_at": self.now - 80 * 86400, "updated_at": self.now - 3600},
             {"id": "data", "name": "数据智能", "description": "数据产品与分析", "user_count": 1, "created_at": self.now - 55 * 86400, "updated_at": self.now - 7200},
@@ -269,6 +280,8 @@ class MockAdminData:
             "updated_at": self.now - 600,
             "account_count": 3,
             "active_accounts": 3,
+            "route_account_id": "cpa-main",
+            "team_membership_version": 1 if team_id else 0,
             "usage": usage,
             "weekly_quota": weekly_quota(self.now, round(usage["weighted_tokens"] * 1.4)),
             "team_id": team_id or None,
@@ -298,6 +311,10 @@ class MockAdminData:
             "created_at": self.now - 90 * 86400,
             "group_enabled": True,
             "default_group": account_id == "cpa-main",
+            "proxy_mode": "inherit",
+            "enabled": True,
+            "default": account_id == "cpa-main",
+            "proxy_configured": False,
             "service": "cliproxy-{}".format(account_id),
             "container_state": "running",
             "container_status": "Up 8 days (healthy)",
@@ -314,11 +331,31 @@ class MockAdminData:
             "usage_window_available": True,
             "runtime": {"state": "available", "error_count": failed, "rate_429_count": 0, "error_log_status": "ok", "error_log_files": 0},
             "operational_status": {"code": "available", "label": "可用", "tone": "success", "reason": "容器、OAuth 与额度均正常", "selectable": True},
+            "state_available": True,
+            "account_state": {
+                "account": account_id,
+                "eligible": True,
+                "exhausted": False,
+                "reason": "available",
+                "used_percent": float(used_percent),
+                "remaining_percent": remaining,
+                "headroom": max(0.0, remaining - 5.0),
+                "reset_at": self.now + 4 * 86400,
+                "observed_at": self.now - 20,
+            },
         }
 
     @staticmethod
     def _collector(now):
-        return {"status": "healthy", "heartbeat_at": now - 10, "generated_at": now}
+        return {
+            "status": "ok",
+            "heartbeat_at": now - 10,
+            "last_error": "",
+            "event_count": 1842,
+            "collection_started_at": now - 45 * 86400,
+            "usage_breakdown_started_at": now - 45 * 86400,
+            "last_event_at": now - 18,
+        }
 
     def site_config(self):
         return {
@@ -347,6 +384,24 @@ class MockAdminData:
             "services": services,
             "warnings": [],
             "recent_jobs": [],
+        }
+
+    def overview_summary(self):
+        active_users = sum(1 for user in self.users if user["status"] == "active")
+        return {
+            "generated_at": self.now,
+            "source": "control-plane",
+            "summary": {
+                "accounts": len(self.accounts),
+                "enabled_accounts": sum(1 for account in self.accounts if account["enabled"]),
+                "users": len(self.users),
+                "active_users": active_users,
+                "active_keys": sum(user["active_keys"] for user in self.users),
+                "routed_users": sum(1 for user in self.users if user["route_account_id"]),
+                "unassigned_users": sum(1 for user in self.users if not user["team_id"]),
+                "teams": len(self.teams),
+                "incomplete_key_matrices": 0,
+            },
         }
 
     def overview_catalog(self):
@@ -379,8 +434,28 @@ class MockAdminData:
         }
 
     def overview_usage(self, query):
-        bucket_seconds = 900
-        buckets = [self.now - bucket_seconds * index for index in reversed(range(25))]
+        window = query.get("window", ["today"])[0]
+        window_layouts = {
+            "3600": (300, 13),
+            "21600": (1800, 13),
+            "86400": (3600, 25),
+            "604800": (21600, 29),
+            # Production aggregates 30 days into six-hour buckets. Keep the
+            # preview at the same 121-point density so chart and request gates
+            # exercise the real payload shape instead of a daily shortcut.
+            "2592000": (21600, 121),
+            "today": (900, 25),
+            "since_reset": (21600, 29),
+        }
+        bucket_seconds, bucket_count = window_layouts.get(window, (900, 25))
+        if window == "custom":
+            start_at = int(query.get("start_at", [self.now - 86400])[0])
+            end_at = int(query.get("end_at", [self.now])[0])
+            duration = max(1, end_at - start_at)
+            bucket_seconds = max(60, duration // 30)
+            buckets = [min(end_at, start_at + bucket_seconds * index) for index in range(31)]
+        else:
+            buckets = [self.now - bucket_seconds * index for index in reversed(range(bucket_count))]
         account_values = {
             "cpa-main": [260_000 + ((index * 83_000) % 540_000) for index in range(len(buckets))],
             "cpa-lab": [110_000 + ((index * 47_000) % 290_000) for index in range(len(buckets))],
@@ -403,23 +478,28 @@ class MockAdminData:
         limit = max(1, min(int(query.get("user_limit", ["10"])[0]), 50))
         return {
             "generated_at": self.now,
-            "window": query.get("window", ["today"])[0],
+            "window": int(window) if window.isdigit() else window,
             "window_start_at": buckets[0],
             "window_seconds": self.now - buckets[0],
+            "window_start_at_by_account": None,
             "bucket_seconds": bucket_seconds,
             "buckets": buckets,
             "accounts": account_series,
             "users": sorted(user_series, key=lambda item: -item["total"])[:limit],
             "selected_accounts": selected_accounts,
             "selected_users": selected_users,
+            "selected_account": selected_accounts[0] if len(selected_accounts) == 1 else None,
+            "selected_user": selected_users[0] if len(selected_users) == 1 else None,
             "user_limit": limit,
             "unavailable_accounts": [],
             "collector": self._collector(self.now),
+            "cached": False,
         }
 
     def account_page(self):
         return {
             "generated_at": self.now,
+            "warnings": [],
             "window": "today",
             "window_start_at": self.now - 86400,
             "window_end_at": self.now,
@@ -429,6 +509,73 @@ class MockAdminData:
             "quota_refreshing": False,
             "accounts": self.accounts,
             "collector": self._collector(self.now),
+        }
+
+    def runtime_services(self):
+        services = [
+            ("edge", "preview-edge", "codex-cpa-edge:preview"),
+            ("gateway-blue", "preview-gateway-blue", "codex-cpa-gateway:preview"),
+            ("web", "preview-web", "codex-cpa-web:preview"),
+            ("admin", "preview-admin", "codex-cpa-admin:preview"),
+        ]
+        services.extend(
+            (account["service"], "preview-{}".format(account["id"]), "cliproxyapi:v7.1.23")
+            for account in self.accounts
+        )
+        return {
+            "services": [
+                {
+                    "service": service,
+                    "container_id": "preview-{:012d}".format(index + 1),
+                    "name": name,
+                    "image": image,
+                    "state": "running",
+                    "status": "Up 8 days (healthy)",
+                }
+                for index, (service, name, image) in enumerate(services)
+            ]
+        }
+
+    def image_status(self):
+        target_image = "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23"
+        image_id = "sha256:preview1234567890"
+        return {
+            "target_image": target_image,
+            "update_channel": "stable",
+            "candidate": {},
+            "applied": {},
+            "local_image": {
+                "available": True,
+                "id": image_id,
+                "short_id": "preview123456",
+                "created": "2026-08-20T08:00:00Z",
+                "repo_digests": [],
+                "version": "v7.1.23",
+                "commit": "preview",
+                "built_at": "2026-08-20T08:00:00Z",
+                "resolved_ref": target_image,
+            },
+            "accounts": [
+                {
+                    "account": account["id"],
+                    "service": account["service"],
+                    "enabled": True,
+                    "container_exists": True,
+                    "running": True,
+                    "state": "running",
+                    "image_ref": target_image,
+                    "image_id": image_id,
+                    "image_short_id": "preview123456",
+                    "version": "v7.1.23",
+                    "using_target": True,
+                    "rollback_available": True,
+                }
+                for account in self.accounts
+            ],
+            "running_count": len(self.accounts),
+            "current_count": len(self.accounts),
+            "outdated_count": 0,
+            "cached": False,
         }
 
     def user_page(self, query):
@@ -543,6 +690,150 @@ class MockAdminData:
             "branding": self.site_config(),
         }
 
+    def configuration_catalog(self):
+        groups = [
+            {
+                "name": "CPA 请求",
+                "description": "统一作用于所有业务 CPA，保存后只重建受影响的账号容器。",
+                "fields": [
+                    {
+                        "key": "cpa.proxy_url",
+                        "label": "默认上游代理 URL",
+                        "description": "加密保存且不会回显；留空继续使用当前值。",
+                        "type": "proxy_url_secret",
+                        "value": "",
+                        "default": "",
+                        "apply_mode": "accounts",
+                        "editable": True,
+                        "configured": True,
+                    },
+                    {
+                        "key": "cpa.request_retry",
+                        "label": "请求重试次数",
+                        "description": "单次上游请求失败后的最大重试次数。",
+                        "type": "integer",
+                        "value": 2,
+                        "default": 2,
+                        "apply_mode": "accounts",
+                        "editable": True,
+                        "min": 0,
+                        "max": 10,
+                    },
+                ],
+            },
+            {
+                "name": "品牌与身份",
+                "description": "管理公开页面显示名称与客户端导出参数。",
+                "fields": [
+                    {
+                        "key": "branding.product_name",
+                        "label": "产品名称",
+                        "description": "所有页面显示的完整产品名称。",
+                        "type": "text",
+                        "value": "Codex CPA Cluster",
+                        "default": "Codex CPA Cluster",
+                        "apply_mode": "live",
+                        "editable": True,
+                        "min_length": 2,
+                        "max_length": 64,
+                    },
+                    {
+                        "key": "branding.environment_label",
+                        "label": "环境标签",
+                        "description": "显示在登录页与侧栏的环境说明。",
+                        "type": "text",
+                        "value": "本地模拟预览",
+                        "default": "Production",
+                        "apply_mode": "live",
+                        "editable": True,
+                        "min_length": 2,
+                        "max_length": 64,
+                    },
+                ],
+            },
+            {
+                "name": "账号自动切换",
+                "description": "额度不可用时的账号路由策略。",
+                "fields": [
+                    {
+                        "key": "account_failover.mode",
+                        "label": "自动切换模式",
+                        "description": "只保留关闭或自动执行；不再提供观察模式。",
+                        "type": "choice",
+                        "value": "active",
+                        "default": "active",
+                        "apply_mode": "live",
+                        "editable": True,
+                        "choices": [
+                            {"value": "off", "label": "关闭"},
+                            {"value": "active", "label": "自动执行"},
+                        ],
+                    },
+                    {
+                        "key": "user_quota.default_weekly_tokens",
+                        "label": "默认用户周额度",
+                        "description": "用户未配置个人策略时使用的自然周 Token 上限。",
+                        "type": "nullable_integer",
+                        "value": 20_000_000,
+                        "default": 20_000_000,
+                        "apply_mode": "quota",
+                        "editable": True,
+                        "unit": "Token",
+                        "min": 0,
+                    },
+                ],
+            },
+        ]
+        return {
+            "version": 1,
+            "generated_at": self.now,
+            "field_count": sum(len(group["fields"]) for group in groups),
+            "groups": groups,
+        }
+
+    def general_settings(self):
+        return {
+            "version": 1,
+            "apply_mode": "live",
+            "generated_at": self.now,
+            "values": {
+                "product_name": "Codex CPA Cluster",
+                "short_name": "Codex CPA",
+                "environment_label": "本地模拟预览",
+                "public_base_url": "",
+                "allowed_email_domains": ["example.com"],
+                "key_prefix": "cpa_",
+                "provider_name": "Codex CPA",
+                "api_key_env": "CPA_API_KEY",
+                "default_model": "gpt-5.6-sol",
+            },
+            "security": {
+                "management_key_configured": True,
+                "initial_password_configured": True,
+            },
+            "branding": {"custom_logo": False},
+        }
+
+    def notification_settings(self):
+        return {
+            "notifications": {
+                "webhook_configured": True,
+                "webhook_url": "",
+                "heartbeat_at": self.now - 8,
+                "last_success_at": self.now - 1800,
+                "last_error": "",
+                "next_schedule_at": self.now + 3600,
+            },
+            "values": {
+                "enabled": True,
+                "timezone": "Asia/Shanghai",
+                "daily_times": "09:00,14:00,18:00",
+                "schedule_grace_minutes": 15,
+                "quota_alert_enabled": True,
+                "weekly_threshold_percent": 90,
+            },
+        }
+
     def response(self, path, query):
         if path == "/site-config.json":
             return HTTPStatus.OK, self.site_config()
@@ -550,6 +841,8 @@ class MockAdminData:
             return HTTPStatus.OK, {"authenticated": True, "accounts": {account["id"]: {"email": account["email"]} for account in self.accounts}}
         if path == "/admin/api/overview":
             return HTTPStatus.OK, self.overview()
+        if path == "/admin/api/overview/summary":
+            return HTTPStatus.OK, self.overview_summary()
         if path == "/admin/api/overview/catalog":
             return HTTPStatus.OK, self.overview_catalog()
         if path == "/admin/api/overview/usage":
@@ -559,7 +852,7 @@ class MockAdminData:
         if path == "/admin/api/accounts/usage-breakdown":
             return HTTPStatus.OK, {"generated_at": self.now, "window": "today", "window_start_at": self.now - 86400, "window_end_at": self.now, "window_seconds": 86400, "account": query.get("account", [self.accounts[0]["id"]])[0], "definition": "account_model_reasoning_effort_tokens", **model_breakdown(self.now)}
         if path == "/admin/api/images/cliproxy":
-            return HTTPStatus.OK, {"target_image": "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23", "local_image": {"available": True, "short_id": "preview123456"}, "running_count": len(self.accounts), "current_count": len(self.accounts), "outdated_count": 0, "accounts": [{"account": account["id"], "running": True, "using_target": True, "image_short_id": "preview123456"} for account in self.accounts]}
+            return HTTPStatus.OK, self.image_status()
         if path == "/admin/api/users":
             return HTTPStatus.OK, self.user_page(query)
         if path == "/admin/api/users/detail":
@@ -569,14 +862,22 @@ class MockAdminData:
             return HTTPStatus.OK, {"user": user["email"], "weekly_quota": user["weekly_quota"], "adjustments": []}
         if path == "/admin/api/users/usage-breakdown":
             return HTTPStatus.OK, {"generated_at": self.now, "window": "today", "window_start_at": self.now - 86400, "window_end_at": self.now, "window_seconds": 86400, "user": query.get("email", [self.users[0]["email"]])[0], "account": query.get("account", [None])[0], "definition": "successful_model_requests", **model_breakdown(self.now, weighted=True)}
-        if path in ("/admin/api/teams", "/admin/api/tags"):
-            return HTTPStatus.OK, {"teams": self.teams, "tags": self.tags}
+        if path == "/admin/api/teams":
+            return HTTPStatus.OK, {"teams": self.teams}
+        if path == "/admin/api/tags":
+            return HTTPStatus.OK, {"tags": self.tags}
         if path == "/admin/api/teams/usage":
             return HTTPStatus.OK, self.teams_usage(query)
         if path == "/admin/api/teams/usage-breakdown":
             return HTTPStatus.OK, self.team_breakdown(query.get("team_id", ["unassigned"])[0], query)
         if path == "/admin/api/settings":
             return HTTPStatus.OK, self.settings()
+        if path == "/admin/api/settings/configuration":
+            return HTTPStatus.OK, self.configuration_catalog()
+        if path == "/admin/api/settings/general":
+            return HTTPStatus.OK, self.general_settings()
+        if path == "/admin/api/settings/notifications":
+            return HTTPStatus.OK, self.notification_settings()
         if path == "/admin/api/release":
             return HTTPStatus.OK, {
                 "configured": True,
@@ -601,11 +902,13 @@ class MockAdminData:
             }
         if path == "/admin/api/operations/impact":
             return HTTPStatus.OK, self.operation_impact(query)
-        if path == "/admin/api/jobs":
+        if path in ("/admin/api/jobs", "/admin/api/runtime/jobs"):
             return HTTPStatus.OK, {"jobs": []}
-        if path.startswith("/admin/api/jobs/"):
+        if path.startswith(("/admin/api/jobs/", "/admin/api/runtime/jobs/")):
             return HTTPStatus.NOT_FOUND, error_payload("模拟任务不存在", "not_found")
-        if path == "/admin/api/logs":
+        if path == "/admin/api/runtime/services":
+            return HTTPStatus.OK, self.runtime_services()
+        if path in ("/admin/api/logs", "/admin/api/runtime/logs"):
             return HTTPStatus.OK, {
                 "target": query.get("target", ["all"])[0],
                 "output": "[preview] 本地模拟日志，不含远程运行数据。\n",
@@ -651,14 +954,14 @@ class PreviewServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, *, mode, root, upstream, timeout, ssl_context=None):
+    def __init__(self, address, *, mode, root, upstream, timeout, ssl_context=None, mock_now=None):
         super().__init__(address, PreviewHandler)
         self.mode = mode
         self.root = Path(root).resolve()
         self.upstream = upstream.rstrip("/")
         self.timeout = float(timeout)
         self.sessions = SessionVault()
-        self.mock = MockAdminData()
+        self.mock = MockAdminData(now=mock_now)
         handlers = [NoRedirectHandler()]
         if ssl_context is not None:
             handlers.insert(0, urllib.request.HTTPSHandler(context=ssl_context))
@@ -686,7 +989,13 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(raw)
+            try:
+                self.wfile.write(raw)
+            except (BrokenPipeError, ConnectionResetError):
+                # Browsers cancel superseded page/API requests during route
+                # changes. The preview is read-only here, so there is no
+                # partially applied operation to report as a server failure.
+                return
 
     def _json(self, status, payload, headers=()):
         self._send(status, json_bytes(payload), headers=headers)
@@ -768,11 +1077,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def _allowed_remote_get(path):
         return path in PUBLIC_REMOTE_GET_PATHS or path in REMOTE_ADMIN_GET_PATHS or (
             path.startswith("/admin/api/jobs/") and path.count("/") == 4
+        ) or (
+            path.startswith("/admin/api/runtime/jobs/") and path.count("/") == 5
         )
 
     @staticmethod
     def _allowed_remote_write(method, path):
-        return path in REMOTE_ADMIN_WRITE_PATHS.get(str(method or "").upper(), set())
+        normalized_method = str(method or "").upper()
+        if normalized_method == "POST" and path.startswith("/admin/api/runtime/jobs/") and path.endswith("/cancel"):
+            return path.count("/") == 6
+        return path in REMOTE_ADMIN_WRITE_PATHS.get(normalized_method, set())
 
     @staticmethod
     def _sanitized_query(raw_query):
@@ -986,6 +1300,7 @@ def build_parser():
         help="remote-read-write 必填，且必须与 --upstream 完全相同",
     )
     parser.add_argument("--timeout", type=float, default=15.0)
+    parser.add_argument("--mock-now", type=int, help="固定 mock 数据时间戳，仅用于可重复的自动化截图")
     parser.add_argument("--insecure-upstream", action="store_true", help="仅临时诊断使用：关闭上游 TLS 验证")
     return parser
 
@@ -1011,6 +1326,7 @@ def main(argv=None):
         upstream=args.upstream,
         timeout=args.timeout,
         ssl_context=ssl_context,
+        mock_now=args.mock_now,
     )
     print("Admin preview: http://{}:{}/admin/ [{}]".format(args.host, server.server_port, args.mode))
     if args.mode == "remote-read-only":

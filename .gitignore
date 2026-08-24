@@ -6,6 +6,8 @@ __pycache__/
 v2-target.env
 dist/
 node_modules/
+frontend/playwright-report/
+frontend/test-results/
 
 # Local-only agent harness and deployment environment context
 /.harness/

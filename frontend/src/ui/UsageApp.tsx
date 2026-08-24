@@ -1,7 +1,7 @@
 import { Button, Result } from "antd";
 import { LogoutOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { lazy, Suspense, useCallback } from "react";
 
 import { ApiError } from "../api/client";
 import {
@@ -10,10 +10,15 @@ import {
   readPortalSession,
   type PortalSession
 } from "../api/portal";
-import { PortalPasswordModal } from "./PortalPasswordModal";
-import { UsageDashboard } from "./UsageDashboard";
 import { UsageLoginPage } from "./UsageLoginPage";
 import { ThemeToggle, useTheme } from "./ThemeProvider";
+
+const PortalPasswordModal = lazy(() => import("./PortalPasswordModal").then((module) => ({
+  default: module.PortalPasswordModal
+})));
+const UsageDashboard = lazy(() => import("./UsageDashboard").then((module) => ({
+  default: module.UsageDashboard
+})));
 
 export function UsageApp() {
   const queryClient = useQueryClient();
@@ -66,21 +71,23 @@ export function UsageApp() {
       loggingOut={logout.isPending}
       onLogout={() => logout.mutate()}
     >
-      {session.data.password_change_required ? (
-        <section className="usage-password-required">
-          <div>
-            <span className="eyebrow">SECURITY CHECK</span>
-            <h1>先设置你的个人密码</h1>
-            <p>初始密码仅用于首次登录。完成修改后再加载 API Key 与个人用量。</p>
-          </div>
-          <PortalPasswordModal
-            open
-            mandatory
-            onClose={() => undefined}
-            onSuccess={() => updateSession({ password_change_required: false })}
-          />
-        </section>
-      ) : <UsageDashboard onSessionExpired={expireSession} />}
+      <Suspense fallback={<UsageLoading />}>
+        {session.data.password_change_required ? (
+          <section className="usage-password-required">
+            <div>
+              <span className="eyebrow">SECURITY CHECK</span>
+              <h1>先设置你的个人密码</h1>
+              <p>初始密码仅用于首次登录。完成修改后再加载 API Key 与个人用量。</p>
+            </div>
+            <PortalPasswordModal
+              open
+              mandatory
+              onClose={() => undefined}
+              onSuccess={() => updateSession({ password_change_required: false })}
+            />
+          </section>
+        ) : <UsageDashboard onSessionExpired={expireSession} />}
+      </Suspense>
     </UsageShell>
   );
 }

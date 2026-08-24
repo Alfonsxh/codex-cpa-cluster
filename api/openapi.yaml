@@ -1,0 +1,3508 @@
+openapi: 3.1.0
+info:
+  title: Codex CPA Cluster v2 API
+  version: 2.0.0-dev
+  description: >-
+    Contract for the isolated Go v2 Admin and self-service APIs. The current
+    Production router remains v1 until the migration gates are complete.
+servers:
+  - url: /
+tags:
+  - name: health
+  - name: admin-session
+  - name: admin-overview
+  - name: admin-accounts
+  - name: admin-runtime
+  - name: admin-users
+  - name: admin-teams
+  - name: admin-settings
+  - name: public-site
+  - name: portal
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [health]
+      responses:
+        "200":
+          description: Process and backing-store health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /site-config.json:
+    get:
+      operationId: getPublicSiteConfiguration
+      tags: [public-site]
+      responses:
+        "200":
+          description: Browser-safe branding and client export defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicSiteConfiguration"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/session:
+    post:
+      operationId: createAdminSession
+      tags: [admin-session]
+      parameters:
+        - $ref: "#/components/parameters/ManagementKey"
+      responses:
+        "201":
+          $ref: "#/components/responses/AdminSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      operationId: getAdminSession
+      tags: [admin-session]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          $ref: "#/components/responses/AdminSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      operationId: deleteAdminSession
+      tags: [admin-session]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoggedOutResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/overview/summary:
+    get:
+      operationId: getAdminOverviewSummary
+      tags: [admin-overview]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Secret-free control-plane totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewPayload"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts:
+    get:
+      operationId: listAdminAccounts
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Account catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountCatalog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      operationId: createAdminAccount
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountCreateRequest"
+      responses:
+        "201":
+          description: Account created, rendered, probed, and activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountCreateResponse"
+        "503":
+          $ref: "#/components/responses/AccountLifecycleUnavailableResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/update:
+    post:
+      operationId: updateAdminAccount
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountUpdateRequest"
+      responses:
+        "200":
+          description: Account state and runtime updated with compensating rollback protection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountUpdateResponse"
+        "409":
+          $ref: "#/components/responses/AccountLifecycleConflictResponse"
+        "503":
+          $ref: "#/components/responses/AccountLifecycleUnavailableResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/clear-auth:
+    post:
+      operationId: clearAdminAccountAuth
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountClearAuthRequest"
+      responses:
+        "200":
+          description: OAuth files archived, cleared, and account restarted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountClearAuthResponse"
+        "503":
+          $ref: "#/components/responses/AccountLifecycleUnavailableResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/delete:
+    post:
+      operationId: deleteAdminAccount
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountDeleteRequest"
+      responses:
+        "200":
+          description: Account removed after safe reroute, snapshot activation, in-flight drain, and backup
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDeleteResponse"
+        "409":
+          $ref: "#/components/responses/AccountLifecycleConflictResponse"
+        "503":
+          $ref: "#/components/responses/AccountLifecycleUnavailableResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/native-accounts:
+    get:
+      operationId: listAdminNativeAccounts
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Secret-free native account selector; management URLs exist only for loopback Hosts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NativeAccountCatalog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/usage-breakdown:
+    get:
+      operationId: getAdminAccountUsageBreakdown
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/AccountQuery"
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
+      responses:
+        "200":
+          description: Account usage breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageBreakdown"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/rebalance-all:
+    post:
+      operationId: rebalanceAllAdminAccounts
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RebalanceAllRequest"
+      responses:
+        "200":
+          description: Atomic rebalance result after activity refresh
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RebalanceResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/runtime/services:
+    get:
+      operationId: listAdminRuntimeServices
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Exact Compose-project service catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeServiceCatalog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/runtime/logs:
+    get:
+      operationId: getAdminRuntimeLogs
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: target
+          in: query
+          schema:
+            type: string
+            default: all
+      responses:
+        "200":
+          description: Redacted logs limited to the latest 200 lines and 2 MiB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogs"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/runtime/jobs:
+    get:
+      operationId: listAdminRuntimeJobs
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 60
+            default: 30
+      responses:
+        "200":
+          description: Recent bounded in-process runtime jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeJobCatalog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      operationId: createAdminRuntimeJob
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuntimeJobRequest"
+      responses:
+        "202":
+          description: Runtime job accepted into the bounded pool
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeJobSubmissionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/runtime/jobs/{id}:
+    get:
+      operationId: getAdminRuntimeJob
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current runtime job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeJobResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/runtime/jobs/{id}/cancel:
+    post:
+      operationId: cancelAdminRuntimeJob
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Queued job cancelled or running job cancellation requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeJobCancelResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users:
+    get:
+      operationId: listAdminUsers
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: team_id
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: Paginated secret-free user catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserCatalog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      operationId: createAdminUser
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: One-time user credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserCreateResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/quota:
+    get:
+      operationId: getAdminUserQuota
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EmailQuery"
+      responses:
+        "200":
+          description: Natural-week quota state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserQuotaResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      operationId: updateAdminUserQuota
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserQuotaRequest"
+      responses:
+        "200":
+          description: Updated quota policy and current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserQuotaResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      operationId: deleteAdminUserQuota
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EmailQuery"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Inherited quota policy and current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserQuotaResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/usage-breakdown:
+    get:
+      operationId: getAdminUserUsageBreakdown
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EmailQuery"
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
+      responses:
+        "200":
+          description: User usage breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageBreakdown"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/keys/rotate:
+    post:
+      operationId: rotateAdminUserKey
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserEmailConfirmRequest"
+      responses:
+        "200":
+          description: One-time replacement API Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserKeyRotationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/revoke:
+    post:
+      operationId: revokeAdminUser
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserEmailConfirmRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/reset-password:
+    post:
+      operationId: resetAdminUserPassword
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserEmailConfirmRequest"
+      responses:
+        "200":
+          description: One-time replacement password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPasswordResetResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/delete:
+    post:
+      operationId: deleteAdminUser
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteUserRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/team:
+    put:
+      operationId: updateAdminUserTeam
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserTeamRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/team/batch:
+    post:
+      operationId: updateAdminUserTeams
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserTeamsRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/MessageResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/teams:
+    get:
+      operationId: listAdminTeams
+      tags: [admin-teams]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Team catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamCatalog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      operationId: createAdminTeam
+      tags: [admin-teams]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamInput"
+      responses:
+        "201":
+          description: Created team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      operationId: updateAdminTeam
+      tags: [admin-teams]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamUpdateInput"
+      responses:
+        "200":
+          description: Updated team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      operationId: deleteAdminTeam
+      tags: [admin-teams]
+      security:
+        - adminSession: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Deleted team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/general:
+    get:
+      operationId: getAdminGeneralSettings
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: General settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneralSettings"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      operationId: updateAdminGeneralSettings
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneralSettingsUpdateRequest"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneralSettingsMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/initial-password:
+    post:
+      operationId: updateAdminInitialPassword
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitialPasswordRequest"
+      responses:
+        "200":
+          description: Password stored without echoing the secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitialPasswordResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/notifications:
+    get:
+      operationId: getAdminNotificationSettings
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Notification settings and status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationSettings"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      operationId: updateAdminNotificationSettings
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationSettingsUpdateRequest"
+      responses:
+        "200":
+          description: Updated notification settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationSettingsMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/notification-webhook:
+    post:
+      operationId: updateAdminNotificationWebhook
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationWebhookRequest"
+      responses:
+        "200":
+          description: Updated secret status without returning the Webhook
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationWebhookResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/notification-webhook/clear:
+    post:
+      operationId: clearAdminNotificationWebhook
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmClearRequest"
+      responses:
+        "200":
+          description: Cleared secret status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationWebhookResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/notifications/send:
+    post:
+      operationId: sendAdminNotification
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Manual Markdown v2 notification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendNotificationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /branding/logo:
+    get:
+      operationId: getBrandingLogo
+      tags: [public-site]
+      responses:
+        "200":
+          description: Configured raster or safety-validated SVG Logo bytes
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            image/svg+xml: { schema: { type: string, format: binary } }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/overview/usage:
+    get:
+      operationId: getAdminOverviewUsage
+      tags: [admin-overview]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
+        - name: account
+          in: query
+          schema: { type: array, items: { type: string } }
+        - name: user
+          in: query
+          schema: { type: array, items: { type: string, format: email } }
+        - name: user_limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        "200":
+          description: Fine-grained Token time series loaded only for the requested window and filters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OverviewUsageResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/rebalance:
+    post:
+      operationId: rebalanceAdminAccount
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RebalanceAccountRequest" }
+      responses:
+        "200":
+          description: Whole-account safe evacuation result followed by refreshed one-hour activity
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RebalanceAccountResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/reset-quota:
+    post:
+      operationId: resetAdminAccountQuota
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetAccountQuotaRequest" }
+      responses:
+        "200":
+          description: Upstream weekly quota reset result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResetAccountQuotaResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/images/cliproxy:
+    get:
+      operationId: getAdminCPAImageStatus
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Applied, candidate, local and per-account CLIProxyAPI image identities
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CPAImageStatus" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/release:
+    get:
+      operationId: getAdminReleaseStatus
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: fresh
+          in: query
+          schema: { type: string, enum: ["0", "1"], default: "0" }
+      responses:
+        "200":
+          description: Current and latest validated semantic release metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReleaseStatus" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/teams/usage:
+    get:
+      operationId: getAdminTeamUsage
+      tags: [admin-teams]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
+      responses:
+        "200":
+          description: Current-membership team totals for the requested range
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TeamUsageResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/teams/usage-breakdown:
+    get:
+      operationId: getAdminTeamUsageBreakdown
+      tags: [admin-teams]
+      security:
+        - adminSession: []
+      parameters:
+        - name: team_id
+          in: query
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
+      responses:
+        "200":
+          description: Team Token trend and model, user and CPA breakdown
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TeamUsageBreakdownResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/quota-actions:
+    post:
+      operationId: applyAdminUserQuotaAction
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserQuotaActionRequest" }
+      responses:
+        "200":
+          description: Bulk current-week quota policy or adjustment result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserQuotaActionResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/logo:
+    post:
+      operationId: updateAdminBrandingLogo
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BrandingLogoUpdateRequest" }
+      responses:
+        "200":
+          description: Updated public Logo metadata without echoing source bytes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrandingLogoMutationResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      operationId: deleteAdminBrandingLogo
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BrandingLogoResetRequest" }
+      responses:
+        "200":
+          description: Default Logo restored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrandingLogoMutationResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/configuration:
+    get:
+      operationId: getAdminConfiguration
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Complete effective configuration catalog with presentation metadata and write-only secrets masked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigurationCatalog" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      operationId: updateAdminConfiguration
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfigurationUpdateRequest" }
+      responses:
+        "200":
+          description: Atomic settings and encrypted-proxy update with compensated runtime apply
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigurationUpdateResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/management-key:
+    post:
+      operationId: rotateAdminManagementKey
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManagementKeyRotationRequest" }
+      responses:
+        "200":
+          description: Management key rotated and existing Admin sessions invalidated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagementKeyRotationResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/notifications/test:
+    post:
+      operationId: testAdminNotification
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: One bounded channel-test message without collecting account quota or usage data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SendNotificationResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/logs:
+    get:
+      operationId: getLegacyAdminRuntimeLogs
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: target
+          in: query
+          schema: { type: string, default: all }
+      responses:
+        "200":
+          description: Compatibility alias for redacted bounded runtime logs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeLogs" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/jobs:
+    get:
+      operationId: listLegacyAdminRuntimeJobs
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 60, default: 30 }
+      responses:
+        "200":
+          description: Compatibility alias for recent runtime jobs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeJobCatalog" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/jobs/{id}:
+    get:
+      operationId: getLegacyAdminRuntimeJob
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Compatibility alias for current runtime job status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeJobResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/jobs/cancel:
+    post:
+      operationId: cancelLegacyAdminRuntimeJob
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegacyRuntimeJobCancelRequest" }
+      responses:
+        "200":
+          description: Compatibility alias for queued or running job cancellation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeJobCancelResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/operations:
+    post:
+      operationId: createLegacyAdminRuntimeJob
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegacyRuntimeJobRequest" }
+      responses:
+        "200":
+          description: Existing identical job reused
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeJobSubmissionResponse" }
+        "202":
+          description: Runtime job accepted into the bounded pool
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeJobSubmissionResponse" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/operations/impact:
+    get:
+      operationId: getAdminOperationImpact
+      tags: [admin-runtime]
+      security:
+        - adminSession: []
+      parameters:
+        - name: action
+          in: query
+          required: true
+          schema: { type: string, const: stop }
+        - name: target
+          in: query
+          schema: { type: string, default: all }
+      responses:
+        "200":
+          description: Routed-user impact for an exact stop target
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperationImpact" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/api:
+    get:
+      operationId: getPublicGatewayUsage
+      tags: [portal]
+      parameters:
+        - name: window
+          in: query
+          schema: { type: integer, enum: [300, 3600, 86400], default: 300 }
+      responses:
+        "200":
+          description: Anonymous account-level request, active-Key and in-flight aggregate
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicGatewayUsage" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/limits:
+    get:
+      operationId: getPublicUsageLimits
+      tags: [portal]
+      responses:
+        "200":
+          description: Anonymous sanitized official weekly quota status without reset credits or actions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicUsageLimits" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/session:
+    post:
+      operationId: createPortalSession
+      tags: [portal]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalLoginRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/PortalSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      operationId: getPortalSession
+      tags: [portal]
+      security:
+        - portalSession: []
+      responses:
+        "200":
+          $ref: "#/components/responses/PortalSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      operationId: deletePortalSession
+      tags: [portal]
+      # Logout is intentionally idempotent. A caller without a session still
+      # receives the same logged-out response, so this operation is anonymous.
+      security: []
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoggedOutResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/profile:
+    get:
+      operationId: getPortalProfile
+      tags: [portal]
+      security:
+        - portalSession: []
+      responses:
+        "200":
+          description: Current user and API Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalProfile"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/accounts:
+    get:
+      operationId: listPortalAccounts
+      tags: [portal]
+      security:
+        - portalSession: []
+      parameters:
+        - $ref: "#/components/parameters/PortalUsageWindowQuery"
+      responses:
+        "200":
+          description: Current user's account catalog and totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalAccounts"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/route:
+    get:
+      operationId: getPortalRoute
+      tags: [portal]
+      security:
+        - portalSession: []
+      responses:
+        "200":
+          description: Lightweight current route
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRoute"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/usage-breakdown:
+    get:
+      operationId: getPortalUsageBreakdown
+      tags: [portal]
+      security:
+        - portalSession: []
+      parameters:
+        - name: account
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PortalUsageWindowQuery"
+      responses:
+        "200":
+          description: Current user's usage breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageBreakdown"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/password:
+    put:
+      operationId: updatePortalPassword
+      tags: [portal]
+      security:
+        - portalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalPasswordRequest"
+      responses:
+        "200":
+          description: Password changed and required-change flag cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalPasswordResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/group:
+    put:
+      operationId: updatePortalRoute
+      tags: [portal]
+      security:
+        - portalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalRouteRequest"
+      responses:
+        "200":
+          description: Route update after Gateway activation confirmation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRouteMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/key/rotate:
+    post:
+      operationId: rotatePortalKey
+      tags: [portal]
+      security:
+        - portalSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalRotateKeyRequest"
+      responses:
+        "200":
+          description: One-time replacement API Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRotateKeyResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+components:
+  securitySchemes:
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: cpa_admin_session
+    portalSession:
+      type: apiKey
+      in: cookie
+      name: cpa_usage_session
+  parameters:
+    ManagementKey:
+      name: X-Management-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 12
+        maxLength: 128
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+    AccountQuery:
+      name: account
+      in: query
+      required: true
+      schema:
+        type: string
+    EmailQuery:
+      name: email
+      in: query
+      required: true
+      schema:
+        type: string
+        format: email
+    UsageWindowQuery:
+      name: window
+      in: query
+      required: false
+      description: Route-specific usage range; `custom` also requires `start_at` and `end_at`.
+      schema:
+        $ref: "#/components/schemas/UsageWindow"
+    UsageStartAtQuery:
+      name: start_at
+      in: query
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+    UsageEndAtQuery:
+      name: end_at
+      in: query
+      required: false
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    PortalUsageWindowQuery:
+      name: window
+      in: query
+      required: true
+      schema:
+        $ref: "#/components/schemas/PortalUsageWindow"
+  responses:
+    AccountLifecycleConflictResponse:
+      description: Safety conflict; `error.code` is `account_requests_active` when Codex requests are still in flight.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    AccountLifecycleUnavailableResponse:
+      description: Account mutation is unavailable; `error.code` is `account_lifecycle_not_ready` when durable recovery or safe evacuation cannot proceed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ErrorResponse:
+      description: Safe JSON error envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    MessageResponse:
+      description: Successful mutation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageResponse"
+    AdminSessionResponse:
+      description: Authenticated Admin session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AdminSession"
+    PortalSessionResponse:
+      description: Authenticated self-service session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PortalSession"
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    PublicSiteLogo:
+      type: object
+      additionalProperties: false
+      required: [custom, url, content_type, sha256, updated_at]
+      properties:
+        custom: { type: boolean }
+        url: { type: string }
+        content_type: { type: string }
+        sha256: { type: string }
+        updated_at: { type: [integer, "null"], format: int64 }
+    PublicSiteConfiguration:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - product_name
+        - short_name
+        - environment_label
+        - public_base_url
+        - provider_name
+        - api_key_env
+        - default_model
+        - logo
+      properties:
+        version: { type: integer, const: 1 }
+        product_name: { type: string }
+        short_name: { type: string }
+        environment_label: { type: string }
+        public_base_url: { type: string }
+        provider_name: { type: string }
+        api_key_env: { type: string }
+        default_model: { type: string }
+        logo: { $ref: "#/components/schemas/PublicSiteLogo" }
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        type:
+          type: string
+    MessageResponse:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+    LoggedOutResponse:
+      type: object
+      additionalProperties: false
+      required: [logged_out]
+      properties:
+        logged_out:
+          type: boolean
+          const: true
+    AdminSession:
+      type: object
+      additionalProperties: false
+      required: [authenticated]
+      properties:
+        authenticated:
+          type: boolean
+          const: true
+        csrf_token:
+          type: string
+    OverviewPayload:
+      type: object
+      additionalProperties: false
+      required: [generated_at, source, summary]
+      properties:
+        generated_at:
+          type: integer
+          format: int64
+        source:
+          type: string
+          const: control-plane
+        summary:
+          $ref: "#/components/schemas/OverviewSummary"
+    OverviewSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - accounts
+        - enabled_accounts
+        - users
+        - active_users
+        - active_keys
+        - routed_users
+        - unassigned_users
+        - teams
+        - incomplete_key_matrices
+      properties:
+        accounts: { type: integer }
+        enabled_accounts: { type: integer }
+        users: { type: integer }
+        active_users: { type: integer }
+        active_keys: { type: integer }
+        routed_users: { type: integer }
+        unassigned_users: { type: integer }
+        teams: { type: integer }
+        incomplete_key_matrices: { type: integer }
+    AccountState:
+      type: object
+      additionalProperties: false
+      required:
+        - account
+        - eligible
+        - exhausted
+        - reason
+        - used_percent
+        - remaining_percent
+        - headroom
+        - reset_at
+        - observed_at
+      properties:
+        account: { type: string }
+        eligible: { type: boolean }
+        exhausted: { type: boolean }
+        reason: { type: string }
+        used_percent: { type: [number, "null"] }
+        remaining_percent: { type: [number, "null"] }
+        headroom: { type: number }
+        reset_at: { type: integer, format: int64 }
+        observed_at: { type: integer, format: int64 }
+    Account:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - email
+        - port
+        - proxy_mode
+        - enabled
+        - default
+        - routed_users
+        - active_users_1h
+        - account_state
+        - state_available
+        - proxy_configured
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        port: { type: integer }
+        proxy_mode: { type: string }
+        enabled: { type: boolean }
+        default: { type: boolean }
+        routed_users: { type: integer }
+        active_users_1h: { type: [integer, "null"] }
+        account_state: { $ref: "#/components/schemas/AccountState" }
+        state_available: { type: boolean }
+        proxy_configured: { type: boolean }
+    AccountCatalog:
+      type: object
+      additionalProperties: false
+      required: [accounts, generated_at, warnings]
+      properties:
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/Account" }
+        generated_at: { type: integer, format: int64 }
+        warnings:
+          type: array
+          items: { type: string }
+    AccountLifecycleRecord:
+      type: object
+      additionalProperties: false
+      required: [id, email, port, proxy_mode, created_at, group_enabled, default_group]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,31}$"
+        email: { type: string, format: email }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        proxy_mode: { type: string, enum: [inherit, custom, direct] }
+        created_at: { type: integer, format: int64 }
+        group_enabled: { type: boolean }
+        default_group: { type: boolean }
+    AccountCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [id, email, proxy_mode]
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z][A-Za-z0-9-]{1,31}$"
+        email: { type: string, format: email }
+        proxy_mode: { type: string, enum: [inherit, custom, direct] }
+        proxy_url:
+          type: string
+          maxLength: 2048
+          writeOnly: true
+    AccountCreateResult:
+      type: object
+      additionalProperties: false
+      required: [account, created_key_rows, snapshot_generation]
+      properties:
+        account: { $ref: "#/components/schemas/AccountLifecycleRecord" }
+        created_key_rows: { type: integer, minimum: 0 }
+        snapshot_generation: { type: string }
+    AccountCreateResponse:
+      type: object
+      additionalProperties: false
+      required: [message, account]
+      properties:
+        message: { type: string }
+        account: { $ref: "#/components/schemas/AccountCreateResult" }
+    AccountUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z][A-Za-z0-9-]{1,31}$"
+        new_id:
+          type: string
+          pattern: "^[A-Za-z][A-Za-z0-9-]{1,31}$"
+        email: { type: string, format: email }
+        proxy_mode: { type: string, enum: [inherit, custom, direct] }
+        proxy_url:
+          type: string
+          maxLength: 2048
+          writeOnly: true
+          description: Omit to retain the encrypted value; send an empty string to clear it.
+        group_enabled: { type: boolean }
+        default_group: { type: boolean }
+        fallback_account:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,31}$"
+        confirm:
+          type: string
+          description: Required to equal id when new_id changes.
+    AccountUpdateResult:
+      type: object
+      additionalProperties: false
+      required: [account, rerouted_users, snapshot_generation]
+      properties:
+        account: { $ref: "#/components/schemas/AccountLifecycleRecord" }
+        renamed_from: { type: string }
+        rerouted_users: { type: integer, minimum: 0 }
+        backup: { type: string }
+        snapshot_generation: { type: string }
+    AccountUpdateResponse:
+      type: object
+      additionalProperties: false
+      required: [message, account]
+      properties:
+        message: { type: string }
+        account: { $ref: "#/components/schemas/AccountUpdateResult" }
+    AccountClearAuthRequest:
+      type: object
+      additionalProperties: false
+      required: [id, confirm]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,31}$"
+        confirm: { type: string }
+    AccountClearAuthResult:
+      type: object
+      additionalProperties: false
+      required: [account_id, backup]
+      properties:
+        account_id: { type: string }
+        backup: { type: string }
+    AccountClearAuthResponse:
+      type: object
+      additionalProperties: false
+      required: [message, account]
+      properties:
+        message: { type: string }
+        account: { $ref: "#/components/schemas/AccountClearAuthResult" }
+    AccountDeleteRequest:
+      type: object
+      additionalProperties: false
+      required: [id, confirm, revoke_keys]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,31}$"
+        confirm: { type: string }
+        revoke_keys: { type: boolean }
+        fallback_account:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,31}$"
+    AccountDeleteResult:
+      type: object
+      additionalProperties: false
+      required:
+        - account_id
+        - removed_key_rows
+        - revoked_exclusive_keys
+        - rerouted_users
+        - replacement_account
+        - backup
+        - snapshot_generation
+      properties:
+        account_id: { type: string }
+        removed_key_rows: { type: integer, minimum: 0 }
+        revoked_exclusive_keys: { type: integer, minimum: 0 }
+        rerouted_users: { type: integer, minimum: 0 }
+        replacement_account: { type: string }
+        backup: { type: string }
+        snapshot_generation: { type: string }
+    AccountDeleteResponse:
+      type: object
+      additionalProperties: false
+      required: [message, account]
+      properties:
+        message: { type: string }
+        account: { $ref: "#/components/schemas/AccountDeleteResult" }
+    NativeAccount:
+      type: object
+      additionalProperties: false
+      required: [id, group_enabled]
+      properties:
+        id: { type: string }
+        group_enabled: { type: boolean }
+        management_url:
+          type: string
+          format: uri
+    NativeAccountCatalog:
+      type: object
+      additionalProperties: false
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/NativeAccount" }
+    RebalanceAllRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm:
+          type: string
+          const: rebalance-all
+    RebalanceResult:
+      type: object
+      additionalProperties: false
+      required:
+        - moved_users
+        - destinations
+        - target_counts
+        - snapshot_generation
+        - active_users_1h
+        - activity_refreshed
+      properties:
+        moved_users: { type: integer }
+        destinations:
+          type: object
+          additionalProperties: { type: integer }
+        target_counts:
+          type: object
+          additionalProperties: { type: integer }
+        snapshot_generation: { type: string }
+        active_users_1h:
+          type: object
+          additionalProperties: { type: integer }
+        activity_refreshed: { type: boolean }
+        warning: { type: string }
+    RebalanceResponse:
+      type: object
+      additionalProperties: false
+      required: [message, rebalance]
+      properties:
+        message: { type: string }
+        rebalance: { $ref: "#/components/schemas/RebalanceResult" }
+    RuntimeService:
+      type: object
+      additionalProperties: false
+      required: [service, container_id, name, image, state, status]
+      properties:
+        service: { type: string }
+        container_id: { type: string, maxLength: 12 }
+        name: { type: string }
+        image: { type: string }
+        state: { type: string }
+        status: { type: string }
+    RuntimeServiceCatalog:
+      type: object
+      additionalProperties: false
+      required: [services]
+      properties:
+        services:
+          type: array
+          items: { $ref: "#/components/schemas/RuntimeService" }
+    RuntimeLogs:
+      type: object
+      additionalProperties: false
+      required: [target, output, exit_code, truncated]
+      properties:
+        target: { type: string }
+        output: { type: string, maxLength: 2097184 }
+        exit_code:
+          type: integer
+          const: 0
+          description: Successful Docker log reads preserve the v1 command exit-code field; failures use an HTTP error response.
+        truncated: { type: boolean }
+    RuntimeOperationResult:
+      type: object
+      additionalProperties: false
+      required: [action, target, services]
+      properties:
+        action: { type: string, enum: [start, stop, restart] }
+        target: { type: string }
+        services:
+          type: array
+          items: { $ref: "#/components/schemas/RuntimeService" }
+    RuntimeJob:
+      type: object
+      additionalProperties: false
+      required: [id, name, action, target, status, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        action: { type: string, enum: [start, stop, restart] }
+        target: { type: string }
+        status:
+          type: string
+          enum: [queued, running, cancelling, succeeded, failed, cancelled]
+        created_at: { type: integer, format: int64 }
+        started_at: { type: integer, format: int64 }
+        finished_at: { type: integer, format: int64 }
+        result: { $ref: "#/components/schemas/RuntimeOperationResult" }
+        error: { type: string }
+    RuntimeJobCatalog:
+      type: object
+      additionalProperties: false
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/RuntimeJob" }
+    RuntimeJobRequest:
+      type: object
+      additionalProperties: false
+      required: [action, target, confirm]
+      properties:
+        action: { type: string, enum: [start, up, stop, restart] }
+        target: { type: string, minLength: 1 }
+        confirm:
+          type: string
+          description: Exact lowercase action and target separated by a colon
+    RuntimeJobResponse:
+      type: object
+      additionalProperties: false
+      required: [job]
+      properties:
+        job: { $ref: "#/components/schemas/RuntimeJob" }
+    RuntimeJobSubmissionResponse:
+      type: object
+      additionalProperties: false
+      required: [message, job, reused]
+      properties:
+        message: { type: string }
+        job: { $ref: "#/components/schemas/RuntimeJob" }
+        reused: { type: boolean }
+    RuntimeJobCancelResponse:
+      type: object
+      additionalProperties: false
+      required: [message, job]
+      properties:
+        message: { type: string }
+        job: { $ref: "#/components/schemas/RuntimeJob" }
+    Team:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, user_count, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        user_count: { type: integer }
+        created_at: { type: integer, format: int64 }
+        updated_at: { type: integer, format: int64 }
+    UserTeam:
+      type: object
+      additionalProperties: false
+      required: [id, name, description]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+    TeamCatalog:
+      type: object
+      additionalProperties: false
+      required: [teams]
+      properties:
+        teams:
+          type: array
+          items: { $ref: "#/components/schemas/Team" }
+    TeamInput:
+      type: object
+      additionalProperties: false
+      required: [name, description]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: string, maxLength: 240 }
+    TeamUpdateInput:
+      allOf:
+        - $ref: "#/components/schemas/TeamInput"
+        - type: object
+          additionalProperties: false
+          required: [id]
+          properties:
+            id: { type: string }
+    TeamMutationResponse:
+      type: object
+      additionalProperties: false
+      required: [message, team]
+      properties:
+        message: { type: string }
+        team: { $ref: "#/components/schemas/Team" }
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - status
+        - active_keys
+        - active_accounts
+        - total_records
+        - created_at
+        - updated_at
+        - route_account_id
+        - team_id
+        - team
+        - team_membership_version
+      properties:
+        email: { type: string, format: email }
+        status: { type: string, enum: [active, inactive] }
+        active_keys: { type: integer }
+        active_accounts: { type: integer }
+        total_records: { type: integer }
+        created_at: { type: integer, format: int64 }
+        updated_at: { type: integer, format: int64 }
+        route_account_id: { type: [string, "null"] }
+        team_id: { type: [string, "null"] }
+        team:
+          oneOf:
+            - $ref: "#/components/schemas/UserTeam"
+            - type: "null"
+        team_membership_version: { type: integer, format: int64 }
+    Pagination:
+      type: object
+      additionalProperties: false
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+        total_pages: { type: integer }
+    UserCatalog:
+      type: object
+      additionalProperties: false
+      required: [users, pagination, generated_at]
+      properties:
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/UserSummary" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+        generated_at: { type: integer, format: int64 }
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        team_id: { type: [string, "null"] }
+    UserCreateCredential:
+      type: object
+      additionalProperties: false
+      required: [user, api_key, initial_password, team_id, accounts, snapshot_generation]
+      properties:
+        user: { type: string, format: email }
+        api_key: { type: string }
+        initial_password: { type: string }
+        team_id: { type: [string, "null"] }
+        accounts: { type: integer }
+        snapshot_generation: { type: string }
+    UserCreateResponse:
+      type: object
+      additionalProperties: false
+      required: [message, user]
+      properties:
+        message: { type: string }
+        user: { $ref: "#/components/schemas/UserCreateCredential" }
+    UserEmailConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [email, confirm]
+      properties:
+        email: { type: string, format: email }
+        confirm: { type: string }
+    UserKeyRotation:
+      type: object
+      additionalProperties: false
+      required: [api_key, snapshot_generation]
+      properties:
+        api_key: { type: string }
+        snapshot_generation: { type: string }
+    UserKeyRotationResponse:
+      type: object
+      additionalProperties: false
+      required: [message, key]
+      properties:
+        message: { type: string }
+        key: { $ref: "#/components/schemas/UserKeyRotation" }
+    UserPasswordReset:
+      type: object
+      additionalProperties: false
+      required: [user, initial_password, password_change_required]
+      properties:
+        user: { type: string, format: email }
+        initial_password: { type: string }
+        password_change_required: { type: boolean }
+    UserPasswordResetResponse:
+      type: object
+      additionalProperties: false
+      required: [message, password]
+      properties:
+        message: { type: string }
+        password: { $ref: "#/components/schemas/UserPasswordReset" }
+    DeleteUserRequest:
+      type: object
+      additionalProperties: false
+      required: [email, confirm, revoke_keys]
+      properties:
+        email: { type: string, format: email }
+        confirm: { type: string, format: email }
+        revoke_keys: { type: boolean }
+    UpdateUserTeamRequest:
+      type: object
+      additionalProperties: false
+      required: [email, team_id, expected_team_id]
+      properties:
+        email: { type: string, format: email }
+        team_id: { type: [string, "null"] }
+        expected_team_id: { type: [string, "null"] }
+    UpdateUserTeamsRequest:
+      type: object
+      additionalProperties: false
+      required: [users, team_id]
+      properties:
+        users:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: string, format: email }
+        team_id: { type: [string, "null"] }
+    UserQuotaMode:
+      type: string
+      enum: [inherit, unlimited, custom]
+    UpdateUserQuotaRequest:
+      type: object
+      additionalProperties: false
+      required: [email, mode, weekly_tokens]
+      properties:
+        email: { type: string, format: email }
+        mode: { $ref: "#/components/schemas/UserQuotaMode" }
+        weekly_tokens: { type: [integer, "null"], format: int64 }
+    UserWeeklyQuota:
+      type: object
+      additionalProperties: false
+      required:
+        - period
+        - timezone
+        - week_start_at
+        - week_end_at
+        - limit_tokens
+        - base_limit_tokens
+        - bonus_tokens
+        - used_tokens
+        - weighted_used_tokens
+        - raw_used_tokens
+        - remaining_tokens
+        - used_percent
+        - limit_reached
+        - policy_mode
+        - policy_tokens
+        - policy_reset_at
+        - default_limit_tokens
+        - unlimited
+        - quota_unit
+        - personal_policy_reset_enabled
+      properties:
+        period: { type: string, const: natural_week }
+        timezone: { type: string }
+        week_start_at: { type: integer, format: int64 }
+        week_end_at: { type: integer, format: int64 }
+        limit_tokens: { type: [integer, "null"], format: int64 }
+        base_limit_tokens: { type: [integer, "null"], format: int64 }
+        bonus_tokens: { type: integer, format: int64 }
+        used_tokens: { type: integer, format: int64 }
+        weighted_used_tokens: { type: integer, format: int64 }
+        raw_used_tokens: { type: integer, format: int64 }
+        remaining_tokens: { type: [integer, "null"], format: int64 }
+        used_percent: { type: [number, "null"] }
+        limit_reached: { type: boolean }
+        policy_mode: { $ref: "#/components/schemas/UserQuotaMode" }
+        policy_tokens: { type: [integer, "null"], format: int64 }
+        policy_reset_at: { type: [integer, "null"], format: int64 }
+        default_limit_tokens: { type: [integer, "null"], format: int64 }
+        unlimited: { type: boolean }
+        quota_unit: { type: string, const: weighted_tokens }
+        personal_policy_reset_enabled: { type: boolean }
+    UserQuotaAdjustment:
+      type: object
+      additionalProperties: false
+      required: [action, token_amount, reason, created_at, created_by]
+      properties:
+        action: { type: string, enum: [bonus, usage_reset] }
+        token_amount: { type: integer, format: int64 }
+        reason: { type: string }
+        created_at: { type: integer, format: int64 }
+        created_by: { type: string }
+    UserQuotaResult:
+      type: object
+      additionalProperties: false
+      required: [user, weekly_quota, adjustments]
+      properties:
+        user: { type: string, format: email }
+        weekly_quota: { $ref: "#/components/schemas/UserWeeklyQuota" }
+        adjustments:
+          type: array
+          items: { $ref: "#/components/schemas/UserQuotaAdjustment" }
+        message: { type: string }
+    GeneralSettingsValues:
+      type: object
+      additionalProperties: false
+      required:
+        - product_name
+        - short_name
+        - environment_label
+        - public_base_url
+        - allowed_email_domains
+        - key_prefix
+        - provider_name
+        - api_key_env
+        - default_model
+      properties:
+        product_name: { type: string }
+        short_name: { type: string }
+        environment_label: { type: string }
+        public_base_url: { type: string }
+        allowed_email_domains:
+          type: array
+          items: { type: string }
+        key_prefix: { type: string }
+        provider_name: { type: string }
+        api_key_env: { type: string }
+        default_model: { type: string }
+    GeneralSettingsSecurity:
+      type: object
+      additionalProperties: false
+      required: [management_key_configured, initial_password_configured]
+      properties:
+        management_key_configured: { type: boolean }
+        initial_password_configured: { type: boolean }
+    GeneralSettingsBranding:
+      type: object
+      additionalProperties: false
+      required: [custom_logo]
+      properties:
+        custom_logo: { type: boolean }
+        logo_sha256: { type: string }
+        updated_at: { type: integer, format: int64 }
+    GeneralSettings:
+      type: object
+      additionalProperties: false
+      required: [version, apply_mode, generated_at, values, security, branding]
+      properties:
+        version: { type: integer }
+        apply_mode: { type: string, const: live }
+        generated_at: { type: integer, format: int64 }
+        values: { $ref: "#/components/schemas/GeneralSettingsValues" }
+        security: { $ref: "#/components/schemas/GeneralSettingsSecurity" }
+        branding: { $ref: "#/components/schemas/GeneralSettingsBranding" }
+    GeneralSettingsUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm, values]
+      properties:
+        confirm: { type: string, const: save }
+        values: { $ref: "#/components/schemas/GeneralSettingsValues" }
+    GeneralSettingsMutationResponse:
+      type: object
+      additionalProperties: false
+      required: [message, settings]
+      properties:
+        message: { type: string }
+        settings: { $ref: "#/components/schemas/GeneralSettings" }
+    InitialPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [initial_password, confirmation]
+      properties:
+        initial_password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+        confirmation: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+    InitialPasswordResponse:
+      type: object
+      additionalProperties: false
+      required: [message, configured]
+      properties:
+        message: { type: string }
+        configured: { type: boolean, const: true }
+    NotificationStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - webhook_configured
+        - webhook_url
+        - heartbeat_at
+        - last_success_at
+        - last_error
+        - next_schedule_at
+      properties:
+        webhook_configured: { type: boolean }
+        webhook_url: { type: string }
+        heartbeat_at: { type: [integer, "null"], format: int64 }
+        last_success_at: { type: [integer, "null"], format: int64 }
+        last_error: { type: string }
+        next_schedule_at: { type: [integer, "null"], format: int64 }
+    NotificationValues:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - timezone
+        - daily_times
+        - schedule_grace_minutes
+        - quota_alert_enabled
+        - weekly_threshold_percent
+      properties:
+        enabled: { type: boolean }
+        timezone: { type: string }
+        daily_times: { type: string }
+        schedule_grace_minutes: { type: integer }
+        quota_alert_enabled: { type: boolean }
+        weekly_threshold_percent: { type: number }
+    NotificationSettings:
+      type: object
+      additionalProperties: false
+      required: [notifications, values]
+      properties:
+        notifications: { $ref: "#/components/schemas/NotificationStatus" }
+        values: { $ref: "#/components/schemas/NotificationValues" }
+    NotificationSettingsUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm, values]
+      properties:
+        confirm: { type: string, const: save }
+        values: { $ref: "#/components/schemas/NotificationValues" }
+    NotificationSettingsMutationResponse:
+      allOf:
+        - $ref: "#/components/schemas/NotificationSettings"
+        - type: object
+          required: [message]
+          properties:
+            message: { type: string }
+    NotificationWebhookRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm, webhook_url]
+      properties:
+        confirm: { type: string, const: save }
+        webhook_url: { type: string, format: uri, writeOnly: true }
+    ConfirmClearRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm: { type: string, const: clear }
+    NotificationWebhookResponse:
+      type: object
+      additionalProperties: false
+      required: [message, notifications]
+      properties:
+        message: { type: string }
+        notifications: { $ref: "#/components/schemas/NotificationStatus" }
+    SendNotificationResponse:
+      type: object
+      additionalProperties: false
+      required: [message, format]
+      properties:
+        message: { type: string }
+        format: { type: string, const: markdown_v2 }
+    UsageWindow:
+      type: string
+      description: Supported values vary by route; unsupported values fail closed with `invalid_request`.
+      enum: ["3600", "21600", "86400", "604800", "2592000", today, current_week, custom, all, since_reset]
+    PortalUsageWindow:
+      oneOf:
+        - $ref: "#/components/schemas/UsageWindow"
+        - type: string
+          const: today
+    UsageMetrics:
+      type: object
+      required:
+        - request_count
+        - success_count
+        - failed_count
+        - input_tokens
+        - output_tokens
+        - reasoning_tokens
+        - cached_tokens
+        - total_tokens
+        - last_used_at
+      properties:
+        request_count: { type: integer, format: int64 }
+        success_count: { type: integer, format: int64 }
+        failed_count: { type: integer, format: int64 }
+        input_tokens: { type: integer, format: int64 }
+        output_tokens: { type: integer, format: int64 }
+        reasoning_tokens: { type: integer, format: int64 }
+        cached_tokens: { type: integer, format: int64 }
+        total_tokens: { type: integer, format: int64 }
+        weighted_tokens: { type: integer, format: int64 }
+        last_used_at: { type: integer, format: int64 }
+    UsageModelMetrics:
+      allOf:
+        - $ref: "#/components/schemas/UsageMetrics"
+        - type: object
+          required: [model]
+          properties:
+            model: { type: string }
+    UsageReasoningMetrics:
+      allOf:
+        - $ref: "#/components/schemas/UsageMetrics"
+        - type: object
+          required: [reasoning_effort]
+          properties:
+            reasoning_effort: { type: string }
+    UsageCombination:
+      allOf:
+        - $ref: "#/components/schemas/UsageMetrics"
+        - type: object
+          required: [model, reasoning_effort]
+          properties:
+            account: { type: string }
+            model: { type: string }
+            reasoning_effort: { type: string }
+    UsageBreakdown:
+      type: object
+      required:
+        - generated_at
+        - window
+        - window_seconds
+        - window_start_at
+        - window_end_at
+        - collection_started_at
+        - effective_start_at
+        - definition
+        - account
+        - totals
+        - models
+        - reasoning_efforts
+        - combinations
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window:
+          oneOf:
+            - type: integer
+            - type: string
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: [integer, "null"], format: int64 }
+        window_end_at: { type: integer, format: int64 }
+        collection_started_at: { type: integer, format: int64 }
+        effective_start_at: { type: integer, format: int64 }
+        definition: { type: string }
+        account: { type: [string, "null"] }
+        user: { type: string, format: email }
+        totals:
+          allOf:
+            - $ref: "#/components/schemas/UsageMetrics"
+            - type: object
+              properties:
+                known_effort_count: { type: integer, format: int64 }
+        models:
+          type: array
+          items: { $ref: "#/components/schemas/UsageModelMetrics" }
+        reasoning_efforts:
+          type: array
+          items: { $ref: "#/components/schemas/UsageReasoningMetrics" }
+        combinations:
+          type: array
+          items: { $ref: "#/components/schemas/UsageCombination" }
+    PortalLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, writeOnly: true }
+    PortalSession:
+      type: object
+      additionalProperties: false
+      required: [authenticated, user, expires_at, password_change_required]
+      properties:
+        authenticated: { type: boolean, const: true }
+        user: { type: string, format: email }
+        expires_at: { type: integer, format: int64 }
+        password_change_required: { type: boolean }
+    PortalProfile:
+      type: object
+      additionalProperties: false
+      required: [user, api_key, current_group, generated_at]
+      properties:
+        user: { type: string, format: email }
+        api_key: { type: string }
+        current_group: { type: string }
+        generated_at: { type: integer, format: int64 }
+    PortalAccountStatus:
+      type: object
+      additionalProperties: false
+      required: [code, label, tone, reason, selectable]
+      properties:
+        code: { type: string }
+        label: { type: string }
+        tone: { type: string, enum: [success, warning, danger, neutral] }
+        reason: { type: string }
+        selectable: { type: boolean }
+        used_percent: { type: number }
+        remaining_percent: { type: number }
+        reset_at: { type: integer, format: int64 }
+    PortalAccount:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, current, enabled, selectable, status, active_users_1h, usage]
+      properties:
+        id: { type: string }
+        display_name: { type: string }
+        current: { type: boolean }
+        enabled: { type: boolean }
+        selectable: { type: boolean }
+        status: { $ref: "#/components/schemas/PortalAccountStatus" }
+        active_users_1h: { type: integer }
+        usage: { $ref: "#/components/schemas/UsageMetrics" }
+    PortalWindow:
+      type: object
+      additionalProperties: false
+      required: [window, window_seconds, window_start_at, window_end_at]
+      properties:
+        window:
+          oneOf:
+            - type: integer
+            - type: string
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: integer, format: int64 }
+        window_end_at: { type: integer, format: int64 }
+        window_timezone: { type: string }
+    PortalAccounts:
+      type: object
+      additionalProperties: false
+      required: [generated_at, window, current_group, accounts, totals, warnings]
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window: { $ref: "#/components/schemas/PortalWindow" }
+        current_group: { type: string }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/PortalAccount" }
+        totals: { $ref: "#/components/schemas/UsageMetrics" }
+        warnings:
+          type: array
+          items: { type: string }
+    PortalRoute:
+      type: object
+      additionalProperties: false
+      required: [current_group, generated_at]
+      properties:
+        current_group: { type: string }
+        generated_at: { type: integer, format: int64 }
+    PortalPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, writeOnly: true }
+        new_password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+    PortalPasswordResponse:
+      type: object
+      additionalProperties: false
+      required: [message, password_change_required]
+      properties:
+        message: { type: string }
+        password_change_required: { type: boolean, const: false }
+    PortalRouteRequest:
+      type: object
+      additionalProperties: false
+      required: [group_id]
+      properties:
+        group_id: { type: string }
+    PortalRouteMutationResponse:
+      type: object
+      additionalProperties: false
+      required: [message, current_group, changed]
+      properties:
+        message: { type: string }
+        current_group: { type: string }
+        changed: { type: boolean }
+        snapshot_generation: { type: string }
+    PortalRotateKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm: { type: boolean, const: true }
+    PortalRotateKeyResponse:
+      type: object
+      additionalProperties: false
+      required: [message, api_key, snapshot_generation]
+      properties:
+        message: { type: string }
+        api_key: { type: string }
+        snapshot_generation: { type: string }
+    TokenSeries:
+      type: object
+      additionalProperties: false
+      required: [name, values, current, average, maximum, total]
+      properties:
+        name: { type: string }
+        values:
+          type: array
+          items: { type: integer, format: int64 }
+        current: { type: integer, format: int64 }
+        average: { type: integer, format: int64 }
+        maximum: { type: integer, format: int64 }
+        total: { type: integer, format: int64 }
+    CollectorStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - heartbeat_at
+        - last_error
+        - event_count
+        - collection_started_at
+        - usage_breakdown_started_at
+        - last_event_at
+      properties:
+        status: { type: string }
+        heartbeat_at: { type: integer, format: int64 }
+        last_error: { type: string }
+        event_count: { type: integer, format: int64 }
+        collection_started_at: { type: integer, format: int64 }
+        usage_breakdown_started_at: { type: integer, format: int64 }
+        last_event_at: { type: integer, format: int64 }
+    OverviewUsageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - generated_at
+        - window
+        - window_seconds
+        - window_start_at
+        - window_start_at_by_account
+        - unavailable_accounts
+        - bucket_seconds
+        - buckets
+        - accounts
+        - users
+        - selected_account
+        - selected_user
+        - selected_accounts
+        - selected_users
+        - user_limit
+        - collector
+        - cached
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window:
+          oneOf:
+            - type: integer
+            - type: string
+              enum: [today, custom, since_reset]
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: integer, format: int64 }
+        window_start_at_by_account:
+          type: [object, "null"]
+          additionalProperties: { type: integer, format: int64 }
+        unavailable_accounts:
+          type: array
+          items: { type: string }
+        bucket_seconds: { type: integer, format: int64 }
+        buckets:
+          type: array
+          items: { type: integer, format: int64 }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/TokenSeries" }
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/TokenSeries" }
+        selected_account: { type: [string, "null"] }
+        selected_user: { type: [string, "null"], format: email }
+        selected_accounts:
+          type: array
+          items: { type: string }
+        selected_users:
+          type: array
+          items: { type: string, format: email }
+        user_limit: { type: integer, minimum: 1, maximum: 50 }
+        collector: { $ref: "#/components/schemas/CollectorStatus" }
+        cached: { type: boolean, const: false }
+    RebalanceAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [id, confirm]
+      properties:
+        id: { type: string }
+        confirm:
+          type: string
+          description: Must exactly match the normalized CPA account id.
+    RebalancePlanSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - sources
+        - destinations
+        - candidate_accounts
+        - affected_users
+        - planned_users
+        - skipped_users
+        - unassigned_users
+      properties:
+        sources:
+          type: object
+          additionalProperties: { type: integer }
+        destinations:
+          type: object
+          additionalProperties: { type: integer }
+        candidate_accounts:
+          type: array
+          items: { type: string }
+        affected_users: { type: integer }
+        planned_users: { type: integer }
+        skipped_users: { type: integer }
+        unassigned_users: { type: integer }
+    RebalanceEvacuationResult:
+      type: object
+      additionalProperties: false
+      required:
+        - moved_users
+        - destinations
+        - target_counts
+        - snapshot_generation
+        - active_users_1h
+        - activity_refreshed
+        - plan
+      properties:
+        moved_users: { type: integer }
+        destinations:
+          type: object
+          additionalProperties: { type: integer }
+        target_counts:
+          type: object
+          additionalProperties: { type: integer }
+        snapshot_generation: { type: string }
+        active_users_1h:
+          type: object
+          additionalProperties: { type: integer }
+        activity_refreshed: { type: boolean }
+        warning: { type: string }
+        plan: { $ref: "#/components/schemas/RebalancePlanSummary" }
+    RebalanceAccountResponse:
+      type: object
+      additionalProperties: false
+      required: [message, rebalance]
+      properties:
+        message: { type: string }
+        rebalance: { $ref: "#/components/schemas/RebalanceEvacuationResult" }
+    ResetAccountQuotaRequest:
+      type: object
+      additionalProperties: false
+      required: [account, credit_id, confirm]
+      properties:
+        account: { type: string }
+        credit_id: { type: string, minLength: 1, maxLength: 512, writeOnly: true }
+        confirm:
+          type: string
+          description: Must exactly match the normalized CPA account id.
+    ResetQuotaWindow:
+      type: object
+      additionalProperties: false
+      required: [key, label, previous_reset_at]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        previous_reset_at: { type: [integer, "null"], format: int64 }
+    ResetQuotaCredit:
+      type: object
+      additionalProperties: false
+      properties:
+        title: { type: string }
+        expires_at: { type: integer, format: int64 }
+        reset_type: { type: string }
+        status: { type: string }
+        redeemed_at: { type: integer, format: int64 }
+    ResetAccountQuotaResponse:
+      type: object
+      additionalProperties: false
+      required: [message, account, windows, windows_reset, code, credit]
+      properties:
+        message: { type: string }
+        account: { type: string }
+        windows:
+          type: array
+          items: { $ref: "#/components/schemas/ResetQuotaWindow" }
+        windows_reset: { type: integer, format: int64 }
+        code: { type: string }
+        credit: { $ref: "#/components/schemas/ResetQuotaCredit" }
+    CPAImageMetadata:
+      type: object
+      additionalProperties: true
+    CPAImageLocal:
+      type: object
+      additionalProperties: false
+      required: [available, id, short_id, created, repo_digests, version, commit, built_at, resolved_ref]
+      properties:
+        available: { type: boolean }
+        id: { type: string }
+        short_id: { type: string }
+        created: { type: string }
+        repo_digests:
+          type: array
+          items: { type: string }
+        version: { type: string }
+        commit: { type: string }
+        built_at: { type: string }
+        resolved_ref: { type: string }
+    CPAAccountImage:
+      type: object
+      additionalProperties: false
+      required:
+        - account
+        - service
+        - enabled
+        - container_exists
+        - running
+        - state
+        - image_ref
+        - image_id
+        - image_short_id
+        - version
+        - using_target
+        - rollback_available
+      properties:
+        account: { type: string }
+        service: { type: string }
+        enabled: { type: boolean }
+        container_exists: { type: boolean }
+        running: { type: boolean }
+        state: { type: string }
+        image_ref: { type: string }
+        image_id: { type: string }
+        image_short_id: { type: string }
+        version: { type: string }
+        using_target: { type: boolean }
+        rollback_available: { type: boolean }
+    CPAImageStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - target_image
+        - update_channel
+        - candidate
+        - applied
+        - local_image
+        - accounts
+        - running_count
+        - current_count
+        - outdated_count
+        - cached
+      properties:
+        target_image: { type: string }
+        update_channel: { type: string }
+        candidate: { $ref: "#/components/schemas/CPAImageMetadata" }
+        applied: { $ref: "#/components/schemas/CPAImageMetadata" }
+        local_image: { $ref: "#/components/schemas/CPAImageLocal" }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/CPAAccountImage" }
+        running_count: { type: integer }
+        current_count: { type: integer }
+        outdated_count: { type: integer }
+        cached: { type: boolean, const: false }
+    ReleaseStatus:
+      type: object
+      additionalProperties: false
+      required: [configured, current_version, available]
+      properties:
+        configured: { type: boolean }
+        current_version: { type: string }
+        available: { type: boolean }
+        status: { type: string, enum: [ok, unavailable, invalid_configuration] }
+        latest_version: { type: string }
+        latest_revision: { type: string, maxLength: 64 }
+        checked_at: { type: integer, format: int64 }
+    WeightedUsageMetrics:
+      allOf:
+        - $ref: "#/components/schemas/UsageMetrics"
+        - type: object
+          required: [weighted_tokens]
+          properties:
+            weighted_tokens: { type: integer, format: int64 }
+    TeamUsageMetrics:
+      allOf:
+        - $ref: "#/components/schemas/WeightedUsageMetrics"
+        - type: object
+          required: [active_users]
+          properties:
+            active_users: { type: integer, format: int64 }
+    TeamUsageRow:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - description
+        - user_count
+        - created_at
+        - updated_at
+        - current_user_count
+        - usage
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        user_count: { type: integer }
+        created_at: { type: integer, format: int64 }
+        updated_at: { type: integer, format: int64 }
+        current_user_count: { type: integer }
+        usage: { $ref: "#/components/schemas/TeamUsageMetrics" }
+    TeamUsageResponse:
+      type: object
+      additionalProperties: false
+      required: [generated_at, window, window_seconds, window_start_at, window_end_at, attribution, teams]
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window:
+          oneOf:
+            - type: integer
+            - type: string
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: [integer, "null"], format: int64 }
+        window_end_at: { type: integer, format: int64 }
+        window_timezone: { type: string }
+        attribution: { type: string, const: current_membership }
+        teams:
+          type: array
+          items: { $ref: "#/components/schemas/TeamUsageRow" }
+    TeamUserUsage:
+      type: object
+      required: [user, request_count, success_count, failed_count, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, weighted_tokens, last_used_at]
+      properties:
+        user: { type: string, format: email }
+        request_count: { type: integer, format: int64 }
+        success_count: { type: integer, format: int64 }
+        failed_count: { type: integer, format: int64 }
+        input_tokens: { type: integer, format: int64 }
+        output_tokens: { type: integer, format: int64 }
+        reasoning_tokens: { type: integer, format: int64 }
+        cached_tokens: { type: integer, format: int64 }
+        total_tokens: { type: integer, format: int64 }
+        weighted_tokens: { type: integer, format: int64 }
+        last_used_at: { type: integer, format: int64 }
+    TeamAccountUsage:
+      allOf:
+        - $ref: "#/components/schemas/WeightedUsageMetrics"
+        - type: object
+          required: [account]
+          properties:
+            account: { type: string }
+    TeamModelUsage:
+      allOf:
+        - $ref: "#/components/schemas/WeightedUsageMetrics"
+        - type: object
+          required: [model]
+          properties:
+            model: { type: string }
+    TeamCombinationUsage:
+      allOf:
+        - $ref: "#/components/schemas/WeightedUsageMetrics"
+        - type: object
+          required: [model, reasoning_effort]
+          properties:
+            model: { type: string }
+            reasoning_effort: { type: string }
+    TeamUsageSeries:
+      type: object
+      additionalProperties: false
+      required: [start_at, end_at, bucket_seconds, buckets, values]
+      properties:
+        start_at: { type: integer, format: int64 }
+        end_at: { type: integer, format: int64 }
+        bucket_seconds: { type: integer, format: int64 }
+        buckets:
+          type: array
+          items: { type: integer, format: int64 }
+        values:
+          type: array
+          items: { type: integer, format: int64 }
+    TeamUsageBreakdownResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - generated_at
+        - window
+        - window_seconds
+        - window_start_at
+        - window_end_at
+        - definition
+        - team_id
+        - attribution
+        - totals
+        - users
+        - accounts
+        - models
+        - combinations
+        - series
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window:
+          oneOf:
+            - type: integer
+            - type: string
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: [integer, "null"], format: int64 }
+        window_end_at: { type: integer, format: int64 }
+        window_timezone: { type: string }
+        definition: { type: string, const: team_model_reasoning_effort_tokens }
+        team_id: { type: string }
+        attribution: { type: string, const: current_membership }
+        totals: { $ref: "#/components/schemas/WeightedUsageMetrics" }
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/TeamUserUsage" }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/TeamAccountUsage" }
+        models:
+          type: array
+          items: { $ref: "#/components/schemas/TeamModelUsage" }
+        combinations:
+          type: array
+          items: { $ref: "#/components/schemas/TeamCombinationUsage" }
+        series: { $ref: "#/components/schemas/TeamUsageSeries" }
+    UserQuotaActionRequest:
+      type: object
+      additionalProperties: false
+      required: [action, confirm]
+      properties:
+        action: { type: string, enum: [restore_default, add_bonus, reset_usage] }
+        scope: { type: string, enum: [selected, all], default: selected }
+        users:
+          type: array
+          maxItems: 500
+          items: { type: string, format: email }
+        token_amount:
+          oneOf:
+            - type: integer
+              format: int64
+              minimum: 1
+              maximum: 1000000000000
+            - type: string
+              pattern: "^[0-9]+$"
+              writeOnly: true
+        reason: { type: string, maxLength: 200 }
+        confirm:
+          type: string
+          enum: [restore_default, add_bonus, reset_current_week_usage, reset_all_current_week_usage]
+    QuotaActionApplied:
+      type: object
+      additionalProperties: false
+      required: [user, token_amount]
+      properties:
+        user: { type: string, format: email }
+        token_amount: { type: integer, format: int64 }
+    UserQuotaOperationSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - total_users
+        - users_with_usage
+        - total_used_tokens
+        - total_raw_used_tokens
+        - users_with_personal_policy
+        - users_with_bonus
+        - users_with_usage_reset
+        - week_start_at
+        - week_end_at
+      properties:
+        total_users: { type: integer }
+        users_with_usage: { type: integer }
+        total_used_tokens: { type: integer, format: int64 }
+        total_raw_used_tokens: { type: integer, format: int64 }
+        users_with_personal_policy: { type: integer }
+        users_with_bonus: { type: integer }
+        users_with_usage_reset: { type: integer }
+        week_start_at: { type: [integer, "null"], format: int64 }
+        week_end_at: { type: [integer, "null"], format: int64 }
+    UserQuotaActionResponse:
+      type: object
+      additionalProperties: false
+      required: [action, applied_users, skipped_users, message, quota_operations]
+      properties:
+        action: { type: string, enum: [restore_default, add_bonus, reset_usage] }
+        applied:
+          type: array
+          items: { $ref: "#/components/schemas/QuotaActionApplied" }
+        applied_users:
+          type: array
+          items: { type: string, format: email }
+        skipped_users:
+          type: array
+          items: { type: string, format: email }
+        token_amount: { type: integer, format: int64 }
+        week_start_at: { type: integer, format: int64 }
+        reason: { type: string }
+        created_at: { type: integer, format: int64 }
+        changed_policies: { type: integer, format: int64 }
+        message: { type: string }
+        quota_operations: { $ref: "#/components/schemas/UserQuotaOperationSummary" }
+    BrandingLogoUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [filename, content_type, data_base64, confirm]
+      properties:
+        filename: { type: string }
+        content_type: { type: string, enum: [image/png, image/jpeg, image/gif, image/webp, image/svg+xml] }
+        data_base64: { type: string, format: byte, writeOnly: true }
+        confirm: { type: string, const: save }
+    BrandingLogoResetRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm: { type: string, const: reset }
+    BrandingLogoState:
+      type: object
+      additionalProperties: false
+      required: [custom]
+      properties:
+        custom: { type: boolean }
+        url: { type: string }
+        content_type: { type: string }
+        sha256: { type: string }
+    BrandingLogoMutationResponse:
+      type: object
+      additionalProperties: false
+      required: [message, logo]
+      properties:
+        message: { type: string }
+        logo: { $ref: "#/components/schemas/BrandingLogoState" }
+    ConfigurationValue:
+      anyOf:
+        - type: string
+        - type: boolean
+        - type: integer
+          format: int64
+        - type: number
+          format: double
+        - type: array
+          items: { type: string }
+        - type: "null"
+    ConfigurationChoice:
+      type: object
+      additionalProperties: false
+      required: [value, label]
+      properties:
+        value: { type: string }
+        label: { type: string }
+    ConfigurationField:
+      type: object
+      additionalProperties: false
+      required: [key, label, description, type, value, default, apply_mode, editable]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        description: { type: string }
+        type:
+          type: string
+          enum: [text, optional_text, boolean, integer, number, nullable_integer, choice, color, base_url, proxy_url_secret, duration, timezone, time_list, image, optional_image, ip, domain_list, key_prefix, env_name]
+        value: { $ref: "#/components/schemas/ConfigurationValue" }
+        default: { $ref: "#/components/schemas/ConfigurationValue" }
+        apply_mode:
+          type: string
+          enum: [live, accounts, collector, future, deployment, quota]
+        editable: { type: boolean, const: true }
+        unit: { type: string }
+        min: { type: number, format: double }
+        max: { type: number, format: double }
+        min_length: { type: integer, minimum: 0 }
+        max_length: { type: integer, minimum: 1 }
+        choices:
+          type: array
+          items: { $ref: "#/components/schemas/ConfigurationChoice" }
+        configured: { type: boolean }
+        digest_required: { type: boolean }
+    ConfigurationGroup:
+      type: object
+      additionalProperties: false
+      required: [name, description, fields]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        fields:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ConfigurationField" }
+    ConfigurationCatalog:
+      type: object
+      additionalProperties: false
+      required: [version, generated_at, field_count, groups]
+      properties:
+        version: { type: integer, const: 1 }
+        generated_at: { type: integer, format: int64 }
+        field_count: { type: integer, minimum: 1 }
+        groups:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ConfigurationGroup" }
+    ConfigurationUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm, values]
+      properties:
+        confirm: { type: string, const: save }
+        values:
+          type: object
+          additionalProperties: true
+          description: Bounded configuration keys registered by the Go control plane; secret values are write-only.
+    ConfigurationUpdateResponse:
+      type: object
+      additionalProperties: false
+      required: [message, changed, applied, pending_deployment]
+      properties:
+        message: { type: string }
+        changed:
+          type: array
+          items: { type: string }
+        applied:
+          type: array
+          items: { type: string, enum: [live, accounts, collector, quota] }
+        pending_deployment: { type: boolean }
+    ManagementKeyRotationRequest:
+      type: object
+      additionalProperties: false
+      required: [new_key, confirmation]
+      properties:
+        new_key: { type: string, minLength: 12, maxLength: 128, writeOnly: true }
+        confirmation: { type: string, minLength: 12, maxLength: 128, writeOnly: true }
+    ManagementKeyRotationResult:
+      type: object
+      additionalProperties: false
+      required: [rotated, services]
+      properties:
+        rotated: { type: boolean, const: true }
+        services: { type: integer, const: 0 }
+    ManagementKeyRotationResponse:
+      type: object
+      additionalProperties: false
+      required: [message, result]
+      properties:
+        message: { type: string }
+        result: { $ref: "#/components/schemas/ManagementKeyRotationResult" }
+    LegacyRuntimeJobRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: { type: string, enum: [start, up, stop, restart] }
+        target: { type: string, default: all }
+    LegacyRuntimeJobCancelRequest:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string }
+    OperationImpact:
+      type: object
+      additionalProperties: false
+      required: [action, target, target_type, routed_users]
+      properties:
+        action: { type: string, const: stop }
+        target: { type: string }
+        target_type: { type: string, enum: [all, account, service] }
+        routed_users: { type: [integer, "null"] }
+    PublicGatewayUsageTotals:
+      type: object
+      additionalProperties: false
+      required: [inflight_keys, active_keys, requests]
+      properties:
+        inflight_keys: { type: integer, format: int64 }
+        active_keys: { type: integer, format: int64 }
+        requests: { type: integer, format: int64 }
+    PublicGatewayUsageAccount:
+      type: object
+      additionalProperties: false
+      required: [account, inflight_keys, active_keys, request_count]
+      properties:
+        account: { type: string }
+        inflight_keys: { type: integer, format: int64 }
+        active_keys: { type: integer, format: int64 }
+        request_count: { type: integer, format: int64 }
+    PublicGatewayUsage:
+      type: object
+      additionalProperties: false
+      required: [generated_at, window_seconds, truncated, cached, totals, accounts]
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window_seconds: { type: integer, format: int64, enum: [300, 3600, 86400] }
+        truncated: { type: boolean, const: false }
+        cached: { type: boolean, const: false }
+        totals: { $ref: "#/components/schemas/PublicGatewayUsageTotals" }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/PublicGatewayUsageAccount" }
+    PublicWeeklyWindow:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - label
+        - metered_feature
+        - window_slot
+        - used_percent
+        - remaining_percent
+        - reported_used_percent
+        - reset_at
+        - reset_after_seconds
+        - window_seconds
+        - limit_reached
+      properties:
+        key: { type: string }
+        label: { type: string }
+        metered_feature: { type: [string, "null"] }
+        window_slot: { type: string }
+        used_percent: { type: number }
+        remaining_percent: { type: number }
+        reported_used_percent: { type: number }
+        reset_at: { type: [integer, "null"], format: int64 }
+        reset_after_seconds: { type: [integer, "null"], format: int64 }
+        window_seconds: { type: integer, format: int64 }
+        limit_reached: { type: boolean }
+    PublicAccountQuota:
+      type: object
+      additionalProperties: false
+      required: [account, status, plan_type, allowed, limit_reached, weekly, weekly_windows]
+      properties:
+        account: { type: string }
+        status: { type: string }
+        plan_type: { type: [string, "null"] }
+        allowed: { type: [boolean, "null"] }
+        limit_reached: { type: [boolean, "null"] }
+        weekly:
+          oneOf:
+            - $ref: "#/components/schemas/PublicWeeklyWindow"
+            - type: "null"
+        weekly_windows:
+          type: array
+          items: { $ref: "#/components/schemas/PublicWeeklyWindow" }
+    PublicUsageLimits:
+      type: object
+      additionalProperties: false
+      required: [generated_at, cache_ttl_seconds, cached, refreshing, accounts]
+      properties:
+        generated_at: { type: integer, format: int64 }
+        cache_ttl_seconds: { type: integer, format: int64 }
+        cached: { type: boolean }
+        refreshing: { type: boolean }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/PublicAccountQuota" }

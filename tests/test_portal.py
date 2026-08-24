@@ -1556,7 +1556,7 @@ class PortalTests(unittest.TestCase):
         script = (ROOT / "admin" / "static" / "app.js").read_text(encoding="utf-8")
 
         self.assertIn('"key": "account_failover.mode"', control)
-        self.assertIn('"value": "observe", "label": "观察"', control)
+        self.assertNotIn('"value": "observe", "label": "观察"', control)
         self.assertIn('"value": "active", "label": "自动执行"', control)
         self.assertIn('"key": "account_failover.reserve_percent"', control)
         self.assertIn('"group": "账号自动切换"', control)

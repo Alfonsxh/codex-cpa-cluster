@@ -37,7 +37,9 @@ python3 "$ROOT_DIR/scripts/release_manifest.py" create \
 MANIFEST_CREATED=true
 
 COPYFILE_DISABLE=1 tar --no-xattrs \
-  --exclude='*/__pycache__' --exclude='*.pyc' -czf "$OUTPUT" -C "$ROOT_DIR" \
+  --exclude='*/__pycache__' --exclude='*.pyc' \
+  --exclude='*/node_modules' --exclude='frontend/dist' \
+  -czf "$OUTPUT" -C "$ROOT_DIR" \
   .dockerignore \
   .env.example \
   compose.env.example \
@@ -53,17 +55,31 @@ COPYFILE_DISABLE=1 tar --no-xattrs \
   config \
   docs \
   docker-compose.yml \
+  docker-compose.v1-compare.yml \
+  docker-compose.v2.yml \
+  docker-compose.v2-test.yml \
+  v1-compare.env.example \
+  v2-compose.env.example \
   admin \
+  api \
+  cmd \
   dashboard \
   edge \
   gateway/Dockerfile \
   gateway/gateway_state.lua \
   gateway/nginx.conf \
   gateway/request_gate.lua \
+  frontend \
+  go.mod \
+  go.sum \
+  internal \
   portal \
   release \
   web \
   scripts \
+  testdata/v2 \
+  tools/openapi \
+  v2 \
   release-manifest.json
 
 python3 - "$OUTPUT" <<'PY'

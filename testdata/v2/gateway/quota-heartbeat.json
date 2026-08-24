@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "updated_at": 1,
+  "ok": true,
+  "error": "",
+  "stale_after_seconds": 15,
+  "last_success_at": 1,
+  "fail_open_after_seconds": 300
+}

@@ -7,6 +7,7 @@ VERSION=${VERSION:?VERSION 不能为空，例如 v1.0.0}
 PLATFORM=${PLATFORM:-linux/amd64}
 IMAGE_PREFIXES=${IMAGE_PREFIXES:-}
 ALLOW_DIRTY=${ALLOW_DIRTY:-false}
+RELEASE_COMPONENTS="admin web gateway edge v2-control v2-web v2-gateway v2-edge"
 
 case "$VERSION" in
   v[0-9]*.[0-9]*.[0-9]*|[0-9]*.[0-9]*.[0-9]*) ;;
@@ -51,23 +52,33 @@ component_digest() {
 build_component() {
   COMPONENT=$1
   DOCKERFILE=$2
+  TARGET=${3:-}
   DIGEST=$(component_digest "$COMPONENT")
   LOCAL_IMAGE="codex-cpa-$COMPONENT:sha256-$DIGEST"
-  docker buildx build \
+  set -- docker buildx build \
     --platform "$PLATFORM" \
     --load \
     --label "io.codex-cpa.component=$COMPONENT" \
     --label "io.codex-cpa.component-digest=$DIGEST" \
-    --label "io.codex-cpa.source-digest=$DIGEST" \
+    --label "io.codex-cpa.source-digest=$DIGEST"
+  if [ -n "$TARGET" ]; then
+    set -- "$@" --target "$TARGET"
+  fi
+  set -- "$@" \
     -t "$LOCAL_IMAGE" \
     -f "$ROOT_DIR/$DOCKERFILE" \
     "$ROOT_DIR"
+  "$@"
 }
 
 build_component admin admin/Dockerfile
 build_component web web/Dockerfile
 build_component gateway gateway/Dockerfile
 build_component edge edge/Dockerfile
+build_component v2-control v2/Dockerfile control
+build_component v2-web v2/Dockerfile web
+build_component v2-gateway v2/Dockerfile gateway
+build_component v2-edge v2/Dockerfile edge
 docker buildx build \
   --platform "$PLATFORM" \
   --load \
@@ -112,7 +123,7 @@ for PREFIX in $IMAGE_PREFIXES; do
     echo "镜像前缀无效：$PREFIX" >&2
     exit 1
   fi
-  for COMPONENT in admin web gateway edge; do
+  for COMPONENT in $RELEASE_COMPONENTS; do
     DIGEST=$(component_digest "$COMPONENT")
     CONTENT_IMAGE="$PREFIX/codex-cpa-$COMPONENT:sha256-$DIGEST"
     VERSION_IMAGE="$PREFIX/codex-cpa-$COMPONENT:$VERSION"
@@ -133,7 +144,7 @@ for PREFIX in $IMAGE_PREFIXES; do
 done
 
 for PREFIX in $IMAGE_PREFIXES; do
-  for COMPONENT in admin web gateway edge; do
+  for COMPONENT in $RELEASE_COMPONENTS; do
     DIGEST=$(component_digest "$COMPONENT")
     LOCAL_IMAGE="codex-cpa-$COMPONENT:sha256-$DIGEST"
     CONTENT_IMAGE="$PREFIX/codex-cpa-$COMPONENT:sha256-$DIGEST"
@@ -169,7 +180,7 @@ done
 # 所有 Registry 的不可变版本标签均已写入或验证后，才移动 latest，避免
 # Admin 提醒到半成品发布。
 for PREFIX in $IMAGE_PREFIXES; do
-  for COMPONENT in admin web gateway edge; do
+  for COMPONENT in $RELEASE_COMPONENTS; do
     VERSION_IMAGE="$PREFIX/codex-cpa-$COMPONENT:$VERSION"
     if ! docker image inspect "$VERSION_IMAGE" >/dev/null 2>&1; then
       docker pull "$VERSION_IMAGE"

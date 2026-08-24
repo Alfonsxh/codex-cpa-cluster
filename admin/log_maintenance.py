@@ -18,6 +18,7 @@ APPLICATION_ROOT = Path(
 PROJECT_ROOT = Path(os.environ.get("CLIPROXY_ROOT", APPLICATION_ROOT)).resolve()
 sys.path.insert(0, str(APPLICATION_ROOT / "scripts"))
 from control_plane_store import ControlPlaneStore  # noqa: E402
+from ownership_lease import OwnershipGuard, exit_process_on_ownership_loss  # noqa: E402
 DEFAULT_TARGETS = (
     "logs/gateway/access.tsv",
     "logs/gateway/admin-access.log",
@@ -119,10 +120,7 @@ def build_parser():
     return parser
 
 
-def main(argv=None):
-    args = build_parser().parse_args(argv)
-    if args.health:
-        return 0 if healthy(args.root) else 1
+def _run_owned(args):
     if args.once:
         payload = run_once(
             args.root,
@@ -159,6 +157,18 @@ def main(argv=None):
             )
         stopping.wait(max(5, float(args.interval)))
     return 0
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.health:
+        return 0 if healthy(args.root) else 1
+    with OwnershipGuard(
+        args.root,
+        ("log-maintenance",),
+        on_lost=exit_process_on_ownership_loss,
+    ):
+        return _run_owned(args)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+{
+  "name": "codex-cpa-openapi-codegen",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "generate": "openapi-ts --file openapi-ts.config.ts"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
+    "typescript": "5.9.3"
+  }
+}

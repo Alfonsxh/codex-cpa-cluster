@@ -14,7 +14,7 @@ from control_plane_store import ControlPlaneStore  # noqa: E402
 
 
 STATE_VERSION = 1
-MODES = {"off", "observe", "active"}
+MODES = {"off", "active"}
 
 
 def _number(value):

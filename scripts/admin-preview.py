@@ -606,7 +606,12 @@ class MockAdminData:
         if path.startswith("/admin/api/jobs/"):
             return HTTPStatus.NOT_FOUND, error_payload("模拟任务不存在", "not_found")
         if path == "/admin/api/logs":
-            return HTTPStatus.OK, {"target": query.get("target", ["all"])[0], "content": "[preview] 本地模拟日志，不含远程运行数据。\n"}
+            return HTTPStatus.OK, {
+                "target": query.get("target", ["all"])[0],
+                "output": "[preview] 本地模拟日志，不含远程运行数据。\n",
+                "exit_code": 0,
+                "truncated": False,
+            }
         return HTTPStatus.NOT_FOUND, error_payload("模拟接口不存在", "not_found")
 
 

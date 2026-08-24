@@ -10,7 +10,7 @@ import stat
 from pathlib import Path
 
 
-MANIFEST_VERSION = 3
+MANIFEST_VERSION = 4
 RELEASE_DESCRIPTOR_VERSION = 1
 SEMVER_PATTERN = re.compile(r"^v?\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$")
 COMPONENT_INPUTS = {
@@ -26,6 +26,81 @@ COMPONENT_INPUTS = {
         "gateway/request_gate.lua",
     ),
     "edge": (".dockerignore", "edge"),
+    # Go v2 candidate images are published alongside the active v1 images, but
+    # are not consumed by the production deployment script. Their independent
+    # source identities let Test pull and compare an exact candidate build.
+    "v2-control": (
+        ".dockerignore",
+        "go.mod",
+        "go.sum",
+        "v2/Dockerfile",
+        "cmd/admin",
+        "cmd/collector",
+        "cmd/docker-read-proxy",
+        "cmd/failover",
+        "cmd/log-maintenance",
+        "cmd/migration-compare",
+        "cmd/notifications",
+        "cmd/ownership",
+        "cmd/quota",
+        "internal/accountlifecycle",
+        "internal/accountprojection",
+        "internal/accountstatus",
+        "internal/admin",
+        "internal/branding",
+        "internal/collector",
+        "internal/contract",
+        "internal/controlplane",
+        "internal/dockerreadproxy",
+        "internal/failover",
+        "internal/gateway",
+        "internal/identity",
+        "internal/logmaintenance",
+        "internal/migrationcheck",
+        "internal/notifications",
+        "internal/ownership",
+        "internal/portal",
+        "internal/quota",
+        "internal/runtimeops",
+        "internal/scheduler",
+        "internal/usage",
+    ),
+    "v2-web": (
+        ".dockerignore",
+        "go.mod",
+        "go.sum",
+        "v2/Dockerfile",
+        "cmd/web",
+        "internal/web",
+        "frontend/README.md",
+        "frontend/index.html",
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "frontend/portal",
+        "frontend/scripts",
+        "frontend/src",
+        "frontend/tsconfig.json",
+        "frontend/usage",
+        "frontend/vite.config.ts",
+        "frontend/vite.portal.config.ts",
+        "frontend/vite.usage.config.ts",
+    ),
+    "v2-gateway": (
+        ".dockerignore",
+        "go.mod",
+        "go.sum",
+        "v2/Dockerfile",
+        "cmd/gateway",
+        "internal/gateway",
+    ),
+    "v2-edge": (
+        ".dockerignore",
+        "go.mod",
+        "go.sum",
+        "v2/Dockerfile",
+        "cmd/edge",
+        "internal/edge",
+    ),
 }
 IGNORED_NAMES = {"__pycache__"}
 

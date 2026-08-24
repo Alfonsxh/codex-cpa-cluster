@@ -3,7 +3,9 @@ __pycache__/
 *.sqlite3
 
 .env
+v2-target.env
 dist/
+node_modules/
 
 # Local-only agent harness and deployment environment context
 /.harness/

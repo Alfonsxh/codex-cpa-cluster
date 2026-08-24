@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "generation": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "generated_at": 1,
+  "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "records": [
+    {
+      "user_email": "fixture@example.com",
+      "week_start_at": 1,
+      "week_end_at": 4102444800,
+      "limit_tokens": -1,
+      "used_tokens": 0,
+      "raw_used_tokens": 0,
+      "weighted_raw_used_tokens": 0,
+      "quota_unit": "weighted_tokens"
+    }
+  ]
+}

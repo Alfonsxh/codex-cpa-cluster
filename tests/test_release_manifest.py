@@ -30,6 +30,65 @@ class ReleaseManifestTests(unittest.TestCase):
             (self.root / "gateway" / filename).write_text(
                 filename + "\n", encoding="utf-8"
             )
+        for filename in ("go.mod", "go.sum"):
+            (self.root / filename).write_text(filename + "\n", encoding="utf-8")
+        for directory in (
+            "cmd/admin",
+            "cmd/collector",
+            "cmd/docker-read-proxy",
+            "cmd/edge",
+            "cmd/failover",
+            "cmd/gateway",
+            "cmd/log-maintenance",
+            "cmd/migration-compare",
+            "cmd/notifications",
+            "cmd/ownership",
+            "cmd/quota",
+            "cmd/web",
+            "frontend/portal",
+            "frontend/scripts",
+            "frontend/src",
+            "frontend/usage",
+            "internal/accountlifecycle",
+            "internal/accountprojection",
+            "internal/accountstatus",
+            "internal/admin",
+            "internal/branding",
+            "internal/collector",
+            "internal/contract",
+            "internal/controlplane",
+            "internal/dockerreadproxy",
+            "internal/edge",
+            "internal/failover",
+            "internal/gateway",
+            "internal/identity",
+            "internal/logmaintenance",
+            "internal/migrationcheck",
+            "internal/notifications",
+            "internal/ownership",
+            "internal/portal",
+            "internal/quota",
+            "internal/runtimeops",
+            "internal/scheduler",
+            "internal/usage",
+            "internal/web",
+            "v2",
+        ):
+            path = self.root / directory
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "source.txt").write_text(directory + "\n", encoding="utf-8")
+        for filename in (
+            "frontend/README.md",
+            "frontend/index.html",
+            "frontend/package.json",
+            "frontend/package-lock.json",
+            "frontend/tsconfig.json",
+            "frontend/vite.config.ts",
+            "frontend/vite.portal.config.ts",
+            "frontend/vite.usage.config.ts",
+            "v2/Dockerfile",
+        ):
+            (self.root / filename).write_text(filename + "\n", encoding="utf-8")
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -112,9 +171,88 @@ class ReleaseManifestTests(unittest.TestCase):
         release_manifest.write_manifest(self.root, manifest_path)
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(payload["version"], 3)
-        self.assertEqual(set(payload["components"]), {"admin", "web", "gateway", "edge"})
+        self.assertEqual(payload["version"], 4)
+        self.assertEqual(
+            set(payload["components"]),
+            {
+                "admin",
+                "web",
+                "gateway",
+                "edge",
+                "v2-control",
+                "v2-web",
+                "v2-gateway",
+                "v2-edge",
+            },
+        )
         self.assertNotIn("admin changed", manifest_path.read_text(encoding="utf-8"))
+
+    def test_v2_candidate_runtime_boundaries_have_independent_digests(self):
+        original = release_manifest.build_manifest(self.root)
+        candidates = {"v2-control", "v2-web", "v2-gateway", "v2-edge"}
+        for component, source in (
+            ("v2-control", self.root / "internal/admin/source.txt"),
+            ("v2-web", self.root / "frontend/src/source.txt"),
+            ("v2-gateway", self.root / "cmd/gateway/source.txt"),
+            ("v2-edge", self.root / "internal/edge/source.txt"),
+        ):
+            previous = source.read_text(encoding="utf-8")
+            source.write_text(previous + "changed\n", encoding="utf-8")
+            changed = release_manifest.build_manifest(self.root)
+            self.assertNotEqual(
+                original["components"][component]["source_sha256"],
+                changed["components"][component]["source_sha256"],
+            )
+            for other in candidates - {component}:
+                self.assertEqual(
+                    original["components"][other]["source_sha256"],
+                    changed["components"][other]["source_sha256"],
+                )
+            source.write_text(previous, encoding="utf-8")
+
+    def test_v2_go_component_inputs_cover_every_local_binary_dependency(self):
+        commands = {
+            "v2-control": (
+                "admin",
+                "collector",
+                "docker-read-proxy",
+                "failover",
+                "log-maintenance",
+                "migration-compare",
+                "notifications",
+                "ownership",
+                "quota",
+            ),
+            "v2-gateway": ("gateway",),
+            "v2-edge": ("edge",),
+        }
+        root = ROOT.resolve()
+        for component, names in commands.items():
+            inputs = [root / item for item in release_manifest.COMPONENT_INPUTS[component]]
+            output = subprocess.check_output(
+                [
+                    "go",
+                    "list",
+                    "-deps",
+                    "-f",
+                    "{{if .Module}}{{if eq .Module.Path \"github.com/Alfonsxh/codex-cpa-cluster\"}}{{.Dir}}{{end}}{{end}}",
+                    *(f"./cmd/{name}" for name in names),
+                ],
+                cwd=ROOT,
+                text=True,
+            )
+            dependencies = {
+                Path(line).resolve() for line in output.splitlines() if line.strip()
+            }
+            uncovered = [
+                path
+                for path in sorted(dependencies)
+                if not any(
+                    source == path or (source.is_dir() and source in path.parents)
+                    for source in inputs
+                )
+            ]
+            self.assertEqual(uncovered, [], f"{component} has unhashed Go dependencies")
 
     def test_gateway_apply_selection_is_fail_closed(self):
         deploy = (ROOT / "scripts/deploy-release.sh").read_text(encoding="utf-8")

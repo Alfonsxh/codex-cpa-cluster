@@ -473,12 +473,11 @@ CONFIG_DEFINITIONS = (
         "key": "account_failover.mode",
         "group": "账号自动切换",
         "label": "自动切换模式",
-        "description": "关闭时不检查；观察模式只生成计划；自动模式在账号官方周额度耗尽后批量迁移路由。",
+        "description": "关闭时不检查；自动模式在账号官方周额度耗尽后批量迁移路由。",
         "type": "choice",
         "default": "active",
         "choices": [
             {"value": "off", "label": "关闭"},
-            {"value": "observe", "label": "观察"},
             {"value": "active", "label": "自动执行"},
         ],
         "apply_mode": "live",
@@ -1346,6 +1345,11 @@ class ControlPlane:
     def configuration(self):
         stored = self._read_stored_configuration()
         inferred = dict(stored)
+        # The retired observe mode could leave a deployment permanently using
+        # stale plans. Migrate it to the fail-closed off mode before validating
+        # the now two-value setting.
+        if inferred.get("account_failover.mode") == "observe":
+            inferred["account_failover.mode"] = "off"
         legacy_proxy_url = str(inferred.pop("cpa.proxy_url", "") or "").strip()
         if legacy_proxy_url:
             self.store.write_secret(DEFAULT_PROXY_SECRET, legacy_proxy_url)

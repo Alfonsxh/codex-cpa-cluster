@@ -1,0 +1,5 @@
+package: contract
+generate:
+  models: true
+output-options:
+  skip-prune: true

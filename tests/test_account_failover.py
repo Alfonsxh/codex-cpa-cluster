@@ -211,40 +211,15 @@ class AccountFailoverTests(unittest.TestCase):
         self.assertEqual(plan["destinations"], {"high": 2, "low": 6, "middle": 4})
         self.assertEqual(plan["unassigned_users"], 0)
 
-    def test_observe_builds_plan_without_changing_routes(self):
-        self.control.create_user(
-            "alice@example.com",
-            apply=False,
-            initial_account="alpha",
-        )
-        self.control.update_configuration({"account_failover.mode": "observe"})
-        self.runtime()
-        payload = self.quota_payload(
-            {"alpha": self.quota("alpha", 100, limit_reached=True)}
-        )
-        self.app.usage_limits = mock.Mock(return_value=payload)
-
-        result = self.app.account_failover.run_once(self.app, now=self.now)
-
-        self.assertTrue(result["checked"])
-        self.assertEqual(result["moved_users"], 0)
-        self.assertEqual(result["plan"]["planned_users"], 1)
-        self.assertEqual(
-            self.control.explicit_user_route("alice@example.com"),
-            "alpha",
+    def test_retired_observe_runtime_state_fails_closed(self):
+        self.control.store.write_runtime_state(
+            "account_failover",
+            {**self.app.account_failover._default_state(), "mode": "observe"},
         )
 
-        self.control.update_configuration({"account_failover.mode": "active"})
-        with mock.patch.object(
-            self.control,
-            "publish_auth_snapshot",
-            return_value={"generation": "d" * 32, "records": 1},
-        ):
-            activated = self.app.account_failover.run_once(
-                self.app,
-                now=self.now + 1,
-            )
-        self.assertEqual(activated["moved_users"], 1)
+        state = self.app.account_failover.read_state()
+
+        self.assertEqual(state["mode"], "off")
 
     def test_active_mode_moves_routes_once_and_persists_private_status(self):
         for user in ("alice@example.com", "bob@example.com"):

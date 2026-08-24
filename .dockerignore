@@ -5,10 +5,13 @@
 AGENTS.md
 .claude
 .env
+v2-target.env
 .DS_Store
 ._*
 __pycache__
 *.pyc
+**/node_modules
+frontend/dist
 *.sqlite3
 *.sqlite3-*
 auth

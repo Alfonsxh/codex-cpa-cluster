@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(os.environ.get("CLIPROXY_ROOT", APPLICATION_ROOT)).resolve()
 sys.path.insert(0, str(APPLICATION_ROOT / "scripts"))
 sys.path.insert(0, str(APPLICATION_ROOT / "admin"))
 import cliproxy  # noqa: E402
+from ownership_lease import OwnershipGuard, exit_process_on_ownership_loss  # noqa: E402
 from usage_store import UsageStore, reasoning_effort_multipliers  # noqa: E402
 
 
@@ -231,8 +232,7 @@ def build_parser():
     return parser
 
 
-def main(argv=None):
-    args = build_parser().parse_args(argv)
+def _run_owned(args):
     control = cliproxy.ControlPlane(args.root)
     control.ensure_layout()
     configuration = control.configuration()["values"]
@@ -271,9 +271,6 @@ def main(argv=None):
         )
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
         return 0
-    if args.health:
-        status = collector.store.status()
-        return 0 if status["status"] == "healthy" and status["heartbeat_at"] else 1
     if args.once:
         result = collector.run_once()
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
@@ -301,6 +298,20 @@ def main(argv=None):
                 pass
         stopping.wait(max(0.5, interval))
     return 0
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.health:
+        collector = UsageCollector(args.root)
+        status = collector.store.status()
+        return 0 if status["status"] == "healthy" and status["heartbeat_at"] else 1
+    with OwnershipGuard(
+        args.root,
+        ("usage-collector",),
+        on_lost=exit_process_on_ownership_loss,
+    ):
+        return _run_owned(args)
 
 
 if __name__ == "__main__":

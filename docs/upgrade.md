@@ -30,7 +30,9 @@ docker compose --env-file .env --env-file state/compose.env \
 sudo /opt/codex-cpa-cluster/bin/codex-cpa upgrade v1.1.0
 ```
 
-发布包和四个应用镜像必须属于同一组件指纹。需要从内部 Registry 拉取同版本镜像时，使用 `--image-prefix registry.example.com/team`。
+发布包和当前活动的四个应用镜像必须属于同一组件指纹。需要从内部 Registry 拉取同版本镜像时，使用
+`--image-prefix registry.example.com/team`。同版本发布中的 Go v2 候选镜像仅供隔离 Test 使用，当前
+升级器不会拉取或应用它们。
 
 部署器会：
 

@@ -1,0 +1,652 @@
+package portal
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/identity"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/gin-gonic/gin"
+)
+
+func TestPortalLoginSetsClockBoundHttpOnlyCookieWithoutLeakingKey(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.server.sessionTTL = time.Hour
+
+	response := fixture.request(
+		http.MethodPost,
+		"/usage/session",
+		`{"email":"Alice@Example.com","password":"initial-password"}`,
+		"",
+	)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("login status/body = %d %s", response.Code, response.Body.String())
+	}
+	cookie := response.Header().Get("Set-Cookie")
+	for _, fragment := range []string{
+		"cpa_user_session=created-token-1", "Path=/usage", "Max-Age=3600", "HttpOnly", "SameSite=Lax",
+	} {
+		if !strings.Contains(cookie, fragment) {
+			t.Fatalf("login cookie %q does not contain %q", cookie, fragment)
+		}
+	}
+	if response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "old-key") {
+		t.Fatalf("login response headers/body = %#v %s", response.Header(), response.Body.String())
+	}
+}
+
+func TestPortalLoginRateLimitsOneAccountAcrossClientAddresses(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.server.loginLimiter = &LoginLimiter{
+		entries: make(map[string]*loginLimitEntry), now: fixture.server.now,
+		burst: 1, refill: time.Hour,
+	}
+
+	first := fixture.requestFrom(
+		http.MethodPost,
+		"/usage/session",
+		`{"email":"alice@example.com","password":"wrong-password"}`,
+		"",
+		"192.0.2.10:1000",
+	)
+	if first.Code != http.StatusUnauthorized {
+		t.Fatalf("first failed login = %d %s", first.Code, first.Body.String())
+	}
+	second := fixture.requestFrom(
+		http.MethodPost,
+		"/usage/session",
+		`{"email":"alice@example.com","password":"wrong-password"}`,
+		"",
+		"192.0.2.11:1000",
+	)
+	if second.Code != http.StatusTooManyRequests || second.Header().Get("Retry-After") == "" {
+		t.Fatalf("shared-account rate limit = %d %#v %s", second.Code, second.Header(), second.Body.String())
+	}
+}
+
+func TestPortalRequiresInitialPasswordChangeAndKeepsOnlyCurrentSession(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["current-session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	fixture.sessions.sessions["other-session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	credential := fixture.sessions.credentials["alice@example.com"]
+	credential.MustChange = true
+	fixture.sessions.credentials["alice@example.com"] = credential
+
+	blocked := fixture.request(http.MethodGet, "/usage/me/profile", "", "current-session")
+	assertPortalError(t, blocked, http.StatusForbidden, "password_change_required")
+
+	changed := fixture.request(
+		http.MethodPut,
+		"/usage/me/password",
+		`{"current_password":"initial-password","new_password":"replacement-password"}`,
+		"current-session",
+	)
+	if changed.Code != http.StatusOK {
+		t.Fatalf("password change = %d %s", changed.Code, changed.Body.String())
+	}
+	updated := fixture.sessions.credentials["alice@example.com"]
+	if updated.MustChange || !VerifyPassword("replacement-password", updated.PasswordHash) {
+		t.Fatalf("updated credential = %#v", updated)
+	}
+	if _, found := fixture.sessions.sessions["other-session"]; found {
+		t.Fatal("password change retained another session")
+	}
+	if _, found := fixture.sessions.sessions["current-session"]; !found || fixture.sessions.lastKept != "current-session" {
+		t.Fatalf("password change did not retain current session: %#v", fixture.sessions.sessions)
+	}
+
+	profile := fixture.request(http.MethodGet, "/usage/me/profile", "", "current-session")
+	if profile.Code != http.StatusOK || !strings.Contains(profile.Body.String(), "old-key") ||
+		strings.Contains(profile.Body.String(), "bob-key") {
+		t.Fatalf("profile = %d %s", profile.Code, profile.Body.String())
+	}
+}
+
+func TestPortalRevokesSessionWhenUserIsDeletedOrDisabled(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["deleted-session"] = usage.PortalSession{User: "deleted@example.com", ExpiresAt: 11_000}
+	fixture.sessions.credentials["deleted@example.com"] = fixture.sessions.credentials["alice@example.com"]
+
+	response := fixture.request(http.MethodGet, "/usage/me/profile", "", "deleted-session")
+	assertPortalError(t, response, http.StatusUnauthorized, "session_required")
+	if _, found := fixture.sessions.sessions["deleted-session"]; found || fixture.sessions.lastRevoked != "deleted-session" {
+		t.Fatalf("deleted user session was not revoked: %#v", fixture.sessions)
+	}
+}
+
+func TestPortalUsageReadsAreUserScopedAndBoundedToOneGeneratedWindow(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	fixture.usage.accountsResult = usage.UserAccountSummary{
+		Totals: usage.WeightedMetrics{RawMetrics: usage.RawMetrics{TotalTokens: 12}, WeightedTokens: 18},
+		Accounts: []usage.UserAccountUsage{{
+			Account: "alpha",
+			WeightedMetrics: usage.WeightedMetrics{
+				RawMetrics: usage.RawMetrics{RequestCount: 1, TotalTokens: 12}, WeightedTokens: 18,
+			},
+		}},
+	}
+
+	response := fixture.request(http.MethodGet, "/usage/me/accounts?window=3600", "", "session")
+	if response.Code != http.StatusOK {
+		t.Fatalf("account usage = %d %s", response.Code, response.Body.String())
+	}
+	if fixture.usage.accountsCalls != 1 || fixture.usage.user != "alice@example.com" ||
+		fixture.usage.startAt != 6_400 || fixture.usage.endAt == nil || *fixture.usage.endAt != 10_000 {
+		t.Fatalf("bounded usage call = %#v", fixture.usage)
+	}
+	if strings.Contains(response.Body.String(), "bob@example.com") || strings.Contains(response.Body.String(), "bob-key") {
+		t.Fatalf("account response leaked another user: %s", response.Body.String())
+	}
+
+	breakdown := fixture.request(http.MethodGet, "/usage/me/usage-breakdown?window=3600", "", "session")
+	if breakdown.Code != http.StatusOK || fixture.usage.breakdownCalls != 1 ||
+		fixture.usage.breakdownEndAt == nil || *fixture.usage.breakdownEndAt != 10_000 {
+		t.Fatalf("breakdown = %d %s, usage=%#v", breakdown.Code, breakdown.Body.String(), fixture.usage)
+	}
+}
+
+func TestPortalRejectsInvisibleAccountBeforeReadingBreakdown(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+
+	response := fixture.request(
+		http.MethodGet,
+		"/usage/me/usage-breakdown?account=private-account&window=3600",
+		"",
+		"session",
+	)
+	assertPortalError(t, response, http.StatusNotFound, "account_not_found")
+	if fixture.usage.breakdownCalls != 0 {
+		t.Fatalf("invisible account reached usage store %d times", fixture.usage.breakdownCalls)
+	}
+}
+
+func TestPortalRouteChangeUsesExpectedValueAndSurfacesConflict(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	fixture.routes.err = controlplane.ErrRouteConflict
+
+	response := fixture.request(
+		http.MethodPut,
+		"/usage/me/group",
+		`{"group_id":"beta"}`,
+		"session",
+	)
+	assertPortalError(t, response, http.StatusConflict, "route_conflict")
+	if !reflect.DeepEqual(
+		[]string{fixture.routes.user, fixture.routes.target, fixture.routes.expected},
+		[]string{"alice@example.com", "beta", "alpha"},
+	) {
+		t.Fatalf("route arguments = %#v", fixture.routes)
+	}
+}
+
+func TestPortalKeyRotationRequiresConfirmationAndReturnsOnlyNewKey(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	fixture.keys.result = identity.RotationResult{APIKey: "new-key", SnapshotGeneration: "generation-2"}
+
+	rejected := fixture.request(http.MethodPost, "/usage/me/key/rotate", `{"confirm":false}`, "session")
+	assertPortalError(t, rejected, http.StatusBadRequest, "confirmation_required")
+
+	response := fixture.request(http.MethodPost, "/usage/me/key/rotate", `{"confirm":true}`, "session")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "new-key") ||
+		strings.Contains(response.Body.String(), "old-key") {
+		t.Fatalf("rotation response = %d %s", response.Code, response.Body.String())
+	}
+	if fixture.keys.user != "alice@example.com" || fixture.keys.expected != "old-key" {
+		t.Fatalf("rotation arguments = %#v", fixture.keys)
+	}
+}
+
+func TestPortalAccountStatusUsesStablePublicCodes(t *testing.T) {
+	account := controlplane.Account{ID: "alpha", GroupEnabled: true}
+	tests := []struct {
+		name       string
+		state      failover.AccountState
+		found      bool
+		code       string
+		selectable bool
+	}{
+		{name: "available", state: failover.AccountState{Reason: "available"}, found: true, code: "available", selectable: true},
+		{name: "stopped", state: failover.AccountState{Reason: "container_not_running"}, found: true, code: "stopped"},
+		{name: "auth", state: failover.AccountState{Reason: "oauth_missing"}, found: true, code: "auth_missing"},
+		{name: "credential", state: failover.AccountState{Reason: "credential_unavailable"}, found: true, code: "credential_unavailable"},
+		{name: "cooldown", state: failover.AccountState{Reason: "transient_cooldown"}, found: true, code: "transient_cooldown", selectable: true},
+		{name: "rate-limited", state: failover.AccountState{Reason: "rate_limited"}, found: true, code: "rate_limited", selectable: true},
+		{name: "degraded", state: failover.AccountState{Reason: "degraded"}, found: true, code: "degraded", selectable: true},
+		{name: "runtime-unknown", state: failover.AccountState{Reason: "runtime_unknown"}, found: true, code: "unknown", selectable: true},
+		{name: "reserve", state: failover.AccountState{Reason: "reserve_reached"}, found: true, code: "quota_warning", selectable: true},
+		{name: "stale", state: failover.AccountState{Reason: "quota_stale"}, found: true, code: "unknown", selectable: true},
+		{name: "unavailable", state: failover.AccountState{Reason: "quota_unavailable"}, found: true, code: "quota_unknown", selectable: true},
+		{name: "missing", found: false, code: "unknown", selectable: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			status := presentAccountState(account, test.state, test.found)
+			if status.Code != test.code || status.Selectable != test.selectable || status.Label == "" || status.Reason == "" {
+				t.Fatalf("status = %#v", status)
+			}
+		})
+	}
+}
+
+func TestPublicUsageLimitsExposeCurrentQuotaWithoutResetCreditsOrActions(t *testing.T) {
+	fixture := newPortalFixture(t)
+	resetAt := int64(20_000)
+	resetAfter := int64(10_000)
+	allowed := true
+	limitReached := false
+	plan := "team"
+	credits := int64(3)
+	window := quota.WeeklyWindow{
+		Key: "default:604800", Label: "周额度", WindowSlot: "primary",
+		UsedPercent: 25, RemainingPercent: 75, ReportedUsedPercent: 25,
+		ResetAt: &resetAt, ResetAfterSeconds: &resetAfter, WindowSeconds: quota.WeeklyWindowSeconds,
+		LimitReached: false, Resettable: true,
+	}
+	fixture.quota.state = quota.RuntimeState{
+		Version: 1, HeartbeatAt: 10_000, LastSuccessAt: 10_000,
+		Snapshot: quota.Snapshot{
+			GeneratedAt: 10_000, CacheTTLSeconds: 60, Cached: true, Refreshing: false,
+			Accounts: []quota.AccountQuota{{
+				Account: "alpha", Status: "ok", PlanType: &plan, Allowed: &allowed,
+				LimitReached: &limitReached, ResetCreditCount: &credits,
+				Weekly: &window, WeeklyWindows: []quota.WeeklyWindow{window},
+			}},
+		},
+	}
+	fixture.quota.found = true
+
+	response := fixture.request(http.MethodGet, "/usage/limits", "", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("public usage limits = %d %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "reset_credit") ||
+		strings.Contains(response.Body.String(), "resettable") ||
+		strings.Contains(response.Body.String(), "oauth") {
+		t.Fatalf("public usage limits leaked reset or auth details: %s", response.Body.String())
+	}
+	var payload struct {
+		GeneratedAt int64 `json:"generated_at"`
+		Accounts    []struct {
+			Account       string               `json:"account"`
+			Weekly        *quota.WeeklyWindow  `json:"weekly"`
+			WeeklyWindows []quota.WeeklyWindow `json:"weekly_windows"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || payload.GeneratedAt != 10_000 ||
+		len(payload.Accounts) != 1 || payload.Accounts[0].Account != "alpha" ||
+		payload.Accounts[0].Weekly == nil || payload.Accounts[0].Weekly.RemainingPercent != 75 ||
+		len(payload.Accounts[0].WeeklyWindows) != 1 {
+		t.Fatalf("public usage limit payload = (%#v, %v)", payload, err)
+	}
+}
+
+type portalFixture struct {
+	t        *testing.T
+	server   *Server
+	router   *gin.Engine
+	identity *portalIdentityFake
+	sessions *portalSessionFake
+	usage    *portalUsageFake
+	routes   *portalRouteFake
+	keys     *portalKeyFake
+	quota    *portalQuotaStateFake
+}
+
+func newPortalFixture(t *testing.T) *portalFixture {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	now := func() time.Time { return time.Unix(10_000, 0) }
+	hash, err := hashPasswordWithSalt("initial-password", []byte("0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("hash fixture password: %v", err)
+	}
+	identityStore := &portalIdentityFake{
+		accounts: []controlplane.Account{
+			{ID: "alpha", Email: "alpha@example.test", GroupEnabled: true},
+			{ID: "beta", Email: "beta@example.test", GroupEnabled: true},
+		},
+		routes: map[string]string{"alice@example.com": "alpha"},
+		records: []controlplane.KeyRecord{
+			{Label: "alice:alpha", Account: "alpha", User: "alice@example.com", Status: "active", Key: "old-key"},
+			{Label: "alice:beta", Account: "beta", User: "alice@example.com", Status: "active", Key: "old-key"},
+			{Label: "bob:alpha", Account: "alpha", User: "bob@example.com", Status: "active", Key: "bob-key"},
+		},
+		settings: map[string]any{"user_quota.timezone": "Asia/Shanghai"},
+		secrets:  map[string]string{"portal_initial_password": "initial-password"},
+	}
+	sessions := &portalSessionFake{
+		now: now, sessions: make(map[string]usage.PortalSession),
+		credentials: map[string]usage.PortalCredential{
+			"alice@example.com": {PasswordHash: hash, MustChange: false, CreatedAt: 1, UpdatedAt: 1},
+		},
+	}
+	usageReader := &portalUsageFake{}
+	routeChanger := &portalRouteFake{}
+	keyRotator := &portalKeyFake{}
+	quotaStore := &portalQuotaStateFake{}
+	server, err := New(Config{
+		Identity: identityStore, Sessions: sessions, Usage: usageReader,
+		PublicUsage: usageReader,
+		Routes:      routeChanger, Keys: keyRotator, QuotaStore: quotaStore,
+		Now: now, SessionTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("New portal server: %v", err)
+	}
+	router := gin.New()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		t.Fatalf("disable trusted proxies: %v", err)
+	}
+	server.Register(router)
+	return &portalFixture{
+		t: t, server: server, router: router, identity: identityStore,
+		sessions: sessions, usage: usageReader, routes: routeChanger, keys: keyRotator,
+		quota: quotaStore,
+	}
+}
+
+func TestPublicUsageAPIPreservesBoundedAggregateContract(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.usage.publicResult = map[string]usage.PublicAccountUsage{
+		"alpha": {Account: "alpha", ActiveKeys: 2, RequestCount: 5},
+		"beta":  {Account: "beta"},
+	}
+	response := fixture.request(http.MethodGet, "/usage/api?window=300", "", "")
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"window_seconds":300`) ||
+		!strings.Contains(response.Body.String(), `"active_keys":2`) ||
+		!strings.Contains(response.Body.String(), `"requests":5`) ||
+		strings.Contains(response.Body.String(), "account_email") ||
+		strings.Contains(response.Body.String(), `"users"`) {
+		t.Fatalf("public usage response = %d %s", response.Code, response.Body.String())
+	}
+	response = fixture.request(http.MethodGet, "/usage/api?window=42", "", "")
+	assertPortalError(t, response, http.StatusBadRequest, "invalid_request")
+}
+
+func (fixture *portalFixture) request(method string, path string, body string, token string) *httptest.ResponseRecorder {
+	return fixture.requestFrom(method, path, body, token, "192.0.2.1:1000")
+}
+
+func (fixture *portalFixture) requestFrom(
+	method string,
+	path string,
+	body string,
+	token string,
+	remoteAddress string,
+) *httptest.ResponseRecorder {
+	fixture.t.Helper()
+	request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	request.RemoteAddr = remoteAddress
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	}
+	response := httptest.NewRecorder()
+	fixture.router.ServeHTTP(response, request)
+	return response
+}
+
+func assertPortalError(t *testing.T, response *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if response.Code != status {
+		t.Fatalf("response status/body = %d %s", response.Code, response.Body.String())
+	}
+	var payload ErrorEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Error.Code != code {
+		t.Fatalf("error payload = %#v", payload)
+	}
+}
+
+type portalIdentityFake struct {
+	accounts []controlplane.Account
+	routes   map[string]string
+	records  []controlplane.KeyRecord
+	settings map[string]any
+	secrets  map[string]string
+}
+
+func (store *portalIdentityFake) ReadAccounts(context.Context) ([]controlplane.Account, error) {
+	return append([]controlplane.Account(nil), store.accounts...), nil
+}
+
+func (store *portalIdentityFake) ReadRoutes(context.Context) (map[string]string, error) {
+	result := make(map[string]string, len(store.routes))
+	for user, account := range store.routes {
+		result[user] = account
+	}
+	return result, nil
+}
+
+func (store *portalIdentityFake) ReadKeyRecordsForUsers(
+	_ context.Context,
+	users []string,
+) ([]controlplane.KeyRecord, error) {
+	wanted := make(map[string]struct{}, len(users))
+	for _, user := range users {
+		wanted[strings.ToLower(strings.TrimSpace(user))] = struct{}{}
+	}
+	result := make([]controlplane.KeyRecord, 0)
+	for _, record := range store.records {
+		if _, found := wanted[strings.ToLower(strings.TrimSpace(record.User))]; found {
+			result = append(result, record)
+		}
+	}
+	return result, nil
+}
+
+func (store *portalIdentityFake) ReadSettings(context.Context) (map[string]any, error) {
+	return store.settings, nil
+}
+
+func (store *portalIdentityFake) ReadSecret(_ context.Context, name string) (string, bool, error) {
+	value, found := store.secrets[name]
+	return value, found, nil
+}
+
+type portalSessionFake struct {
+	now          func() time.Time
+	sessions     map[string]usage.PortalSession
+	credentials  map[string]usage.PortalCredential
+	created      int
+	lastRevoked  string
+	lastKept     string
+	lastSetUser  string
+	lastMustFlag bool
+}
+
+func (store *portalSessionFake) CreateSession(
+	_ context.Context,
+	user string,
+	ttl time.Duration,
+) (string, usage.PortalSession, error) {
+	store.created++
+	token := "created-token-" + strconv.Itoa(store.created)
+	session := usage.PortalSession{User: user, ExpiresAt: store.now().Add(ttl).Unix()}
+	store.sessions[token] = session
+	return token, session, nil
+}
+
+func (store *portalSessionFake) ResolveSession(_ context.Context, token string) (usage.PortalSession, error) {
+	session, found := store.sessions[token]
+	if !found || session.ExpiresAt <= store.now().Unix() {
+		return usage.PortalSession{}, usage.ErrPortalSessionNotFound
+	}
+	return session, nil
+}
+
+func (store *portalSessionFake) RevokeSession(_ context.Context, token string) error {
+	store.lastRevoked = token
+	delete(store.sessions, token)
+	return nil
+}
+
+func (store *portalSessionFake) Credential(_ context.Context, user string) (usage.PortalCredential, error) {
+	credential, found := store.credentials[user]
+	if !found {
+		return usage.PortalCredential{}, usage.ErrPortalCredentialNotFound
+	}
+	return credential, nil
+}
+
+func (store *portalSessionFake) SetCredential(
+	_ context.Context,
+	user string,
+	passwordHash string,
+	mustChange bool,
+	keepSessionToken string,
+) (usage.PortalCredential, error) {
+	credential := store.credentials[user]
+	credential.PasswordHash = passwordHash
+	credential.MustChange = mustChange
+	credential.UpdatedAt = store.now().Unix()
+	store.credentials[user] = credential
+	store.lastSetUser, store.lastMustFlag, store.lastKept = user, mustChange, keepSessionToken
+	for token, session := range store.sessions {
+		if session.User == user && token != keepSessionToken {
+			delete(store.sessions, token)
+		}
+	}
+	return credential, nil
+}
+
+type portalUsageFake struct {
+	accountsResult usage.UserAccountSummary
+	breakdown      usage.UserBreakdown
+	user           string
+	startAt        int64
+	endAt          *int64
+	account        string
+	breakdownEndAt *int64
+	accountsCalls  int
+	breakdownCalls int
+	publicResult   map[string]usage.PublicAccountUsage
+}
+
+func (reader *portalUsageFake) PublicGatewayUsage(
+	_ context.Context,
+	accounts []string,
+	_ int64,
+	_ int64,
+) (map[string]usage.PublicAccountUsage, error) {
+	result := make(map[string]usage.PublicAccountUsage, len(accounts))
+	for _, account := range accounts {
+		result[account] = reader.publicResult[account]
+	}
+	return result, nil
+}
+
+func (reader *portalUsageFake) UserAccounts(
+	_ context.Context,
+	user string,
+	startAt int64,
+	endAt *int64,
+) (usage.UserAccountSummary, error) {
+	reader.accountsCalls++
+	reader.user, reader.startAt, reader.endAt = user, startAt, cloneInt64(endAt)
+	if reader.accountsResult.Accounts == nil {
+		reader.accountsResult.Accounts = make([]usage.UserAccountUsage, 0)
+	}
+	return reader.accountsResult, nil
+}
+
+func (reader *portalUsageFake) UserBreakdown(
+	_ context.Context,
+	user string,
+	account string,
+	startAt int64,
+	endAt *int64,
+) (usage.UserBreakdown, error) {
+	reader.breakdownCalls++
+	reader.user, reader.account, reader.startAt, reader.breakdownEndAt = user, account, startAt, cloneInt64(endAt)
+	return reader.breakdown, nil
+}
+
+type portalRouteFake struct {
+	user     string
+	target   string
+	expected string
+	result   failover.RebalanceResult
+	err      error
+}
+
+func (changer *portalRouteFake) MoveUser(
+	_ context.Context,
+	user string,
+	target string,
+	expected string,
+) (failover.RebalanceResult, error) {
+	changer.user, changer.target, changer.expected = user, target, expected
+	return changer.result, changer.err
+}
+
+type portalKeyFake struct {
+	user     string
+	expected string
+	result   identity.RotationResult
+	err      error
+}
+
+type portalQuotaStateFake struct {
+	state quota.RuntimeState
+	found bool
+	err   error
+}
+
+func (store *portalQuotaStateFake) ReadRuntimeState(
+	_ context.Context,
+	_ string,
+	target any,
+) (bool, error) {
+	if store.err != nil || !store.found {
+		return store.found, store.err
+	}
+	raw, err := json.Marshal(store.state)
+	if err != nil {
+		return false, err
+	}
+	destination, ok := target.(*json.RawMessage)
+	if !ok {
+		return false, errors.New("unexpected quota state target")
+	}
+	*destination = raw
+	return true, nil
+}
+
+func (rotator *portalKeyFake) RotateUserKey(
+	_ context.Context,
+	user string,
+	expected string,
+) (identity.RotationResult, error) {
+	rotator.user, rotator.expected = user, expected
+	return rotator.result, rotator.err
+}
+
+func cloneInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}

@@ -1312,10 +1312,13 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.app.store.path.stat().st_mode & 0o777, 0o600)
         self.assertFalse((self.root / "state/configuration.json").exists())
 
-        self.app.update_configuration({"account_failover.mode": "observe"})
+        with self.assertRaisesRegex(ValueError, "自动切换模式"):
+            self.app.update_configuration({"account_failover.mode": "observe"})
+        stored = self.app.store.read_settings()
+        self.app.store.write_settings({**stored, "account_failover.mode": "observe"})
         self.assertEqual(
             self.app.configuration()["values"]["account_failover.mode"],
-            "observe",
+            "off",
         )
 
     def test_configuration_removes_only_retired_gost_settings(self):

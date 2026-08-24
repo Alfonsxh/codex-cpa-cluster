@@ -40,6 +40,7 @@ sys.path.insert(0, str(APPLICATION_ROOT / "scripts"))
 sys.path.insert(0, str(APPLICATION_ROOT / "admin"))
 import cliproxy  # noqa: E402
 from account_failover import AccountFailoverScheduler, AccountFailoverService  # noqa: E402
+from ownership_lease import OwnershipGuard, exit_process_on_ownership_loss  # noqa: E402
 from usage_store import (  # noqa: E402
     MAX_WEEKLY_QUOTA_TOKENS,
     UsageStore,
@@ -6520,21 +6521,26 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    app = AdminApplication(args.root)
-    notification_scheduler = NotificationScheduler(app)
-    failover_scheduler = AccountFailoverScheduler(app)
-    server = AdminHTTPServer((args.host, args.port), app)
-    notification_scheduler.start()
-    failover_scheduler.start()
-    print("CPA admin server listening on {}:{}".format(args.host, args.port), flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        failover_scheduler.stop()
-        notification_scheduler.stop()
-        server.server_close()
+    with OwnershipGuard(
+        args.root,
+        ("admin", "quota", "account-failover", "notifications"),
+        on_lost=exit_process_on_ownership_loss,
+    ):
+        app = AdminApplication(args.root)
+        notification_scheduler = NotificationScheduler(app)
+        failover_scheduler = AccountFailoverScheduler(app)
+        server = AdminHTTPServer((args.host, args.port), app)
+        notification_scheduler.start()
+        failover_scheduler.start()
+        print("CPA admin server listening on {}:{}".format(args.host, args.port), flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            failover_scheduler.stop()
+            notification_scheduler.stop()
+            server.server_close()
     return 0
 
 

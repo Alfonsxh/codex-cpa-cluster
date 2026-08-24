@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "generation": "dddddddddddddddddddddddddddddddd",
+  "generated_at": 1,
+  "records": [
+    {
+      "external_key_sha256": "77c8186e5e69f6072be0fdfa0e1335d6d7e3bab4c1036bfed6c9ebc7abedfdb4",
+      "user_email": "fixture@example.com",
+      "account": "alpha",
+      "backend": "cliproxy-alpha:8317",
+      "internal_key": "fixture-internal-key",
+      "label": "fixture@example.com:alpha"
+    }
+  ]
+}

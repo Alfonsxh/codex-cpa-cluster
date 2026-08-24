@@ -1,0 +1,5 @@
+{
+  "model": "fixture-model",
+  "input": "isolated contract test",
+  "stream": true
+}

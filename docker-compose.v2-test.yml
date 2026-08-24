@@ -1,0 +1,87 @@
+name: codex-cpa-v2-test
+
+x-go-build: &go-build
+  context: .
+  dockerfile: v2/Dockerfile
+
+services:
+  cliproxy-alpha:
+    build:
+      <<: *go-build
+      target: test-upstream
+    environment:
+      CLIPROXY_TEST_UPSTREAM_INTERNAL_KEY: fixture-internal-key
+    expose:
+      - "8317"
+    networks:
+      - v2-test
+
+  gateway-blue:
+    build:
+      <<: *go-build
+      target: gateway
+    command:
+      - --snapshot-dir=/var/run/cliproxy-snapshots
+      - --access-log=
+    volumes:
+      - ${V2_TEST_GATEWAY_FIXTURE_DIR:-./testdata/v2/gateway}:/var/run/cliproxy-snapshots:ro
+    expose:
+      - "8317"
+      - "8319"
+    depends_on:
+      - cliproxy-alpha
+    networks:
+      - v2-test
+
+  gateway-green:
+    build:
+      <<: *go-build
+      target: gateway
+    command:
+      - --snapshot-dir=/var/run/cliproxy-snapshots
+      - --access-log=
+    volumes:
+      - ${V2_TEST_GATEWAY_FIXTURE_DIR:-./testdata/v2/gateway}:/var/run/cliproxy-snapshots:ro
+    expose:
+      - "8317"
+      - "8319"
+    depends_on:
+      - cliproxy-alpha
+    networks:
+      - v2-test
+
+  web:
+    build:
+      <<: *go-build
+      target: web
+    expose:
+      - "8080"
+    networks:
+      - v2-test
+
+  edge:
+    build:
+      <<: *go-build
+      target: edge
+    ports:
+      - "127.0.0.1:${V2_TEST_PUBLIC_PORT:-28317}:8317"
+      - "127.0.0.1:${V2_TEST_INTERNAL_PORT:-28319}:8319"
+    volumes:
+      - ${V2_TEST_EDGE_FIXTURE_DIR:-./testdata/v2/edge}:/var/run/cliproxy-edge:ro
+    depends_on:
+      - gateway-blue
+      - gateway-green
+      - web
+    networks:
+      - v2-test
+      - v2-ingress
+
+networks:
+  v2-test:
+    driver: bridge
+    internal: true
+  # Docker Desktop does not publish host ports from an internal-only network.
+  # Only the credential-free Edge joins this ingress bridge; Gateway and the
+  # isolated upstream remain on the internal Test network.
+  v2-ingress:
+    driver: bridge

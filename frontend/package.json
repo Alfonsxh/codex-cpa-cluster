@@ -1,0 +1,41 @@
+{
+  "name": "codex-cpa-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:portal": "vite --config vite.portal.config.ts",
+    "dev:usage": "vite --config vite.usage.config.ts",
+    "build": "tsc --noEmit && npm run build:portal && npm run build:admin && npm run build:usage && npm run check:dist",
+    "build:portal": "vite build --config vite.portal.config.ts",
+    "build:admin": "vite build",
+    "build:usage": "vite build --config vite.usage.config.ts",
+    "check:dist": "node scripts/check-dist.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ant-design/icons": "6.3.2",
+    "@hookform/resolvers": "5.9.1",
+    "@tanstack/react-query": "5.101.4",
+    "antd": "6.6.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-hook-form": "7.85.0",
+    "react-router-dom": "7.18.2",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.1.0",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

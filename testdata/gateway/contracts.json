@@ -1,0 +1,67 @@
+{
+  "external_key": "fixture-external-key",
+  "paths": [
+    {"path": "/v1", "allowed": true},
+    {"path": "/v1/", "allowed": true},
+    {"path": "/v1/responses", "allowed": true},
+    {"path": "/v1//responses", "allowed": true},
+    {"path": "/v1/./responses", "allowed": true},
+    {"path": "/v1beta/models", "allowed": true},
+    {"path": "/backend-api/codex/responses", "allowed": true},
+    {"path": "/api/provider/example", "allowed": true},
+    {"path": "/v1internal:method", "allowed": true},
+    {"path": "/", "allowed": false},
+    {"path": "/v10", "allowed": false},
+    {"path": "/v1betaevil", "allowed": false},
+    {"path": "/backend-api/codexevil", "allowed": false},
+    {"path": "/api/providerx", "allowed": false},
+    {"path": "/v1internal:method/extra", "allowed": false},
+    {"path": "/v1/../admin", "allowed": false},
+    {"path": "/v0/management", "allowed": false},
+    {"path": "/healthz", "allowed": false},
+    {"path": "/__internal/snapshots", "allowed": false},
+    {"path": "/__stats", "allowed": false}
+  ],
+  "auth_snapshot": {
+    "version": 1,
+    "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "generated_at": 990,
+    "records": [
+      {
+        "external_key_sha256": "77c8186e5e69f6072be0fdfa0e1335d6d7e3bab4c1036bfed6c9ebc7abedfdb4",
+        "user_email": "fixture@example.com",
+        "account": "alpha",
+        "backend": "cliproxy-alpha:8317",
+        "internal_key": "fixture-internal-key",
+        "label": "fixture@example.com:alpha"
+      }
+    ]
+  },
+  "quota_snapshot": {
+    "version": 1,
+    "generation": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "generated_at": 995,
+    "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "records": [
+      {
+        "user_email": "fixture@example.com",
+        "week_start_at": 900,
+        "week_end_at": 2000,
+        "limit_tokens": 1000,
+        "used_tokens": 1000,
+        "raw_used_tokens": 600,
+        "weighted_raw_used_tokens": 1100,
+        "quota_unit": "weighted_tokens"
+      }
+    ]
+  },
+  "quota_heartbeat": {
+    "version": 1,
+    "updated_at": 1000,
+    "ok": true,
+    "error": "",
+    "stale_after_seconds": 15,
+    "last_success_at": 1000,
+    "fail_open_after_seconds": 300
+  }
+}

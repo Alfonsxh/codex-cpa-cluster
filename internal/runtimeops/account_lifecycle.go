@@ -1,0 +1,613 @@
+package runtimeops
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountlifecycle"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/containerd/errdefs"
+	"github.com/go-resty/resty/v2"
+	containertypes "github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	networktypes "github.com/moby/moby/api/types/network"
+	dockerclient "github.com/moby/moby/client"
+)
+
+const (
+	defaultAccountNetwork      = "cliproxy-backend"
+	defaultAccountInstance     = "cliproxy"
+	defaultAccountListen       = "127.0.0.1"
+	defaultAccountImage        = "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23"
+	defaultAccountProbeTimeout = 12 * time.Second
+	accountContainerPort       = "8317/tcp"
+)
+
+var runtimeIdentifierPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+
+type AccountRuntimeStore interface {
+	ReadSettings(context.Context) (map[string]any, error)
+	ReadRuntimeState(context.Context, string, any) (bool, error)
+	ReadInternalKeys(context.Context) (map[string]controlplane.InternalKey, error)
+}
+
+type AccountLifecycleDockerClient interface {
+	DockerClient
+	ContainerCreate(context.Context, dockerclient.ContainerCreateOptions) (dockerclient.ContainerCreateResult, error)
+	ContainerInspect(context.Context, string, dockerclient.ContainerInspectOptions) (dockerclient.ContainerInspectResult, error)
+	ContainerRemove(context.Context, string, dockerclient.ContainerRemoveOptions) (dockerclient.ContainerRemoveResult, error)
+}
+
+type AccountRuntimeConfig struct {
+	Root         string
+	NetworkName  string
+	InstanceName string
+	ProbeTimeout time.Duration
+	HTTPClient   *resty.Client
+}
+
+// AccountRuntime uses the same Moby client and exact Compose labels as the
+// bounded runtime API. It recreates one business CPA at a time and retains a
+// deterministic rollback specification until the lifecycle Saga completes.
+type AccountRuntime struct {
+	client       AccountLifecycleDockerClient
+	project      string
+	root         string
+	network      string
+	instance     string
+	store        AccountRuntimeStore
+	http         *resty.Client
+	probeTimeout time.Duration
+}
+
+func NewAccountRuntime(
+	manager *Manager,
+	store AccountRuntimeStore,
+	config AccountRuntimeConfig,
+) (*AccountRuntime, error) {
+	if manager == nil || manager.client == nil || store == nil {
+		return nil, errors.New("account runtime requires the active Moby manager and control-plane store")
+	}
+	client, ok := manager.client.(AccountLifecycleDockerClient)
+	if !ok {
+		return nil, errors.New("Moby client does not implement account lifecycle operations")
+	}
+	root, err := filepath.Abs(strings.TrimSpace(config.Root))
+	if err != nil || strings.TrimSpace(config.Root) == "" {
+		return nil, errors.New("account runtime requires an absolute deployment root")
+	}
+	root = filepath.Clean(root)
+	networkName := strings.TrimSpace(config.NetworkName)
+	if networkName == "" {
+		networkName = defaultAccountNetwork
+	}
+	instanceName := strings.TrimSpace(config.InstanceName)
+	if instanceName == "" {
+		instanceName = defaultAccountInstance
+	}
+	if !runtimeIdentifierPattern.MatchString(networkName) || !runtimeIdentifierPattern.MatchString(instanceName) {
+		return nil, errors.New("account runtime network and instance names contain unsupported characters")
+	}
+	if config.ProbeTimeout <= 0 {
+		config.ProbeTimeout = defaultAccountProbeTimeout
+	}
+	if config.ProbeTimeout < time.Second || config.ProbeTimeout > time.Minute {
+		return nil, errors.New("account runtime probe timeout must be between one second and one minute")
+	}
+	httpClient := config.HTTPClient
+	if httpClient == nil {
+		httpClient = resty.New().SetTimeout(3 * time.Second).SetRedirectPolicy(resty.NoRedirectPolicy())
+	}
+	return &AccountRuntime{
+		client: client, project: manager.project, root: root, network: networkName,
+		instance: instanceName, store: store, http: httpClient,
+		probeTimeout: config.ProbeTimeout,
+	}, nil
+}
+
+func (runtime *AccountRuntime) ReservedHostPorts(ctx context.Context) (map[int]struct{}, error) {
+	containers, err := runtime.client.ContainerList(ctx, dockerclient.ContainerListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("list Docker host ports: %w", err)
+	}
+	ports := make(map[int]struct{})
+	for _, candidate := range containers.Items {
+		for _, binding := range candidate.Ports {
+			if binding.PublicPort > 0 {
+				ports[int(binding.PublicPort)] = struct{}{}
+			}
+		}
+	}
+	return ports, nil
+}
+
+func (runtime *AccountRuntime) PrepareCreate(
+	ctx context.Context,
+	account controlplane.Account,
+) (accountlifecycle.RuntimeTransition, error) {
+	if _, found, err := runtime.findAccountContainer(ctx, account.ID); err != nil {
+		return nil, err
+	} else if found {
+		return nil, fmt.Errorf("%w: account container already exists for %s", ErrRuntimeConflict, account.ID)
+	}
+	containerID, err := runtime.createAndProbe(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	return &accountRuntimeTransition{
+		runtime: runtime, kind: "create", after: account, newContainerID: containerID,
+	}, nil
+}
+
+func (runtime *AccountRuntime) PrepareUpdate(
+	ctx context.Context,
+	before controlplane.Account,
+	after controlplane.Account,
+) (accountlifecycle.RuntimeTransition, error) {
+	old, found, err := runtime.findAccountContainer(ctx, before.ID)
+	if err != nil {
+		return nil, err
+	}
+	wasRunning := found && old.State == string(containertypes.StateRunning)
+	if found {
+		if err := runtime.removeContainer(ctx, old.dockerID); err != nil {
+			return nil, fmt.Errorf("remove previous account container %s: %w", before.ID, err)
+		}
+	}
+	newContainerID, err := runtime.createAndProbe(ctx, after)
+	if err != nil {
+		return &accountRuntimeTransition{
+			runtime: runtime, kind: "update", before: before, after: after,
+			oldExisted: found, oldWasRunning: wasRunning, newContainerID: newContainerID,
+		}, err
+	}
+	return &accountRuntimeTransition{
+		runtime: runtime, kind: "update", before: before, after: after,
+		oldExisted: found, oldWasRunning: wasRunning, newContainerID: newContainerID,
+	}, nil
+}
+
+func (runtime *AccountRuntime) PrepareDelete(
+	ctx context.Context,
+	account controlplane.Account,
+) (accountlifecycle.RuntimeTransition, error) {
+	old, found, err := runtime.findAccountContainer(ctx, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &accountRuntimeTransition{
+		runtime: runtime, kind: "delete", before: account,
+		oldExisted: found, oldWasRunning: found && old.State == string(containertypes.StateRunning),
+		oldContainerID: old.dockerID,
+	}, nil
+}
+
+func (runtime *AccountRuntime) RestartAccount(ctx context.Context, accountID string) error {
+	container, found, err := runtime.findAccountContainer(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: account container %s is unavailable", ErrRuntimeTarget, accountID)
+	}
+	timeout := 30
+	if _, err := runtime.client.ContainerRestart(
+		ctx, container.dockerID, dockerclient.ContainerRestartOptions{Timeout: &timeout},
+	); err != nil {
+		return fmt.Errorf("restart account container %s: %w", accountID, err)
+	}
+	return runtime.probeAccount(ctx, accountID)
+}
+
+// ReconcileAccount is the idempotent process-interruption recovery boundary.
+// It is called only while the Admin writer lease is held and before the Admin
+// listener starts accepting mutations.
+func (runtime *AccountRuntime) ReconcileAccount(
+	ctx context.Context,
+	previousAccountID string,
+	desired *controlplane.Account,
+) error {
+	previousAccountID = strings.TrimSpace(previousAccountID)
+	if desired == nil {
+		if previousAccountID == "" {
+			return nil
+		}
+		container, found, err := runtime.findAccountContainer(ctx, previousAccountID)
+		if err != nil || !found {
+			return err
+		}
+		return runtime.removeContainer(ctx, container.dockerID)
+	}
+	if normalized, err := controlplane.NormalizeAccountID(desired.ID); err != nil || normalized != desired.ID {
+		return fmt.Errorf("%w: invalid desired recovery account", ErrRuntimeTarget)
+	}
+	// A rename keeps the same Host port. Remove the non-authoritative side
+	// before creating the canonical container so Docker cannot reject the bind.
+	if previousAccountID != "" && previousAccountID != desired.ID {
+		container, found, err := runtime.findAccountContainer(ctx, previousAccountID)
+		if err != nil {
+			return err
+		}
+		if found {
+			if err := runtime.removeContainer(ctx, container.dockerID); err != nil {
+				return err
+			}
+		}
+	}
+	container, found, err := runtime.findAccountContainer(ctx, desired.ID)
+	if err != nil {
+		return err
+	}
+	if found {
+		if err := runtime.removeContainer(ctx, container.dockerID); err != nil {
+			return err
+		}
+	}
+	_, err = runtime.createAndProbe(ctx, *desired)
+	return err
+}
+
+type accountRuntimeTransition struct {
+	runtime        *AccountRuntime
+	kind           string
+	before         controlplane.Account
+	after          controlplane.Account
+	oldExisted     bool
+	oldWasRunning  bool
+	oldContainerID string
+	newContainerID string
+	committed      bool
+	rolledBack     bool
+}
+
+func (transition *accountRuntimeTransition) Commit(ctx context.Context) error {
+	if transition == nil || transition.committed {
+		return nil
+	}
+	if transition.rolledBack {
+		return errors.New("account runtime transition was already rolled back")
+	}
+	if transition.kind == "delete" && transition.oldExisted {
+		if err := transition.runtime.removeContainer(ctx, transition.oldContainerID); err != nil {
+			return err
+		}
+		transition.oldContainerID = ""
+	}
+	transition.committed = true
+	return nil
+}
+
+func (transition *accountRuntimeTransition) Rollback(ctx context.Context) error {
+	if transition == nil || transition.rolledBack {
+		return nil
+	}
+	errorsFound := make([]error, 0, 2)
+	switch transition.kind {
+	case "create":
+		if transition.newContainerID != "" {
+			errorsFound = append(errorsFound, transition.runtime.removeContainer(ctx, transition.newContainerID))
+		}
+	case "update":
+		if transition.newContainerID != "" {
+			errorsFound = append(errorsFound, transition.runtime.removeContainer(ctx, transition.newContainerID))
+		}
+		if transition.oldExisted {
+			_, err := transition.runtime.createAccountContainer(ctx, transition.before, transition.oldWasRunning)
+			errorsFound = append(errorsFound, err)
+		}
+	case "delete":
+		if transition.oldExisted {
+			if transition.oldContainerID != "" {
+				if transition.oldWasRunning {
+					_, err := transition.runtime.client.ContainerStart(
+						ctx, transition.oldContainerID, dockerclient.ContainerStartOptions{},
+					)
+					errorsFound = append(errorsFound, err)
+				}
+			} else {
+				_, err := transition.runtime.createAccountContainer(ctx, transition.before, transition.oldWasRunning)
+				errorsFound = append(errorsFound, err)
+			}
+		}
+	default:
+		errorsFound = append(errorsFound, errors.New("unknown account runtime transition"))
+	}
+	transition.rolledBack = true
+	return errors.Join(compactErrors(errorsFound)...)
+}
+
+func (runtime *AccountRuntime) createAndProbe(ctx context.Context, account controlplane.Account) (string, error) {
+	containerID, err := runtime.createAccountContainer(ctx, account, true)
+	if err != nil {
+		return "", err
+	}
+	if err := runtime.probeAccount(ctx, account.ID); err != nil {
+		rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtime.probeTimeout)
+		defer cancel()
+		return "", errors.Join(err, wrapRuntimeError("remove failed account candidate", runtime.removeContainer(rollbackContext, containerID)))
+	}
+	return containerID, nil
+}
+
+func (runtime *AccountRuntime) createAccountContainer(
+	ctx context.Context,
+	account controlplane.Account,
+	start bool,
+) (string, error) {
+	options, err := runtime.createOptions(ctx, account)
+	if err != nil {
+		return "", err
+	}
+	created, err := runtime.client.ContainerCreate(ctx, options)
+	if err != nil {
+		return "", fmt.Errorf("create account container %s: %w", account.ID, err)
+	}
+	if !start {
+		return created.ID, nil
+	}
+	if _, err := runtime.client.ContainerStart(ctx, created.ID, dockerclient.ContainerStartOptions{}); err != nil {
+		rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		return "", errors.Join(
+			fmt.Errorf("start account container %s: %w", account.ID, err),
+			wrapRuntimeError("remove unstarted account container", runtime.removeContainer(rollbackContext, created.ID)),
+		)
+	}
+	return created.ID, nil
+}
+
+func (runtime *AccountRuntime) createOptions(
+	ctx context.Context,
+	account controlplane.Account,
+) (dockerclient.ContainerCreateOptions, error) {
+	accountID, err := controlplane.NormalizeAccountID(account.ID)
+	if err != nil || accountID != account.ID || account.Port < 1 || account.Port > 65535 {
+		return dockerclient.ContainerCreateOptions{}, fmt.Errorf("%w: invalid account container metadata", ErrRuntimeTarget)
+	}
+	for _, path := range []string{
+		filepath.Join(runtime.root, "configs", account.ID+".yaml"),
+		filepath.Join(runtime.root, "management", "config", "static"),
+		filepath.Join(runtime.root, "auth", account.ID),
+		filepath.Join(runtime.root, "logs", account.ID),
+	} {
+		if err := requireRuntimePath(path); err != nil {
+			return dockerclient.ContainerCreateOptions{}, err
+		}
+	}
+	image, listenAddress, err := runtime.imageAndListenAddress(ctx)
+	if err != nil {
+		return dockerclient.ContainerCreateOptions{}, err
+	}
+	hostAddress, err := netip.ParseAddr(listenAddress)
+	if err != nil || !hostAddress.IsLoopback() {
+		return dockerclient.ContainerCreateOptions{}, errors.New("business CPA listen address must be a loopback IP")
+	}
+	port := networktypes.MustParsePort(accountContainerPort)
+	service := "cliproxy-" + account.ID
+	labels := map[string]string{
+		composeProjectLabel:         runtime.project,
+		composeServiceLabel:         service,
+		"com.docker.compose.oneoff": "False",
+		"io.codex-cpa.account":      account.ID,
+		"io.codex-cpa.managed-by":   "go-v2",
+	}
+	return dockerclient.ContainerCreateOptions{
+		Name: runtime.instance + "-" + account.ID,
+		Config: &containertypes.Config{
+			Image:        image,
+			Cmd:          []string{"./CLIProxyAPI", "-config", "/CLIProxyAPI/configs/" + account.ID + ".yaml"},
+			ExposedPorts: networktypes.PortSet{port: struct{}{}},
+			Labels:       labels,
+		},
+		HostConfig: &containertypes.HostConfig{
+			RestartPolicy: containertypes.RestartPolicy{Name: containertypes.RestartPolicyUnlessStopped},
+			LogConfig: containertypes.LogConfig{Type: "json-file", Config: map[string]string{
+				"max-size": "20m", "max-file": "3",
+			}},
+			NetworkMode: containertypes.NetworkMode(runtime.network),
+			PortBindings: networktypes.PortMap{port: []networktypes.PortBinding{{
+				HostIP: hostAddress, HostPort: strconv.Itoa(account.Port),
+			}}},
+			Mounts: []mount.Mount{
+				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "configs", account.ID+".yaml"), Target: "/CLIProxyAPI/configs/" + account.ID + ".yaml", ReadOnly: true},
+				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "management", "config", "static"), Target: "/CLIProxyAPI/configs/static", ReadOnly: true},
+				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "auth", account.ID), Target: "/root/.cli-proxy-api"},
+				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "logs", account.ID), Target: "/CLIProxyAPI/logs"},
+			},
+		},
+		NetworkingConfig: &networktypes.NetworkingConfig{EndpointsConfig: map[string]*networktypes.EndpointSettings{
+			runtime.network: {Aliases: []string{service}},
+		}},
+	}, nil
+}
+
+func (runtime *AccountRuntime) imageAndListenAddress(ctx context.Context) (string, string, error) {
+	settings, err := runtime.store.ReadSettings(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("read account runtime settings: %w", err)
+	}
+	image := ""
+	state := struct {
+		Applied struct {
+			ResolvedReference string `json:"resolved_ref"`
+		} `json:"applied"`
+	}{}
+	if _, err := runtime.store.ReadRuntimeState(ctx, "cliproxy_image", &state); err != nil {
+		return "", "", fmt.Errorf("read applied CPA image state: %w", err)
+	}
+	image = strings.TrimSpace(state.Applied.ResolvedReference)
+	if image == "" {
+		image, err = runtimeStringSetting(settings, "runtime.cliproxy_image", defaultAccountImage)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	listenAddress, err := runtimeStringSetting(settings, "accounts.listen_address", defaultAccountListen)
+	if err != nil {
+		return "", "", err
+	}
+	if image == "" || len(image) > 512 || strings.ContainsAny(image, "\r\n\t ") {
+		return "", "", errors.New("applied CPA image reference is invalid")
+	}
+	return image, strings.TrimSpace(listenAddress), nil
+}
+
+func (runtime *AccountRuntime) probeAccount(ctx context.Context, accountID string) error {
+	keys, err := runtime.store.ReadInternalKeys(ctx)
+	if err != nil {
+		return fmt.Errorf("read account probe credentials: %w", err)
+	}
+	users := make([]string, 0, len(keys))
+	for user, key := range keys {
+		if key.Status == "active" && strings.TrimSpace(key.Key) != "" {
+			users = append(users, user)
+		}
+	}
+	sort.Strings(users)
+	if len(users) == 0 {
+		return errors.New("cannot verify account runtime without an active internal probe Key")
+	}
+	probeContext, cancel := context.WithTimeout(ctx, runtime.probeTimeout)
+	defer cancel()
+	endpoint := "http://cliproxy-" + accountID + ":8317/v1/models"
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	var lastStatus int
+	var lastError error
+	for {
+		response, requestError := runtime.http.R().
+			SetContext(probeContext).
+			SetHeader("Authorization", "Bearer "+keys[users[0]].Key).
+			SetDoNotParseResponse(true).
+			Get(endpoint)
+		if response != nil {
+			lastStatus = response.StatusCode()
+			if response.RawBody() != nil {
+				_ = response.RawBody().Close()
+			}
+		}
+		if requestError == nil && lastStatus == 200 {
+			return nil
+		}
+		lastError = requestError
+		select {
+		case <-probeContext.Done():
+			return fmt.Errorf("account %s model probe failed with status %d: %w", accountID, lastStatus, errors.Join(lastError, probeContext.Err()))
+		case <-ticker.C:
+		}
+	}
+}
+
+func (runtime *AccountRuntime) findAccountContainer(ctx context.Context, accountID string) (Service, bool, error) {
+	accountID, err := controlplane.NormalizeAccountID(accountID)
+	if err != nil {
+		return Service{}, false, err
+	}
+	service := "cliproxy-" + accountID
+	filter := make(dockerclient.Filters).
+		Add("label", composeProjectLabel+"="+runtime.project).
+		Add("label", composeServiceLabel+"="+service)
+	containers, err := runtime.client.ContainerList(ctx, dockerclient.ContainerListOptions{All: true, Filters: filter})
+	if err != nil {
+		return Service{}, false, fmt.Errorf("list account container %s: %w", accountID, err)
+	}
+	matches := make([]Service, 0, len(containers.Items))
+	for _, candidate := range containers.Items {
+		if candidate.Labels[composeProjectLabel] != runtime.project || candidate.Labels[composeServiceLabel] != service {
+			continue
+		}
+		name := ""
+		if len(candidate.Names) > 0 {
+			name = strings.TrimPrefix(candidate.Names[0], "/")
+		}
+		matches = append(matches, Service{
+			Service: service, ContainerID: shortID(candidate.ID), Name: name,
+			Image: candidate.Image, State: strings.ToLower(strings.TrimSpace(string(candidate.State))),
+			Status: candidate.Status, dockerID: candidate.ID,
+		})
+	}
+	if len(matches) > 1 {
+		return Service{}, false, fmt.Errorf("%w: multiple containers claim account service %s", ErrRuntimeConflict, service)
+	}
+	if len(matches) == 0 {
+		return Service{}, false, nil
+	}
+	return matches[0], true, nil
+}
+
+func (runtime *AccountRuntime) removeContainer(ctx context.Context, containerID string) error {
+	if strings.TrimSpace(containerID) == "" {
+		return nil
+	}
+	inspection, err := runtime.client.ContainerInspect(ctx, containerID, dockerclient.ContainerInspectOptions{})
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("inspect account container before removal: %w", err)
+	}
+	if inspection.Container.State != nil && inspection.Container.State.Running {
+		timeout := 30
+		if _, err := runtime.client.ContainerStop(ctx, containerID, dockerclient.ContainerStopOptions{Timeout: &timeout}); err != nil {
+			return fmt.Errorf("stop account container: %w", err)
+		}
+	}
+	if _, err := runtime.client.ContainerRemove(ctx, containerID, dockerclient.ContainerRemoveOptions{}); err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("remove account container: %w", err)
+	}
+	return nil
+}
+
+func runtimeStringSetting(settings map[string]any, key, fallback string) (string, error) {
+	raw, found := settings[key]
+	if !found || raw == nil {
+		return fallback, nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("runtime setting %s must be a string", key)
+	}
+	return value, nil
+}
+
+func requireRuntimePath(path string) error {
+	information, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("required account runtime path %s: %w", path, err)
+	}
+	if information.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("account runtime path must not be a symbolic link: %s", path)
+	}
+	return nil
+}
+
+func wrapRuntimeError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func compactErrors(values []error) []error {
+	result := make([]error, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+var _ accountlifecycle.Runtime = (*AccountRuntime)(nil)

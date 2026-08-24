@@ -1,0 +1,284 @@
+package admin
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/identity"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/gin-gonic/gin"
+)
+
+type UserQuotaActionRequest struct {
+	Action      string
+	Scope       string
+	Users       []string
+	TokenAmount int64
+	Reason      string
+}
+
+type UserQuotaOperationSummary struct {
+	TotalUsers              int    `json:"total_users"`
+	UsersWithUsage          int    `json:"users_with_usage"`
+	TotalUsedTokens         int64  `json:"total_used_tokens"`
+	TotalRawUsedTokens      int64  `json:"total_raw_used_tokens"`
+	UsersWithPersonalPolicy int    `json:"users_with_personal_policy"`
+	UsersWithBonus          int    `json:"users_with_bonus"`
+	UsersWithUsageReset     int    `json:"users_with_usage_reset"`
+	WeekStartAt             *int64 `json:"week_start_at"`
+	WeekEndAt               *int64 `json:"week_end_at"`
+}
+
+type UserQuotaActionResponse struct {
+	usage.QuotaActionResult
+	Message         string                    `json:"message"`
+	QuotaOperations UserQuotaOperationSummary `json:"quota_operations"`
+}
+
+type quotaActionPayload struct {
+	Action      string   `json:"action"`
+	Scope       string   `json:"scope"`
+	Users       []string `json:"users"`
+	TokenAmount any      `json:"token_amount"`
+	Reason      string   `json:"reason"`
+	Confirm     string   `json:"confirm"`
+}
+
+func (server *Server) applyUserQuotaAction(c *gin.Context) {
+	if !server.requireUserLifecycle(c) {
+		return
+	}
+	var body quotaActionPayload
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeError(c, http.StatusBadRequest, "额度操作参数无效", "invalid_request")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	scope := strings.ToLower(strings.TrimSpace(body.Scope))
+	if scope == "" {
+		scope = "selected"
+	}
+	if !validQuotaActionConfirmation(action, scope, body.Confirm) ||
+		(scope == "all" && action != "reset_usage") ||
+		(scope != "all" && scope != "selected") {
+		writeError(c, http.StatusBadRequest, "请确认额度操作", "invalid_request")
+		return
+	}
+	tokenAmount := int64(0)
+	if action == "add_bonus" {
+		var err error
+		tokenAmount, err = parseQuotaActionTokens(body.TokenAmount)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, "追加额度必须为正整数", "invalid_request")
+			return
+		}
+	}
+	result, err := server.users.ApplyUserQuotaAction(c.Request.Context(), UserQuotaActionRequest{
+		Action: action, Scope: scope, Users: body.Users,
+		TokenAmount: tokenAmount, Reason: body.Reason,
+	})
+	if err != nil {
+		server.writeUserLifecycleError(c, "apply user quota action", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func validQuotaActionConfirmation(action string, scope string, confirmation string) bool {
+	expected := ""
+	switch action {
+	case "restore_default":
+		expected = "restore_default"
+	case "add_bonus":
+		expected = "add_bonus"
+	case "reset_usage":
+		if scope == "all" {
+			expected = "reset_all_current_week_usage"
+		} else {
+			expected = "reset_current_week_usage"
+		}
+	}
+	return expected != "" && confirmation == expected
+}
+
+func parseQuotaActionTokens(value any) (int64, error) {
+	var tokens int64
+	switch typed := value.(type) {
+	case float64:
+		tokens = int64(typed)
+		if float64(tokens) != typed {
+			return 0, usage.ErrInvalidQuotaAction
+		}
+	case string:
+		raw := strings.TrimSpace(typed)
+		if raw == "" {
+			return 0, usage.ErrInvalidQuotaAction
+		}
+		for _, character := range raw {
+			if character < '0' || character > '9' {
+				return 0, usage.ErrInvalidQuotaAction
+			}
+		}
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return 0, usage.ErrInvalidQuotaAction
+		}
+		tokens = parsed
+	default:
+		return 0, usage.ErrInvalidQuotaAction
+	}
+	if tokens <= 0 || tokens > 1_000_000_000_000 {
+		return 0, usage.ErrInvalidQuotaAction
+	}
+	return tokens, nil
+}
+
+func (manager *UserManager) ApplyUserQuotaAction(
+	ctx context.Context,
+	request UserQuotaActionRequest,
+) (UserQuotaActionResponse, error) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	settings, err := manager.store.ReadSettings(ctx)
+	if err != nil {
+		return UserQuotaActionResponse{}, fmt.Errorf("read quota action settings: %w", err)
+	}
+	request.Action = strings.ToLower(strings.TrimSpace(request.Action))
+	request.Scope = strings.ToLower(strings.TrimSpace(request.Scope))
+	if request.Scope == "" {
+		request.Scope = "selected"
+	}
+	if request.Action != "restore_default" && request.Action != "add_bonus" && request.Action != "reset_usage" {
+		return UserQuotaActionResponse{}, usage.ErrInvalidQuotaAction
+	}
+	if request.Scope != "selected" && request.Scope != "all" {
+		return UserQuotaActionResponse{}, usage.ErrInvalidQuotaAction
+	}
+	if request.Scope == "all" && request.Action != "reset_usage" {
+		return UserQuotaActionResponse{}, usage.ErrInvalidQuotaAction
+	}
+	if request.Action == "add_bonus" && (request.TokenAmount <= 0 || request.TokenAmount > 1_000_000_000_000) {
+		return UserQuotaActionResponse{}, usage.ErrInvalidQuotaAction
+	}
+	if request.Action != "restore_default" {
+		request.Reason = strings.Join(strings.Fields(request.Reason), " ")
+		if request.Reason == "" || utf8.RuneCountInString(request.Reason) > 200 {
+			return UserQuotaActionResponse{}, usage.ErrInvalidQuotaAction
+		}
+	}
+	knownUsers, err := manager.store.KnownUsers(ctx)
+	if err != nil {
+		return UserQuotaActionResponse{}, fmt.Errorf("list quota action users: %w", err)
+	}
+	known := make(map[string]struct{}, len(knownUsers))
+	for _, user := range knownUsers {
+		known[strings.ToLower(strings.TrimSpace(user))] = struct{}{}
+	}
+	knownUsers = knownUsers[:0]
+	for user := range known {
+		knownUsers = append(knownUsers, user)
+	}
+	sort.Strings(knownUsers)
+	users := knownUsers
+	if request.Scope == "selected" {
+		selected := make(map[string]struct{}, len(request.Users))
+		for _, rawUser := range request.Users {
+			if strings.TrimSpace(rawUser) == "" {
+				continue
+			}
+			user, normalizeError := identity.NormalizeUser(settings, rawUser)
+			if normalizeError != nil {
+				return UserQuotaActionResponse{}, normalizeError
+			}
+			selected[user] = struct{}{}
+		}
+		if len(selected) == 0 || len(selected) > 500 {
+			return UserQuotaActionResponse{}, usage.ErrInvalidQuotaAction
+		}
+		users = make([]string, 0, len(selected))
+		for user := range selected {
+			if _, found := known[user]; !found {
+				return UserQuotaActionResponse{}, controlplane.ErrUserLifecycleNotFound
+			}
+			users = append(users, user)
+		}
+		sort.Strings(users)
+	}
+	if len(users) == 0 {
+		return UserQuotaActionResponse{}, usage.ErrInvalidQuotaAction
+	}
+	defaultLimit, _, err := userQuotaConfiguration(settings)
+	if err != nil {
+		return UserQuotaActionResponse{}, err
+	}
+	result, err := manager.credentials.ApplyQuotaAction(ctx, usage.QuotaActionRequest{
+		Action: request.Action, Users: users, TokenAmount: request.TokenAmount,
+		Reason: request.Reason, CreatedBy: "admin", DefaultLimit: defaultLimit,
+	})
+	if err != nil {
+		return UserQuotaActionResponse{}, err
+	}
+	quotas, err := manager.credentials.WeeklyQuotas(ctx, knownUsers, defaultLimit)
+	if err != nil {
+		return UserQuotaActionResponse{}, fmt.Errorf("read quota operation summary: %w", err)
+	}
+	return UserQuotaActionResponse{
+		QuotaActionResult: result,
+		Message:           quotaActionMessage(request.Action, len(users), result),
+		QuotaOperations:   summarizeQuotaOperations(knownUsers, quotas),
+	}, nil
+}
+
+func quotaActionMessage(action string, selected int, result usage.QuotaActionResult) string {
+	switch action {
+	case "restore_default":
+		return fmt.Sprintf("已将 %d 位用户恢复为继承组织默认额度", selected)
+	case "add_bonus":
+		return fmt.Sprintf("已为 %d 位用户追加本周额度；将在下次采集后生效", selected)
+	default:
+		message := fmt.Sprintf("已清零 %d 位用户的本周已用量；将在下次采集后生效", len(result.AppliedUsers))
+		if len(result.SkippedUsers) > 0 {
+			message += fmt.Sprintf("；%d 位用户当前用量为 0，已跳过", len(result.SkippedUsers))
+		}
+		return message
+	}
+}
+
+func summarizeQuotaOperations(users []string, quotas map[string]usage.WeeklyQuota) UserQuotaOperationSummary {
+	summary := UserQuotaOperationSummary{TotalUsers: len(users)}
+	for _, user := range users {
+		quota := quotas[user]
+		if summary.WeekStartAt == nil {
+			start, end := quota.WeekStartAt, quota.WeekEndAt
+			summary.WeekStartAt, summary.WeekEndAt = &start, &end
+		}
+		if quota.UsedTokens > 0 {
+			summary.UsersWithUsage++
+		}
+		summary.TotalUsedTokens += quota.UsedTokens
+		summary.TotalRawUsedTokens += quota.RawUsedTokens
+		if quota.PolicyMode != "inherit" {
+			summary.UsersWithPersonalPolicy++
+		}
+		if quota.BonusTokens > 0 {
+			summary.UsersWithBonus++
+		}
+		if quota.UsageResetTokens > 0 {
+			summary.UsersWithUsageReset++
+		}
+	}
+	return summary
+}
+
+func isQuotaActionInputError(err error) bool {
+	return errors.Is(err, usage.ErrInvalidQuotaAction) ||
+		errors.Is(err, usage.ErrQuotaActionUnlimited) ||
+		errors.Is(err, usage.ErrQuotaActionLimitExceeded)
+}

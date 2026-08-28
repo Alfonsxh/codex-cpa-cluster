@@ -1,11 +1,9 @@
 import { defineConfig } from "@playwright/test";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(frontendRoot, "..");
-const macOSChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -24,7 +22,6 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:5193",
     browserName: "chromium",
-    launchOptions: existsSync(macOSChrome) ? { executablePath: macOSChrome } : {},
     locale: "zh-CN",
     timezoneId: "Asia/Shanghai",
     colorScheme: "light",

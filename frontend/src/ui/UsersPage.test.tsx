@@ -1,264 +1,379 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { UsersPage } from "./UsersPage";
 
-describe("UsersPage", () => {
-  it("loads only the user and team catalogs and preserves optimistic concurrency on assignment", async () => {
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.startsWith("/admin/api/users?")) {
-        return Promise.resolve(jsonResponse({
-          users: [{
-            email: "alice@example.com",
-            status: "active",
-            active_keys: 1,
-            active_accounts: 2,
-            total_records: 3,
-            created_at: 100,
-            updated_at: 200,
-            route_account_id: "beta",
-            team_id: "team_platform",
-            team: { id: "team_platform", name: "Platform", description: "Core" },
-            team_membership_version: 4
-          }],
-          pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
-          generated_at: 300
-        }));
-      }
-      if (path === "/admin/api/teams") {
-        return Promise.resolve(jsonResponse({
-          teams: [{
-            id: "team_platform",
-            name: "Platform",
-            description: "Core",
-            user_count: 1,
-            created_at: 100,
-            updated_at: 200
-          }]
-        }));
-      }
-      if (path === "/admin/api/users/team" && init?.method === "PUT") {
-        return Promise.resolve(jsonResponse({ message: "已更新 1 位用户的团队归属" }));
-      }
-      if (path === "/admin/api/users" && init?.method === "POST") {
-        return Promise.resolve(jsonResponse({
-          message: "用户已创建",
-          user: {
-            user: "new@example.com",
-            api_key: "one-time-api-key",
-            initial_password: "one-time-password",
-            team_id: null,
-            accounts: 2,
-            snapshot_generation: "generation-test"
-          }
-        }, { status: 201 }));
-      }
-      if (path === "/admin/api/keys/rotate" && init?.method === "POST") {
-        return Promise.resolve(jsonResponse({
-          message: "API Key 已轮换",
-          key: { api_key: "rotated-one-time-key", snapshot_generation: "generation-test" }
-        }));
-      }
-      return Promise.reject(new Error(`unexpected request: ${path}`));
-    });
+describe("UsersPage legacy parity", () => {
+  it("loads the paginated eleven-column catalog and defers user and team detail until expansion", async () => {
+    const fetchMock = userFetchMock();
     vi.stubGlobal("fetch", fetchMock);
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const user = userEvent.setup();
-    render(
-      <QueryClientProvider client={queryClient}>
-        <UsersPage csrfToken="csrf-test" />
-      </QueryClientProvider>
-    );
+    renderUsers();
 
     expect(await screen.findByText("alice@example.com")).toBeInTheDocument();
-    const readPaths = fetchMock.mock.calls.map(([input]) => String(input));
-    expect(readPaths).toContain("/admin/api/users?page=1&page_size=50");
-    expect(readPaths).toContain("/admin/api/teams");
-    expect(readPaths.some((path) => /accounts|usage|logs/.test(path))).toBe(false);
+    await waitFor(() => expect(requestPaths(fetchMock)).toContain("/admin/api/teams/usage?window=today"));
+    expect(screen.getAllByRole("columnheader")).toHaveLength(11);
+    expect(screen.getByRole("button", { name: /Token 用量，当前降序/ })).toBeInTheDocument();
+    expect(requestPaths(fetchMock).some((path) => path.includes("/users/detail"))).toBe(false);
+    expect(requestPaths(fetchMock).some((path) => path.includes("/users/usage-breakdown"))).toBe(false);
+    expect(requestPaths(fetchMock).some((path) => path.includes("/teams/usage-breakdown"))).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "调整 alice@example.com 的团队" }));
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("调整用户团队")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "保存团队归属" }));
-    expect(await screen.findByText("已更新 1 位用户的团队归属")).toBeInTheDocument();
-
-    const mutation = fetchMock.mock.calls.find(
-      ([input, init]) => String(input) === "/admin/api/users/team" && init?.method === "PUT"
-    );
-    expect(mutation).toBeDefined();
-    expect(JSON.parse(String(mutation?.[1]?.body))).toEqual({
-      email: "alice@example.com",
-      team_id: "team_platform",
-      expected_team_id: "team_platform"
+    const row = screen.getByText("alice@example.com").closest("tr");
+    expect(row).not.toBeNull();
+    await user.click(row!);
+    expect(await screen.findByText("模型与推理分析")).toBeInTheDocument();
+    expect(await screen.findByText("alpha", { selector: ".user-account-table .table-primary" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/users/detail?"))).toBe(true);
+      expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/users/usage-breakdown?"))).toBe(true);
     });
-    expect(new Headers(mutation?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
-    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(5));
 
-    await user.click(screen.getByRole("button", { name: "新增用户" }));
-    await user.type(screen.getByRole("textbox", { name: "新增用户邮箱" }), "new@example.com");
-    await user.click(screen.getByRole("button", { name: "创建并发布 API Key" }));
-    expect(await screen.findByText("已创建 new@example.com")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("one-time-api-key")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("one-time-password")).toBeInTheDocument();
-    const createRequest = fetchMock.mock.calls.find(
-      ([input, init]) => String(input) === "/admin/api/users" && init?.method === "POST"
-    );
-    expect(JSON.parse(String(createRequest?.[1]?.body))).toEqual({
-      email: "new@example.com",
-      team_id: null
-    });
-    expect(new Headers(createRequest?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
-    await user.click(screen.getByRole("button", { name: "我已安全保存" }));
-
-    await user.click(screen.getByRole("button", { name: "管理 alice@example.com" }));
-    await user.click(await screen.findByText("轮换 API Key"));
-    expect(screen.getByText(/新 Key 的 Gateway 快照激活后/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "确认执行" }));
-    expect(await screen.findByText("已轮换 alice@example.com")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("rotated-one-time-key")).toBeInTheDocument();
-    const rotateRequest = fetchMock.mock.calls.find(
-      ([input, init]) => String(input) === "/admin/api/keys/rotate" && init?.method === "POST"
-    );
-    expect(JSON.parse(String(rotateRequest?.[1]?.body))).toEqual({
-      email: "alice@example.com",
-      confirm: "rotate"
-    });
+    await user.click(screen.getByRole("button", { name: "团队：全部团队" }));
+    await user.click(screen.getByRole("option", { name: "Platform" }));
+    await user.click(screen.getByRole("button", { name: "Platform Token 用量" }));
+    expect(await screen.findByText("Platform · Token 用量")).toBeInTheDocument();
+    expect(await screen.findByText("活跃成员排行")).toBeInTheDocument();
+    expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/teams/usage-breakdown?"))).toBe(true);
   });
 
-  it("loads and changes one user quota only when the quota modal is opened", async () => {
-    let quotaMode: "inherit" | "custom" = "inherit";
-    let quotaTokens: number | null = null;
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      if (path.startsWith("/admin/api/users?")) {
-        return Promise.resolve(jsonResponse({
-          users: [{
-            email: "alice@example.com",
-            status: "active",
-            active_keys: 1,
-            active_accounts: 2,
-            total_records: 2,
-            created_at: 100,
-            updated_at: 200,
-            route_account_id: "alpha",
-            team_id: null,
-            team: null,
-            team_membership_version: 0
-          }],
-          pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
-          generated_at: 300
-        }));
-      }
-      if (path === "/admin/api/teams") {
-        return Promise.resolve(jsonResponse({ teams: [] }));
-      }
-      if (path === "/admin/api/users/quota?email=alice%40example.com" && (!init?.method || init.method === "GET")) {
-        return Promise.resolve(jsonResponse(quotaResult(quotaMode, quotaTokens)));
-      }
-      if (path === "/admin/api/users/quota" && init?.method === "PUT") {
-        const body = JSON.parse(String(init.body)) as { mode: "inherit" | "custom"; weekly_tokens: number | null };
-        quotaMode = body.mode;
-        quotaTokens = body.weekly_tokens;
-        return Promise.resolve(jsonResponse({
-          ...quotaResult(quotaMode, quotaTokens),
-          message: "用户周额度策略已保存"
-        }));
-      }
-      if (path === "/admin/api/users/quota?email=alice%40example.com" && init?.method === "DELETE") {
-        quotaMode = "inherit";
-        quotaTokens = null;
-        return Promise.resolve(jsonResponse({
-          ...quotaResult(quotaMode, quotaTokens),
-          message: "已恢复继承组织默认周额度"
-        }));
-      }
-      return Promise.reject(new Error(`unexpected request: ${path}`));
-    });
+  it("preserves team assignment, create-secret and key-rotation request contracts", async () => {
+    const fetchMock = userFetchMock();
     vi.stubGlobal("fetch", fetchMock);
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const user = userEvent.setup();
-    render(
-      <QueryClientProvider client={queryClient}>
-        <UsersPage csrfToken="csrf-test" />
-      </QueryClientProvider>
-    );
+    renderUsers();
 
     expect(await screen.findByText("alice@example.com")).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/users/quota"))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "设置 alice@example.com 的团队" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存团队" }));
+    expect(await screen.findByText("已更新 1 位用户的团队归属")).toBeInTheDocument();
+    const assignment = request(fetchMock, "/admin/api/users/team", "PUT");
+    expect(JSON.parse(String(assignment?.[1]?.body))).toEqual({
+      email: "alice@example.com",
+      team_id: "team_platform"
+    });
+    expect(new Headers(assignment?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
 
-    await user.click(screen.getByRole("button", { name: "管理 alice@example.com" }));
-    await user.click(await screen.findByText("额度策略"));
-    expect(await screen.findByText("本周已用")).toBeInTheDocument();
-    expect(screen.getByText("追加 200 Token")).toBeInTheDocument();
-    expect(screen.getByText(/临时项目扩容/)).toBeInTheDocument();
-    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/users/quota"))).toHaveLength(1);
-    await user.click(screen.getByRole("radio", { name: "自定义" }));
-    await user.type(screen.getByRole("spinbutton", { name: "自定义每周 Token" }), "500");
+    await user.click(screen.getByRole("button", { name: "添加用户" }));
+    await user.type(screen.getByRole("textbox", { name: "用户邮箱" }), "new@example.com");
+    await user.click(screen.getByRole("button", { name: "创建用户" }));
+    expect(await screen.findByText("保存新生成的凭据")).toBeInTheDocument();
+    expect(screen.getByText("one-time-api-key")).toBeInTheDocument();
+    expect(screen.getByText("one-time-password")).toBeInTheDocument();
+    const create = request(fetchMock, "/admin/api/users", "POST");
+    expect(JSON.parse(String(create?.[1]?.body))).toEqual({ email: "new@example.com", team_id: null });
+    await user.click(screen.getByRole("button", { name: "我已保存" }));
+    expect(screen.queryByText("one-time-api-key")).not.toBeInTheDocument();
+
+    const row = screen.getByText("alice@example.com").closest("tr");
+    await user.click(row!);
+    await user.click(await screen.findByRole("button", { name: "轮换唯一 Key" }));
+    await user.click(screen.getByRole("button", { name: "确认轮换" }));
+    expect(await screen.findByText("rotated-one-time-key")).toBeInTheDocument();
+    const rotate = request(fetchMock, "/admin/api/keys/rotate", "POST");
+    expect(JSON.parse(String(rotate?.[1]?.body))).toEqual({ label: "alice@example.com:alpha" });
+    expect(new Headers(rotate?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+  });
+
+  it("hydrates quota from the list, fetches detail on demand and confirms batch restore", async () => {
+    let resolveQuota: ((response: Response) => void) | undefined;
+    const quotaResponse = new Promise<Response>((resolve) => { resolveQuota = resolve; });
+    const fetchMock = userFetchMock((path, init) => {
+      if (path === "/admin/api/users/quota?email=alice%40example.com" && (!init?.method || init.method === "GET")) {
+        return quotaResponse;
+      }
+      return undefined;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers();
+
+    expect(await screen.findByText("alice@example.com")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "配置" }));
+    expect(screen.getByText("当前加权上限")).toBeInTheDocument();
+    expect(screen.getByText("基础额度")).toBeInTheDocument();
+    expect(requestPaths(fetchMock).filter((path) => path.includes("/users/quota?email="))).toHaveLength(1);
+    resolveQuota?.(jsonResponse(quotaResult()));
+    expect(await screen.findByText("临时项目扩容")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: /自定义额度/ }));
+    const tokenInput = screen.getByRole("spinbutton", { name: "每周 Token" });
+    await user.clear(tokenInput);
+    await user.type(tokenInput, "500");
     await user.click(screen.getByRole("button", { name: "保存额度策略" }));
     expect(await screen.findByText("用户周额度策略已保存")).toBeInTheDocument();
-
-    const updateRequest = fetchMock.mock.calls.find(
-      ([input, init]) => String(input) === "/admin/api/users/quota" && init?.method === "PUT"
-    );
-    expect(JSON.parse(String(updateRequest?.[1]?.body))).toEqual({
+    const update = request(fetchMock, "/admin/api/users/quota", "PUT");
+    expect(JSON.parse(String(update?.[1]?.body))).toEqual({
       email: "alice@example.com",
       mode: "custom",
       weekly_tokens: 500
     });
-    expect(new Headers(updateRequest?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
 
-    await user.click(screen.getByRole("button", { name: "管理 alice@example.com" }));
-    await user.click(await screen.findByText("额度策略"));
-    expect(await screen.findByRole("button", { name: "恢复继承组织默认" })).toBeInTheDocument();
-    expect(fetchMock.mock.calls.filter(
-      ([input, init]) => String(input).includes("/users/quota?email=") && (!init?.method || init.method === "GET")
-    )).toHaveLength(2);
-    await user.click(screen.getByRole("button", { name: "恢复继承组织默认" }));
-    expect(await screen.findByText("已恢复继承组织默认周额度")).toBeInTheDocument();
-    const clearRequest = fetchMock.mock.calls.find(
-      ([input, init]) => String(input).includes("/admin/api/users/quota?email=") && init?.method === "DELETE"
-    );
-    expect(new Headers(clearRequest?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+    await user.click(screen.getByRole("checkbox", { name: "选择 alice@example.com" }));
+    const selectionBar = screen.getByText("已选择 1 位用户").closest(".user-selection-bar");
+    expect(selectionBar).not.toBeNull();
+    await user.click(within(selectionBar as HTMLElement).getByRole("button", { name: "恢复组织默认" }));
+    expect(screen.getByText("恢复 1 位用户的组织默认额度？")).toBeInTheDocument();
+    expect(request(fetchMock, "/admin/api/users/quota-actions", "POST")).toBeUndefined();
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "恢复组织默认" }));
+    await waitFor(() => expect(request(fetchMock, "/admin/api/users/quota-actions", "POST")).toBeDefined());
+    const restore = request(fetchMock, "/admin/api/users/quota-actions", "POST");
+    expect(JSON.parse(String(restore?.[1]?.body))).toEqual({
+      action: "restore_default",
+      scope: "selected",
+      users: ["alice@example.com"],
+      confirm: "restore_default"
+    });
   });
 });
 
-function quotaResult(mode: "inherit" | "custom", policyTokens: number | null) {
-  const effectiveLimit = mode === "custom" ? policyTokens : 1_000;
+function renderUsers() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(
+    <MemoryRouter initialEntries={["/admin/users"]}>
+      <QueryClientProvider client={queryClient}>
+        <UsersPage csrfToken="csrf-test" />
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+}
+
+function userFetchMock(override?: (path: string, init?: RequestInit) => Promise<Response> | undefined) {
+  return vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    const overridden = override?.(path, init);
+    if (overridden) return overridden;
+    if (path.startsWith("/admin/api/users?")) return Promise.resolve(jsonResponse(userCatalog()));
+    if (path.startsWith("/admin/api/teams/usage-breakdown?")) return Promise.resolve(jsonResponse(teamUsageBreakdown()));
+    if (path.startsWith("/admin/api/teams/usage?")) return Promise.resolve(jsonResponse(teamUsageCatalog()));
+    if (path.startsWith("/admin/api/users/detail?")) return Promise.resolve(jsonResponse(userDetail()));
+    if (path.startsWith("/admin/api/users/usage-breakdown?")) return Promise.resolve(jsonResponse(usageBreakdown()));
+    if (path === "/admin/api/users/team" && init?.method === "PUT") {
+      return Promise.resolve(jsonResponse({ message: "已更新 1 位用户的团队归属" }));
+    }
+    if (path === "/admin/api/users" && init?.method === "POST") {
+      return Promise.resolve(jsonResponse({
+        message: "用户已创建",
+        keys: [oneTimeKey("one-time-api-key", "new@example.com")],
+        initial_password: "one-time-password",
+        team_id: null
+      }, { status: 201 }));
+    }
+    if (path === "/admin/api/keys/rotate" && init?.method === "POST") {
+      return Promise.resolve(jsonResponse({ message: "API Key 已轮换", keys: [oneTimeKey("rotated-one-time-key", "alice@example.com")] }));
+    }
+    if (path === "/admin/api/users/quota?email=alice%40example.com" && (!init?.method || init.method === "GET")) {
+      return Promise.resolve(jsonResponse(quotaResult()));
+    }
+    if (path === "/admin/api/users/quota" && init?.method === "PUT") {
+      return Promise.resolve(jsonResponse({ ...quotaResult("custom", 500), message: "用户周额度策略已保存" }));
+    }
+    if (path === "/admin/api/users/quota-actions" && init?.method === "POST") {
+      return Promise.resolve(jsonResponse({
+        message: "已恢复所选用户的组织默认额度",
+        action: "restore_default",
+        scope: "selected",
+        requested_users: 1,
+        affected_users: 1,
+        skipped_users: 0,
+        skipped: []
+      }));
+    }
+    return Promise.reject(new Error(`unexpected request: ${path}`));
+  });
+}
+
+function userCatalog() {
   return {
+    users: [baseUser()],
+    accounts: { alpha: { email: "alpha@example.com" } },
+    teams: [{ id: "team_platform", name: "Platform", description: "Core", user_count: 1, created_at: 100, updated_at: 200 }],
+    tags: [],
+    collector: { status: "healthy", heartbeat_at: 300, last_success_at: 300, last_error: "", queue_depth: 0 },
+    pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
+    generated_at: 300,
+    window: "today",
+    window_seconds: 3600,
+    window_start_at: 100,
+    window_end_at: 300,
+    window_timezone: "Asia/Shanghai",
+    summary_generated_at: 300,
+    summary_cached: false
+  };
+}
+
+function baseUser() {
+  return {
+    email: "alice@example.com",
+    status: "active",
+    active_keys: 1,
+    active_accounts: 1,
+    total_records: 3,
+    created_at: 100,
+    updated_at: 200,
+    route_account_id: "alpha",
+    team_id: "team_platform",
+    team: { id: "team_platform", name: "Platform", description: "Core" },
+    team_membership_version: 4,
+    account_count: 1,
+    usage: metrics(1_200, 1_500),
+    weekly_quota: weeklyQuota()
+  };
+}
+
+function userDetail() {
+  return {
+    generated_at: 300,
+    window: "today",
+    window_seconds: 3600,
+    window_start_at: 100,
+    window_end_at: 300,
+    window_timezone: "Asia/Shanghai",
+    user: {
+      ...baseUser(),
+      accounts: [{
+        account: "alpha",
+        account_email: "alpha@example.com",
+        status: "active",
+        history_count: 3,
+        key: { label: "alice@example.com:alpha", account: "alpha", account_email: "alpha@example.com", user: "alice@example.com", status: "active", created_at: 100, updated_at: 200, preview: "sk-…abcd" },
+        usage: metrics(1_200, 1_500)
+      }]
+    }
+  };
+}
+
+function usageBreakdown() {
+  return {
+    generated_at: 300,
+    window: "today",
+    window_seconds: 3600,
+    window_start_at: 100,
+    window_end_at: 300,
+    collection_started_at: 90,
+    effective_start_at: 100,
+    definition: "user_model_reasoning_effort_tokens",
+    account: null,
     user: "alice@example.com",
-    weekly_quota: {
-      period: "natural_week",
-      timezone: "UTC",
-      week_start_at: 1_000,
-      week_end_at: 2_000,
-      limit_tokens: effectiveLimit,
-      base_limit_tokens: effectiveLimit,
-      bonus_tokens: 0,
-      used_tokens: 100,
-      weighted_used_tokens: 100,
-      raw_used_tokens: 80,
-      remaining_tokens: effectiveLimit === null ? null : effectiveLimit - 100,
-      used_percent: effectiveLimit === null ? null : 10,
-      limit_reached: false,
-      policy_mode: mode,
-      policy_tokens: policyTokens,
-      policy_reset_at: mode === "custom" ? 2_000 : null,
-      default_limit_tokens: 1_000,
-      unlimited: false,
-      quota_unit: "weighted_tokens",
-      personal_policy_reset_enabled: true
-    },
-    adjustments: [{
-      action: "bonus",
-      token_amount: 200,
-      reason: "临时项目扩容",
-      created_at: 1_500,
-      created_by: "admin"
+    totals: metrics(1_200, 1_500),
+    models: [],
+    reasoning_efforts: [],
+    combinations: [{ ...metrics(1_200, 1_500), account: "alpha", model: "gpt-5.6", reasoning_effort: "high" }]
+  };
+}
+
+function teamUsageCatalog() {
+  return {
+    generated_at: 300,
+    window: "today",
+    window_seconds: 3600,
+    window_start_at: 100,
+    window_end_at: 300,
+    window_timezone: "Asia/Shanghai",
+    attribution: "current_membership",
+    teams: [{
+      id: "team_platform",
+      name: "Platform",
+      description: "Core",
+      user_count: 1,
+      current_user_count: 1,
+      created_at: 100,
+      updated_at: 200,
+      usage: { ...metrics(1_200, 1_500), active_users: 1 }
     }]
   };
+}
+
+function teamUsageBreakdown() {
+  return {
+    generated_at: 300,
+    window: "today",
+    window_seconds: 3600,
+    window_start_at: 100,
+    window_end_at: 300,
+    window_timezone: "Asia/Shanghai",
+    definition: "team_model_reasoning_effort_tokens",
+    team_id: "team_platform",
+    attribution: "current_membership",
+    totals: metrics(1_200, 1_500),
+    users: [{ user: "alice@example.com", ...metrics(1_200, 1_500) }],
+    accounts: [{ account: "alpha", ...metrics(1_200, 1_500) }],
+    models: [{ model: "gpt-5.6", ...metrics(1_200, 1_500) }],
+    combinations: [{ model: "gpt-5.6", reasoning_effort: "high", ...metrics(1_200, 1_500) }],
+    series: { start_at: 100, end_at: 300, bucket_seconds: 60, buckets: [100, 160, 220], values: [200, 600, 700] }
+  };
+}
+
+function weeklyQuota(mode: "inherit" | "custom" = "inherit", policyTokens: number | null = null) {
+  const effectiveLimit = mode === "custom" ? policyTokens : 1_000;
+  return {
+    period: "natural_week",
+    timezone: "Asia/Shanghai",
+    week_start_at: 100,
+    week_end_at: 700,
+    limit_tokens: effectiveLimit,
+    base_limit_tokens: effectiveLimit,
+    bonus_tokens: 200,
+    used_tokens: 100,
+    weighted_used_tokens: 100,
+    raw_used_tokens: 80,
+    unweighted_used_tokens: 80,
+    weighted_raw_used_tokens: 100,
+    usage_reset_tokens: 0,
+    remaining_tokens: effectiveLimit === null ? null : effectiveLimit - 100,
+    used_percent: effectiveLimit === null ? null : 10,
+    limit_reached: false,
+    source: mode === "custom" ? "user_custom" : "default",
+    policy_mode: mode,
+    policy_tokens: policyTokens,
+    policy_updated_at: mode === "custom" ? 200 : null,
+    policy_updated_by: mode === "custom" ? "admin" : null,
+    policy_reset_at: mode === "custom" ? 700 : null,
+    default_limit_tokens: 1_000,
+    unlimited: false,
+    soft_limit: true,
+    quota_unit: "weighted_tokens",
+    adjustment_count: 1,
+    personal_policy_reset_enabled: true
+  };
+}
+
+function quotaResult(mode: "inherit" | "custom" = "inherit", policyTokens: number | null = null) {
+  return {
+    user: "alice@example.com",
+    weekly_quota: weeklyQuota(mode, policyTokens),
+    adjustments: [{ action: "bonus", token_amount: 200, reason: "临时项目扩容", created_at: 150, created_by: "admin" }]
+  };
+}
+
+function metrics(totalTokens: number, weightedTokens: number) {
+  return {
+    request_count: 4,
+    success_count: 3,
+    failed_count: 1,
+    input_tokens: 500,
+    output_tokens: 300,
+    reasoning_tokens: 300,
+    cached_tokens: 100,
+    total_tokens: totalTokens,
+    weighted_tokens: weightedTokens,
+    last_used_at: 250
+  };
+}
+
+function oneTimeKey(key: string, user: string) {
+  return { label: `${user}:alpha`, account: "alpha", account_email: "alpha@example.com", user, status: "active", created_at: 100, updated_at: 200, preview: "sk-…abcd", key };
+}
+
+function requestPaths(fetchMock: ReturnType<typeof userFetchMock>) {
+  return fetchMock.mock.calls.map(([input]) => String(input));
+}
+
+function request(fetchMock: ReturnType<typeof userFetchMock>, path: string, method: string) {
+  return fetchMock.mock.calls.find(([input, init]) => String(input) === path && init?.method === method);
 }
 
 function jsonResponse(payload: unknown, init: ResponseInit = {}) {

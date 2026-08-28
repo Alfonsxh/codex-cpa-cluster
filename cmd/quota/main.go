@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,6 +34,11 @@ type appConfig struct {
 	Health       bool
 	RuntimeOwner string
 	LeaseTTL     time.Duration
+}
+
+type refreshRunner interface {
+	RunOnce(context.Context) (quota.Snapshot, error)
+	RecordError(context.Context, error) error
 }
 
 func main() {
@@ -136,12 +142,12 @@ func run(config appConfig) error {
 			return printJSON(snapshot)
 		}
 		workerScheduler := scheduler.New(logger)
+		var roundMu sync.Mutex
 		runRound := func() {
-			roundContext, cancel := context.WithTimeout(fenceContext, 2*time.Minute)
-			defer cancel()
-			snapshot, err := refresher.RunOnce(roundContext)
+			roundMu.Lock()
+			defer roundMu.Unlock()
+			snapshot, err := runRefreshRound(fenceContext, store, refresher, time.Now)
 			if err != nil {
-				_ = refresher.RecordError(fenceContext, err)
 				if runContext.Err() == nil {
 					logger.Error("official quota refresh failed", zap.Error(err))
 				}
@@ -164,12 +170,72 @@ func run(config appConfig) error {
 		}
 		logger.Info("Go v2 official quota worker started", zap.Duration("interval", interval))
 		workerScheduler.Start()
+		requestWatcherDone := make(chan struct{})
+		go func() {
+			defer close(requestWatcherDone)
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runContext.Done():
+					return
+				case <-ticker.C:
+					request, _, err := quota.ReadRefreshRequest(fenceContext, store)
+					if err != nil {
+						if runContext.Err() == nil {
+							logger.Error("watch official quota refresh request", zap.Error(err))
+						}
+						continue
+					}
+					if request.Pending() {
+						runRound()
+					}
+				}
+			}
+		}()
 		<-runContext.Done()
 		waitForJobs := workerScheduler.Stop()
 		<-waitForJobs.Done()
+		<-requestWatcherDone
 		logger.Info("Go v2 official quota worker stopped")
 		return nil
 	})
+}
+
+// runRefreshRound owns the complete Admin-request-to-worker-completion
+// transition. Keeping it outside the scheduler closure makes the cross-process
+// handoff testable with the real Resty refresher and persistent control-plane
+// store rather than only with marker-level unit tests.
+func runRefreshRound(
+	ctx context.Context,
+	store quota.RefreshRequestStore,
+	refresher refreshRunner,
+	now func() time.Time,
+) (quota.Snapshot, error) {
+	request, _, err := quota.ReadRefreshRequest(ctx, store)
+	if err != nil {
+		return quota.Snapshot{}, err
+	}
+	requestID := ""
+	if request.Pending() {
+		requestID = request.RequestID
+		if err := quota.MarkRefreshStarted(ctx, store, requestID, now()); err != nil {
+			return quota.Snapshot{}, err
+		}
+	}
+
+	roundContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	snapshot, runErr := refresher.RunOnce(roundContext)
+	if runErr != nil {
+		recordErr := refresher.RecordError(ctx, runErr)
+		completeErr := quota.MarkRefreshCompleted(ctx, store, requestID, now(), runErr)
+		return snapshot, errors.Join(runErr, recordErr, completeErr)
+	}
+	if err := quota.MarkRefreshCompleted(ctx, store, requestID, now(), nil); err != nil {
+		return snapshot, err
+	}
+	return snapshot, nil
 }
 
 func runHealth(config appConfig) error {

@@ -56,15 +56,20 @@ type ControlPlaneStore interface {
 	KnownUsers(context.Context) ([]string, error)
 	UserExists(context.Context, string) (bool, error)
 	ListUsers(context.Context, controlplane.UserListOptions) (controlplane.UserPage, error)
+	ListUserSummaries(context.Context) ([]controlplane.UserSummary, error)
+	ReadKeyRecordsForUsers(context.Context, []string) ([]controlplane.KeyRecord, error)
 	ReadUserTeams(context.Context, []string) (map[string]controlplane.UserTeamClassification, error)
 	SetUserTeamsExpected(context.Context, []string, *string, controlplane.TeamExpectation) ([]controlplane.TeamAssignment, error)
 }
 
 type Config struct {
+	Root                 string
 	Store                ControlPlaneStore
 	Accounts             AccountCatalog
 	AccountStates        failover.AccountStateProvider
+	AccountRuntime       AccountRuntimeReader
 	Activity             failover.ActivityProvider
+	OAuth                AccountOAuthReader
 	Logger               *zap.Logger
 	Now                  func() time.Time
 	SessionTTL           time.Duration
@@ -94,6 +99,28 @@ type UsageReader interface {
 	Status(context.Context) (usage.CollectorStatus, error)
 }
 
+type AccountUsageSummaryReader interface {
+	AccountSummaries(context.Context, []string, int64, *int64) (map[string]usage.AccountUsageSummary, error)
+}
+
+type UserUsageSummaryReader interface {
+	UserSummaries(context.Context, int64, *int64) (map[string]usage.WeightedMetrics, error)
+	UserSummariesForUsers(context.Context, []string, int64, *int64) (map[string]usage.WeightedMetrics, error)
+	UserAccounts(context.Context, string, int64, *int64) (usage.UserAccountSummary, error)
+}
+
+// AccountUsageSummaryByAccountReader preserves the legacy account-page
+// since-reset contract without issuing one SQLite query per CPA. Each account
+// may have a different official quota-period start, while all rows share the
+// same end-exclusive snapshot boundary.
+type AccountUsageSummaryByAccountReader interface {
+	AccountSummariesByStart(context.Context, map[string]int64, *int64) (map[string]usage.AccountUsageSummary, error)
+}
+
+type AccountOAuthReader interface {
+	Load(string) (quota.OAuthRecord, error)
+}
+
 // TeamIdentitySynchronizer keeps the mutable identity catalog in usage.sqlite3
 // aligned with control-plane team assignments. Usage events retain the
 // membership version that was current when they were ingested, so this write
@@ -111,6 +138,10 @@ type QuotaResetter interface {
 	Reset(context.Context, string, string) (quota.ResetResult, error)
 }
 
+type quotaResetInspector interface {
+	Inspect(context.Context, string) (quota.ResetInspection, error)
+}
+
 // RouteRegistrar lets the shared Gin listener host independently owned route
 // groups without coupling Admin handlers to the self-service implementation.
 type RouteRegistrar interface {
@@ -118,6 +149,7 @@ type RouteRegistrar interface {
 }
 
 type Server struct {
+	root                    string
 	store                   ControlPlaneStore
 	logger                  *zap.Logger
 	now                     func() time.Time
@@ -127,7 +159,9 @@ type Server struct {
 	rebalancer              AccountRebalancer
 	accounts                AccountCatalog
 	accountStates           failover.AccountStateProvider
+	accountRuntime          AccountRuntimeReader
 	activity                failover.ActivityProvider
+	oauth                   AccountOAuthReader
 	usage                   UsageReader
 	teamIdentities          TeamIdentitySynchronizer
 	notificationSender      notifications.ContentSender
@@ -205,6 +239,7 @@ func New(config Config) (*Server, error) {
 	sessionManager.Cookie.Secure = config.SecureCookies
 	sessionManager.Cookie.Persist = true
 	server := &Server{
+		root:                 strings.TrimSpace(config.Root),
 		store:                config.Store,
 		logger:               config.Logger,
 		now:                  config.Now,
@@ -214,7 +249,9 @@ func New(config Config) (*Server, error) {
 		rebalancer:           config.Rebalancer,
 		accounts:             config.Accounts,
 		accountStates:        config.AccountStates,
+		accountRuntime:       config.AccountRuntime,
 		activity:             config.Activity,
+		oauth:                config.OAuth,
 		usage:                config.Usage,
 		teamIdentities:       config.TeamIdentities,
 		notificationSender:   config.NotificationSender,
@@ -290,15 +327,18 @@ func (server *Server) registerRoutes() {
 	authenticated.GET("/accounts", server.listAccounts)
 	authenticated.POST("/accounts", server.limitBody(defaultBodyLimit), server.createAccount)
 	authenticated.POST("/accounts/update", server.limitBody(defaultBodyLimit), server.updateAccount)
+	authenticated.POST("/accounts/policy", server.limitBody(defaultBodyLimit), server.updateAccount)
 	authenticated.POST("/accounts/clear-auth", server.limitBody(defaultBodyLimit), server.clearAccountAuth)
 	authenticated.POST("/accounts/delete", server.limitBody(defaultBodyLimit), server.deleteAccount)
 	authenticated.GET("/native-accounts", server.nativeAccounts)
 	authenticated.GET("/accounts/usage-breakdown", server.accountUsageBreakdown)
 	authenticated.GET("/users", server.listUsers)
+	authenticated.GET("/users/detail", server.userDetail)
 	authenticated.POST("/users", server.limitBody(defaultBodyLimit), server.createUser)
 	authenticated.GET("/users/quota", server.readUserQuota)
 	authenticated.PUT("/users/quota", server.limitBody(defaultBodyLimit), server.updateUserQuota)
 	authenticated.DELETE("/users/quota", server.clearUserQuota)
+	authenticated.GET("/users/quota-actions", server.readUserQuotaOperations)
 	authenticated.POST("/users/quota-actions", server.limitBody(defaultBodyLimit), server.applyUserQuotaAction)
 	authenticated.GET("/users/usage-breakdown", server.userUsageBreakdown)
 	authenticated.POST("/users/revoke", server.limitBody(defaultBodyLimit), server.revokeUser)
@@ -309,6 +349,7 @@ func (server *Server) registerRoutes() {
 	authenticated.POST("/users/team/batch", server.limitBody(defaultBodyLimit), server.updateUserTeams)
 	authenticated.POST("/accounts/rebalance-all", server.limitBody(defaultBodyLimit), server.rebalanceAllAccounts)
 	authenticated.POST("/accounts/rebalance", server.limitBody(defaultBodyLimit), server.rebalanceAccount)
+	authenticated.GET("/accounts/quota-reset", server.inspectAccountQuotaReset)
 	authenticated.POST("/accounts/reset-quota", server.limitBody(defaultBodyLimit), server.resetAccountQuota)
 	authenticated.GET("/runtime/services", server.listRuntimeServices)
 	authenticated.GET("/runtime/logs", server.readRuntimeLogs)
@@ -319,16 +360,19 @@ func (server *Server) registerRoutes() {
 	// Keep the current v1 operational paths while React migrates to the finer
 	// runtime namespace. Both route families share the same bounded job pool.
 	authenticated.GET("/logs", server.readRuntimeLogs)
-	authenticated.GET("/jobs", server.listRuntimeJobs)
-	authenticated.GET("/jobs/:id", server.readRuntimeJob)
+	authenticated.GET("/jobs", server.listLegacyRuntimeJobs)
+	authenticated.GET("/jobs/:id", server.readLegacyRuntimeJob)
 	authenticated.POST("/jobs/cancel", server.limitBody(defaultBodyLimit), server.cancelLegacyRuntimeJob)
 	authenticated.POST("/operations", server.limitBody(defaultBodyLimit), server.submitLegacyRuntimeJob)
 	authenticated.GET("/overview/summary", server.readOverviewSummary)
+	authenticated.GET("/overview/catalog", server.readOverviewCatalog)
+	authenticated.GET("/overview/status", server.readOverviewStatus)
 	authenticated.GET("/overview/usage", server.readOverviewUsage)
 	authenticated.GET("/images/cliproxy", server.readCPAImageStatus)
 	authenticated.GET("/release", server.readReleaseStatus)
 	authenticated.GET("/settings/general", server.readGeneralSettings)
 	authenticated.PUT("/settings/general", server.limitBody(defaultBodyLimit), server.updateGeneralSettings)
+	authenticated.GET("/settings/workspace", server.readSettingsWorkspace)
 	authenticated.GET("/settings/configuration", server.readConfiguration)
 	authenticated.POST("/settings/configuration", server.limitBody(defaultBodyLimit), server.updateConfiguration)
 	authenticated.POST("/settings/initial-password", server.limitBody(defaultBodyLimit), server.updateInitialPassword)

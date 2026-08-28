@@ -13,9 +13,9 @@ import (
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 )
 
-func TestConfigurationDefinitionsMatchCompleteV1Contract(t *testing.T) {
-	if len(configurationDefinitions) != 76 {
-		t.Fatalf("configuration definition count = %d, want 76", len(configurationDefinitions))
+func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
+	if len(configurationDefinitions) != 74 {
+		t.Fatalf("configuration definition count = %d, want 74", len(configurationDefinitions))
 	}
 	if len(configurationPresentationByKey) != len(configurationDefinitions) {
 		t.Fatalf("configuration presentation count = %d, want %d", len(configurationPresentationByKey), len(configurationDefinitions))
@@ -71,7 +71,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	}
 	var catalog configurationCatalogResponse
 	decodeAdminResponse(t, response, &catalog)
-	if catalog.Version != 1 || catalog.FieldCount != 76 || len(catalog.Groups) != 10 || catalog.GeneratedAt <= 0 {
+	if catalog.Version != 1 || catalog.FieldCount != 74 || len(catalog.Groups) != 10 || catalog.GeneratedAt <= 0 {
 		t.Fatalf("configuration catalog summary = %#v", catalog)
 	}
 
@@ -84,7 +84,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 			fields[field.Key] = field
 		}
 	}
-	if len(fields) != 76 {
+	if len(fields) != 74 {
 		t.Fatalf("configuration catalog fields = %d", len(fields))
 	}
 	proxy := fields["cpa.proxy_url"]
@@ -123,7 +123,7 @@ func TestConfigurationValueNormalizationCoversSupportedTypesAndBoundaries(t *tes
 		{key: "cpa.session_affinity_ttl", raw: "29s", wantErr: true},
 		{key: "notification.timezone", raw: "Asia/Shanghai", want: "Asia/Shanghai"},
 		{key: "notification.daily_times", raw: "18:00,9:00,09:00", want: "09:00,18:00"},
-		{key: "runtime.gateway_image", raw: "openresty:latest", wantErr: true},
+		{key: "runtime.cliproxy_image", raw: "invalid image", wantErr: true},
 		{key: "gateway.listen_address", raw: "::1", wantErr: true},
 		{key: "admin.account_usage.reasoning_effort_color.max", raw: "#B2731E", want: "#b2731e"},
 	}
@@ -342,6 +342,43 @@ func TestComposeEnvironmentProjectorPreservesAppliedImagesAndWritesSecureProject
 	information, err := os.Stat(path)
 	if err != nil || information.Mode().Perm() != 0o600 {
 		t.Fatalf("projected environment mode = %v, %v", information, err)
+	}
+}
+
+func TestComposeEnvironmentProjectorChangesOnlyCPAImage(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatalf("create state: %v", err)
+	}
+	path := filepath.Join(state, "compose.env")
+	before := strings.Join([]string{
+		"# Generated from state/control-plane.sqlite3; do not edit.",
+		"CLIPROXY_IMAGE=registry.example.test/cpa@sha256:old",
+		"ADMIN_IMAGE=sha256:applied-admin",
+		"WEB_RUNTIME_IMAGE=sha256:applied-web",
+		"GATEWAY_PORT=18317",
+		"BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.1",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+		t.Fatalf("seed Compose environment: %v", err)
+	}
+	projector := &ComposeEnvironmentProjector{Root: root}
+	if err := projector.ProjectCPAImage(context.Background(), "registry.example.test/cpa:v2@sha256:new"); err != nil {
+		t.Fatalf("ProjectCPAImage: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read projected environment: %v", err)
+	}
+	want := strings.Replace(before,
+		"CLIPROXY_IMAGE=registry.example.test/cpa@sha256:old",
+		"CLIPROXY_IMAGE=registry.example.test/cpa:v2@sha256:new", 1)
+	if string(raw) != want {
+		t.Fatalf("CPA image projection changed unrelated bytes:\n--- got ---\n%s--- want ---\n%s", raw, want)
+	}
+	if err := projector.ProjectCPAImage(context.Background(), "mutable image:latest"); err == nil {
+		t.Fatal("ProjectCPAImage accepted an invalid reference")
 	}
 }
 

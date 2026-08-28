@@ -336,7 +336,7 @@ func (store *PortalStore) DeleteIdentity(ctx context.Context, user string) error
 
 // DeleteUserState performs the additional Admin deletion cleanup for the
 // current quota policy. Historical usage and quota adjustments are retained
-// for audit and reporting compatibility with the Python v1 implementation.
+// for audit and reporting compatibility with persisted historical data.
 func (store *PortalStore) DeleteUserState(ctx context.Context, user string) error {
 	return store.deleteUserState(ctx, user, true)
 }

@@ -35,8 +35,8 @@ describe("AdminShell legacy visual contract", () => {
     const switcher = screen.getByRole("region", { name: "界面切换" });
     expect(within(switcher).getByRole("link", { name: /服务入口/ })).toHaveAttribute("href", "/");
     expect(within(switcher).getByRole("link", { name: /使用中心/ })).toHaveAttribute("href", "/usage/");
-    expect(screen.getByRole("heading", { name: "配置中心" })).toBeInTheDocument();
-    expect(screen.getByText("CONFIGURATION CENTER")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "系统设置" })).toBeInTheDocument();
+    expect(screen.getByText("CONTROL PLANE SETTINGS")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Codex CPA 管理中心" }).querySelector("img"))
       .toHaveAttribute("src", "/portal/assets/codex-cpa-cluster-mark.svg");
   });
@@ -55,7 +55,7 @@ describe("AdminShell legacy visual contract", () => {
     const user = userEvent.setup();
     renderShell("/overview");
 
-    expect(screen.getByText("总览已更新")).toBeInTheDocument();
+    expect(screen.getByText("等待刷新")).toBeInTheDocument();
     const refresh = screen.getByRole("button", { name: "刷新" });
     await user.click(refresh);
     expect(refresh).toBeEnabled();

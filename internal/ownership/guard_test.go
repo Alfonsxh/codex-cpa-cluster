@@ -259,14 +259,14 @@ func TestGoWorkerLeaseGroupTransfersAllScopesAndRejectsDuplicate(t *testing.T) {
 	}
 	defer rollback.Close()
 	rolledRuntime, err := rollback.TakeLease(
-		context.Background(), RuntimeScope, "python-v1", 5*time.Second,
+		context.Background(), RuntimeScope, "go-previous", 5*time.Second,
 	)
 	if err != nil || rolledRuntime.Generation != 2 {
 		t.Fatalf("rollback runtime lease = (%#v, %v)", rolledRuntime, err)
 	}
 	for _, scope := range workerScopes {
 		lease, err := rollback.TakeLease(
-			context.Background(), scope, "python-v1:"+scope, 5*time.Second,
+			context.Background(), scope, "go-previous:"+scope, 5*time.Second,
 		)
 		if err != nil || lease.Generation != 2 {
 			t.Fatalf("rollback worker %s = (%#v, %v)", scope, lease, err)

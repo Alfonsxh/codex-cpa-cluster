@@ -54,6 +54,37 @@ type State struct {
 	Reason             string
 	DisableEligibility bool
 	Exhausted          bool
+	Runtime            Runtime
+	AuthFiles          int
+}
+
+// Runtime is the privacy-bounded subset of the account runtime snapshot used
+// by the Admin account table and its status Tooltip. It keeps
+// aggregate counters and status facts only; raw request labels, credentials,
+// upstream response bodies, and status messages never leave the observer.
+type Runtime struct {
+	State                      string  `json:"state"`
+	QueryStatus                string  `json:"query_status"`
+	CredentialStatus           string  `json:"credential_status"`
+	CredentialCount            int     `json:"credential_count"`
+	CredentialUnavailable      bool    `json:"credential_unavailable"`
+	CredentialUnavailableCount int     `json:"credential_unavailable_count"`
+	CredentialDisabled         bool    `json:"credential_disabled"`
+	CredentialDisabledCount    int     `json:"credential_disabled_count"`
+	NativeSuccess              int64   `json:"native_success"`
+	NativeFailed               int64   `json:"native_failed"`
+	ErrorLogFiles              int     `json:"error_log_files"`
+	ErrorLogStatus             string  `json:"error_log_status"`
+	WindowSeconds              int64   `json:"window_seconds"`
+	Requests                   int     `json:"requests"`
+	ErrorCount                 int     `json:"error_count"`
+	Rate429Count               int     `json:"rate_429_count"`
+	ServerErrorCount           int     `json:"server_error_count"`
+	AffectedUsers              int     `json:"affected_users"`
+	LastErrorAt                int64   `json:"last_error_at"`
+	LastErrorStatus            int     `json:"last_error_status"`
+	ErrorRatePercent           float64 `json:"error_rate_percent"`
+	ErrorAgeSeconds            *int64  `json:"error_age_seconds"`
 }
 
 type Config struct {
@@ -175,10 +206,14 @@ func (observer *Observer) refreshStates(
 }
 
 type authFile struct {
-	Unavailable   bool   `json:"unavailable"`
-	Disabled      bool   `json:"disabled"`
-	Status        string `json:"status"`
-	StatusMessage string `json:"status_message"`
+	Unavailable    bool   `json:"unavailable"`
+	Disabled       bool   `json:"disabled"`
+	Status         string `json:"status"`
+	StatusMessage  string `json:"status_message"`
+	RecentRequests []struct {
+		Success int64 `json:"success"`
+		Failed  int64 `json:"failed"`
+	} `json:"recent_requests"`
 }
 
 type authFilePayload struct {
@@ -186,11 +221,18 @@ type authFilePayload struct {
 }
 
 type nativeSnapshot struct {
-	queryStatus           string
-	credentialStatus      string
-	credentialUnavailable bool
-	credentialDisabled    bool
-	statusMessage         string
+	queryStatus                string
+	credentialStatus           string
+	credentialCount            int
+	credentialUnavailable      bool
+	credentialUnavailableCount int
+	credentialDisabled         bool
+	credentialDisabledCount    int
+	statusMessage              string
+	nativeSuccess              int64
+	nativeFailed               int64
+	errorLogFiles              int
+	errorLogStatus             string
 }
 
 func (observer *Observer) nativeSnapshots(
@@ -229,41 +271,26 @@ func (observer *Observer) probeNative(
 	service string,
 	managementKey string,
 ) nativeSnapshot {
-	fallback := nativeSnapshot{queryStatus: "unavailable", credentialStatus: "unknown"}
+	fallback := nativeSnapshot{
+		queryStatus: "unavailable", credentialStatus: "unknown", errorLogStatus: "unavailable",
+	}
 	if !validService(account, service) {
 		return fallback
 	}
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodGet,
-		"http://"+service+":8317/v0/management/auth-files",
-		nil,
-	)
-	if err != nil {
-		return fallback
-	}
-	request.Header.Set("Authorization", "Bearer "+managementKey)
-	request.Header.Set("Accept", "application/json")
-	response, err := observer.client.Do(request)
-	if err != nil {
-		return fallback
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 32*1024))
-		return fallback
-	}
-	limited := io.LimitReader(response.Body, managementBodyLimit+1)
-	raw, err := io.ReadAll(limited)
-	if err != nil || int64(len(raw)) > managementBodyLimit {
+	raw, ok := observer.requestManagement(ctx, service, managementKey, "/auth-files")
+	if !ok {
 		return fallback
 	}
 	var payload authFilePayload
 	if json.Unmarshal(raw, &payload) != nil {
 		return fallback
 	}
-	snapshot := nativeSnapshot{queryStatus: "ok", credentialStatus: "missing"}
+	snapshot := nativeSnapshot{
+		queryStatus: "ok", credentialStatus: "missing", errorLogStatus: "unavailable",
+		credentialCount: len(payload.Files),
+	}
 	if len(payload.Files) == 0 {
+		snapshot.readErrorLogs(observer, ctx, service, managementKey)
 		return snapshot
 	}
 	unavailable := 0
@@ -283,7 +310,13 @@ func (observer *Observer) probeNative(
 		if status != "" && status != "active" {
 			degraded = true
 		}
+		for _, recent := range file.RecentRequests {
+			snapshot.nativeSuccess += max(0, recent.Success)
+			snapshot.nativeFailed += max(0, recent.Failed)
+		}
 	}
+	snapshot.credentialUnavailableCount = unavailable
+	snapshot.credentialDisabledCount = disabled
 	snapshot.credentialUnavailable = unavailable == len(payload.Files)
 	snapshot.credentialDisabled = disabled == len(payload.Files)
 	switch {
@@ -294,7 +327,62 @@ func (observer *Observer) probeNative(
 	default:
 		snapshot.credentialStatus = "active"
 	}
+	snapshot.readErrorLogs(observer, ctx, service, managementKey)
 	return snapshot
+}
+
+func (observer *Observer) requestManagement(
+	ctx context.Context,
+	service string,
+	managementKey string,
+	path string,
+) ([]byte, bool) {
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"http://"+service+":8317/v0/management"+path,
+		nil,
+	)
+	if err != nil {
+		return nil, false
+	}
+	request.Header.Set("Authorization", "Bearer "+managementKey)
+	request.Header.Set("Accept", "application/json")
+	response, err := observer.client.Do(request)
+	if err != nil {
+		return nil, false
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 32*1024))
+		return nil, false
+	}
+	limited := io.LimitReader(response.Body, managementBodyLimit+1)
+	raw, err := io.ReadAll(limited)
+	if err != nil || int64(len(raw)) > managementBodyLimit {
+		return nil, false
+	}
+	return raw, true
+}
+
+func (snapshot *nativeSnapshot) readErrorLogs(
+	observer *Observer,
+	ctx context.Context,
+	service string,
+	managementKey string,
+) {
+	raw, ok := observer.requestManagement(ctx, service, managementKey, "/request-error-logs")
+	if !ok {
+		return
+	}
+	var payload struct {
+		Files []json.RawMessage `json:"files"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return
+	}
+	snapshot.errorLogFiles = len(payload.Files)
+	snapshot.errorLogStatus = "ok"
 }
 
 func presentRuntime(snapshot nativeSnapshot, activity accessActivity, now time.Time) State {
@@ -319,27 +407,49 @@ func presentRuntime(snapshot nativeSnapshot, activity accessActivity, now time.T
 	case snapshot.credentialStatus == "active":
 		state = "healthy"
 	}
+	runtime := Runtime{
+		State: state, QueryStatus: snapshot.queryStatus, CredentialStatus: snapshot.credentialStatus,
+		CredentialCount:            snapshot.credentialCount,
+		CredentialUnavailable:      snapshot.credentialUnavailable,
+		CredentialUnavailableCount: snapshot.credentialUnavailableCount,
+		CredentialDisabled:         snapshot.credentialDisabled,
+		CredentialDisabledCount:    snapshot.credentialDisabledCount,
+		NativeSuccess:              snapshot.nativeSuccess, NativeFailed: snapshot.nativeFailed,
+		ErrorLogFiles: snapshot.errorLogFiles, ErrorLogStatus: snapshot.errorLogStatus,
+		WindowSeconds: int64(errorWindow / time.Second), Requests: activity.requests,
+		ErrorCount: activity.errors, Rate429Count: activity.rate429,
+		ServerErrorCount: activity.serverErrors, AffectedUsers: len(activity.affectedUsers),
+		LastErrorStatus: activity.lastErrorStatus,
+	}
+	if !activity.lastErrorAt.IsZero() {
+		runtime.LastErrorAt = activity.lastErrorAt.Unix()
+		age := int64(lastErrorAge / time.Second)
+		runtime.ErrorAgeSeconds = &age
+	}
+	if activity.requests > 0 {
+		runtime.ErrorRatePercent = float64(activity.errors) * 100 / float64(activity.requests)
+	}
+	result := State{Runtime: runtime, AuthFiles: snapshot.credentialCount}
 	switch state {
 	case "unavailable":
 		switch {
 		case unavailableDueToQuota(snapshot.statusMessage):
-			return State{Reason: ReasonQuotaExhausted, DisableEligibility: true, Exhausted: true}
+			result.Reason, result.DisableEligibility, result.Exhausted = ReasonQuotaExhausted, true, true
 		case snapshot.credentialStatus != "missing" && !snapshot.credentialDisabled &&
 			!unavailableDueToInvalidCredential(snapshot.statusMessage) &&
 			unavailableDueToTransientError(snapshot.statusMessage):
-			return State{Reason: ReasonTransientCooldown}
+			result.Reason = ReasonTransientCooldown
 		default:
-			return State{Reason: ReasonCredentialUnavailable, DisableEligibility: true}
+			result.Reason, result.DisableEligibility = ReasonCredentialUnavailable, true
 		}
 	case "rate_limited":
-		return State{Reason: ReasonRateLimited}
+		result.Reason = ReasonRateLimited
 	case "degraded":
-		return State{Reason: ReasonDegraded}
+		result.Reason = ReasonDegraded
 	case "unknown":
-		return State{Reason: ReasonRuntimeUnknown}
-	default:
-		return State{}
+		result.Reason = ReasonRuntimeUnknown
 	}
+	return result
 }
 
 func unavailableDueToQuota(message string) bool {
@@ -438,21 +548,29 @@ func cloneStates(source map[string]State) map[string]State {
 func unknownStates(services map[string]string) map[string]State {
 	result := make(map[string]State, len(services))
 	for account := range services {
-		result[account] = State{Reason: ReasonRuntimeUnknown}
+		result[account] = State{
+			Reason:  ReasonRuntimeUnknown,
+			Runtime: Runtime{State: "unknown", QueryStatus: "unavailable", CredentialStatus: "unknown", ErrorLogStatus: "unavailable", WindowSeconds: int64(errorWindow / time.Second)},
+		}
 	}
 	return result
 }
 
 type accessLogRow struct {
 	timestamp time.Time
+	user      string
 	account   string
 	status    int
 }
 
 type accessActivity struct {
-	errors      int
-	rate429     int
-	lastErrorAt time.Time
+	requests        int
+	errors          int
+	rate429         int
+	serverErrors    int
+	affectedUsers   map[string]struct{}
+	lastErrorAt     time.Time
+	lastErrorStatus int
 }
 
 type accessLogReader struct {
@@ -487,16 +605,31 @@ func (reader *accessLogReader) recent(now time.Time) map[string]accessActivity {
 			continue
 		}
 		retained = append(retained, row)
-		if row.timestamp.After(now.Add(time.Second)) || !isOperationalError(row.status) {
+		if row.timestamp.After(now.Add(time.Second)) {
 			continue
 		}
 		activity := result[row.account]
+		activity.requests++
+		if !isOperationalError(row.status) {
+			result[row.account] = activity
+			continue
+		}
 		activity.errors++
 		if row.status == http.StatusTooManyRequests {
 			activity.rate429++
 		}
+		if row.status >= http.StatusInternalServerError {
+			activity.serverErrors++
+		}
+		if row.user != "" {
+			if activity.affectedUsers == nil {
+				activity.affectedUsers = make(map[string]struct{})
+			}
+			activity.affectedUsers[row.user] = struct{}{}
+		}
 		if row.timestamp.After(activity.lastErrorAt) {
 			activity.lastErrorAt = row.timestamp
+			activity.lastErrorStatus = row.status
 		}
 		result[row.account] = activity
 	}
@@ -614,9 +747,15 @@ func parseAccessLogLine(line []byte) (accessLogRow, bool) {
 	if account == "" {
 		return accessLogRow{}, false
 	}
+	label := strings.TrimSpace(string(fields[1]))
+	user := ""
+	if separator := strings.LastIndexByte(label, ':'); separator > 0 {
+		user = strings.TrimSpace(label[:separator])
+	}
 	seconds, fraction := mathModf(timestamp)
 	return accessLogRow{
 		timestamp: time.Unix(seconds, int64(fraction*float64(time.Second))),
+		user:      user,
 		account:   account,
 		status:    status,
 	}, true

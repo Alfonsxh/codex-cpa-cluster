@@ -1,0 +1,18 @@
+{
+  "notifications": {
+    "webhook_configured": false,
+    "webhook_url": "",
+    "heartbeat_at": null,
+    "last_success_at": null,
+    "last_error": "",
+    "next_schedule_at": null
+  },
+  "values": {
+    "enabled": false,
+    "timezone": "UTC",
+    "daily_times": "09:00",
+    "schedule_grace_minutes": 15,
+    "quota_alert_enabled": true,
+    "weekly_threshold_percent": 90
+  }
+}

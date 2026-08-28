@@ -33,7 +33,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "python3 scripts/admin-preview.py --mode mock --port 8896 --mock-now 1787500800",
+      command: "go run ./cmd/test-preview --address 127.0.0.1:8896 --root .",
       cwd: repositoryRoot,
       url: "http://127.0.0.1:8896/healthz",
       reuseExistingServer: false,
@@ -50,6 +50,13 @@ export default defineConfig({
       command: "CPA_DEV_PROXY_TARGET=http://127.0.0.1:8896 npm run dev:usage -- --port 5194",
       cwd: frontendRoot,
       url: "http://127.0.0.1:5194/usage/",
+      reuseExistingServer: false,
+      timeout: 30_000
+    },
+    {
+      command: "CPA_DEV_PROXY_TARGET=http://127.0.0.1:8896 npm run dev:portal -- --port 5192",
+      cwd: frontendRoot,
+      url: "http://127.0.0.1:5192/",
       reuseExistingServer: false,
       timeout: 30_000
     }

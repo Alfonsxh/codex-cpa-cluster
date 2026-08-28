@@ -321,7 +321,7 @@ func TestSecretEncryptionPersistsWithoutPlaintextAndRefusesMissingKey(t *testing
 	}
 }
 
-func TestDecryptsPythonAESGCMCompatibilityVector(t *testing.T) {
+func TestDecryptsLegacyAESGCMCompatibilityVector(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	key, _ := hex.DecodeString("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
@@ -345,7 +345,7 @@ func TestDecryptsPythonAESGCMCompatibilityVector(t *testing.T) {
 		"bd3606ad437c79bf692b8949ef0a18047c3d40335e529eb4eba98a402adf246e",
 		100,
 	); err != nil {
-		t.Fatalf("insert Python AES-GCM vector: %v", err)
+		t.Fatalf("insert legacy AES-GCM vector: %v", err)
 	}
 	value, found, err := store.ReadSecret(ctx, "cpa_management_key")
 	if err != nil || !found || value != "test-management-key" {

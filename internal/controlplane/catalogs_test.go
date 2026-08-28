@@ -188,6 +188,15 @@ func TestListUsersIsPaginatedFilteredAndNeverReturnsKeyMaterial(t *testing.T) {
 	if page.Users[1].Status != "inactive" || page.Users[1].TeamID != nil {
 		t.Fatalf("bob summary = %#v", page.Users[1])
 	}
+	all, err := store.ListUserSummaries(ctx)
+	if err != nil {
+		t.Fatalf("ListUserSummaries: %v", err)
+	}
+	if len(all) != 2 || all[0].Email != "alice@example.com" || all[0].Team == nil ||
+		all[0].Team.Name != "Platform" || all[1].Email != "bob@example.com" ||
+		all[1].Team != nil {
+		t.Fatalf("complete user summaries = %#v", all)
+	}
 
 	filtered, err := store.ListUsers(ctx, UserListOptions{Query: "PLATFORM", PageSize: 25})
 	if err != nil || filtered.Total != 1 || filtered.Users[0].Email != alice.Email {

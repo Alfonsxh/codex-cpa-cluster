@@ -1,60 +1,48 @@
 # 备份与恢复
 
-## 必须成对保存的数据
+## 必须成对保存
 
-控制面数据库中的秘密使用 `secrets/control-plane.key` 加密。只备份数据库或只备份主密钥都不足以恢复系统。
-
-最小完整备份包括：
+最小业务备份包括：
 
 ```text
 state/control-plane.sqlite3
 state/usage.sqlite3
 secrets/control-plane.key
 auth/
-.env
+configs/
+state/gateway/
+state/edge/
 ```
 
-建议同时保存 `state/compose.env`、`configs/`、`compose.accounts.yml` 和 `state/gateway/` 以便诊断，但它们可以从控制面数据库重新渲染。
+`control-plane.sqlite3` 中的秘密依赖 `control-plane.key`；缺少任一文件都不能视为可恢复备份。OAuth、Webhook、API Key、邮箱和私有地址不得进入仓库、发布包或公开日志。
 
-## 在线备份
+## 备份流程
 
-控制面数据库使用 SQLite Backup API：
+1. 记录当前四个不可变镜像引用、组件摘要、Compose 项目名和活动 Gateway 槽。
+2. 停止 `usage-collector`、`quota`、`account-failover`、`notifications` 和 `log-maintenance`，阻止新的数据库写入。
+3. 对两份 SQLite 使用支持 SQLite Backup API 的受控工具或一致性文件系统快照；不要在 WAL 模式下只复制主文件。
+4. 同一批次复制匹配主密钥、OAuth、账号配置和 Gateway/Edge 状态。
+5. 将备份保存到不同故障域，并限制为操作者可读。
 
-```bash
-mkdir -p backups/manual
-chmod 700 backups/manual
+账号重命名、删除和 OAuth 清理产生的可恢复目录位于 `backups/accounts/`，由 `internal/accountlifecycle` 管理；它们不是两份 SQLite 的完整灾备替代品。
 
-docker compose --env-file .env --env-file state/compose.env \
-  -f docker-compose.yml -f compose.accounts.yml \
-  exec -T admin codex-cpa store backup \
-  "$PWD/backups/manual/control-plane.sqlite3"
-```
+## 备份验收
 
-不要在 WAL 模式下只复制 `.sqlite3` 主文件。
+在隔离目录验证：
 
-用量数据库和 OAuth 文件应在文件系统快照或受控维护窗口中备份。所有备份文件必须限制读取权限，并存放到与生产主机故障域不同的位置。
-
-## 验证备份
-
-```bash
-docker compose --env-file .env --env-file state/compose.env \
-  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa store verify
-```
-
-定期在隔离目录执行恢复演练，确认：
-
-- 数据库完整性检查通过。
-- 主密钥可以解密全部秘密。
-- OAuth 文件数量与账号对应。
-- 账号、用户、路由和用量事件数量没有异常减少。
+- 两份 SQLite `PRAGMA quick_check` 返回 `ok`。
+- Schema 版本不高于恢复镜像支持版本。
+- 主密钥权限为 `0600`，控制面能读取现有加密秘密状态。
+- 账号、用户、路由、团队和用量关键行数与备份前记录一致。
+- OAuth 与账号 ID 对应，目录内不存在符号链接或额外秘密副本。
 
 ## 恢复顺序
 
-1. 停止 Admin、采集器和业务 CPA，避免恢复期间继续写入。
-2. 恢复启动用 `.env`、控制面数据库、用量数据库、主密钥和 OAuth 文件。
-3. 检查文件所有者与权限，主密钥必须为 `0600`。
-4. 启动 Admin 并执行 `store verify`。
-5. 执行 `codex-cpa render` 重新生成 `state/compose.env` 和其他运行投影。
-6. 启动全部服务并执行 `health` 与 `verify-routing`。
+1. 停止目标的全部 Go Control Writer 和账号生命周期写操作。
+2. 恢复两份 SQLite、匹配主密钥、OAuth、账号配置与槽位/快照文件。
+3. 恢复正确所有者和最小权限，不从备份启动未知脚本或二进制。
+4. 使用与 Schema 兼容的不可变镜像执行 `scripts/deploy-target.sh config` 和 `verify-images`。
+5. 激活唯一 Go 所有者，再依次启动核心服务与 Writer。
+6. 执行目标烟测、数据库检查、浏览器检查和真实 API Key 的 Responses/SSE 验收。
 
-恢复操作应使用与数据库 Schema 兼容的应用版本。
+恢复失败时保持 Writer 停止，不得用空数据库、错误主密钥或仅页面可打开作为成功条件。

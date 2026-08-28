@@ -99,8 +99,8 @@ func (service *Service) RotateUserKey(
 	)
 }
 
-// NormalizeUser applies the same explicit domain allowlist as Python v1. The
-// result is suitable for storage and routing; display-name email parsing is
+// NormalizeUser applies the configured explicit domain allowlist. The result
+// is suitable for storage and routing; display-name email parsing is
 // intentionally unsupported.
 func NormalizeUser(settings map[string]any, raw string) (string, error) {
 	user := strings.ToLower(strings.TrimSpace(raw))

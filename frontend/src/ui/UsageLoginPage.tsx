@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
@@ -17,6 +18,7 @@ type LoginValues = z.infer<typeof loginSchema>;
 export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
   const { theme } = useTheme();
   const queryClient = useQueryClient();
+  const [retrySeconds, setRetrySeconds] = useState(0);
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" }
@@ -30,12 +32,23 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
       queryClient.setQueryData(portalSessionQueryKey, session);
     }
   });
+  useEffect(() => {
+    if (!(login.error instanceof ApiError) || login.error.status !== 429) return;
+    setRetrySeconds(Math.max(1, login.error.retryAfterSeconds || 1));
+  }, [login.error]);
+  useEffect(() => {
+    if (retrySeconds <= 0) return;
+    const timer = window.setTimeout(() => setRetrySeconds((current) => Math.max(0, current - 1)), 1_000);
+    return () => window.clearTimeout(timer);
+  }, [retrySeconds]);
 
   const formCard = (
       <form
         className={`login-card auth-card usage-login-card ${overlay ? "usage-login-card-overlay" : ""}`}
         noValidate
-        onSubmit={form.handleSubmit(() => login.mutate())}
+        onSubmit={form.handleSubmit(() => {
+          if (retrySeconds <= 0 && !login.isPending) login.mutate();
+        })}
       >
         {!overlay ? <div className="login-card-toolbar">
           <a href="/" aria-label="返回 Codex CPA 首页">
@@ -75,13 +88,13 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
           </label>
           {login.isError ? (
             <div className="inline-alert" role="alert">
-              {login.error instanceof ApiError && login.error.status === 401
-                ? "邮箱或密码错误，请重新确认。"
+              {retrySeconds > 0
+                ? `登录尝试过于频繁，请 ${retrySeconds} 秒后重试`
                 : login.error.message}
             </div>
           ) : null}
-          <button className="button button-primary button-block" type="submit" disabled={login.isPending}>
-            {login.isPending ? "正在验证…" : "登录"}
+          <button className="button button-primary button-block" type="submit" disabled={login.isPending || retrySeconds > 0}>
+            {retrySeconds > 0 ? `${retrySeconds} 秒后重试` : login.isPending ? "正在验证…" : "登录"}
           </button>
         <a className="quiet-link" href="/">返回服务入口 →</a>
       </form>

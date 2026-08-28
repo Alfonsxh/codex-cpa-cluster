@@ -12,24 +12,44 @@ export type {
 
 export const usageBreakdownQueryRoot = ["usage-breakdown"] as const;
 
+export type UsageRange = {
+  window: UsageWindow;
+  startAt?: number;
+  endAt?: number;
+  account?: string;
+};
+
+type UsageRangeInput = UsageWindow | UsageRange;
+
+function normalizeUsageRange(range: UsageRangeInput): UsageRange {
+  return typeof range === "string" ? { window: range } : range;
+}
+
 export function usageBreakdownQueryKey(
   kind: "account" | "user",
   subject: string,
-  window: UsageWindow
+  rangeInput: UsageRangeInput
 ) {
-  return [...usageBreakdownQueryRoot, kind, subject, window] as const;
+  const range = normalizeUsageRange(rangeInput);
+  return [...usageBreakdownQueryRoot, kind, subject, range.window, range.startAt ?? null, range.endAt ?? null, range.account ?? ""] as const;
 }
 
 export function readUsageBreakdown(
   kind: "account" | "user",
   subject: string,
-  window: UsageWindow,
+  rangeInput: UsageRangeInput,
   signal?: AbortSignal
 ): Promise<UsageBreakdown> {
-  const query = new URLSearchParams({ window });
+  const range = normalizeUsageRange(rangeInput);
+  const query = new URLSearchParams({ window: range.window });
+  if (range.window === "custom" && range.startAt !== undefined && range.endAt !== undefined) {
+    query.set("start_at", String(range.startAt));
+    query.set("end_at", String(range.endAt));
+  }
   const path = kind === "account"
     ? "/admin/api/accounts/usage-breakdown"
     : "/admin/api/users/usage-breakdown";
   query.set(kind === "account" ? "account" : "email", subject);
+  if (kind === "user" && range.account) query.set("account", range.account);
   return apiRequest<UsageBreakdown>(`${path}?${query.toString()}`, { signal });
 }

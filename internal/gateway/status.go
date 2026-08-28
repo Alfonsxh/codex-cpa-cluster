@@ -22,9 +22,8 @@ type Status struct {
 	Quota QuotaSnapshotStatus `json:"quota"`
 }
 
-// Status returns the same operational fields as the OpenResty
-// /__internal/snapshots endpoint. It intentionally contains no credentials or
-// per-user records.
+// Status returns the stable operational fields of the internal snapshot
+// endpoint. It intentionally contains no credentials or per-user records.
 func (engine *Engine) Status() Status {
 	result := Status{}
 	if auth := engine.auth.Load(); auth != nil {

@@ -10,6 +10,72 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AccountAuthState.
+const (
+	AccountAuthStateConfigured AccountAuthState = "configured"
+	AccountAuthStatePending    AccountAuthState = "pending"
+	AccountAuthStateUnknown    AccountAuthState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AccountAuthState enum.
+func (e AccountAuthState) Valid() bool {
+	switch e {
+	case AccountAuthStateConfigured:
+		return true
+	case AccountAuthStatePending:
+		return true
+	case AccountAuthStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountProxySource.
+const (
+	AccountProxySourceAccount AccountProxySource = "account"
+	AccountProxySourceDefault AccountProxySource = "default"
+	AccountProxySourceDirect  AccountProxySource = "direct"
+)
+
+// Valid indicates whether the value is a known member of the AccountProxySource enum.
+func (e AccountProxySource) Valid() bool {
+	switch e {
+	case AccountProxySourceAccount:
+		return true
+	case AccountProxySourceDefault:
+		return true
+	case AccountProxySourceDirect:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountRuntimeState.
+const (
+	AccountRuntimeStateDisabled AccountRuntimeState = "disabled"
+	AccountRuntimeStateRunning  AccountRuntimeState = "running"
+	AccountRuntimeStateStopped  AccountRuntimeState = "stopped"
+	AccountRuntimeStateUnknown  AccountRuntimeState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AccountRuntimeState enum.
+func (e AccountRuntimeState) Valid() bool {
+	switch e {
+	case AccountRuntimeStateDisabled:
+		return true
+	case AccountRuntimeStateRunning:
+		return true
+	case AccountRuntimeStateStopped:
+		return true
+	case AccountRuntimeStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AccountCreateRequestProxyMode.
 const (
 	AccountCreateRequestProxyModeCustom  AccountCreateRequestProxyMode = "custom"
@@ -46,6 +112,30 @@ func (e AccountLifecycleRecordProxyMode) Valid() bool {
 	case AccountLifecycleRecordProxyModeDirect:
 		return true
 	case AccountLifecycleRecordProxyModeInherit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AccountOperationalStatusTone.
+const (
+	AccountOperationalStatusToneDanger  AccountOperationalStatusTone = "danger"
+	AccountOperationalStatusToneNeutral AccountOperationalStatusTone = "neutral"
+	AccountOperationalStatusToneSuccess AccountOperationalStatusTone = "success"
+	AccountOperationalStatusToneWarning AccountOperationalStatusTone = "warning"
+)
+
+// Valid indicates whether the value is a known member of the AccountOperationalStatusTone enum.
+func (e AccountOperationalStatusTone) Valid() bool {
+	switch e {
+	case AccountOperationalStatusToneDanger:
+		return true
+	case AccountOperationalStatusToneNeutral:
+		return true
+	case AccountOperationalStatusToneSuccess:
+		return true
+	case AccountOperationalStatusToneWarning:
 		return true
 	default:
 		return false
@@ -403,17 +493,63 @@ func (e InitialPasswordResponseConfigured) Valid() bool {
 	}
 }
 
+// Defines values for LegacyRuntimeJobStatus.
+const (
+	LegacyRuntimeJobStatusCancelled  LegacyRuntimeJobStatus = "cancelled"
+	LegacyRuntimeJobStatusCancelling LegacyRuntimeJobStatus = "cancelling"
+	LegacyRuntimeJobStatusFailed     LegacyRuntimeJobStatus = "failed"
+	LegacyRuntimeJobStatusQueued     LegacyRuntimeJobStatus = "queued"
+	LegacyRuntimeJobStatusRunning    LegacyRuntimeJobStatus = "running"
+	LegacyRuntimeJobStatusSucceeded  LegacyRuntimeJobStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the LegacyRuntimeJobStatus enum.
+func (e LegacyRuntimeJobStatus) Valid() bool {
+	switch e {
+	case LegacyRuntimeJobStatusCancelled:
+		return true
+	case LegacyRuntimeJobStatusCancelling:
+		return true
+	case LegacyRuntimeJobStatusFailed:
+		return true
+	case LegacyRuntimeJobStatusQueued:
+		return true
+	case LegacyRuntimeJobStatusRunning:
+		return true
+	case LegacyRuntimeJobStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LegacyRuntimeJobRequestAction.
 const (
-	LegacyRuntimeJobRequestActionRestart LegacyRuntimeJobRequestAction = "restart"
-	LegacyRuntimeJobRequestActionStart   LegacyRuntimeJobRequestAction = "start"
-	LegacyRuntimeJobRequestActionStop    LegacyRuntimeJobRequestAction = "stop"
-	LegacyRuntimeJobRequestActionUp      LegacyRuntimeJobRequestAction = "up"
+	LegacyRuntimeJobRequestActionHealth        LegacyRuntimeJobRequestAction = "health"
+	LegacyRuntimeJobRequestActionImagePull     LegacyRuntimeJobRequestAction = "image-pull"
+	LegacyRuntimeJobRequestActionImageUpdate   LegacyRuntimeJobRequestAction = "image-update"
+	LegacyRuntimeJobRequestActionLogin         LegacyRuntimeJobRequestAction = "login"
+	LegacyRuntimeJobRequestActionRender        LegacyRuntimeJobRequestAction = "render"
+	LegacyRuntimeJobRequestActionRestart       LegacyRuntimeJobRequestAction = "restart"
+	LegacyRuntimeJobRequestActionStart         LegacyRuntimeJobRequestAction = "start"
+	LegacyRuntimeJobRequestActionStop          LegacyRuntimeJobRequestAction = "stop"
+	LegacyRuntimeJobRequestActionUp            LegacyRuntimeJobRequestAction = "up"
+	LegacyRuntimeJobRequestActionVerifyRouting LegacyRuntimeJobRequestAction = "verify-routing"
 )
 
 // Valid indicates whether the value is a known member of the LegacyRuntimeJobRequestAction enum.
 func (e LegacyRuntimeJobRequestAction) Valid() bool {
 	switch e {
+	case LegacyRuntimeJobRequestActionHealth:
+		return true
+	case LegacyRuntimeJobRequestActionImagePull:
+		return true
+	case LegacyRuntimeJobRequestActionImageUpdate:
+		return true
+	case LegacyRuntimeJobRequestActionLogin:
+		return true
+	case LegacyRuntimeJobRequestActionRender:
+		return true
 	case LegacyRuntimeJobRequestActionRestart:
 		return true
 	case LegacyRuntimeJobRequestActionStart:
@@ -421,6 +557,8 @@ func (e LegacyRuntimeJobRequestAction) Valid() bool {
 	case LegacyRuntimeJobRequestActionStop:
 		return true
 	case LegacyRuntimeJobRequestActionUp:
+		return true
+	case LegacyRuntimeJobRequestActionVerifyRouting:
 		return true
 	default:
 		return false
@@ -538,6 +676,24 @@ func (e OperationImpactTargetType) Valid() bool {
 	}
 }
 
+// Defines values for OverviewCatalogUserStatus.
+const (
+	OverviewCatalogUserStatusActive   OverviewCatalogUserStatus = "active"
+	OverviewCatalogUserStatusInactive OverviewCatalogUserStatus = "inactive"
+)
+
+// Valid indicates whether the value is a known member of the OverviewCatalogUserStatus enum.
+func (e OverviewCatalogUserStatus) Valid() bool {
+	switch e {
+	case OverviewCatalogUserStatusActive:
+		return true
+	case OverviewCatalogUserStatusInactive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OverviewPayloadSource.
 const (
 	ControlPlane OverviewPayloadSource = "control-plane"
@@ -591,22 +747,22 @@ func (e OverviewUsageResponseWindow1) Valid() bool {
 
 // Defines values for PortalAccountStatusTone.
 const (
-	Danger  PortalAccountStatusTone = "danger"
-	Neutral PortalAccountStatusTone = "neutral"
-	Success PortalAccountStatusTone = "success"
-	Warning PortalAccountStatusTone = "warning"
+	PortalAccountStatusToneDanger  PortalAccountStatusTone = "danger"
+	PortalAccountStatusToneNeutral PortalAccountStatusTone = "neutral"
+	PortalAccountStatusToneSuccess PortalAccountStatusTone = "success"
+	PortalAccountStatusToneWarning PortalAccountStatusTone = "warning"
 )
 
 // Valid indicates whether the value is a known member of the PortalAccountStatusTone enum.
 func (e PortalAccountStatusTone) Valid() bool {
 	switch e {
-	case Danger:
+	case PortalAccountStatusToneDanger:
 		return true
-	case Neutral:
+	case PortalAccountStatusToneNeutral:
 		return true
-	case Success:
+	case PortalAccountStatusToneSuccess:
 		return true
-	case Warning:
+	case PortalAccountStatusToneWarning:
 		return true
 	default:
 		return false
@@ -777,14 +933,23 @@ func (e ReleaseStatusStatus) Valid() bool {
 
 // Defines values for RuntimeJobAction.
 const (
-	RuntimeJobActionRestart RuntimeJobAction = "restart"
-	RuntimeJobActionStart   RuntimeJobAction = "start"
-	RuntimeJobActionStop    RuntimeJobAction = "stop"
+	RuntimeJobActionImagePull   RuntimeJobAction = "image-pull"
+	RuntimeJobActionImageUpdate RuntimeJobAction = "image-update"
+	RuntimeJobActionLogin       RuntimeJobAction = "login"
+	RuntimeJobActionRestart     RuntimeJobAction = "restart"
+	RuntimeJobActionStart       RuntimeJobAction = "start"
+	RuntimeJobActionStop        RuntimeJobAction = "stop"
 )
 
 // Valid indicates whether the value is a known member of the RuntimeJobAction enum.
 func (e RuntimeJobAction) Valid() bool {
 	switch e {
+	case RuntimeJobActionImagePull:
+		return true
+	case RuntimeJobActionImageUpdate:
+		return true
+	case RuntimeJobActionLogin:
+		return true
 	case RuntimeJobActionRestart:
 		return true
 	case RuntimeJobActionStart:
@@ -798,28 +963,28 @@ func (e RuntimeJobAction) Valid() bool {
 
 // Defines values for RuntimeJobStatus.
 const (
-	Cancelled  RuntimeJobStatus = "cancelled"
-	Cancelling RuntimeJobStatus = "cancelling"
-	Failed     RuntimeJobStatus = "failed"
-	Queued     RuntimeJobStatus = "queued"
-	Running    RuntimeJobStatus = "running"
-	Succeeded  RuntimeJobStatus = "succeeded"
+	RuntimeJobStatusCancelled  RuntimeJobStatus = "cancelled"
+	RuntimeJobStatusCancelling RuntimeJobStatus = "cancelling"
+	RuntimeJobStatusFailed     RuntimeJobStatus = "failed"
+	RuntimeJobStatusQueued     RuntimeJobStatus = "queued"
+	RuntimeJobStatusRunning    RuntimeJobStatus = "running"
+	RuntimeJobStatusSucceeded  RuntimeJobStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the RuntimeJobStatus enum.
 func (e RuntimeJobStatus) Valid() bool {
 	switch e {
-	case Cancelled:
+	case RuntimeJobStatusCancelled:
 		return true
-	case Cancelling:
+	case RuntimeJobStatusCancelling:
 		return true
-	case Failed:
+	case RuntimeJobStatusFailed:
 		return true
-	case Queued:
+	case RuntimeJobStatusQueued:
 		return true
-	case Running:
+	case RuntimeJobStatusRunning:
 		return true
-	case Succeeded:
+	case RuntimeJobStatusSucceeded:
 		return true
 	default:
 		return false
@@ -828,15 +993,31 @@ func (e RuntimeJobStatus) Valid() bool {
 
 // Defines values for RuntimeJobRequestAction.
 const (
-	RuntimeJobRequestActionRestart RuntimeJobRequestAction = "restart"
-	RuntimeJobRequestActionStart   RuntimeJobRequestAction = "start"
-	RuntimeJobRequestActionStop    RuntimeJobRequestAction = "stop"
-	RuntimeJobRequestActionUp      RuntimeJobRequestAction = "up"
+	RuntimeJobRequestActionHealth        RuntimeJobRequestAction = "health"
+	RuntimeJobRequestActionImagePull     RuntimeJobRequestAction = "image-pull"
+	RuntimeJobRequestActionImageUpdate   RuntimeJobRequestAction = "image-update"
+	RuntimeJobRequestActionLogin         RuntimeJobRequestAction = "login"
+	RuntimeJobRequestActionRender        RuntimeJobRequestAction = "render"
+	RuntimeJobRequestActionRestart       RuntimeJobRequestAction = "restart"
+	RuntimeJobRequestActionStart         RuntimeJobRequestAction = "start"
+	RuntimeJobRequestActionStop          RuntimeJobRequestAction = "stop"
+	RuntimeJobRequestActionUp            RuntimeJobRequestAction = "up"
+	RuntimeJobRequestActionVerifyRouting RuntimeJobRequestAction = "verify-routing"
 )
 
 // Valid indicates whether the value is a known member of the RuntimeJobRequestAction enum.
 func (e RuntimeJobRequestAction) Valid() bool {
 	switch e {
+	case RuntimeJobRequestActionHealth:
+		return true
+	case RuntimeJobRequestActionImagePull:
+		return true
+	case RuntimeJobRequestActionImageUpdate:
+		return true
+	case RuntimeJobRequestActionLogin:
+		return true
+	case RuntimeJobRequestActionRender:
+		return true
 	case RuntimeJobRequestActionRestart:
 		return true
 	case RuntimeJobRequestActionStart:
@@ -844,6 +1025,8 @@ func (e RuntimeJobRequestAction) Valid() bool {
 	case RuntimeJobRequestActionStop:
 		return true
 	case RuntimeJobRequestActionUp:
+		return true
+	case RuntimeJobRequestActionVerifyRouting:
 		return true
 	default:
 		return false
@@ -867,19 +1050,37 @@ func (e RuntimeLogsExitCode) Valid() bool {
 
 // Defines values for RuntimeOperationResultAction.
 const (
-	RuntimeOperationResultActionRestart RuntimeOperationResultAction = "restart"
-	RuntimeOperationResultActionStart   RuntimeOperationResultAction = "start"
-	RuntimeOperationResultActionStop    RuntimeOperationResultAction = "stop"
+	RuntimeOperationResultActionHealth        RuntimeOperationResultAction = "health"
+	RuntimeOperationResultActionImagePull     RuntimeOperationResultAction = "image-pull"
+	RuntimeOperationResultActionImageUpdate   RuntimeOperationResultAction = "image-update"
+	RuntimeOperationResultActionLogin         RuntimeOperationResultAction = "login"
+	RuntimeOperationResultActionRender        RuntimeOperationResultAction = "render"
+	RuntimeOperationResultActionRestart       RuntimeOperationResultAction = "restart"
+	RuntimeOperationResultActionStart         RuntimeOperationResultAction = "start"
+	RuntimeOperationResultActionStop          RuntimeOperationResultAction = "stop"
+	RuntimeOperationResultActionVerifyRouting RuntimeOperationResultAction = "verify-routing"
 )
 
 // Valid indicates whether the value is a known member of the RuntimeOperationResultAction enum.
 func (e RuntimeOperationResultAction) Valid() bool {
 	switch e {
+	case RuntimeOperationResultActionHealth:
+		return true
+	case RuntimeOperationResultActionImagePull:
+		return true
+	case RuntimeOperationResultActionImageUpdate:
+		return true
+	case RuntimeOperationResultActionLogin:
+		return true
+	case RuntimeOperationResultActionRender:
+		return true
 	case RuntimeOperationResultActionRestart:
 		return true
 	case RuntimeOperationResultActionStart:
 		return true
 	case RuntimeOperationResultActionStop:
+		return true
+	case RuntimeOperationResultActionVerifyRouting:
 		return true
 	default:
 		return false
@@ -982,6 +1183,48 @@ func (e UsageWindow) Valid() bool {
 	case UsageWindowSinceReset:
 		return true
 	case UsageWindowToday:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserAccountDetailStatus.
+const (
+	UserAccountDetailStatusActive   UserAccountDetailStatus = "active"
+	UserAccountDetailStatusInactive UserAccountDetailStatus = "inactive"
+	UserAccountDetailStatusMissing  UserAccountDetailStatus = "missing"
+	UserAccountDetailStatusRevoked  UserAccountDetailStatus = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the UserAccountDetailStatus enum.
+func (e UserAccountDetailStatus) Valid() bool {
+	switch e {
+	case UserAccountDetailStatusActive:
+		return true
+	case UserAccountDetailStatusInactive:
+		return true
+	case UserAccountDetailStatusMissing:
+		return true
+	case UserAccountDetailStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserDetailStatus.
+const (
+	UserDetailStatusActive   UserDetailStatus = "active"
+	UserDetailStatusInactive UserDetailStatus = "inactive"
+)
+
+// Valid indicates whether the value is a known member of the UserDetailStatus enum.
+func (e UserDetailStatus) Valid() bool {
+	switch e {
+	case UserDetailStatusActive:
+		return true
+	case UserDetailStatusInactive:
 		return true
 	default:
 		return false
@@ -1113,16 +1356,16 @@ func (e UserQuotaMode) Valid() bool {
 
 // Defines values for UserSummaryStatus.
 const (
-	Active   UserSummaryStatus = "active"
-	Inactive UserSummaryStatus = "inactive"
+	UserSummaryStatusActive   UserSummaryStatus = "active"
+	UserSummaryStatusInactive UserSummaryStatus = "inactive"
 )
 
 // Valid indicates whether the value is a known member of the UserSummaryStatus enum.
 func (e UserSummaryStatus) Valid() bool {
 	switch e {
-	case Active:
+	case UserSummaryStatusActive:
 		return true
-	case Inactive:
+	case UserSummaryStatusInactive:
 		return true
 	default:
 		return false
@@ -1153,6 +1396,45 @@ const (
 func (e UserWeeklyQuotaQuotaUnit) Valid() bool {
 	switch e {
 	case WeightedTokens:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserWeeklyQuotaSource.
+const (
+	UserWeeklyQuotaSourceDefault       UserWeeklyQuotaSource = "default"
+	UserWeeklyQuotaSourceUserCustom    UserWeeklyQuotaSource = "user_custom"
+	UserWeeklyQuotaSourceUserUnlimited UserWeeklyQuotaSource = "user_unlimited"
+)
+
+// Valid indicates whether the value is a known member of the UserWeeklyQuotaSource enum.
+func (e UserWeeklyQuotaSource) Valid() bool {
+	switch e {
+	case UserWeeklyQuotaSourceDefault:
+		return true
+	case UserWeeklyQuotaSourceUserCustom:
+		return true
+	case UserWeeklyQuotaSourceUserUnlimited:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAdminAccountsParamsFresh.
+const (
+	ListAdminAccountsParamsFreshN0 ListAdminAccountsParamsFresh = "0"
+	ListAdminAccountsParamsFreshN1 ListAdminAccountsParamsFresh = "1"
+)
+
+// Valid indicates whether the value is a known member of the ListAdminAccountsParamsFresh enum.
+func (e ListAdminAccountsParamsFresh) Valid() bool {
+	switch e {
+	case ListAdminAccountsParamsFreshN0:
+		return true
+	case ListAdminAccountsParamsFreshN1:
 		return true
 	default:
 		return false
@@ -1192,6 +1474,111 @@ func (e GetAdminReleaseStatusParamsFresh) Valid() bool {
 	}
 }
 
+// Defines values for ListAdminUsersParamsView.
+const (
+	Members ListAdminUsersParamsView = "members"
+	Summary ListAdminUsersParamsView = "summary"
+)
+
+// Valid indicates whether the value is a known member of the ListAdminUsersParamsView enum.
+func (e ListAdminUsersParamsView) Valid() bool {
+	switch e {
+	case Members:
+		return true
+	case Summary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAdminUsersParamsUsageState.
+const (
+	ListAdminUsersParamsUsageStateAll    ListAdminUsersParamsUsageState = "all"
+	ListAdminUsersParamsUsageStateUnused ListAdminUsersParamsUsageState = "unused"
+	ListAdminUsersParamsUsageStateUsed   ListAdminUsersParamsUsageState = "used"
+)
+
+// Valid indicates whether the value is a known member of the ListAdminUsersParamsUsageState enum.
+func (e ListAdminUsersParamsUsageState) Valid() bool {
+	switch e {
+	case ListAdminUsersParamsUsageStateAll:
+		return true
+	case ListAdminUsersParamsUsageStateUnused:
+		return true
+	case ListAdminUsersParamsUsageStateUsed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAdminUsersParamsSort.
+const (
+	ListAdminUsersParamsSortEmail    ListAdminUsersParamsSort = "email"
+	ListAdminUsersParamsSortLastUsed ListAdminUsersParamsSort = "last_used"
+	ListAdminUsersParamsSortQuota    ListAdminUsersParamsSort = "quota"
+	ListAdminUsersParamsSortRequests ListAdminUsersParamsSort = "requests"
+	ListAdminUsersParamsSortTokens   ListAdminUsersParamsSort = "tokens"
+)
+
+// Valid indicates whether the value is a known member of the ListAdminUsersParamsSort enum.
+func (e ListAdminUsersParamsSort) Valid() bool {
+	switch e {
+	case ListAdminUsersParamsSortEmail:
+		return true
+	case ListAdminUsersParamsSortLastUsed:
+		return true
+	case ListAdminUsersParamsSortQuota:
+		return true
+	case ListAdminUsersParamsSortRequests:
+		return true
+	case ListAdminUsersParamsSortTokens:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAdminUsersParamsDirection.
+const (
+	Asc  ListAdminUsersParamsDirection = "asc"
+	Desc ListAdminUsersParamsDirection = "desc"
+)
+
+// Valid indicates whether the value is a known member of the ListAdminUsersParamsDirection enum.
+func (e ListAdminUsersParamsDirection) Valid() bool {
+	switch e {
+	case Asc:
+		return true
+	case Desc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAdminUsersParamsPageSize.
+const (
+	N100 ListAdminUsersParamsPageSize = 100
+	N25  ListAdminUsersParamsPageSize = 25
+	N50  ListAdminUsersParamsPageSize = 50
+)
+
+// Valid indicates whether the value is a known member of the ListAdminUsersParamsPageSize enum.
+func (e ListAdminUsersParamsPageSize) Valid() bool {
+	switch e {
+	case N100:
+		return true
+	case N25:
+		return true
+	case N50:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPublicGatewayUsageParamsWindow.
 const (
 	GetPublicGatewayUsageParamsWindowN300   GetPublicGatewayUsageParamsWindow = 300
@@ -1215,24 +1602,81 @@ func (e GetPublicGatewayUsageParamsWindow) Valid() bool {
 
 // Account defines model for Account.
 type Account struct {
-	AccountState    AccountState        `json:"account_state"`
-	ActiveUsers1h   *int                `json:"active_users_1h"`
-	Default         bool                `json:"default"`
-	Email           openapi_types.Email `json:"email"`
-	Enabled         bool                `json:"enabled"`
-	Id              string              `json:"id"`
-	Port            int                 `json:"port"`
-	ProxyConfigured bool                `json:"proxy_configured"`
-	ProxyMode       string              `json:"proxy_mode"`
-	RoutedUsers     int                 `json:"routed_users"`
-	StateAvailable  bool                `json:"state_available"`
+	AccountState AccountState `json:"account_state"`
+
+	// ActiveUserEmails1h Authenticated rolling-hour distinct user identities, sorted by normalized email
+	ActiveUserEmails1h []openapi_types.Email    `json:"active_user_emails_1h"`
+	ActiveUsers1h      *int                     `json:"active_users_1h"`
+	AssociatedUsers    int                      `json:"associated_users"`
+	AuthFiles          int                      `json:"auth_files"`
+	AuthState          AccountAuthState         `json:"auth_state"`
+	ContainerHealth    string                   `json:"container_health"`
+	ContainerState     string                   `json:"container_state"`
+	ContainerStatus    string                   `json:"container_status"`
+	Default            bool                     `json:"default"`
+	Email              openapi_types.Email      `json:"email"`
+	Enabled            bool                     `json:"enabled"`
+	Id                 string                   `json:"id"`
+	OauthConfigured    *bool                    `json:"oauth_configured"`
+	OperationalStatus  AccountOperationalStatus `json:"operational_status"`
+	Port               int                      `json:"port"`
+	ProxyConfigured    bool                     `json:"proxy_configured"`
+
+	// ProxyDisplay Effective proxy URL with password redacted, or direct; never contains a plaintext proxy password.
+	ProxyDisplay         string              `json:"proxy_display"`
+	ProxyMode            string              `json:"proxy_mode"`
+	ProxySource          AccountProxySource  `json:"proxy_source"`
+	Quota                AccountQuota        `json:"quota"`
+	ResetCreditCount     *int64              `json:"reset_credit_count"`
+	ResetWindowLabels    []string            `json:"reset_window_labels"`
+	Resettable           bool                `json:"resettable"`
+	RoutedUsers          int                 `json:"routed_users"`
+	Runtime              AccountRuntime      `json:"runtime"`
+	RuntimeState         AccountRuntimeState `json:"runtime_state"`
+	Service              string              `json:"service"`
+	StateAvailable       bool                `json:"state_available"`
+	Usage                UsageMetrics        `json:"usage"`
+	UsageAvailable       bool                `json:"usage_available"`
+	UsageWindowAvailable bool                `json:"usage_window_available"`
+	UsageWindowStartAt   *int64              `json:"usage_window_start_at"`
 }
+
+// AccountAuthState defines model for Account.AuthState.
+type AccountAuthState string
+
+// AccountProxySource defines model for Account.ProxySource.
+type AccountProxySource string
+
+// AccountRuntimeState defines model for Account.RuntimeState.
+type AccountRuntimeState string
 
 // AccountCatalog defines model for AccountCatalog.
 type AccountCatalog struct {
-	Accounts    []Account `json:"accounts"`
-	GeneratedAt int64     `json:"generated_at"`
-	Warnings    []string  `json:"warnings"`
+	Accounts               []Account             `json:"accounts"`
+	Collector              CollectorStatus       `json:"collector"`
+	GeneratedAt            int64                 `json:"generated_at"`
+	QuotaCacheTtlSeconds   int64                 `json:"quota_cache_ttl_seconds"`
+	QuotaCached            bool                  `json:"quota_cached"`
+	QuotaGeneratedAt       *int64                `json:"quota_generated_at"`
+	QuotaRefreshing        bool                  `json:"quota_refreshing"`
+	Warnings               []string              `json:"warnings"`
+	Window                 AccountCatalog_Window `json:"window"`
+	WindowEndAt            *int64                `json:"window_end_at"`
+	WindowSeconds          *int64                `json:"window_seconds"`
+	WindowStartAt          *int64                `json:"window_start_at"`
+	WindowStartAtByAccount *map[string]int64     `json:"window_start_at_by_account"`
+	WindowTimezone         string                `json:"window_timezone"`
+}
+
+// AccountCatalogWindow0 defines model for AccountCatalog.Window.0.
+type AccountCatalogWindow0 = int
+
+// AccountCatalogWindow1 defines model for AccountCatalog.Window.1.
+type AccountCatalogWindow1 = string
+
+// AccountCatalog_Window defines model for AccountCatalog.Window.
+type AccountCatalog_Window struct {
+	union json.RawMessage
 }
 
 // AccountClearAuthRequest defines model for AccountClearAuthRequest.
@@ -1316,6 +1760,56 @@ type AccountLifecycleRecord struct {
 // AccountLifecycleRecordProxyMode defines model for AccountLifecycleRecord.ProxyMode.
 type AccountLifecycleRecordProxyMode string
 
+// AccountOperationalStatus defines model for AccountOperationalStatus.
+type AccountOperationalStatus struct {
+	Code       string                       `json:"code"`
+	Label      string                       `json:"label"`
+	Reason     string                       `json:"reason"`
+	Selectable bool                         `json:"selectable"`
+	Tone       AccountOperationalStatusTone `json:"tone"`
+}
+
+// AccountOperationalStatusTone defines model for AccountOperationalStatus.Tone.
+type AccountOperationalStatusTone string
+
+// AccountQuota defines model for AccountQuota.
+type AccountQuota struct {
+	Account          string                `json:"account"`
+	Allowed          *bool                 `json:"allowed"`
+	LimitReached     *bool                 `json:"limit_reached"`
+	PlanType         *string               `json:"plan_type"`
+	ResetCreditCount *int64                `json:"reset_credit_count"`
+	Status           string                `json:"status"`
+	Weekly           *AccountWeeklyWindow  `json:"weekly"`
+	WeeklyWindows    []AccountWeeklyWindow `json:"weekly_windows"`
+}
+
+// AccountRuntime defines model for AccountRuntime.
+type AccountRuntime struct {
+	AffectedUsers              int     `json:"affected_users"`
+	CredentialCount            int     `json:"credential_count"`
+	CredentialDisabled         bool    `json:"credential_disabled"`
+	CredentialDisabledCount    int     `json:"credential_disabled_count"`
+	CredentialStatus           string  `json:"credential_status"`
+	CredentialUnavailable      bool    `json:"credential_unavailable"`
+	CredentialUnavailableCount int     `json:"credential_unavailable_count"`
+	ErrorAgeSeconds            *int64  `json:"error_age_seconds"`
+	ErrorCount                 int     `json:"error_count"`
+	ErrorLogFiles              int     `json:"error_log_files"`
+	ErrorLogStatus             string  `json:"error_log_status"`
+	ErrorRatePercent           float32 `json:"error_rate_percent"`
+	LastErrorAt                int64   `json:"last_error_at"`
+	LastErrorStatus            int     `json:"last_error_status"`
+	NativeFailed               int64   `json:"native_failed"`
+	NativeSuccess              int64   `json:"native_success"`
+	QueryStatus                string  `json:"query_status"`
+	Rate429Count               int     `json:"rate_429_count"`
+	Requests                   int     `json:"requests"`
+	ServerErrorCount           int     `json:"server_error_count"`
+	State                      string  `json:"state"`
+	WindowSeconds              int64   `json:"window_seconds"`
+}
+
 // AccountState defines model for AccountState.
 type AccountState struct {
 	Account          string   `json:"account"`
@@ -1341,7 +1835,7 @@ type AccountUpdateRequest struct {
 	NewId           *string                        `json:"new_id,omitempty"`
 	ProxyMode       *AccountUpdateRequestProxyMode `json:"proxy_mode,omitempty"`
 
-	// ProxyUrl Omit to retain the encrypted value; send an empty string to clear it.
+	// ProxyUrl Omit or send an empty string to retain the encrypted value, matching the legacy write-only editor.
 	ProxyUrl *string `json:"proxy_url,omitempty"`
 }
 
@@ -1361,6 +1855,22 @@ type AccountUpdateResult struct {
 	RenamedFrom        *string                `json:"renamed_from,omitempty"`
 	ReroutedUsers      int                    `json:"rerouted_users"`
 	SnapshotGeneration string                 `json:"snapshot_generation"`
+}
+
+// AccountWeeklyWindow defines model for AccountWeeklyWindow.
+type AccountWeeklyWindow struct {
+	Key                 string  `json:"key"`
+	Label               string  `json:"label"`
+	LimitReached        bool    `json:"limit_reached"`
+	MeteredFeature      *string `json:"metered_feature"`
+	RemainingPercent    float32 `json:"remaining_percent"`
+	ReportedUsedPercent float32 `json:"reported_used_percent"`
+	ResetAfterSeconds   *int64  `json:"reset_after_seconds"`
+	ResetAt             *int64  `json:"reset_at"`
+	Resettable          bool    `json:"resettable"`
+	UsedPercent         float32 `json:"used_percent"`
+	WindowSeconds       int64   `json:"window_seconds"`
+	WindowSlot          string  `json:"window_slot"`
 }
 
 // AdminSession defines model for AdminSession.
@@ -1673,9 +2183,36 @@ type InitialPasswordResponse struct {
 // InitialPasswordResponseConfigured defines model for InitialPasswordResponse.Configured.
 type InitialPasswordResponseConfigured bool
 
+// LegacyRuntimeJob defines model for LegacyRuntimeJob.
+type LegacyRuntimeJob struct {
+	CreatedAt  int64                  `json:"created_at"`
+	ExitCode   *int                   `json:"exit_code"`
+	FinishedAt *int64                 `json:"finished_at"`
+	Id         string                 `json:"id"`
+	Name       string                 `json:"name"`
+	Output     *[]string              `json:"output,omitempty"`
+	StartedAt  *int64                 `json:"started_at"`
+	Status     LegacyRuntimeJobStatus `json:"status"`
+	Target     string                 `json:"target"`
+}
+
+// LegacyRuntimeJobStatus defines model for LegacyRuntimeJob.Status.
+type LegacyRuntimeJobStatus string
+
 // LegacyRuntimeJobCancelRequest defines model for LegacyRuntimeJobCancelRequest.
 type LegacyRuntimeJobCancelRequest struct {
 	Id string `json:"id"`
+}
+
+// LegacyRuntimeJobCancelResponse defines model for LegacyRuntimeJobCancelResponse.
+type LegacyRuntimeJobCancelResponse struct {
+	Job     LegacyRuntimeJob `json:"job"`
+	Message string           `json:"message"`
+}
+
+// LegacyRuntimeJobCatalog defines model for LegacyRuntimeJobCatalog.
+type LegacyRuntimeJobCatalog struct {
+	Jobs []LegacyRuntimeJob `json:"jobs"`
 }
 
 // LegacyRuntimeJobRequest defines model for LegacyRuntimeJobRequest.
@@ -1686,6 +2223,18 @@ type LegacyRuntimeJobRequest struct {
 
 // LegacyRuntimeJobRequestAction defines model for LegacyRuntimeJobRequest.Action.
 type LegacyRuntimeJobRequestAction string
+
+// LegacyRuntimeJobResponse defines model for LegacyRuntimeJobResponse.
+type LegacyRuntimeJobResponse struct {
+	Job LegacyRuntimeJob `json:"job"`
+}
+
+// LegacyRuntimeJobSubmissionResponse defines model for LegacyRuntimeJobSubmissionResponse.
+type LegacyRuntimeJobSubmissionResponse struct {
+	Job     LegacyRuntimeJob `json:"job"`
+	Message string           `json:"message"`
+	Reused  bool             `json:"reused"`
+}
 
 // LoggedOutResponse defines model for LoggedOutResponse.
 type LoggedOutResponse struct {
@@ -1809,6 +2358,28 @@ type OperationImpactAction string
 // OperationImpactTargetType defines model for OperationImpact.TargetType.
 type OperationImpactTargetType string
 
+// OverviewCatalog defines model for OverviewCatalog.
+type OverviewCatalog struct {
+	Accounts    []OverviewCatalogAccount `json:"accounts"`
+	GeneratedAt int64                    `json:"generated_at"`
+	Users       []OverviewCatalogUser    `json:"users"`
+}
+
+// OverviewCatalogAccount defines model for OverviewCatalogAccount.
+type OverviewCatalogAccount struct {
+	Id                string                   `json:"id"`
+	OperationalStatus AccountOperationalStatus `json:"operational_status"`
+}
+
+// OverviewCatalogUser defines model for OverviewCatalogUser.
+type OverviewCatalogUser struct {
+	Email  openapi_types.Email       `json:"email"`
+	Status OverviewCatalogUserStatus `json:"status"`
+}
+
+// OverviewCatalogUserStatus defines model for OverviewCatalogUser.Status.
+type OverviewCatalogUserStatus string
+
 // OverviewPayload defines model for OverviewPayload.
 type OverviewPayload struct {
 	GeneratedAt int64                 `json:"generated_at"`
@@ -1818,6 +2389,16 @@ type OverviewPayload struct {
 
 // OverviewPayloadSource defines model for OverviewPayload.Source.
 type OverviewPayloadSource string
+
+// OverviewStatusPayload defines model for OverviewStatusPayload.
+type OverviewStatusPayload struct {
+	AuthorizedAccounts int      `json:"authorized_accounts"`
+	GeneratedAt        int64    `json:"generated_at"`
+	Requests5m         int64    `json:"requests_5m"`
+	RunningServices    int      `json:"running_services"`
+	TotalServices      int      `json:"total_services"`
+	Warnings           []string `json:"warnings"`
+}
 
 // OverviewSummary defines model for OverviewSummary.
 type OverviewSummary struct {
@@ -1945,6 +2526,12 @@ type PortalProfile struct {
 	CurrentGroup string              `json:"current_group"`
 	GeneratedAt  int64               `json:"generated_at"`
 	User         openapi_types.Email `json:"user"`
+}
+
+// PortalQuota defines model for PortalQuota.
+type PortalQuota struct {
+	GeneratedAt int64           `json:"generated_at"`
+	WeeklyQuota UserWeeklyQuota `json:"weekly_quota"`
 }
 
 // PortalRotateKeyRequest defines model for PortalRotateKeyRequest.
@@ -2195,6 +2782,15 @@ type ReleaseStatus struct {
 // ReleaseStatusStatus defines model for ReleaseStatus.Status.
 type ReleaseStatusStatus string
 
+// ResetAccountQuotaInspection defines model for ResetAccountQuotaInspection.
+type ResetAccountQuotaInspection struct {
+	Account          string                   `json:"account"`
+	AvailableCount   *int64                   `json:"available_count"`
+	Credits          []ResetQuotaCreditOption `json:"credits"`
+	DetailsTruncated bool                     `json:"details_truncated"`
+	Windows          []ResetQuotaWindow       `json:"windows"`
+}
+
 // ResetAccountQuotaRequest defines model for ResetAccountQuotaRequest.
 type ResetAccountQuotaRequest struct {
 	Account string `json:"account"`
@@ -2223,6 +2819,13 @@ type ResetQuotaCredit struct {
 	Title      *string `json:"title,omitempty"`
 }
 
+// ResetQuotaCreditOption defines model for ResetQuotaCreditOption.
+type ResetQuotaCreditOption struct {
+	ExpiresAt *int64 `json:"expires_at,omitempty"`
+	Id        string `json:"id"`
+	Title     string `json:"title"`
+}
+
 // ResetQuotaWindow defines model for ResetQuotaWindow.
 type ResetQuotaWindow struct {
 	Key             string `json:"key"`
@@ -2238,6 +2841,7 @@ type RuntimeJob struct {
 	FinishedAt *int64                  `json:"finished_at,omitempty"`
 	Id         string                  `json:"id"`
 	Name       string                  `json:"name"`
+	Output     *string                 `json:"output,omitempty"`
 	Result     *RuntimeOperationResult `json:"result,omitempty"`
 	StartedAt  *int64                  `json:"started_at,omitempty"`
 	Status     RuntimeJobStatus        `json:"status"`
@@ -2310,6 +2914,7 @@ type RuntimeOperationResultAction string
 // RuntimeService defines model for RuntimeService.
 type RuntimeService struct {
 	ContainerId string `json:"container_id"`
+	Health      string `json:"health"`
 	Image       string `json:"image"`
 	Name        string `json:"name"`
 	Service     string `json:"service"`
@@ -2330,6 +2935,35 @@ type SendNotificationResponse struct {
 
 // SendNotificationResponseFormat defines model for SendNotificationResponse.Format.
 type SendNotificationResponseFormat string
+
+// SettingsWorkspace defines model for SettingsWorkspace.
+type SettingsWorkspace struct {
+	Backups     SettingsWorkspaceBackups   `json:"backups"`
+	RecentAudit []SettingsWorkspaceAudit   `json:"recent_audit"`
+	Storage     []SettingsWorkspaceStorage `json:"storage"`
+}
+
+// SettingsWorkspaceAudit defines model for SettingsWorkspaceAudit.
+type SettingsWorkspaceAudit struct {
+	Action    string `json:"action"`
+	Outcome   string `json:"outcome"`
+	Target    string `json:"target"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// SettingsWorkspaceBackups defines model for SettingsWorkspaceBackups.
+type SettingsWorkspaceBackups struct {
+	Count  int    `json:"count"`
+	Latest string `json:"latest"`
+}
+
+// SettingsWorkspaceStorage defines model for SettingsWorkspaceStorage.
+type SettingsWorkspaceStorage struct {
+	Exists bool   `json:"exists"`
+	Label  string `json:"label"`
+	Mode   string `json:"mode"`
+	Path   string `json:"path"`
+}
 
 // Team defines model for Team.
 type Team struct {
@@ -2544,14 +3178,15 @@ type UpdateUserQuotaRequest struct {
 // UpdateUserTeamRequest defines model for UpdateUserTeamRequest.
 type UpdateUserTeamRequest struct {
 	Email          openapi_types.Email `json:"email"`
-	ExpectedTeamId *string             `json:"expected_team_id"`
+	ExpectedTeamId *string             `json:"expected_team_id,omitempty"`
 	TeamId         *string             `json:"team_id"`
 }
 
 // UpdateUserTeamsRequest defines model for UpdateUserTeamsRequest.
 type UpdateUserTeamsRequest struct {
-	TeamId *string               `json:"team_id"`
-	Users  []openapi_types.Email `json:"users"`
+	ExpectedTeamId *string               `json:"expected_team_id,omitempty"`
+	TeamId         *string               `json:"team_id"`
+	Users          []openapi_types.Email `json:"users"`
 }
 
 // UsageBreakdown defines model for UsageBreakdown.
@@ -2659,58 +3294,131 @@ type UsageReasoningMetrics struct {
 // UsageWindow Supported values vary by route; unsupported values fail closed with `invalid_request`.
 type UsageWindow string
 
-// UserCatalog defines model for UserCatalog.
-type UserCatalog struct {
-	GeneratedAt int64         `json:"generated_at"`
-	Pagination  Pagination    `json:"pagination"`
-	Users       []UserSummary `json:"users"`
+// UserAccountDetail defines model for UserAccountDetail.
+type UserAccountDetail struct {
+	Account      string                  `json:"account"`
+	AccountEmail openapi_types.Email     `json:"account_email"`
+	HistoryCount int                     `json:"history_count"`
+	Key          *UserKeyPreview         `json:"key"`
+	Status       UserAccountDetailStatus `json:"status"`
+	Usage        WeightedUsageMetrics    `json:"usage"`
 }
 
-// UserCreateCredential defines model for UserCreateCredential.
-type UserCreateCredential struct {
-	Accounts           int                 `json:"accounts"`
-	ApiKey             string              `json:"api_key"`
-	InitialPassword    string              `json:"initial_password"`
-	SnapshotGeneration string              `json:"snapshot_generation"`
-	TeamId             *string             `json:"team_id"`
-	User               openapi_types.Email `json:"user"`
+// UserAccountDetailStatus defines model for UserAccountDetail.Status.
+type UserAccountDetailStatus string
+
+// UserCatalog defines model for UserCatalog.
+type UserCatalog struct {
+	Accounts map[string]struct {
+		Email openapi_types.Email `json:"email"`
+	} `json:"accounts"`
+	Collector          CollectorStatus          `json:"collector"`
+	GeneratedAt        int64                    `json:"generated_at"`
+	Pagination         Pagination               `json:"pagination"`
+	SummaryCached      bool                     `json:"summary_cached"`
+	SummaryGeneratedAt int64                    `json:"summary_generated_at"`
+	Tags               []map[string]interface{} `json:"tags"`
+	Teams              []Team                   `json:"teams"`
+	Users              []UserSummary            `json:"users"`
+
+	// Window Supported values vary by route; unsupported values fail closed with `invalid_request`.
+	Window         UsageWindow `json:"window"`
+	WindowEndAt    *int64      `json:"window_end_at"`
+	WindowSeconds  *int64      `json:"window_seconds"`
+	WindowStartAt  *int64      `json:"window_start_at"`
+	WindowTimezone string      `json:"window_timezone"`
 }
 
 // UserCreateResponse defines model for UserCreateResponse.
 type UserCreateResponse struct {
-	Message string               `json:"message"`
-	User    UserCreateCredential `json:"user"`
+	InitialPassword string           `json:"initial_password"`
+	Keys            []UserOneTimeKey `json:"keys"`
+	Message         string           `json:"message"`
+	TeamId          *string          `json:"team_id"`
 }
 
-// UserEmailConfirmRequest defines model for UserEmailConfirmRequest.
-type UserEmailConfirmRequest struct {
-	Confirm string              `json:"confirm"`
-	Email   openapi_types.Email `json:"email"`
+// UserDetail defines model for UserDetail.
+type UserDetail struct {
+	AccountCount          int                  `json:"account_count"`
+	Accounts              []UserAccountDetail  `json:"accounts"`
+	ActiveAccounts        int                  `json:"active_accounts"`
+	ActiveKeys            int                  `json:"active_keys"`
+	CreatedAt             int64                `json:"created_at"`
+	Email                 openapi_types.Email  `json:"email"`
+	RouteAccountId        *string              `json:"route_account_id"`
+	Status                UserDetailStatus     `json:"status"`
+	Team                  *UserTeam            `json:"team"`
+	TeamId                *string              `json:"team_id"`
+	TeamMembershipVersion int64                `json:"team_membership_version"`
+	TotalRecords          int                  `json:"total_records"`
+	UpdatedAt             int64                `json:"updated_at"`
+	Usage                 WeightedUsageMetrics `json:"usage"`
+	WeeklyQuota           UserWeeklyQuota      `json:"weekly_quota"`
 }
 
-// UserKeyRotation defines model for UserKeyRotation.
-type UserKeyRotation struct {
-	ApiKey             string `json:"api_key"`
-	SnapshotGeneration string `json:"snapshot_generation"`
+// UserDetailStatus defines model for UserDetail.Status.
+type UserDetailStatus string
+
+// UserDetailResponse defines model for UserDetailResponse.
+type UserDetailResponse struct {
+	GeneratedAt int64      `json:"generated_at"`
+	User        UserDetail `json:"user"`
+
+	// Window Supported values vary by route; unsupported values fail closed with `invalid_request`.
+	Window         UsageWindow `json:"window"`
+	WindowEndAt    *int64      `json:"window_end_at"`
+	WindowSeconds  *int64      `json:"window_seconds"`
+	WindowStartAt  *int64      `json:"window_start_at"`
+	WindowTimezone string      `json:"window_timezone"`
+}
+
+// UserEmailRequest defines model for UserEmailRequest.
+type UserEmailRequest struct {
+	Email openapi_types.Email `json:"email"`
+}
+
+// UserKeyActionRequest defines model for UserKeyActionRequest.
+type UserKeyActionRequest struct {
+	Label string `json:"label"`
+}
+
+// UserKeyPreview defines model for UserKeyPreview.
+type UserKeyPreview struct {
+	Account      string              `json:"account"`
+	AccountEmail string              `json:"account_email"`
+	CreatedAt    int64               `json:"created_at"`
+	Label        string              `json:"label"`
+	Preview      string              `json:"preview"`
+	Status       string              `json:"status"`
+	UpdatedAt    int64               `json:"updated_at"`
+	User         openapi_types.Email `json:"user"`
 }
 
 // UserKeyRotationResponse defines model for UserKeyRotationResponse.
 type UserKeyRotationResponse struct {
-	Key     UserKeyRotation `json:"key"`
-	Message string          `json:"message"`
+	Keys    []UserOneTimeKey `json:"keys"`
+	Message string           `json:"message"`
 }
 
-// UserPasswordReset defines model for UserPasswordReset.
-type UserPasswordReset struct {
-	InitialPassword        string              `json:"initial_password"`
-	PasswordChangeRequired bool                `json:"password_change_required"`
-	User                   openapi_types.Email `json:"user"`
+// UserOneTimeKey defines model for UserOneTimeKey.
+type UserOneTimeKey struct {
+	Account      string              `json:"account"`
+	AccountEmail string              `json:"account_email"`
+	CreatedAt    int64               `json:"created_at"`
+	Key          string              `json:"key"`
+	Label        string              `json:"label"`
+	Preview      string              `json:"preview"`
+	Status       string              `json:"status"`
+	UpdatedAt    int64               `json:"updated_at"`
+	User         openapi_types.Email `json:"user"`
 }
 
 // UserPasswordResetResponse defines model for UserPasswordResetResponse.
 type UserPasswordResetResponse struct {
-	Message  string            `json:"message"`
-	Password UserPasswordReset `json:"password"`
+	InitialPassword        string              `json:"initial_password"`
+	Message                string              `json:"message"`
+	PasswordChangeRequired bool                `json:"password_change_required"`
+	User                   openapi_types.Email `json:"user"`
 }
 
 // UserQuotaActionRequest defines model for UserQuotaActionRequest.
@@ -2799,17 +3507,20 @@ type UserQuotaResult struct {
 
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
-	ActiveAccounts        int                 `json:"active_accounts"`
-	ActiveKeys            int                 `json:"active_keys"`
-	CreatedAt             int64               `json:"created_at"`
-	Email                 openapi_types.Email `json:"email"`
-	RouteAccountId        *string             `json:"route_account_id"`
-	Status                UserSummaryStatus   `json:"status"`
-	Team                  *UserTeam           `json:"team"`
-	TeamId                *string             `json:"team_id"`
-	TeamMembershipVersion int64               `json:"team_membership_version"`
-	TotalRecords          int                 `json:"total_records"`
-	UpdatedAt             int64               `json:"updated_at"`
+	AccountCount          int                  `json:"account_count"`
+	ActiveAccounts        int                  `json:"active_accounts"`
+	ActiveKeys            int                  `json:"active_keys"`
+	CreatedAt             int64                `json:"created_at"`
+	Email                 openapi_types.Email  `json:"email"`
+	RouteAccountId        *string              `json:"route_account_id"`
+	Status                UserSummaryStatus    `json:"status"`
+	Team                  *UserTeam            `json:"team"`
+	TeamId                *string              `json:"team_id"`
+	TeamMembershipVersion int64                `json:"team_membership_version"`
+	TotalRecords          int                  `json:"total_records"`
+	UpdatedAt             int64                `json:"updated_at"`
+	Usage                 WeightedUsageMetrics `json:"usage"`
+	WeeklyQuota           UserWeeklyQuota      `json:"weekly_quota"`
 }
 
 // UserSummaryStatus defines model for UserSummary.Status.
@@ -2824,6 +3535,7 @@ type UserTeam struct {
 
 // UserWeeklyQuota defines model for UserWeeklyQuota.
 type UserWeeklyQuota struct {
+	AdjustmentCount            int64                    `json:"adjustment_count"`
 	BaseLimitTokens            *int64                   `json:"base_limit_tokens"`
 	BonusTokens                int64                    `json:"bonus_tokens"`
 	DefaultLimitTokens         *int64                   `json:"default_limit_tokens"`
@@ -2834,15 +3546,22 @@ type UserWeeklyQuota struct {
 	PolicyMode                 UserQuotaMode            `json:"policy_mode"`
 	PolicyResetAt              *int64                   `json:"policy_reset_at"`
 	PolicyTokens               *int64                   `json:"policy_tokens"`
+	PolicyUpdatedAt            *int64                   `json:"policy_updated_at"`
+	PolicyUpdatedBy            *string                  `json:"policy_updated_by"`
 	QuotaUnit                  UserWeeklyQuotaQuotaUnit `json:"quota_unit"`
 	RawUsedTokens              int64                    `json:"raw_used_tokens"`
 	RemainingTokens            *int64                   `json:"remaining_tokens"`
+	SoftLimit                  bool                     `json:"soft_limit"`
+	Source                     UserWeeklyQuotaSource    `json:"source"`
 	Timezone                   string                   `json:"timezone"`
 	Unlimited                  bool                     `json:"unlimited"`
+	UnweightedUsedTokens       int64                    `json:"unweighted_used_tokens"`
+	UsageResetTokens           int64                    `json:"usage_reset_tokens"`
 	UsedPercent                *float32                 `json:"used_percent"`
 	UsedTokens                 int64                    `json:"used_tokens"`
 	WeekEndAt                  int64                    `json:"week_end_at"`
 	WeekStartAt                int64                    `json:"week_start_at"`
+	WeightedRawUsedTokens      int64                    `json:"weighted_raw_used_tokens"`
 	WeightedUsedTokens         int64                    `json:"weighted_used_tokens"`
 }
 
@@ -2851,6 +3570,9 @@ type UserWeeklyQuotaPeriod string
 
 // UserWeeklyQuotaQuotaUnit defines model for UserWeeklyQuota.QuotaUnit.
 type UserWeeklyQuotaQuotaUnit string
+
+// UserWeeklyQuotaSource defines model for UserWeeklyQuota.Source.
+type UserWeeklyQuotaSource string
 
 // WeightedUsageMetrics defines model for WeightedUsageMetrics.
 type WeightedUsageMetrics struct {
@@ -2905,6 +3627,20 @@ type ErrorResponse = ErrorEnvelope
 // PortalSessionResponse defines model for PortalSessionResponse.
 type PortalSessionResponse = PortalSession
 
+// ListAdminAccountsParams defines parameters for ListAdminAccounts.
+type ListAdminAccountsParams struct {
+	// Window Route-specific usage range; `custom` also requires `start_at` and `end_at`.
+	Window  *UsageWindowQuery  `form:"window,omitempty" json:"window,omitempty"`
+	StartAt *UsageStartAtQuery `form:"start_at,omitempty" json:"start_at,omitempty"`
+	EndAt   *UsageEndAtQuery   `form:"end_at,omitempty" json:"end_at,omitempty"`
+
+	// Fresh Request a single-flight official quota refresh when the persistent snapshot is old enough.
+	Fresh *ListAdminAccountsParamsFresh `form:"fresh,omitempty" json:"fresh,omitempty"`
+}
+
+// ListAdminAccountsParamsFresh defines parameters for ListAdminAccounts.
+type ListAdminAccountsParamsFresh string
+
 // CreateAdminAccountParams defines parameters for CreateAdminAccount.
 type CreateAdminAccountParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
@@ -2918,6 +3654,16 @@ type ClearAdminAccountAuthParams struct {
 // DeleteAdminAccountParams defines parameters for DeleteAdminAccount.
 type DeleteAdminAccountParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// UpdateAdminAccountPolicyParams defines parameters for UpdateAdminAccountPolicy.
+type UpdateAdminAccountPolicyParams struct {
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// InspectAdminAccountQuotaResetParams defines parameters for InspectAdminAccountQuotaReset.
+type InspectAdminAccountQuotaResetParams struct {
+	Account string `form:"account" json:"account"`
 }
 
 // RebalanceAdminAccountParams defines parameters for RebalanceAdminAccount.
@@ -3124,11 +3870,36 @@ type GetAdminTeamUsageBreakdownParams struct {
 
 // ListAdminUsersParams defines parameters for ListAdminUsers.
 type ListAdminUsersParams struct {
-	Q        *string `form:"q,omitempty" json:"q,omitempty"`
-	TeamId   *string `form:"team_id,omitempty" json:"team_id,omitempty"`
-	Page     *int    `form:"page,omitempty" json:"page,omitempty"`
-	PageSize *int    `form:"page_size,omitempty" json:"page_size,omitempty"`
+	View *ListAdminUsersParamsView `form:"view,omitempty" json:"view,omitempty"`
+
+	// Window Route-specific usage range; `custom` also requires `start_at` and `end_at`.
+	Window     *UsageWindowQuery               `form:"window,omitempty" json:"window,omitempty"`
+	StartAt    *UsageStartAtQuery              `form:"start_at,omitempty" json:"start_at,omitempty"`
+	EndAt      *UsageEndAtQuery                `form:"end_at,omitempty" json:"end_at,omitempty"`
+	Q          *string                         `form:"q,omitempty" json:"q,omitempty"`
+	TeamId     *string                         `form:"team_id,omitempty" json:"team_id,omitempty"`
+	UsageState *ListAdminUsersParamsUsageState `form:"usage_state,omitempty" json:"usage_state,omitempty"`
+	Sort       *ListAdminUsersParamsSort       `form:"sort,omitempty" json:"sort,omitempty"`
+	Direction  *ListAdminUsersParamsDirection  `form:"direction,omitempty" json:"direction,omitempty"`
+	Fresh      *bool                           `form:"fresh,omitempty" json:"fresh,omitempty"`
+	Page       *int                            `form:"page,omitempty" json:"page,omitempty"`
+	PageSize   *ListAdminUsersParamsPageSize   `form:"page_size,omitempty" json:"page_size,omitempty"`
 }
+
+// ListAdminUsersParamsView defines parameters for ListAdminUsers.
+type ListAdminUsersParamsView string
+
+// ListAdminUsersParamsUsageState defines parameters for ListAdminUsers.
+type ListAdminUsersParamsUsageState string
+
+// ListAdminUsersParamsSort defines parameters for ListAdminUsers.
+type ListAdminUsersParamsSort string
+
+// ListAdminUsersParamsDirection defines parameters for ListAdminUsers.
+type ListAdminUsersParamsDirection string
+
+// ListAdminUsersParamsPageSize defines parameters for ListAdminUsers.
+type ListAdminUsersParamsPageSize int
 
 // CreateAdminUserParams defines parameters for CreateAdminUser.
 type CreateAdminUserParams struct {
@@ -3138,6 +3909,16 @@ type CreateAdminUserParams struct {
 // DeleteAdminUserParams defines parameters for DeleteAdminUser.
 type DeleteAdminUserParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// GetAdminUserDetailParams defines parameters for GetAdminUserDetail.
+type GetAdminUserDetailParams struct {
+	Email EmailQuery `form:"email" json:"email"`
+
+	// Window Route-specific usage range; `custom` also requires `start_at` and `end_at`.
+	Window  *UsageWindowQuery  `form:"window,omitempty" json:"window,omitempty"`
+	StartAt *UsageStartAtQuery `form:"start_at,omitempty" json:"start_at,omitempty"`
+	EndAt   *UsageEndAtQuery   `form:"end_at,omitempty" json:"end_at,omitempty"`
 }
 
 // DeleteAdminUserQuotaParams defines parameters for DeleteAdminUserQuota.
@@ -3219,6 +4000,9 @@ type ClearAdminAccountAuthJSONRequestBody = AccountClearAuthRequest
 // DeleteAdminAccountJSONRequestBody defines body for DeleteAdminAccount for application/json ContentType.
 type DeleteAdminAccountJSONRequestBody = AccountDeleteRequest
 
+// UpdateAdminAccountPolicyJSONRequestBody defines body for UpdateAdminAccountPolicy for application/json ContentType.
+type UpdateAdminAccountPolicyJSONRequestBody = AccountUpdateRequest
+
 // RebalanceAdminAccountJSONRequestBody defines body for RebalanceAdminAccount for application/json ContentType.
 type RebalanceAdminAccountJSONRequestBody = RebalanceAccountRequest
 
@@ -3235,7 +4019,7 @@ type UpdateAdminAccountJSONRequestBody = AccountUpdateRequest
 type CancelLegacyAdminRuntimeJobJSONRequestBody = LegacyRuntimeJobCancelRequest
 
 // RotateAdminUserKeyJSONRequestBody defines body for RotateAdminUserKey for application/json ContentType.
-type RotateAdminUserKeyJSONRequestBody = UserEmailConfirmRequest
+type RotateAdminUserKeyJSONRequestBody = UserKeyActionRequest
 
 // CreateLegacyAdminRuntimeJobJSONRequestBody defines body for CreateLegacyAdminRuntimeJob for application/json ContentType.
 type CreateLegacyAdminRuntimeJobJSONRequestBody = LegacyRuntimeJobRequest
@@ -3289,10 +4073,10 @@ type UpdateAdminUserQuotaJSONRequestBody = UpdateUserQuotaRequest
 type ApplyAdminUserQuotaActionJSONRequestBody = UserQuotaActionRequest
 
 // ResetAdminUserPasswordJSONRequestBody defines body for ResetAdminUserPassword for application/json ContentType.
-type ResetAdminUserPasswordJSONRequestBody = UserEmailConfirmRequest
+type ResetAdminUserPasswordJSONRequestBody = UserEmailRequest
 
 // RevokeAdminUserJSONRequestBody defines body for RevokeAdminUser for application/json ContentType.
-type RevokeAdminUserJSONRequestBody = UserEmailConfirmRequest
+type RevokeAdminUserJSONRequestBody = UserEmailRequest
 
 // UpdateAdminUserTeamJSONRequestBody defines body for UpdateAdminUserTeam for application/json ContentType.
 type UpdateAdminUserTeamJSONRequestBody = UpdateUserTeamRequest
@@ -3311,6 +4095,68 @@ type UpdatePortalPasswordJSONRequestBody = PortalPasswordRequest
 
 // CreatePortalSessionJSONRequestBody defines body for CreatePortalSession for application/json ContentType.
 type CreatePortalSessionJSONRequestBody = PortalLoginRequest
+
+// AsAccountCatalogWindow0 returns the union data inside the AccountCatalog_Window as a AccountCatalogWindow0
+func (t AccountCatalog_Window) AsAccountCatalogWindow0() (AccountCatalogWindow0, error) {
+	var body AccountCatalogWindow0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAccountCatalogWindow0 overwrites any union data inside the AccountCatalog_Window as the provided AccountCatalogWindow0
+func (t *AccountCatalog_Window) FromAccountCatalogWindow0(v AccountCatalogWindow0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAccountCatalogWindow0 performs a merge with any union data inside the AccountCatalog_Window, using the provided AccountCatalogWindow0
+func (t *AccountCatalog_Window) MergeAccountCatalogWindow0(v AccountCatalogWindow0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAccountCatalogWindow1 returns the union data inside the AccountCatalog_Window as a AccountCatalogWindow1
+func (t AccountCatalog_Window) AsAccountCatalogWindow1() (AccountCatalogWindow1, error) {
+	var body AccountCatalogWindow1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAccountCatalogWindow1 overwrites any union data inside the AccountCatalog_Window as the provided AccountCatalogWindow1
+func (t *AccountCatalog_Window) FromAccountCatalogWindow1(v AccountCatalogWindow1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAccountCatalogWindow1 performs a merge with any union data inside the AccountCatalog_Window, using the provided AccountCatalogWindow1
+func (t *AccountCatalog_Window) MergeAccountCatalogWindow1(v AccountCatalogWindow1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t AccountCatalog_Window) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *AccountCatalog_Window) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsConfigurationValue0 returns the union data inside the ConfigurationValue as a ConfigurationValue0
 func (t ConfigurationValue) AsConfigurationValue0() (ConfigurationValue0, error) {

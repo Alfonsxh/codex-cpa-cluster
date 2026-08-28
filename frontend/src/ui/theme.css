@@ -1,12 +1,12 @@
 :root {
   color-scheme: light;
-  font-family: "Geist", "Plus Jakarta Sans", "Avenir Next", "Segoe UI", "PingFang SC", sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  --sans: "Geist", "Plus Jakarta Sans", "Avenir Next", "Segoe UI", "PingFang SC", sans-serif;
+  font-family: var(--sans);
   --canvas: #f3f6fb;
   --surface: #ffffff;
   --surface-2: #f8faff;
   --surface-soft: #eef2f9;
+  --surface-3: #eef2f9;
   --ink: #1d2437;
   --muted: #667085;
   --faint: #8b95a7;
@@ -22,6 +22,7 @@
   --danger-soft: #fff0f1;
   --shadow: 0 16px 46px rgb(48 65 105 / 9%);
   --shadow-soft: 0 4px 16px rgb(48 65 105 / 6%);
+  --radius: 16px;
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
@@ -31,6 +32,7 @@
   --surface: #151b28;
   --surface-2: #1a2232;
   --surface-soft: #212b3e;
+  --surface-3: #212b3e;
   --ink: #edf1fb;
   --muted: #a4aec2;
   --faint: #7f8ba3;
@@ -49,7 +51,9 @@
 }
 
 html { min-width: 320px; min-height: 100%; overflow-x: clip; background: var(--canvas); }
-body { color: var(--ink); background: var(--canvas); -webkit-font-smoothing: antialiased; }
+body,
+.ant-app { color: var(--ink); background: var(--canvas); line-height: normal; }
+body { -webkit-font-smoothing: antialiased; }
 
 .theme-toggle {
   min-height: 38px;
@@ -58,13 +62,13 @@ body { color: var(--ink); background: var(--canvas); -webkit-font-smoothing: ant
   border-radius: 9px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 7px;
   background: var(--surface);
   color: var(--muted);
   box-shadow: var(--shadow-soft);
   font-size: 11px;
   font-weight: 650;
+  line-height: normal;
   cursor: pointer;
   transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
@@ -73,7 +77,7 @@ body { color: var(--ink); background: var(--canvas); -webkit-font-smoothing: ant
 .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .theme-toggle-icon { color: var(--accent); font-size: 15px; line-height: 1; }
 
-@media (max-width: 560px) {
+@media (max-width: 460px) {
   .theme-toggle-label { display: none; }
   .theme-toggle { width: 38px; padding-inline: 0; }
 }

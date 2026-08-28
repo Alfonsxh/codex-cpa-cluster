@@ -41,6 +41,22 @@ type cancelLegacyRuntimeJobRequest struct {
 	ID string `json:"id"`
 }
 
+// legacyRuntimeJob preserves the stable compatibility job shape. Output is an
+// array of complete lines, action/result are absent, and timestamps/exit code
+// remain explicit nullable fields. The namespaced /runtime/jobs API exposes
+// the native Go job shape with one bounded output string.
+type legacyRuntimeJob struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Target     string    `json:"target"`
+	Status     string    `json:"status"`
+	CreatedAt  int64     `json:"created_at"`
+	StartedAt  *int64    `json:"started_at"`
+	FinishedAt *int64    `json:"finished_at"`
+	ExitCode   *int      `json:"exit_code"`
+	Output     *[]string `json:"output,omitempty"`
+}
+
 type operationImpactResponse struct {
 	Action      string `json:"action"`
 	Target      string `json:"target"`
@@ -150,6 +166,14 @@ func (server *Server) readRuntimeLogs(c *gin.Context) {
 }
 
 func (server *Server) listRuntimeJobs(c *gin.Context) {
+	server.listRuntimeJobsWithShape(c, false)
+}
+
+func (server *Server) listLegacyRuntimeJobs(c *gin.Context) {
+	server.listRuntimeJobsWithShape(c, true)
+}
+
+func (server *Server) listRuntimeJobsWithShape(c *gin.Context, legacy bool) {
 	if !server.requireRuntime(c, true) {
 		return
 	}
@@ -162,10 +186,27 @@ func (server *Server) listRuntimeJobs(c *gin.Context) {
 		}
 		limit = parsed
 	}
-	c.JSON(http.StatusOK, gin.H{"jobs": server.runtimeJobs.Recent(limit)})
+	jobs := server.runtimeJobs.Recent(limit)
+	if legacy {
+		legacyJobs := make([]legacyRuntimeJob, 0, len(jobs))
+		for _, job := range jobs {
+			legacyJobs = append(legacyJobs, toLegacyRuntimeJob(job, false))
+		}
+		c.JSON(http.StatusOK, gin.H{"jobs": legacyJobs})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"jobs": jobs})
 }
 
 func (server *Server) readRuntimeJob(c *gin.Context) {
+	server.readRuntimeJobWithShape(c, false)
+}
+
+func (server *Server) readLegacyRuntimeJob(c *gin.Context) {
+	server.readRuntimeJobWithShape(c, true)
+}
+
+func (server *Server) readRuntimeJobWithShape(c *gin.Context, legacy bool) {
 	if !server.requireRuntime(c, true) {
 		return
 	}
@@ -174,18 +215,22 @@ func (server *Server) readRuntimeJob(c *gin.Context) {
 		server.writeRuntimeError(c, "read runtime job", err)
 		return
 	}
+	if legacy {
+		c.JSON(http.StatusOK, gin.H{"job": toLegacyRuntimeJob(job, true)})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"job": job})
 }
 
 func (server *Server) submitConfirmedRuntimeJob(c *gin.Context) {
-	server.submitRuntimeJob(c, true)
+	server.submitRuntimeJob(c, true, false)
 }
 
 func (server *Server) submitLegacyRuntimeJob(c *gin.Context) {
-	server.submitRuntimeJob(c, false)
+	server.submitRuntimeJob(c, false, true)
 }
 
-func (server *Server) submitRuntimeJob(c *gin.Context, requireConfirmation bool) {
+func (server *Server) submitRuntimeJob(c *gin.Context, requireConfirmation bool, legacy bool) {
 	if !server.requireRuntime(c, true) {
 		return
 	}
@@ -197,6 +242,9 @@ func (server *Server) submitRuntimeJob(c *gin.Context, requireConfirmation bool)
 	action := strings.ToLower(strings.TrimSpace(body.Action))
 	target := strings.ToLower(strings.TrimSpace(body.Target))
 	if target == "" {
+		target = "all"
+	}
+	if action == "image-pull" {
 		target = "all"
 	}
 	if requireConfirmation && body.Confirm != action+":"+target {
@@ -214,7 +262,11 @@ func (server *Server) submitRuntimeJob(c *gin.Context, requireConfirmation bool)
 		message = "已有相同任务，已直接打开"
 		status = http.StatusOK
 	}
-	c.JSON(status, gin.H{"message": message, "job": submission.Job, "reused": submission.Reused})
+	job := any(submission.Job)
+	if legacy {
+		job = toLegacyRuntimeJob(submission.Job, true)
+	}
+	c.JSON(status, gin.H{"message": message, "job": job, "reused": submission.Reused})
 }
 
 func (server *Server) cancelRuntimeJob(c *gin.Context) {
@@ -233,16 +285,48 @@ func (server *Server) cancelLegacyRuntimeJob(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "取消任务请求无效", "invalid_request")
 		return
 	}
-	server.cancelRuntimeJobID(c, body.ID)
+	server.cancelRuntimeJobID(c, body.ID, true)
 }
 
-func (server *Server) cancelRuntimeJobID(c *gin.Context, id string) {
+func (server *Server) cancelRuntimeJobID(c *gin.Context, id string, legacy ...bool) {
 	job, err := server.runtimeJobs.Cancel(id)
 	if err != nil {
 		server.writeRuntimeError(c, "cancel runtime job", err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "任务取消请求已提交", "job": job})
+	responseJob := any(job)
+	if len(legacy) > 0 && legacy[0] {
+		responseJob = toLegacyRuntimeJob(job, true)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "任务取消请求已提交", "job": responseJob})
+}
+
+func toLegacyRuntimeJob(job runtimeops.Job, includeOutput bool) legacyRuntimeJob {
+	var exitCode *int
+	switch job.Status {
+	case "succeeded":
+		value := 0
+		exitCode = &value
+	case "failed":
+		value := 1
+		exitCode = &value
+	case "cancelled":
+		value := -15
+		exitCode = &value
+	}
+	result := legacyRuntimeJob{
+		ID: job.ID, Name: job.Name, Target: job.Target, Status: job.Status,
+		CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
+		ExitCode: exitCode,
+	}
+	if includeOutput {
+		lines := make([]string, 0)
+		if output := strings.TrimRight(strings.ReplaceAll(job.Output, "\r\n", "\n"), "\r\n"); output != "" {
+			lines = strings.Split(output, "\n")
+		}
+		result.Output = &lines
+	}
+	return result
 }
 
 func (server *Server) requireRuntime(c *gin.Context, jobs bool) bool {

@@ -53,7 +53,9 @@ type Service struct {
 	Image       string `json:"image"`
 	State       string `json:"state"`
 	Status      string `json:"status"`
+	Health      string `json:"health"`
 	dockerID    string
+	imageID     string
 }
 
 type OperationResult struct {
@@ -226,11 +228,22 @@ func (manager *Manager) List(ctx context.Context) ([]Service, error) {
 		services = append(services, Service{
 			Service: serviceName, ContainerID: shortID(container.ID), Name: name,
 			Image: container.Image, State: strings.ToLower(strings.TrimSpace(string(container.State))),
-			Status: strings.TrimSpace(container.Status), dockerID: container.ID,
+			Status: strings.TrimSpace(container.Status), Health: containerHealth(container.Status),
+			dockerID: container.ID, imageID: container.ImageID,
 		})
 	}
 	sort.Slice(services, func(left, right int) bool { return services[left].Service < services[right].Service })
 	return services, nil
+}
+
+func containerHealth(status string) string {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	for _, health := range []string{"healthy", "unhealthy", "starting"} {
+		if strings.Contains(normalized, "("+health+")") || strings.Contains(normalized, "(health: "+health+")") {
+			return health
+		}
+	}
+	return ""
 }
 
 func (manager *Manager) Start(ctx context.Context, target string) (OperationResult, error) {

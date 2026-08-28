@@ -7,10 +7,8 @@ import {
   Empty,
   Result,
   Row,
-  Select,
   Space,
   Statistic,
-  Table,
   Tag,
   Typography,
   type TableColumnsType
@@ -25,6 +23,8 @@ import {
   type PortalUsageWindow
 } from "../api/portal";
 import type { UsageMetrics } from "../api/usage";
+import { AdminTable } from "./components/AdminTable";
+import { WideSelect } from "./components/WideSelect";
 import { formatTokens } from "./formatters";
 
 type ModelRow = UsageMetrics & { model: string };
@@ -61,7 +61,7 @@ export function PortalUsageBreakdownDrawer({
       destroyOnHidden
       extra={(
         <Space wrap>
-          <Select<PortalUsageWindow>
+          <WideSelect<PortalUsageWindow>
             aria-label="用量时间范围"
             value={window}
             options={portalWindowOptions}
@@ -81,7 +81,7 @@ export function PortalUsageBreakdownDrawer({
         <Alert
           type="info"
           showIcon
-          message="按需实时查询"
+          title="按需实时查询"
           description="仅在抽屉打开时读取当前 SQLite 快照；关闭后停止轮询并释放前端 Query。"
         />
         {query.isPending ? <Card loading /> : null}
@@ -123,13 +123,14 @@ function PortalBreakdownContent({ data }: { data: Awaited<ReturnType<typeof read
         title="模型用量"
         extra={<Typography.Text type="secondary">数据时间：{formatTimestamp(data.generated_at)}</Typography.Text>}
       >
-        <Table<ModelRow>
+        <AdminTable<ModelRow>
           rowKey="model"
           columns={modelColumns}
           dataSource={data.models}
           pagination={false}
           locale={{ emptyText: "当前范围没有模型明细" }}
           scroll={{ x: 620 }}
+          maxBodyHeight="min(48vh, 480px)"
           size="small"
         />
       </Card>

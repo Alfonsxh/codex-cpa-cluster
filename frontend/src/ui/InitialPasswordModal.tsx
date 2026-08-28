@@ -1,11 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Alert, Button, Form, Input, Modal, Space, Typography } from "antd";
+import { Button, Modal } from "antd";
 import { useMutation } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
 import { saveInitialPassword } from "../api/general-settings";
+import { LegacyPasswordInput } from "./components/LegacyPasswordInput";
 
 const initialPasswordSchema = z.object({
   initialPassword: z.string().min(8, "初始密码至少需要 8 位").max(128, "初始密码不能超过 128 位"),
@@ -54,62 +55,52 @@ export function InitialPasswordModal({
     mutation.reset();
     onClose();
   };
+  const error = form.formState.errors.initialPassword?.message
+    ?? form.formState.errors.confirmation?.message
+    ?? (mutation.isError
+      ? mutation.error instanceof ApiError ? mutation.error.message : "请稍后重试"
+      : "");
 
   return (
     <Modal
-      title="设置未来用户初始密码"
+      className="legacy-account-editor-modal legacy-settings-form-modal"
+      title={<div className="legacy-dialog-title"><strong>设置用户初始密码</strong><span>ENCRYPTED USER SECRET</span></div>}
       open={open}
-      footer={null}
+      width={560}
+      centered
+      closeIcon={<span className="legacy-dialog-close" aria-hidden="true">×</span>}
+      transitionName=""
+      maskTransitionName=""
+      afterOpenChange={(visible) => { if (visible) form.setFocus("initialPassword"); }}
       onCancel={close}
       destroyOnHidden
+      footer={[
+        <Button key="cancel" className="legacy-modal-ghost" disabled={mutation.isPending} onClick={close}>取消</Button>,
+        <Button
+          key="submit"
+          type="primary"
+          htmlType="submit"
+          form="settings-initial-password-form"
+          disabled={mutation.isPending}
+        >{mutation.isPending ? "正在保存…" : "安全保存"}</Button>
+      ]}
     >
-      <Space orientation="vertical" size={16} className="portal-form-stack">
-        <Typography.Paragraph type="secondary">
-          只用于后续新建或重置用户。已有用户密码不会变化，密码不会在保存后返回或写入浏览器存储。
-        </Typography.Paragraph>
-        {mutation.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="初始密码保存失败"
-            description={mutation.error instanceof ApiError ? mutation.error.message : "请稍后重试"}
-          />
-        ) : null}
-        <form noValidate onSubmit={form.handleSubmit(() => mutation.mutate())}>
-          <Form.Item
-            label="初始密码"
-            htmlFor="settings-initial-password"
-            validateStatus={form.formState.errors.initialPassword ? "error" : undefined}
-            help={form.formState.errors.initialPassword?.message}
-          >
-            <Controller
-              control={form.control}
-              name="initialPassword"
-              render={({ field }) => (
-                <Input.Password id="settings-initial-password" autoComplete="new-password" {...field} />
-              )}
-            />
-          </Form.Item>
-          <Form.Item
-            label="确认初始密码"
-            htmlFor="settings-initial-password-confirmation"
-            validateStatus={form.formState.errors.confirmation ? "error" : undefined}
-            help={form.formState.errors.confirmation?.message}
-          >
-            <Controller
-              control={form.control}
-              name="confirmation"
-              render={({ field }) => (
-                <Input.Password id="settings-initial-password-confirmation" autoComplete="new-password" {...field} />
-              )}
-            />
-          </Form.Item>
-          <Space>
-            <Button onClick={close} disabled={mutation.isPending}>取消</Button>
-            <Button type="primary" htmlType="submit" loading={mutation.isPending}>安全保存</Button>
-          </Space>
-        </form>
-      </Space>
+      <div className="warning-banner">仅影响后续新建或重置的用户。密码以 AES-GCM 加密保存在控制面数据库中，页面不会读取或回显现值。</div>
+      <form id="settings-initial-password-form" noValidate onSubmit={form.handleSubmit(() => mutation.mutate())}>
+        <div className="field">
+          <label htmlFor="settings-initial-password">新初始密码</label>
+          <Controller control={form.control} name="initialPassword" render={({ field }) => (
+            <LegacyPasswordInput id="settings-initial-password" value={field.value} name={field.name} inputRef={field.ref} onBlur={field.onBlur} minLength={8} maxLength={128} onValueChange={field.onChange} />
+          )} />
+        </div>
+        <div className="field account-email-field">
+          <label htmlFor="settings-initial-password-confirmation">再次输入</label>
+          <Controller control={form.control} name="confirmation" render={({ field }) => (
+            <LegacyPasswordInput id="settings-initial-password-confirmation" value={field.value} name={field.name} inputRef={field.ref} onBlur={field.onBlur} minLength={8} maxLength={128} onValueChange={field.onChange} />
+          )} />
+        </div>
+        <p className="form-error" role="alert">{error}</p>
+      </form>
     </Modal>
   );
 }

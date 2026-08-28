@@ -3,7 +3,11 @@ package runtimeops
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -95,6 +99,165 @@ func TestJobManagerReportsFailuresRedactsErrorsAndRejectsFullQueue(t *testing.T)
 	}
 }
 
+func TestJobManagerStreamsSanitizedOAuthOutputReusesAndCancels(t *testing.T) {
+	controller := &blockingController{started: make(chan string, 1), release: make(chan struct{})}
+	login := &blockingLoginController{started: make(chan string, 1), release: make(chan struct{})}
+	manager, err := newJobManagerWithLogin(controller, login, 1, 2, 10)
+	if err != nil {
+		t.Fatalf("new OAuth job manager: %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	submission, err := manager.Submit("login", "alpha")
+	if err != nil {
+		t.Fatalf("submit OAuth job: %v", err)
+	}
+	awaitRuntimeValue(t, login.started, "alpha")
+	deadline := time.Now().Add(2 * time.Second)
+	var running Job
+	for time.Now().Before(deadline) {
+		running, err = manager.Get(submission.Job.ID)
+		if err != nil {
+			t.Fatalf("get OAuth job: %v", err)
+		}
+		if strings.Contains(running.Output, "Codex device URL: https://auth.example.test/device") {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !strings.Contains(running.Output, "Codex device URL: https://auth.example.test/device") {
+		t.Fatalf("OAuth output was not published while running: %q", running.Output)
+	}
+	if strings.Contains(running.Output, "secret-token") || strings.Contains(running.Output, "secret-json") ||
+		!strings.Contains(running.Output, "Bearer [REDACTED]") || !strings.Contains(running.Output, `"access_token":"[REDACTED]"`) {
+		t.Fatalf("OAuth output was not sanitized: %q", running.Output)
+	}
+	reused, err := manager.Submit("login", "alpha")
+	if err != nil || !reused.Reused || reused.Job.ID != submission.Job.ID {
+		t.Fatalf("duplicate OAuth submission = (%#v, %v)", reused, err)
+	}
+	cancelled, err := manager.Cancel(submission.Job.ID)
+	if err != nil || cancelled.Status != "cancelling" {
+		t.Fatalf("cancel OAuth job = (%#v, %v)", cancelled, err)
+	}
+	awaitJobStatus(t, manager, submission.Job.ID, "cancelled")
+	close(login.release)
+}
+
+func TestJobManagerRejectsOAuthWhenLoginControllerIsUnavailable(t *testing.T) {
+	controller := &blockingController{started: make(chan string, 1), release: make(chan struct{})}
+	manager, err := newJobManager(controller, 1, 1, 10)
+	if err != nil {
+		t.Fatalf("new job manager: %v", err)
+	}
+	t.Cleanup(manager.Close)
+	if _, err := manager.Submit("login", "alpha"); !errors.Is(err, ErrRuntimeTarget) {
+		t.Fatalf("OAuth unavailable error = %v", err)
+	}
+}
+
+func TestJobManagerRunsImageActionsUnderSharedOperationLock(t *testing.T) {
+	controller := &blockingController{started: make(chan string, 1), release: make(chan struct{})}
+	login := &blockingLoginController{started: make(chan string, 1), release: make(chan struct{})}
+	locker := &recordingJobLocker{}
+	images := &blockingImageController{
+		started: make(chan string, 2), release: make(chan struct{}), locker: locker,
+	}
+	manager, err := newJobManagerWithControllers(controller, login, images, nil, locker, 1, 2, 10)
+	if err != nil {
+		t.Fatalf("new image job manager: %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	pull, err := manager.Submit("image-pull", "all")
+	if err != nil || pull.Job.Name != "拉取 CPA 镜像" {
+		t.Fatalf("submit image pull = (%#v, %v)", pull, err)
+	}
+	awaitRuntimeValue(t, images.started, "image-pull:all")
+	if !images.observedLock.Load() {
+		t.Fatal("image pull ran outside the identity operation lock")
+	}
+	reused, err := manager.Submit("image-pull", "all")
+	if err != nil || !reused.Reused || reused.Job.ID != pull.Job.ID {
+		t.Fatalf("duplicate image pull = (%#v, %v)", reused, err)
+	}
+	close(images.release)
+	completed := awaitJobStatus(t, manager, pull.Job.ID, "succeeded")
+	if !strings.Contains(completed.Output, "image pull output") {
+		t.Fatalf("image pull output = %q", completed.Output)
+	}
+
+	images.release = make(chan struct{})
+	update, err := manager.Submit("image-update", "alpha")
+	if err != nil || update.Job.Name != "更新 CPA 镜像" {
+		t.Fatalf("submit image update = (%#v, %v)", update, err)
+	}
+	awaitRuntimeValue(t, images.started, "image-update:alpha")
+	close(images.release)
+	awaitJobStatus(t, manager, update.Job.ID, "succeeded")
+	if _, err := manager.Submit("image-pull", "alpha"); !errors.Is(err, ErrRuntimeTarget) {
+		t.Fatalf("non-all image pull error = %v", err)
+	}
+}
+
+func TestJobManagerRejectsImageActionsWithoutController(t *testing.T) {
+	controller := &blockingController{started: make(chan string, 1), release: make(chan struct{})}
+	manager, err := newJobManager(controller, 1, 1, 10)
+	if err != nil {
+		t.Fatalf("new job manager: %v", err)
+	}
+	t.Cleanup(manager.Close)
+	if _, err := manager.Submit("image-update", "all"); !errors.Is(err, ErrRuntimeTarget) {
+		t.Fatalf("image controller unavailable error = %v", err)
+	}
+}
+
+func TestJobManagerRunsFrozenLegacyDiagnosticsAndLocksRender(t *testing.T) {
+	controller := &blockingController{started: make(chan string, 1), release: make(chan struct{})}
+	locker := &recordingJobLocker{}
+	diagnostics := &recordingDiagnosticController{locker: locker}
+	manager, err := newJobManagerWithControllers(controller, nil, nil, diagnostics, locker, 1, 3, 10)
+	if err != nil {
+		t.Fatalf("new diagnostic job manager: %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	for _, test := range []struct {
+		action string
+		name   string
+	}{
+		{action: "health", name: "健康检查"},
+		{action: "verify-routing", name: "路由验证"},
+		{action: "render", name: "渲染并校验配置"},
+	} {
+		submission, submitError := manager.Submit(test.action, "ignored-target")
+		if submitError != nil || submission.Job.Name != test.name || submission.Job.Target != "all" {
+			t.Fatalf("submit %s = (%#v, %v)", test.action, submission, submitError)
+		}
+		completed := awaitJobStatus(t, manager, submission.Job.ID, "succeeded")
+		if !strings.Contains(completed.Output, test.action+" output") {
+			t.Fatalf("%s output = %q", test.action, completed.Output)
+		}
+	}
+	if diagnostics.calls != 3 || !diagnostics.renderObservedLock {
+		t.Fatalf("diagnostic calls=%d render lock=%v", diagnostics.calls, diagnostics.renderObservedLock)
+	}
+}
+
+func TestJobManagerRejectsDiagnosticsWithoutController(t *testing.T) {
+	controller := &blockingController{started: make(chan string, 1), release: make(chan struct{})}
+	manager, err := newJobManager(controller, 1, 1, 10)
+	if err != nil {
+		t.Fatalf("new job manager: %v", err)
+	}
+	t.Cleanup(manager.Close)
+	for _, action := range []string{"health", "verify-routing", "render"} {
+		if _, err := manager.Submit(action, "all"); !errors.Is(err, ErrRuntimeTarget) {
+			t.Fatalf("%s unavailable error = %v", action, err)
+		}
+	}
+}
+
 type blockingController struct {
 	started chan string
 	release chan struct{}
@@ -103,6 +266,116 @@ type blockingController struct {
 	mu         sync.Mutex
 	running    int
 	maxRunning int
+}
+
+type blockingLoginController struct {
+	started chan string
+	release chan struct{}
+}
+
+type blockingImageController struct {
+	started      chan string
+	release      chan struct{}
+	locker       *recordingJobLocker
+	observedLock atomic.Bool
+}
+
+type recordingDiagnosticController struct {
+	locker             *recordingJobLocker
+	calls              int
+	renderObservedLock bool
+}
+
+func (controller *recordingDiagnosticController) Health(
+	_ context.Context,
+	output io.Writer,
+) (OperationResult, error) {
+	controller.calls++
+	_, _ = fmt.Fprintln(output, "health output")
+	return OperationResult{Action: "health", Target: "all"}, nil
+}
+
+func (controller *recordingDiagnosticController) VerifyRouting(
+	_ context.Context,
+	output io.Writer,
+) (OperationResult, error) {
+	controller.calls++
+	_, _ = fmt.Fprintln(output, "verify-routing output")
+	return OperationResult{Action: "verify-routing", Target: "all"}, nil
+}
+
+func (controller *recordingDiagnosticController) Render(
+	_ context.Context,
+	output io.Writer,
+) (OperationResult, error) {
+	controller.calls++
+	controller.renderObservedLock = controller.locker.locked.Load()
+	_, _ = fmt.Fprintln(output, "render output")
+	return OperationResult{Action: "render", Target: "all"}, nil
+}
+
+func (controller *blockingImageController) PullImage(
+	ctx context.Context,
+	output io.Writer,
+) (OperationResult, error) {
+	return controller.run(ctx, "image-pull", "all", output)
+}
+
+func (controller *blockingImageController) UpdateImage(
+	ctx context.Context,
+	target string,
+	output io.Writer,
+) (OperationResult, error) {
+	return controller.run(ctx, "image-update", target, output)
+}
+
+func (controller *blockingImageController) run(
+	ctx context.Context,
+	action string,
+	target string,
+	output io.Writer,
+) (OperationResult, error) {
+	controller.observedLock.Store(controller.locker.locked.Load())
+	_, _ = fmt.Fprintln(output, "image pull output")
+	controller.started <- action + ":" + target
+	select {
+	case <-ctx.Done():
+		return OperationResult{}, ctx.Err()
+	case <-controller.release:
+		return OperationResult{Action: action, Target: target}, nil
+	}
+}
+
+type recordingJobLocker struct {
+	mutex  sync.Mutex
+	locked atomic.Bool
+}
+
+func (locker *recordingJobLocker) Lock() {
+	locker.mutex.Lock()
+	locker.locked.Store(true)
+}
+
+func (locker *recordingJobLocker) Unlock() {
+	locker.locked.Store(false)
+	locker.mutex.Unlock()
+}
+
+func (controller *blockingLoginController) Login(
+	ctx context.Context,
+	target string,
+	output io.Writer,
+) (OperationResult, error) {
+	_, _ = fmt.Fprintln(output, "Codex device URL: https://auth.example.test/device")
+	_, _ = fmt.Fprintln(output, `{"access_token":"secret-json"}`)
+	_, _ = fmt.Fprintln(output, "Authorization: Bearer secret-token")
+	controller.started <- target
+	select {
+	case <-ctx.Done():
+		return OperationResult{}, ctx.Err()
+	case <-controller.release:
+		return OperationResult{Action: "login", Target: target}, nil
+	}
 }
 
 func (controller *blockingController) Start(ctx context.Context, target string) (OperationResult, error) {

@@ -83,7 +83,8 @@ func newCommand(output io.Writer) *cobra.Command {
 }
 
 func newStatusCommand(settings *viper.Viper, output io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var field string
+	command := &cobra.Command{
 		Use:   "status [scope]",
 		Short: "Read a lease without mutating the target",
 		Args:  cobra.MaximumNArgs(1),
@@ -94,9 +95,16 @@ func newStatusCommand(settings *viper.Viper, output io.Writer) *cobra.Command {
 			}
 			return runStatus(command.Context(), output, commandConfig{
 				Root: settings.GetString("root"), TTL: settings.GetDuration("ttl"),
-			}, scope)
+			}, scope, field)
 		},
 	}
+	command.Flags().StringVar(
+		&field,
+		"field",
+		"",
+		"print one status field without JSON encoding",
+	)
+	return command
 }
 
 func newActivateCommand(settings *viper.Viper, output io.Writer) *cobra.Command {
@@ -155,6 +163,7 @@ func runStatus(
 	output io.Writer,
 	config commandConfig,
 	scope string,
+	field string,
 ) error {
 	reader, err := controlplane.OpenReadOnly(ctx, config.Root)
 	if err != nil {
@@ -165,7 +174,43 @@ func runStatus(
 	if err != nil {
 		return err
 	}
-	return writeJSON(output, redactedLeaseStatus(lease, found, time.Now()))
+	status := redactedLeaseStatus(lease, found, time.Now())
+	if strings.TrimSpace(field) != "" {
+		return writeStatusField(output, status, field)
+	}
+	return writeJSON(output, status)
+}
+
+func writeStatusField(output io.Writer, status leaseStatus, field string) error {
+	var value any
+	switch strings.TrimSpace(field) {
+	case "found":
+		value = status.Found
+	case "active":
+		value = status.Active
+	case "scope":
+		value = status.Scope
+	case "owner":
+		value = status.Owner
+	case "generation":
+		value = status.Generation
+	case "acquired_at":
+		value = status.AcquiredAt
+	case "renewed_at":
+		value = status.RenewedAt
+	case "expires_at":
+		value = status.ExpiresAt
+	case "released_at":
+		if status.ReleasedAt == nil {
+			value = ""
+		} else {
+			value = *status.ReleasedAt
+		}
+	default:
+		return fmt.Errorf("unsupported status field: %s", field)
+	}
+	_, err := fmt.Fprintln(output, value)
+	return err
 }
 
 func runActivate(

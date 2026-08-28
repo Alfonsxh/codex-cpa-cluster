@@ -85,15 +85,7 @@ wait_for_status 200
 # Upstream loss must be a bounded 502 and must not weaken API-Key rejection.
 compose stop cliproxy-alpha >/dev/null
 wait_for_status 502 10
-python3 - "$TEMP_DIR/models.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-if payload.get("error", {}).get("code") != "upstream_unavailable":
-    raise SystemExit("upstream failure did not preserve the 502 error contract")
-PY
+grep -Eq '"code"[[:space:]]*:[[:space:]]*"upstream_unavailable"' "$TEMP_DIR/models.json"
 invalid_status=$(
   curl --noproxy '*' -sS -o "$TEMP_DIR/invalid.json" -w '%{http_code}' \
     -H 'Authorization: Bearer fixture-invalid-key' \
@@ -107,15 +99,7 @@ wait_for_status 200
 # five-second freshness contract. Restoring the valid atomic fixture recovers.
 printf '%s\n' '{"version":1,"broken":true}' >"$GATEWAY_FIXTURES/auth-snapshot.json"
 wait_for_status 503 15
-python3 - "$TEMP_DIR/models.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-if payload.get("error", {}).get("code") != "authentication_snapshot_unavailable":
-    raise SystemExit("corrupt auth snapshot did not fail closed")
-PY
+grep -Eq '"code"[[:space:]]*:[[:space:]]*"authentication_snapshot_unavailable"' "$TEMP_DIR/models.json"
 cp "$TEMP_DIR/auth-snapshot.valid.json" "$GATEWAY_FIXTURES/auth-snapshot.json"
 wait_for_status 200
 

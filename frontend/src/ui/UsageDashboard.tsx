@@ -1,75 +1,53 @@
-import {
-  Alert,
-  App as AntApp,
-  Button,
-  Card,
-  Col,
-  Empty,
-  Form,
-  Input,
-  Modal,
-  Progress,
-  Result,
-  Row,
-  Select,
-  Skeleton,
-  Space,
-  Statistic,
-  Table,
-  Tag,
-  Typography,
-  type TableColumnsType
-} from "antd";
-import {
-  BarChartOutlined,
-  CheckCircleOutlined,
-  CopyOutlined,
-  EyeOutlined,
-  KeyOutlined,
-  LockOutlined,
-  ReloadOutlined,
-  SwapOutlined
-} from "@ant-design/icons";
+import { Alert, App as AntApp, Button, Form, Input, Modal, Skeleton, Space, Tooltip } from "antd";
+import { CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { ApiError } from "../api/client";
 import {
   portalAccountsQueryKey,
+  portalBreakdownQueryKey,
   portalProfileQueryKey,
+  portalQuotaQueryKey,
   portalRouteQueryKey,
   readPortalAccounts,
+  readPortalBreakdown,
   readPortalKey,
   readPortalProfile,
+  readPortalQuota,
   readPortalRoute,
   rotatePortalKey,
   switchPortalAccount,
   type PortalAccount,
+  type PortalQuota,
   type PortalUsageWindow
 } from "../api/portal";
-import { PortalPasswordModal } from "./PortalPasswordModal";
-import { PortalUsageBreakdownDrawer } from "./PortalUsageBreakdownDrawer";
-import { formatTokens } from "./formatters";
+import type { UsageBreakdown, UsageCombination, UsageMetrics } from "../api/generated";
+import { PortalClientConfigModal, type PortalClientConfigMode } from "./PortalClientConfigModal";
+import { NativeTableViewport } from "./components/NativeTableViewport";
+import { formatTokenAmount, formatTokens } from "./formatters";
 
-const { Paragraph, Text, Title } = Typography;
+type SortField = "current" | "account" | "quota" | "active_users" | "status" | "requests" | "tokens" | "last_used";
+type SortState = { field: SortField; direction: "asc" | "desc"; pinCurrent: boolean };
 
-type BreakdownTarget = { account: string; displayName: string };
+const defaultSort: SortState = { field: "quota", direction: "asc", pinCurrent: true };
 
 export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => void }) {
   const queryClient = useQueryClient();
   const { message } = AntApp.useApp();
   const [window, setWindow] = useState<PortalUsageWindow>("today");
+  const [sort, setSort] = useState<SortState>(defaultSort);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [showKey, setShowKey] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyValue, setKeyValue] = useState("");
   const [keyLoading, setKeyLoading] = useState(false);
   const [keyError, setKeyError] = useState("");
   const keyRequest = useRef<AbortController | null>(null);
-  const [passwordOpen, setPasswordOpen] = useState(false);
   const [rotationOpen, setRotationOpen] = useState(false);
+  const [clientConfigMode, setClientConfigMode] = useState<PortalClientConfigMode | null>(null);
   const [switchTarget, setSwitchTarget] = useState<PortalAccount | null>(null);
-  const [breakdownTarget, setBreakdownTarget] = useState<BreakdownTarget | null>(null);
 
   const profile = useQuery({
     queryKey: portalProfileQueryKey,
@@ -87,6 +65,14 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
     refetchOnMount: "always",
     refetchOnWindowFocus: true
   });
+  const quota = useQuery({
+    queryKey: portalQuotaQueryKey,
+    queryFn: ({ signal }) => readPortalQuota(signal),
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true
+  });
   const route = useQuery({
     queryKey: portalRouteQueryKey,
     queryFn: ({ signal }) => readPortalRoute(signal),
@@ -97,14 +83,17 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   });
 
   useEffect(() => {
-    if ([profile.error, accounts.error, route.error].some(isUnauthorized)) {
-      onSessionExpired();
-    }
-  }, [accounts.error, onSessionExpired, profile.error, route.error]);
+    if ([profile.error, quota.error, accounts.error, route.error].some(isUnauthorized)) onSessionExpired();
+  }, [accounts.error, onSessionExpired, profile.error, quota.error, route.error]);
   useEffect(() => () => keyRequest.current?.abort(), []);
+  useEffect(() => setExpanded(new Set()), [window]);
 
   const currentGroup = route.data?.current_group ?? accounts.data?.current_group ?? profile.data?.current_group ?? "";
   const currentAccount = accounts.data?.accounts.find((item) => item.id === currentGroup);
+  const sortedAccounts = useMemo(
+    () => sortAccounts(accounts.data?.accounts ?? [], currentGroup, sort),
+    [accounts.data?.accounts, currentGroup, sort]
+  );
 
   const accountSwitch = useMutation({
     mutationFn: (account: PortalAccount) => switchPortalAccount(account.id),
@@ -116,6 +105,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       setSwitchTarget(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: portalProfileQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: portalQuotaQueryKey, exact: true }),
         queryClient.invalidateQueries({ queryKey: portalAccountsQueryKey(window), exact: true })
       ]);
       void message.success(result.changed ? "账号已切换并完成 Gateway 激活确认" : "当前已使用该账号");
@@ -157,9 +147,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       const result = await readPortalKey(request.signal);
       if (keyRequest.current === request) setKeyValue(result.api_key);
     } catch (error) {
-      if (!request.signal.aborted && keyRequest.current === request) {
-        setKeyError(errorMessage(error));
-      }
+      if (!request.signal.aborted && keyRequest.current === request) setKeyError(errorMessage(error));
     } finally {
       if (keyRequest.current === request) {
         keyRequest.current = null;
@@ -170,8 +158,6 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const closeKey = () => {
     keyRequest.current?.abort();
     keyRequest.current = null;
-    // Ant Design keeps closing modal contents mounted for its exit animation.
-    // Flush the secret-bearing field first so Key bytes leave the DOM immediately.
     flushSync(() => {
       setKeyValue("");
       setKeyError("");
@@ -180,316 +166,427 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
     });
     setKeyOpen(false);
   };
+  const refresh = () => void Promise.all([profile.refetch(), quota.refetch(), accounts.refetch(), route.refetch()]);
+  const toggleExpanded = (accountID: string) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(accountID)) next.delete(accountID);
+      else next.add(accountID);
+      return next;
+    });
+  };
+  const changeSort = (field: SortField) => {
+    setSort((current) => current.field === field
+      ? { field, direction: current.direction === "asc" ? "desc" : "asc", pinCurrent: field === "quota" }
+      : { field, direction: field === "account" || field === "status" || field === "quota" ? "asc" : "desc", pinCurrent: field === "quota" });
+  };
 
   return (
     <section className="usage-dashboard">
-      <div className="usage-hero">
-        <div>
-          <span className="eyebrow">YOUR CPA WORKSPACE</span>
-          <Title level={2}>你好，{profile.data?.user ?? "正在确认身份"}</Title>
-          <Paragraph>这里仅展示你的凭据、当前路由与请求用量。页面关闭后，API Key 不会留在浏览器存储中。</Paragraph>
+      <section className="usage-key-card" aria-label="个人凭据与用量摘要">
+        <div className="usage-key-panel">
+          <div className="usage-key-value">
+            <span>我的 API Key</span>
+            <code aria-label="API Key 安全状态">出于安全，仅在需要时读取</code>
+          </div>
+          <div className="usage-key-actions">
+            <button className="usage-secondary-button usage-credential-entry" type="button" onClick={() => setKeyOpen(true)}>管理 API Key</button>
+            <button className="usage-secondary-button" type="button" onClick={() => setClientConfigMode("codex")}>配置 Codex</button>
+            <button className="usage-secondary-button" type="button" onClick={() => setClientConfigMode("claude")}>配置 Claude Code</button>
+            <button className="usage-primary-button" type="button" onClick={() => setClientConfigMode("ccswitch")}>导入 CC Switch</button>
+          </div>
         </div>
-        <Space wrap>
-          <Button icon={<LockOutlined aria-hidden="true" />} onClick={() => setPasswordOpen(true)}>修改密码</Button>
-          <Button
-            icon={<ReloadOutlined aria-hidden="true" />}
-            loading={profile.isFetching || accounts.isFetching || route.isFetching}
-            onClick={() => void Promise.all([profile.refetch(), accounts.refetch(), route.refetch()])}
-          >
-            刷新当前页
-          </Button>
-        </Space>
-      </div>
+
+        <div className="usage-token-overview">
+          <CurrentAccountSummary account={currentAccount} loading={route.isPending || accounts.isPending} />
+          <PersonalQuotaSummary quota={quota.data} loading={quota.isPending} error={quota.error} onRetry={() => void quota.refetch()} />
+          <RangeSummary window={window} metrics={accounts.data?.totals} loading={accounts.isPending} />
+        </div>
+      </section>
 
       {accounts.data?.warnings.map((warning) => (
-        <Alert key={warning} className="page-alert" type="warning" showIcon title={warning} />
+        <section className="usage-route-notice" role="status" key={warning}><strong>账号提示</strong><span>{warning}</span></section>
       ))}
+      {!currentGroup && !accounts.isPending ? (
+        <section className="usage-route-notice" role="status">
+          <strong>暂时无法自动分配 CPA</strong>
+          <span>当前没有可用账号；系统会在下次刷新时自动重试，也可以在下方手动选择。</span>
+        </section>
+      ) : null}
 
-      <Row gutter={[16, 16]} className="portal-summary-grid">
-        <Col xs={24} xl={12}>
-          <Card className="portal-key-card" loading={profile.isPending}>
-            {profile.isError ? (
-              <Result
-                status="warning"
-                title="身份信息加载失败"
-                subTitle={errorMessage(profile.error)}
-                extra={<Button onClick={() => void profile.refetch()}>重新加载</Button>}
-              />
-            ) : profile.data ? (
-              <Space orientation="vertical" size={18} className="portal-card-stack">
-                <Space className="portal-card-title"><KeyOutlined aria-hidden="true" /><Text strong>我的 API Key</Text></Space>
-                <div className="portal-key-value" aria-label="API Key 安全状态">
-                  出于安全，仅在需要时读取
-                </div>
-                <Space wrap>
-                  <Button
-                    icon={<EyeOutlined aria-hidden="true" />}
-                    onClick={() => void revealKey()}
-                  >
-                    查看 API Key
-                  </Button>
-                  <Button danger icon={<SwapOutlined aria-hidden="true" />} onClick={() => {
-                    rotation.reset();
-                    setRotationOpen(true);
-                  }}>
-                    刷新 Key
-                  </Button>
-                </Space>
-              </Space>
-            ) : null}
-          </Card>
-        </Col>
-        <Col xs={24} md={12} xl={6}>
-          <Card className="portal-route-card">
-            <Space orientation="vertical" size={12} className="portal-card-stack">
-              <Text type="secondary">当前路由</Text>
-              {route.isPending && !currentAccount ? <Skeleton.Input active /> : (
-                <>
-                  <Title level={3}>{currentAccount?.display_name ?? (currentGroup ? "当前 CPA" : "尚未分配")}</Title>
-                  {currentAccount ? <AccountStatusTag account={currentAccount} /> : <Tag>等待分配</Tag>}
-                </>
-              )}
-            </Space>
-          </Card>
-        </Col>
-        <Col xs={24} md={12} xl={6}>
-          <Card className="portal-usage-card" loading={accounts.isPending}>
-            <Statistic
-              title={windowLabel(window)}
-              value={accounts.data?.totals.weighted_tokens ?? 0}
-              formatter={(value) => formatTokens(Number(value))}
-              suffix="加权 Token"
-            />
-            <Button
-              type="link"
-              icon={<BarChartOutlined aria-hidden="true" />}
-              onClick={() => setBreakdownTarget({ account: "", displayName: "全部账号" })}
-            >
-              查看全部明细
-            </Button>
-          </Card>
-        </Col>
-      </Row>
+      <section className="usage-account-section">
+        <div className="usage-section-toolbar">
+          <h2>账号明细</h2>
+          <div className="usage-toolbar-actions">
+            <div className="usage-window-switcher" role="group" aria-label="统计时间范围">
+              {portalWindowOptions.map((option) => (
+                <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => setWindow(option.value)}>{option.label}</button>
+              ))}
+            </div>
+            <button className="usage-refresh-button" type="button" disabled={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching} onClick={refresh}>
+              {accounts.isFetching && !accounts.isPending ? "刷新中…" : "刷新"}
+            </button>
+            <time className="usage-updated">额度更新 {formatTimestamp(accounts.data?.generated_at ?? quota.data?.generated_at ?? 0)}</time>
+          </div>
+        </div>
 
-      <Card
-        className="portal-account-card"
-        title="可用账号与个人用量"
-        extra={(
-          <Space wrap>
-            <Select<PortalUsageWindow>
-              aria-label="账号用量时间范围"
-              value={window}
-              options={portalWindowOptions}
-              onChange={setWindow}
-            />
-            <Text type="secondary">数据时间：{formatTimestamp(accounts.data?.generated_at ?? 0)}</Text>
-          </Space>
-        )}
-      >
-        {accounts.isPending ? <Skeleton active paragraph={{ rows: 5 }} /> : null}
         {accounts.isError ? (
-          <Result
-            status="warning"
-            title="账号与用量加载失败"
-            subTitle={errorMessage(accounts.error)}
-            extra={<Button type="primary" onClick={() => void accounts.refetch()}>重新加载</Button>}
-          />
-        ) : null}
-        {accounts.data && accounts.data.accounts.length === 0 ? <Empty description="尚未分配可用账号" /> : null}
-        {accounts.data?.accounts.length ? (
-          <Table<PortalAccount>
-            rowKey="id"
-            columns={accountColumns({
-              currentGroup,
-              onBreakdown: (account) => setBreakdownTarget({ account: account.id, displayName: account.display_name }),
-              onSwitch: (account) => {
-                accountSwitch.reset();
-                setSwitchTarget(account);
-              }
-            })}
-            dataSource={accounts.data.accounts}
-            pagination={false}
-            scroll={{ x: 820 }}
-          />
-        ) : null}
-      </Card>
+          <div className="usage-error" role="alert">
+            <span><strong>账号与用量加载失败</strong> · {errorMessage(accounts.error)}</span>
+            <button className="usage-secondary-button" type="button" onClick={() => void accounts.refetch()}>重新加载</button>
+          </div>
+        ) : (
+          <NativeTableViewport className="usage-table-wrap" aria-label="账号明细表格">
+            <table className="usage-account-table">
+              <thead>
+                <tr>
+                  <th className="table-index-column" scope="col">序号</th>
+                  <SortableHeader field="current" label="当前账号" sort={sort} onSort={changeSort} />
+                  <SortableHeader field="account" label="CPA 账号" sort={sort} onSort={changeSort} />
+                  <SortableHeader field="quota" label="账号周额度" detail="所有用户共享 · 已用较少优先" sort={sort} onSort={changeSort} />
+                  <SortableHeader field="active_users" label="活跃用户" detail="近 1 小时" sort={sort} onSort={changeSort} />
+                  <SortableHeader field="status" label="账号状态" sort={sort} onSort={changeSort} />
+                  <SortableHeader field="requests" label="我的请求" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
+                  <SortableHeader className="usage-token-header" field="tokens" label="我的 Token" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
+                  <SortableHeader field="last_used" label="最后使用" detail="我的记录" sort={sort} onSort={changeSort} />
+                  <th scope="col"><span className="sr-only">使用明细</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.isPending ? <UsageTableSkeleton /> : null}
+                {!accounts.isPending && sortedAccounts.map((account, index) => (
+                  <AccountRows
+                    key={account.id}
+                    account={account}
+                    index={index}
+                    currentGroup={currentGroup}
+                    window={window}
+                    expanded={expanded.has(account.id)}
+                    onToggle={() => toggleExpanded(account.id)}
+                    onSwitch={() => { accountSwitch.reset(); setSwitchTarget(account); }}
+                  />
+                ))}
+              </tbody>
+            </table>
+            {!accounts.isPending && sortedAccounts.length === 0 ? <div className="usage-empty">暂无可用账号</div> : null}
+          </NativeTableViewport>
+        )}
+      </section>
 
-      <Modal
-        title={`切换到 ${switchTarget?.display_name ?? "目标账号"}`}
-        open={Boolean(switchTarget)}
-        okText="确认切换"
-        cancelText="取消"
-        confirmLoading={accountSwitch.isPending}
-        onCancel={() => !accountSwitch.isPending && setSwitchTarget(null)}
-        onOk={() => switchTarget && accountSwitch.mutate(switchTarget)}
-        destroyOnHidden
-      >
+      <Modal title={`切换到 ${switchTarget?.display_name ?? "目标账号"}`} open={Boolean(switchTarget)} okText="确认切换" cancelText="取消" confirmLoading={accountSwitch.isPending} onCancel={() => !accountSwitch.isPending && setSwitchTarget(null)} onOk={() => switchTarget && accountSwitch.mutate(switchTarget)} destroyOnHidden>
         <Space orientation="vertical" size={16} className="portal-form-stack">
-          <Alert
-            type="info"
-            showIcon
-            title="现有 API Key 不会改变"
-            description="只更新你的目标 CPA。系统会原子写入路由、发布鉴权快照并等待 Gateway 确认；失败时自动恢复原路由。"
-          />
+          <Alert type="info" showIcon title="现有 API Key 不会改变" description="只更新你的目标 CPA。系统会原子写入路由、发布鉴权快照并等待 Gateway 确认；失败时自动恢复原路由。" />
           {accountSwitch.isError ? <Alert type="error" showIcon title="账号切换失败" description={errorMessage(accountSwitch.error)} /> : null}
         </Space>
       </Modal>
 
-      <Modal
-        title="我的 API Key"
-        open={keyOpen}
-        footer={(
-          <Button onClick={closeKey}>
-            关闭并清除
-          </Button>
-        )}
-        onCancel={closeKey}
-        destroyOnHidden
-      >
+      <Modal title="管理 API Key" open={keyOpen} footer={<Button onClick={closeKey}>关闭并清除</Button>} onCancel={closeKey} destroyOnHidden>
         <Space orientation="vertical" size={16} className="portal-form-stack">
-          <Alert
-            type="warning"
-            showIcon
-            title="API Key 只保留在当前弹框内存中"
-            description="关闭弹框后立即清除；页面不会把它写入查询缓存、URL 或浏览器存储。"
-          />
+          <Alert type="info" showIcon title="查看、复制与刷新集中在这里" description="打开管理弹框不会读取完整 Key；只有点击查看后才按需读取。" />
+          <Alert type="warning" showIcon title="API Key 只保留在当前弹框内存中" description="关闭弹框后立即清除；页面不会把它写入查询缓存、URL 或浏览器存储。" />
           {keyLoading ? <Skeleton.Input active block /> : null}
           {keyError ? <Alert type="error" showIcon title="API Key 读取失败" description={keyError} /> : null}
+          {!keyLoading && !keyValue ? <Button type="primary" onClick={() => void revealKey()}>查看 API Key</Button> : null}
           {keyValue ? (
             <Form.Item label="API Key">
               <Space.Compact block>
-                <Input.Password
-                  value={keyValue}
-                  readOnly
-                  visibilityToggle={{ visible: showKey, onVisibleChange: setShowKey }}
-                  aria-label="API Key"
-                  autoComplete="off"
-                />
-                <Button type="primary" icon={<CopyOutlined aria-hidden="true" />} onClick={() => void copyKey()}>
-                  复制
-                </Button>
+                <Input.Password value={keyValue} readOnly visibilityToggle={{ visible: showKey, onVisibleChange: setShowKey }} aria-label="API Key" autoComplete="off" />
+                <Button type="primary" icon={<CopyOutlined aria-hidden="true" />} onClick={() => void copyKey()}>复制</Button>
               </Space.Compact>
             </Form.Item>
           ) : null}
+          <section className="usage-key-danger-zone" aria-label="API Key 危险操作">
+            <div><strong>刷新 API Key</strong><p>旧 Key 会在 Gateway 激活新鉴权快照后立即失效，需要同步更新所有客户端。</p></div>
+            <Button danger onClick={() => { rotation.reset(); setRotationOpen(true); }}>刷新 API Key</Button>
+          </section>
         </Space>
       </Modal>
 
-      <Modal
-        title="刷新个人 API Key"
-        open={rotationOpen}
-        okText="确认刷新并使旧 Key 失效"
-        cancelText="取消"
-        okButtonProps={{ danger: true }}
-        confirmLoading={rotation.isPending}
-        onCancel={() => !rotation.isPending && setRotationOpen(false)}
-        onOk={() => rotation.mutate()}
-        destroyOnHidden
-      >
+      <Modal title="刷新个人 API Key" open={rotationOpen} okText="确认刷新并使旧 Key 失效" cancelText="取消" okButtonProps={{ danger: true }} confirmLoading={rotation.isPending} onCancel={() => !rotation.isPending && setRotationOpen(false)} onOk={() => rotation.mutate()} destroyOnHidden>
         <Space orientation="vertical" size={16} className="portal-form-stack">
-          <Alert
-            type="warning"
-            showIcon
-            title="旧 API Key 会立即失效"
-            description="刷新成功后，请立刻把新 Key 更新到 Codex 客户端。系统仅在 Gateway 已激活新鉴权快照后返回成功。"
-          />
+          <Alert type="warning" showIcon title="旧 API Key 会立即失效" description="刷新成功后，请立刻把新 Key 更新到 Codex 客户端。系统仅在 Gateway 已激活新鉴权快照后返回成功。" />
           {rotation.isError ? <Alert type="error" showIcon title="API Key 刷新失败" description={errorMessage(rotation.error)} /> : null}
         </Space>
       </Modal>
 
-      <PortalPasswordModal
-        open={passwordOpen}
-        onClose={() => setPasswordOpen(false)}
-        onSuccess={() => {
-          setPasswordOpen(false);
-          void message.success("密码已修改，其他会话已撤销");
-        }}
-      />
-      <PortalUsageBreakdownDrawer
-        open={Boolean(breakdownTarget)}
-        account={breakdownTarget?.account ?? ""}
-        displayName={breakdownTarget?.displayName ?? ""}
-        onClose={() => setBreakdownTarget(null)}
-      />
+      <PortalClientConfigModal open={clientConfigMode !== null} mode={clientConfigMode ?? "codex"} user={profile.data?.user ?? "user"} currentGroup={currentGroup} onClose={() => setClientConfigMode(null)} onSessionExpired={onSessionExpired} />
     </section>
   );
 }
 
-function accountColumns({
-  currentGroup,
-  onBreakdown,
-  onSwitch
-}: {
-  currentGroup: string;
-  onBreakdown: (account: PortalAccount) => void;
-  onSwitch: (account: PortalAccount) => void;
-}): TableColumnsType<PortalAccount> {
-  return [
-    {
-      title: "账号",
-      dataIndex: "display_name",
-      fixed: "left",
-      align: "center",
-      width: 150,
-      render: (value: string, account) => (
-        <Space>
-          <Text strong>{value}</Text>
-          {account.id === currentGroup ? <Tag icon={<CheckCircleOutlined aria-hidden="true" />} color="green">当前</Tag> : null}
-        </Space>
-      )
-    },
-    { title: "状态", align: "center", width: 145, render: (_, account) => <AccountStatusTag account={account} /> },
-    {
-      title: "剩余额度",
-      align: "right",
-      width: 180,
-      render: (_, account) => account.status.remaining_percent === undefined ? (
-        <Text type="secondary">状态未知</Text>
-      ) : (
-        <Progress
-          percent={Math.max(0, Math.min(100, account.status.remaining_percent))}
-          size="small"
-          status={account.status.remaining_percent <= 5 ? "exception" : "normal"}
-          format={(value) => `${Number(value ?? 0).toFixed(1)}%`}
-        />
-      )
-    },
-    { title: "1h 活跃用户", dataIndex: "active_users_1h", align: "right", width: 120 },
-    {
-      title: "个人加权 Token",
-      align: "right",
-      width: 145,
-      render: (_, account) => formatTokens(account.usage.weighted_tokens ?? 0)
-    },
-    {
-      title: "操作",
-      fixed: "right",
-      align: "center",
-      width: 205,
-      render: (_, account) => (
-        <Space size={4}>
-          <Button type="link" onClick={() => onBreakdown(account)}>用量明细</Button>
-          <Button
-            type="link"
-            disabled={account.id === currentGroup || !account.selectable}
-            onClick={() => onSwitch(account)}
-          >
-            {account.id === currentGroup ? "当前账号" : "切换"}
-          </Button>
-        </Space>
-      )
-    }
-  ];
+function CurrentAccountSummary({ account, loading }: { account?: PortalAccount; loading: boolean }) {
+  const used = account ? accountUsedPercent(account) : 0;
+  const remaining = account?.status.remaining_percent ?? (account ? Math.max(0, 100 - used) : 0);
+  return (
+    <div className="usage-current-account" aria-labelledby="current-account-label">
+      <div className="usage-current-account-head">
+        <span className="usage-current-account-label" id="current-account-label">当前账号</span>
+        {loading && !account ? <span className="usage-status degraded">读取中</span> : account ? <StatusTag account={account} /> : <span className="usage-status degraded">待选择</span>}
+      </div>
+      <strong className="usage-current-account-name" title={account?.display_name}>{account?.display_name ?? (loading ? "正在读取" : "尚未选择")}</strong>
+      <div className={`usage-current-quota ${used >= 100 ? "exhausted" : used >= 80 ? "warning" : ""}`.trim()}>
+        <div><span>{account ? `周额度 ${formatPercent(used)}` : "选择可用账号后显示"}</span><strong>{account ? `剩余 ${formatPercent(remaining)}` : "—"}</strong></div>
+        <progress className="usage-quota-track" max="100" value={used} aria-label={account ? `当前账号周额度已使用 ${formatPercent(used)}` : "尚未选择当前账号"} />
+      </div>
+    </div>
+  );
 }
 
-function AccountStatusTag({ account }: { account: PortalAccount }) {
-  const color = account.status.tone === "success"
-    ? "green"
-    : account.status.tone === "warning"
-      ? "gold"
-      : account.status.tone === "danger"
-        ? "red"
-        : "default";
-  return <Tag color={color} title={account.status.reason}>{account.status.label}</Tag>;
+function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: PortalQuota; loading: boolean; error: unknown; onRetry: () => void }) {
+  const weekly = quota?.weekly_quota;
+  const percent = weekly?.unlimited ? 0 : clampPercent(weekly?.used_percent ?? 0);
+  const remaining = weekly?.unlimited ? null : Math.max(0, 100 - percent);
+  return (
+    <div className="usage-personal-overview" aria-labelledby="personal-usage-label">
+      <div className="usage-personal-overview-head"><span id="personal-usage-label">个人用量</span><small>{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
+      {error ? (
+        <div className="usage-current-quota degraded">
+          <div><span>个人周额度读取失败</span><button className="usage-inline-retry" type="button" onClick={onRetry}>重试</button></div>
+          <progress className="usage-quota-track" max="100" value="0" aria-label="个人周额度暂不可用" />
+        </div>
+      ) : (
+        <div className={`usage-current-quota ${weekly?.limit_reached ? "exhausted" : percent >= 90 ? "warning" : ""}`.trim()}>
+          <div><span>{loading ? "周额度正在读取…" : weekly?.unlimited ? "周额度不限额" : `周额度 ${formatPercent(percent)}`}</span><strong>{loading ? "—" : weekly?.unlimited ? "剩余不限额" : `剩余 ${formatPercent(remaining ?? 0)}`}</strong></div>
+          <progress className="usage-quota-track" max="100" value={percent} aria-label={weekly?.unlimited ? "个人周额度不限额" : `个人周额度已使用 ${formatPercent(percent)}`} />
+          <div className="usage-personal-quota-detail">
+            <span>{weekly ? weekly.unlimited ? `加权已用 ${formatTokens(weekly.weighted_used_tokens)}` : `加权已用 ${formatTokens(weekly.weighted_used_tokens)} / ${formatTokens(weekly.limit_tokens ?? 0)}` : "用量正在读取…"}{weekly ? <UsageHelp
+              label="说明加权 Token"
+              title={`个人周额度按推理强度倍率折算：已用 ${formatNumber(weekly.weighted_used_tokens)} 加权 Token${weekly.unlimited ? "，当前不限额" : `，额度上限 ${formatNumber(weekly.limit_tokens ?? 0)} 加权 Token`}`}
+            /> : null}</span>
+            <span>{weekly ? `未加权累计 ${formatTokens(weekly.raw_used_tokens)}` : "未加权用量正在读取…"}{weekly ? <UsageHelp
+              label="说明未加权 Token"
+              title={`原始请求累计 ${formatNumber(weekly.raw_used_tokens)} Token，不应用个人周额度的推理强度倍率。`}
+            /> : null}</span>
+            <time>{weekly ? `${formatTimestamp(weekly.week_end_at)} 重置` : "—"}</time>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RangeSummary({ window, metrics, loading }: { window: PortalUsageWindow; metrics?: UsageMetrics; loading: boolean }) {
+  return (
+    <div className="usage-range-overview" aria-labelledby="usage-summary-label">
+      <div className="usage-range-overview-head"><span id="usage-summary-label">{windowLabel(window)} Token</span><small>全部 CPA</small></div>
+      <div className="usage-range-token-pair">
+        <div><span>未加权</span><strong>{loading ? "—" : <TokenValue value={metrics?.total_tokens ?? 0} />}</strong></div>
+        <div><span>加权</span><strong>{loading ? "—" : <TokenValue value={metrics?.weighted_tokens ?? metrics?.total_tokens ?? 0} />}</strong></div>
+      </div>
+      <span className="usage-range-requests">{windowLabel(window)}请求 {loading ? "—" : formatNumber(metrics?.request_count ?? 0)}</span>
+    </div>
+  );
+}
+
+function SortableHeader({ field, label, detail, className = "", sort, onSort }: { field: SortField; label: string; detail?: string; className?: string; sort: SortState; onSort: (field: SortField) => void }) {
+  const active = sort.field === field;
+  return (
+    <th className={className} scope="col" aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button className={`usage-sort-button ${active ? "active" : ""}`.trim()} data-direction={active ? sort.direction : undefined} type="button" aria-label={`${label}${active ? `，当前${sort.direction === "asc" ? "升序" : "降序"}` : "，点击排序"}`} onClick={() => onSort(field)}>
+        <span className="usage-sort-copy"><span>{label}</span>{detail ? <small>{detail}</small> : null}</span>
+      </button>
+    </th>
+  );
+}
+
+function AccountRows({ account, index, currentGroup, window, expanded, onToggle, onSwitch }: { account: PortalAccount; index: number; currentGroup: string; window: PortalUsageWindow; expanded: boolean; onToggle: () => void; onSwitch: () => void }) {
+  const current = account.id === currentGroup;
+  const used = accountUsedPercent(account);
+  const remaining = account.status.remaining_percent ?? Math.max(0, 100 - used);
+  const rowKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+    if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    onToggle();
+  };
+  return (
+    <>
+      <tr className={`usage-summary-row ${current ? "current" : ""}`.trim()} aria-expanded={expanded} tabIndex={0} onKeyDown={rowKeyDown} onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a")) onToggle(); }}>
+        <td className="table-index-cell" data-label="序号">{index + 1}</td>
+        <td data-label="当前账号">
+          {current ? <span className="usage-current-mark" title="当前账号">✓<span className="sr-only">当前账号</span></span> : <button className="usage-select-button" type="button" disabled={!account.selectable || !account.status.selectable} title={account.status.reason} onClick={onSwitch}>{currentGroup ? "切换" : "选择"}</button>}
+        </td>
+        <td data-label="CPA 账号"><strong className="usage-account-id" title={account.display_name}>{account.display_name}</strong></td>
+        <td data-label="账号周额度">
+          <div className={`usage-quota ${used >= 100 ? "exhausted" : used >= 80 ? "warning" : ""}`.trim()}>
+            <div><strong>{formatPercent(used)}</strong><span>剩余 {formatPercent(remaining)}</span></div>
+            <progress className="usage-quota-track" max="100" value={used} aria-label={`已使用 ${formatPercent(used)}`} />
+            <small>{account.status.reset_at ? `${formatTimestamp(account.status.reset_at)} 重置` : "重置时间未知"}</small>
+          </div>
+        </td>
+        <td data-label="活跃用户（近 1 小时）"><strong className="usage-cell-number">{formatNumber(account.active_users_1h)}</strong></td>
+        <td data-label="账号状态"><StatusTag account={account} /></td>
+        <td data-label={`我的请求（${windowLabel(window)}）`}><strong className="usage-cell-number" title={formatNumber(account.usage.request_count)}>{formatCompact(account.usage.request_count)}</strong></td>
+        <td className="usage-token-cell" data-label={`我的 Token（${windowLabel(window)}）`}><div className="usage-token-content"><TokenPair metrics={account.usage} /></div></td>
+        <td data-label="我的最后使用"><time className="usage-last-used">{formatTimestamp(account.usage.last_used_at)}</time></td>
+        <td><button className="usage-expand-button" type="button" aria-label={expanded ? "收起使用明细" : "使用明细"} aria-expanded={expanded} onClick={onToggle}>{expanded ? "−" : "+"}</button></td>
+      </tr>
+      {expanded ? <UsageBreakdownRow account={account} window={window} /> : null}
+    </>
+  );
+}
+
+function UsageBreakdownRow({ account, window }: { account: PortalAccount; window: PortalUsageWindow }) {
+  const query = useQuery({
+    queryKey: portalBreakdownQueryKey(account.id, window),
+    queryFn: ({ signal }) => readPortalBreakdown(account.id, window, signal),
+    staleTime: 30_000,
+    gcTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false
+  });
+  return (
+    <tr className="usage-detail-row" data-detail-for={account.id}>
+      <td colSpan={10}>
+        <div className="usage-account-detail">
+          <div className="usage-detail-panel">
+            <div className="usage-detail-heading"><strong>我的使用明细</strong><span>{windowLabel(window)}</span></div>
+            {query.data ? <UsageTokenGrid metrics={query.data.totals} /> : <div className="usage-token-grid usage-token-grid-placeholder" aria-label="正在加载我的模型 Token 明细">{Array.from({ length: 8 }, (_, index) => <Skeleton.Input active key={index} />)}</div>}
+          </div>
+          <section className="account-model-usage" aria-label="我的模型与推理强度 Token 明细">
+            <div className="account-model-usage-title"><span>我的模型 × 推理强度 Token 明细</span><small>{windowLabel(window)}</small></div>
+            {query.isError ? <div className="account-model-usage-message error" role="alert"><span>{errorMessage(query.error)}</span><button className="usage-breakdown-retry" type="button" onClick={() => void query.refetch()}>重试</button></div> : query.data ? <ModelBreakdown data={query.data} /> : <div className="account-model-usage-skeleton" aria-label="正在加载我的模型 Token 明细"><span /><span /></div>}
+          </section>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function UsageTokenGrid({ metrics }: { metrics: UsageMetrics }) {
+  const cacheRate = metrics.input_tokens > 0 ? formatPercent((metrics.cached_tokens / metrics.input_tokens) * 100) : "0%";
+  return (
+    <div className="usage-token-grid">
+      <Metric label="成功请求" value={formatNumber(metrics.success_count)} />
+      <Metric label="失败请求" value={formatNumber(metrics.failed_count)} />
+      <Metric label="输入 Token" value={formatTokens(metrics.input_tokens)} />
+      <Metric label="输出 Token" value={formatTokens(metrics.output_tokens)} />
+      <Metric label="推理 Token" value={formatTokens(metrics.reasoning_tokens)} />
+      <div><div className="usage-cache-head"><span>缓存 Token</span><small className="usage-cache-rate">缓存率 {cacheRate}</small></div><strong>{formatTokens(metrics.cached_tokens)}</strong></div>
+      <Metric label="未加权 Token" value={formatTokens(metrics.total_tokens)} />
+      <Metric label="加权 Token" value={formatTokens(metrics.weighted_tokens ?? metrics.total_tokens)} />
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function UsageHelp({ label, title }: { label: string; title: string }) {
+  return (
+    <Tooltip title={title} trigger={["hover", "focus"]} placement="top">
+      <button className="usage-help-button" type="button" aria-label={label}>
+        <QuestionCircleOutlined aria-hidden="true" />
+      </button>
+    </Tooltip>
+  );
+}
+
+function ModelBreakdown({ data }: { data: UsageBreakdown }) {
+  const models = groupModelCombinations(data.combinations);
+  if (models.length === 0) return <div className="account-model-usage-message">当前范围暂无我的模型与推理强度 Token 数据。</div>;
+  return (
+    <div className="account-model-usage-list">
+      {models.map((model) => (
+        <div className="account-model-usage-row" key={model.name}>
+          <div className="account-model-usage-head"><strong title={model.name}>{model.name}</strong><span>{formatTokens(model.total)}</span></div>
+          <div className="account-model-progress" role="group" aria-label={`${model.name} 各推理强度 Token 占比`}>
+            {model.efforts.map((effort) => (
+              <button className={`account-model-progress-segment account-model-effort-${effortColorKey(effort.reasoning_effort)} ${effort.share < 18 ? "compact" : ""}`.trim()} style={{ flexGrow: Math.max(1, Math.round(effort.share)) }} type="button" key={effort.reasoning_effort} title={effortTooltip(model.name, effort)} aria-label={effortTooltip(model.name, effort)}>
+                <span>{effort.reasoning_effort}</span><em>{formatPercent(effort.share)}</em>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function groupModelCombinations(combinations: UsageCombination[]) {
+  const grouped = new Map<string, UsageCombination[]>();
+  for (const item of combinations) grouped.set(item.model, [...(grouped.get(item.model) ?? []), item]);
+  return [...grouped.entries()].map(([name, efforts]) => {
+    const total = efforts.reduce((sum, effort) => sum + (effort.weighted_tokens ?? effort.total_tokens), 0);
+    return { name, total, efforts: efforts.map((effort) => ({ ...effort, share: total > 0 ? ((effort.weighted_tokens ?? effort.total_tokens) / total) * 100 : 0 })) };
+  }).sort((left, right) => right.total - left.total || left.name.localeCompare(right.name));
+}
+
+function effortTooltip(model: string, effort: UsageCombination & { share: number }) {
+  return [`${model} · ${effort.reasoning_effort}`, `调用：${formatNumber(effort.request_count)}`, `输入：${formatNumber(effort.input_tokens)}`, `输出：${formatNumber(effort.output_tokens)}`, `推理：${formatNumber(effort.reasoning_tokens)}`, `缓存：${formatNumber(effort.cached_tokens)}`, `总 Token：${formatNumber(effort.total_tokens)}`, `加权 Token：${formatNumber(effort.weighted_tokens ?? effort.total_tokens)}`].join("，");
+}
+
+function TokenPair({ metrics }: { metrics: UsageMetrics }) {
+  return <div className="usage-user-token-pair"><div><small>加权</small><TokenValue value={metrics.weighted_tokens ?? metrics.total_tokens} /></div><div><small>未加权</small><TokenValue value={metrics.total_tokens} /></div></div>;
+}
+
+function TokenValue({ value }: { value: number }) {
+  const safe = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  const compact = formatTokenAmount(safe);
+  const [amount, unit = "Token"] = compact.split(" ");
+  const exact = `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(safe)} Token`;
+  return (
+    <span className="token-usage">
+      <span className="token-usage-main" aria-hidden="true"><span className="token-usage-value">{amount}</span><small className="token-usage-unit">{unit}</small></span>
+      {safe >= 1_000 ? <small className="token-usage-exact" aria-hidden="true">{exact}</small> : null}
+      <span className="token-usage-sr-only">{exact}</span>
+    </span>
+  );
+}
+
+function StatusTag({ account }: { account: PortalAccount }) {
+  const className = account.status.tone === "success" ? "available" : account.status.tone === "warning" ? "warning" : account.status.tone === "danger" ? "unavailable" : "degraded";
+  return <span className={`usage-status ${className}`} title={account.status.reason}>{account.status.label}</span>;
+}
+
+function UsageTableSkeleton() {
+  return <>{Array.from({ length: 3 }, (_, row) => <tr className="usage-summary-row usage-skeleton-row" key={row} aria-label="正在加载账号与用量">{Array.from({ length: 10 }, (_item, column) => <td key={column}><span /></td>)}</tr>)}</>;
+}
+
+function sortAccounts(accounts: PortalAccount[], currentGroup: string, sort: SortState) {
+  const direction = sort.direction === "asc" ? 1 : -1;
+  return [...accounts].sort((left, right) => {
+    if (sort.pinCurrent && (left.id === currentGroup) !== (right.id === currentGroup)) return left.id === currentGroup ? -1 : 1;
+    const compared = compareSortValue(sortValue(left, currentGroup, sort.field), sortValue(right, currentGroup, sort.field));
+    return compared * direction || left.display_name.localeCompare(right.display_name, "zh-CN", { numeric: true });
+  });
+}
+
+function sortValue(account: PortalAccount, currentGroup: string, field: SortField): number | string | null {
+  if (field === "current") return account.id === currentGroup ? 0 : 1;
+  if (field === "account") return account.display_name;
+  if (field === "quota") return Number.isFinite(accountUsedPercent(account)) ? accountUsedPercent(account) : null;
+  if (field === "active_users") return account.active_users_1h;
+  if (field === "status") return statusRank(account);
+  if (field === "requests") return account.usage.request_count;
+  if (field === "tokens") return account.usage.weighted_tokens ?? account.usage.total_tokens;
+  return account.usage.last_used_at || null;
+}
+
+function compareSortValue(left: number | string | null, right: number | string | null) {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  if (typeof left === "string" || typeof right === "string") return String(left).localeCompare(String(right), "zh-CN", { numeric: true });
+  return left - right;
+}
+
+function accountUsedPercent(account: PortalAccount) {
+  if (account.status.used_percent !== undefined) return clampPercent(account.status.used_percent);
+  if (account.status.remaining_percent !== undefined) return 100 - clampPercent(account.status.remaining_percent);
+  return Number.POSITIVE_INFINITY;
+}
+
+function statusRank(account: PortalAccount) {
+  return ({ available: 0, quota_warning: 1, transient_cooldown: 2, rate_limited: 3, degraded: 4, quota_unknown: 5, unknown: 6, quota_exhausted: 7, credential_unavailable: 8, auth_missing: 9, stopped: 10, disabled: 11 } as Record<string, number>)[account.status.code] ?? 12;
+}
+
+function quotaSourceLabel(source: string) {
+  return ({ default: "组织默认", user_unlimited: "单独不限额", user_custom: "用户自定义" } as Record<string, string>)[source] ?? "状态未知";
+}
+
+function effortColorKey(value: string) {
+  return ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "auto"].includes(value) ? value : "unknown";
 }
 
 function isUnauthorized(error: unknown) {
@@ -504,22 +601,30 @@ function windowLabel(window: PortalUsageWindow) {
   return portalWindowOptions.find((item) => item.value === window)?.label ?? "当前范围";
 }
 
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+}
+
+function formatPercent(value: number) {
+  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
+}
+
+function formatCompact(value: number) {
+  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value) || 0);
+}
+
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  }).format(new Date(timestamp * 1000));
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
 }
 
 const portalWindowOptions: Array<{ value: PortalUsageWindow; label: string }> = [
-  { value: "today", label: "今天" },
-  { value: "3600", label: "近 1 小时" },
-  { value: "86400", label: "近 24 小时" },
-  { value: "604800", label: "近 7 天" },
-  { value: "2592000", label: "近 30 天" }
+  { value: "3600", label: "1 小时" },
+  { value: "today", label: "今日" },
+  { value: "86400", label: "24 小时" },
+  { value: "604800", label: "7 天" }
 ];

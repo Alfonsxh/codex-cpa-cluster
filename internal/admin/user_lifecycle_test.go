@@ -155,6 +155,12 @@ func TestUserManagerReadsUpdatesAndClearsFineGrainedWeeklyQuota(t *testing.T) {
 		*inherited.WeeklyQuota.LimitTokens != 1_000 || !inherited.WeeklyQuota.PersonalPolicyResetEnabled {
 		t.Fatalf("inherited quota = (%#v, %v)", inherited, err)
 	}
+	catalog, err := manager.ReadUserQuotas(ctx, []string{"alice@example.com", "ALICE@example.com"})
+	if err != nil || len(catalog) != 1 || catalog["alice@example.com"].LimitTokens == nil ||
+		*catalog["alice@example.com"].LimitTokens != 1_000 ||
+		!catalog["alice@example.com"].PersonalPolicyResetEnabled {
+		t.Fatalf("quota catalog = (%#v, %v)", catalog, err)
+	}
 	customTokens := int64(500)
 	custom, err := manager.UpdateUserQuota(ctx, "alice@example.com", "custom", &customTokens)
 	if err != nil || custom.WeeklyQuota.PolicyMode != "custom" || custom.WeeklyQuota.LimitTokens == nil ||
@@ -193,6 +199,11 @@ func TestUserManagerAppliesBulkQuotaActionsAndReturnsFreshSummary(t *testing.T) 
 	})
 	if err != nil {
 		t.Fatalf("NewUserManager: %v", err)
+	}
+	before, err := manager.ReadQuotaOperations(ctx)
+	if err != nil || before.TotalUsers != 2 || before.UsersWithUsage != 1 ||
+		before.TotalUsedTokens != 300 || before.TotalRawUsedTokens != 150 {
+		t.Fatalf("quota operation summary = (%#v, %v)", before, err)
 	}
 	result, err := manager.ApplyUserQuotaAction(ctx, UserQuotaActionRequest{
 		Action: "add_bonus", Scope: "selected",

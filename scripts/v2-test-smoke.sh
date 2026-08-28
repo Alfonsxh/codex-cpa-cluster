@@ -43,34 +43,21 @@ test "$health" = "ok"
 curl --noproxy '*' -fsS -D "$TEMP_DIR/landing.headers" "${PUBLIC_URL}/" >"$TEMP_DIR/landing.html"
 grep -F '<title>Codex CPA Cluster</title>' "$TEMP_DIR/landing.html" >/dev/null
 grep -i '^Cache-Control: no-cache' "$TEMP_DIR/landing.headers" >/dev/null
-python3 - "$TEMP_DIR/landing.html" >"$TEMP_DIR/portal-assets.txt" <<'PY'
-import sys
-from html.parser import HTMLParser
-from pathlib import Path
-
-
-class Assets(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.paths = []
-
-    def handle_starttag(self, tag, attrs):
-        values = dict(attrs)
-        if tag == "script" and values.get("src", "").startswith("/portal/assets/"):
-            self.paths.append(values["src"])
-        if tag == "link" and values.get("rel") == "stylesheet" and values.get("href", "").startswith("/portal/assets/"):
-            self.paths.append(values["href"])
-
-
-assets = Assets()
-assets.feed(Path(sys.argv[1]).read_text(encoding="utf-8"))
-if len(assets.paths) < 2:
-    raise SystemExit("React Portal entry does not reference built JavaScript and CSS")
-print(*assets.paths, sep="\n")
-PY
+grep -Eo '(src|href)="/portal/assets/[^"]+"' "$TEMP_DIR/landing.html" \
+  | sed -E 's/^(src|href)="([^"]+)"$/\2/' \
+  >"$TEMP_DIR/portal-assets.txt"
+test "$(wc -l <"$TEMP_DIR/portal-assets.txt" | tr -d ' ')" -ge 2
 while IFS= read -r asset; do
   curl --noproxy '*' -fsS -D "$TEMP_DIR/asset.headers" "${PUBLIC_URL}${asset}" >/dev/null
-  grep -i '^Cache-Control: public, max-age=31536000, immutable' "$TEMP_DIR/asset.headers" >/dev/null
+  case "$asset" in
+    /portal/assets/codex-cpa-cluster-*.svg)
+      grep -i '^Cache-Control: no-cache' "$TEMP_DIR/asset.headers" >/dev/null
+      grep -i '^Content-Type: image/svg+xml' "$TEMP_DIR/asset.headers" >/dev/null
+      ;;
+    *)
+      grep -i '^Cache-Control: public, max-age=31536000, immutable' "$TEMP_DIR/asset.headers" >/dev/null
+      ;;
+  esac
 done <"$TEMP_DIR/portal-assets.txt"
 curl --noproxy '*' -fsS "${PUBLIC_URL}/native/" >"$TEMP_DIR/native.html"
 grep -F '<div id="root"></div>' "$TEMP_DIR/native.html" >/dev/null
@@ -86,16 +73,7 @@ test "$unauthorized_status" = "401"
 curl --noproxy '*' -fsS \
   -H 'Authorization: Bearer fixture-external-key' \
   "${PUBLIC_URL}/v1/models" >"$TEMP_DIR/models.json"
-python3 - "$TEMP_DIR/models.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-models = [item.get("id") for item in payload.get("data", [])]
-if models != ["fixture-model"]:
-    raise SystemExit("unexpected v2 Test model catalog")
-PY
+test "$(grep -Eo '"id"[[:space:]]*:[[:space:]]*"fixture-model"' "$TEMP_DIR/models.json" | wc -l | tr -d ' ')" = 1
 
 curl --noproxy '*' -fsS -N \
   -H 'Authorization: Bearer fixture-external-key' \

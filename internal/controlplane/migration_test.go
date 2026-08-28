@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -209,36 +207,6 @@ func TestRetiredSecretIsPreservedWhenDatabaseIsAlreadyCurrent(t *testing.T) {
 	}
 }
 
-func TestOpenPythonSchemaV6WithoutSchemaOrRowDrift(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 is unavailable")
-	}
-	repository, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolve repository root: %v", err)
-	}
-	root := t.TempDir()
-	command := exec.Command(python, "-c", `
-import pathlib, sys
-sys.path.insert(0, sys.argv[1])
-from control_plane_store import ControlPlaneStore
-ControlPlaneStore(pathlib.Path(sys.argv[2]))
-`, filepath.Join(repository, "scripts"), root)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("create Python schema v6: %v\n%s", err, output)
-	}
-	before := snapshotControlPlaneDatabase(t, filepath.Join(root, databaseRelativePath))
-	store := openTestStore(t, root)
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close Go store: %v", err)
-	}
-	after := snapshotControlPlaneDatabase(t, filepath.Join(root, databaseRelativePath))
-	if !reflect.DeepEqual(after, before) {
-		t.Fatalf("Go open changed Python schema v6\nbefore=%#v\nafter=%#v", before, after)
-	}
-}
-
 func TestTwoStoresSerializeCrossInstanceWrites(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -316,50 +284,6 @@ func writeTestEncryptionKey(t *testing.T, root string) {
 	if err := os.WriteFile(path, []byte(strings.Repeat("k", 32)), 0o600); err != nil {
 		t.Fatalf("write encryption key: %v", err)
 	}
-}
-
-func snapshotControlPlaneDatabase(t *testing.T, path string) map[string][]string {
-	t.Helper()
-	database, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open database snapshot: %v", err)
-	}
-	defer database.Close()
-	result := make(map[string][]string)
-	rows, err := database.Query(`
-        SELECT type, name, tbl_name, COALESCE(sql, '')
-          FROM sqlite_master
-         WHERE name NOT LIKE 'sqlite_%'
-         ORDER BY type, name`)
-	if err != nil {
-		t.Fatalf("read database schema snapshot: %v", err)
-	}
-	for rows.Next() {
-		var objectType, name, table, definition string
-		if err := rows.Scan(&objectType, &name, &table, &definition); err != nil {
-			rows.Close()
-			t.Fatalf("scan database schema snapshot: %v", err)
-		}
-		result["schema"] = append(result["schema"], strings.Join([]string{objectType, name, table, definition}, "\x00"))
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close database schema snapshot: %v", err)
-	}
-	for _, table := range requiredTables {
-		var count string
-		if err := database.QueryRow("SELECT CAST(COUNT(*) AS TEXT) FROM " + table).Scan(&count); err != nil {
-			t.Fatalf("count table %s: %v", table, err)
-		}
-		result["counts"] = append(result["counts"], table+"="+count)
-	}
-	var versions string
-	if err := database.QueryRow(`
-        SELECT COALESCE(group_concat(version || ':' || applied_at, ','), '')
-          FROM (SELECT version, applied_at FROM schema_migrations ORDER BY version)`).Scan(&versions); err != nil {
-		t.Fatalf("read schema versions: %v", err)
-	}
-	result["versions"] = []string{versions}
-	return result
 }
 
 func assertErrorIs(t *testing.T, err error, target error) {

@@ -15,7 +15,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 RUN mkdir -p /out \
-    && for command in admin collector docker-read-proxy edge failover gateway log-maintenance migration-compare notifications ownership quota test-upstream web; do \
+    && for command in admin collector docker-read-proxy edge failover gateway log-maintenance notifications ownership quota releasectl test-upstream web; do \
          go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o "/out/cpa-${command}" "./cmd/${command}"; \
        done
 
@@ -46,8 +46,8 @@ ENTRYPOINT ["/usr/local/bin/cpa-edge"]
 
 FROM go-runtime AS control
 COPY --from=go-builder /out/cpa-admin /out/cpa-collector /out/cpa-docker-read-proxy /out/cpa-failover \
-  /out/cpa-log-maintenance /out/cpa-migration-compare /out/cpa-notifications \
-  /out/cpa-ownership /out/cpa-quota \
+  /out/cpa-log-maintenance /out/cpa-notifications \
+  /out/cpa-ownership /out/cpa-quota /out/cpa-releasectl \
   /usr/local/bin/
 CMD ["/usr/local/bin/cpa-admin"]
 

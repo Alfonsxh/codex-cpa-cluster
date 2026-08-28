@@ -1,69 +1,59 @@
-# 升级指南
+# 升级与切换
 
-## 升级前提
+## 前置条件
 
-当前版本以 SQLite 已成为权威存储为前提。目标目录必须同时存在：
+升级只面向已经初始化的目标，必须同时存在：
 
 - `state/control-plane.sqlite3`
-- `secrets/control-plane.key`
+- `state/usage.sqlite3`
+- 匹配的 `secrets/control-plane.key`
+- 当前账号 OAuth 与运行配置
 
-只剩旧控制 JSON、尚未迁移 SQLite 的环境不能直接升级，必须先使用最后一个支持 JSON 导入的过渡版本。
+发布工具不会从退役控制文件初始化目标，也不会替换现有 OAuth。数据库 Schema 新于候选镜像支持范围时必须停止，不得降级数据文件。
 
-## 升级前检查
+## 发布候选
 
-```bash
-docker compose --env-file .env --env-file state/compose.env \
-  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa store verify
-docker compose --env-file .env --env-file state/compose.env \
-  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa health
-docker compose --env-file .env --env-file state/compose.env \
-  -f docker-compose.yml -f compose.accounts.yml exec -T admin codex-cpa verify-routing
+操作者工作站执行：
+
+```sh
+make verify
+npm --prefix frontend run test:e2e
+make images VERSION=v2.0.0 PLATFORM=linux/amd64
+make publish VERSION=v2.0.0 IMAGE_PREFIXES=ghcr.io/owner
+make package VERSION=v2.0.0
 ```
 
-然后执行一次成对备份，参阅[备份与恢复](backup-and-restore.md)。
+`control`、`web`、`gateway` 和 `edge` 由各自源码摘要生成不可变标签；目标使用同一 `release-manifest.json` 校验镜像组件标签。CI 只校验和打包，不持有或连接目标。
 
-## 执行升级
+## Test 顺序
 
-统一入口会下载并校验发布附件，然后调用只面向已初始化目录的蓝绿升级器：
+1. 记录升级前数据库 `quick_check`、Schema、关键行数、活动槽和真实请求结果。
+2. 生成两份 SQLite、匹配主密钥、OAuth 和账号配置的可恢复备份。
+3. 使用仓库外 Test 环境文件执行 `config`、`pull` 和 `verify-images`。
+4. 确认旧 Writer 已停止后，完成受控所有权激活。
+5. 依次执行 `up-core`、`up-writers` 和 `smoke`；通知另行批准。
+6. 验证 Admin、Portal、使用中心、浏览器矩阵和同一个真实 API Key 的模型、非流式 Responses、SSE。
+7. 对比升级前后数据库事实，确认用量只增不减且 API Key/路由未被重建。
 
-```bash
-sudo /opt/codex-cpa-cluster/bin/codex-cpa upgrade v1.1.0
+```sh
+V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh pull
+V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh verify-images
+V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh activate
+V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-core
+V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-writers
+V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh smoke
 ```
 
-发布包和当前活动的四个应用镜像必须属于同一组件指纹。需要从内部 Registry 拉取同版本镜像时，使用
-`--image-prefix registry.example.com/team`。同版本发布中的 Go v2 候选镜像仅供隔离 Test 使用，当前
-升级器不会拉取或应用它们。
+## 最小影响原则
 
-部署器会：
+- Web 或 Admin 更新不要求重建上游账号容器。
+- Gateway 候选先在非活动槽健康，再由稳定 Edge 只切换新请求。
+- 已建立 SSE 留在原槽排空，不重放。
+- Edge 持有公开端口；重建 Edge 必须有明确维护窗口和端口验证。
+- Writer 只有一个有效 Generation，所有权切换后旧进程失败关闭。
 
-1. 获取目标机运行锁，避免与 CPA 镜像更新并发。
-2. 校验发布清单和组件镜像指纹。
-3. 在线备份控制面与用量数据库。
-4. 把目标应用组件暂存到 SQLite，生成 `state/compose.env` 后应用 Admin、Web 和 Gateway 变化。
-5. 在 inactive Gateway 完成真实鉴权、额度与路由验证。
-6. 平滑切换 Edge 并等待旧连接排空。
-7. 使用各业务 CPA 发布前的不可变 image ID 完成必要的 Compose 对账并验证模型列表。
-8. 再次验证数据库、页面、内部 Key 和外部 Key 路由，最后把暂存版本标记为已应用。
+## 回滚
 
-`runtime.cliproxy_image` 可以继续配置为 `:latest`，它只用于显式“拉取镜像”。升级应用本身
-不会拉取或应用该移动标签；候选 CPA 版本必须由账号管理中的镜像更新流程独立验收。
+镜像或路由验收失败时停止新 Writer，恢复上一组不可变镜像、原活动槽和已验证备份。数据库只能回到与备份成对的主密钥和声明兼容的应用版本；不得仅回滚容器而忽略已发生的 Schema/业务写入。
 
-普通升级默认拒绝重建稳定 Edge。确需更新时，应在维护窗口显式设置：
-
-```bash
-sudo /opt/codex-cpa-cluster/bin/codex-cpa upgrade v1.1.0 \
-  --allow-edge-recreate
-```
-
-## 不可逆迁移
-
-`store cleanup-projections` 会在严格校验后删除旧控制 JSON。完成后不能回滚到仍依赖这些 JSON 的旧应用版本。
-
-升级前必须阅读目标版本 Release Notes。未来版本应在发布清单中声明最低来源版本和数据库兼容范围；跨越不兼容版本时应逐个升级。
-
-## 回滚原则
-
-- 应用或路由验证失败时，部署器恢复上一版 Compose、镜像和活动 Gateway slot。
-- 数据库不能盲目降级；只允许回滚到声明兼容当前 Schema 的应用版本。
-- 新 Gateway 仍有流式请求时不会被强制停止，应等待排空或人工确认。
-- 备份未验证可恢复之前，不执行不可逆清理。
+Production 切换必须复用已在 Test 通过的发布摘要，但重新采集 Production 自身的备份、运行状态和真实 API Key 证据。Test 健康不能作为 Production 已验收的证明。

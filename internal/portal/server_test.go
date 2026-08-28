@@ -165,6 +165,47 @@ func TestPortalUsageReadsAreUserScopedAndBoundedToOneGeneratedWindow(t *testing.
 	}
 }
 
+func TestPortalQuotaIsUserScopedAndUsesTheLiveDefaultPolicy(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	fixture.identity.settings["user_quota.default_weekly_tokens"] = float64(20_000_000)
+	fixture.identity.settings["user_quota.reset_personal_weekly_on_new_week"] = false
+	limit := int64(20_000_000)
+	remaining := int64(17_000_000)
+	percent := float64(15)
+	fixture.weekly.result = usage.WeeklyQuota{
+		Period: "natural_week", Timezone: "Asia/Shanghai",
+		WeekStartAt: 9_000, WeekEndAt: 20_000,
+		LimitTokens: &limit, BaseLimitTokens: &limit,
+		UsedTokens: 3_000_000, WeightedUsedTokens: 3_000_000,
+		RawUsedTokens: 2_400_000, UnweightedUsedTokens: 2_400_000,
+		WeightedRawUsedTokens: 3_000_000, RemainingTokens: &remaining,
+		UsedPercent: &percent, Source: "default", PolicyMode: "inherit",
+		DefaultLimitTokens: &limit, QuotaUnit: "weighted_tokens",
+	}
+
+	response := fixture.request(http.MethodGet, "/usage/me/quota", "", "session")
+	if response.Code != http.StatusOK {
+		t.Fatalf("weekly quota = %d %s", response.Code, response.Body.String())
+	}
+	if fixture.weekly.calls != 1 || fixture.weekly.user != "alice@example.com" ||
+		fixture.weekly.defaultLimit == nil || *fixture.weekly.defaultLimit != limit {
+		t.Fatalf("quota reader arguments = %#v", fixture.weekly)
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"generated_at":10000`, `"weekly_quota"`, `"limit_tokens":20000000`,
+		`"weighted_used_tokens":3000000`, `"personal_policy_reset_enabled":false`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("quota response %s does not contain %s", body, expected)
+		}
+	}
+	if strings.Contains(body, "old-key") || strings.Contains(body, "bob@example.com") {
+		t.Fatalf("quota response leaked identity material: %s", body)
+	}
+}
+
 func TestPortalRejectsInvisibleAccountBeforeReadingBreakdown(t *testing.T) {
 	fixture := newPortalFixture(t)
 	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
@@ -313,6 +354,7 @@ type portalFixture struct {
 	routes   *portalRouteFake
 	keys     *portalKeyFake
 	quota    *portalQuotaStateFake
+	weekly   *portalWeeklyQuotaFake
 }
 
 func newPortalFixture(t *testing.T) *portalFixture {
@@ -347,8 +389,10 @@ func newPortalFixture(t *testing.T) *portalFixture {
 	routeChanger := &portalRouteFake{}
 	keyRotator := &portalKeyFake{}
 	quotaStore := &portalQuotaStateFake{}
+	weeklyQuota := &portalWeeklyQuotaFake{}
 	server, err := New(Config{
 		Identity: identityStore, Sessions: sessions, Usage: usageReader,
+		Quotas:      weeklyQuota,
 		PublicUsage: usageReader,
 		Routes:      routeChanger, Keys: keyRotator, QuotaStore: quotaStore,
 		Now: now, SessionTTL: time.Hour,
@@ -364,7 +408,7 @@ func newPortalFixture(t *testing.T) *portalFixture {
 	return &portalFixture{
 		t: t, server: server, router: router, identity: identityStore,
 		sessions: sessions, usage: usageReader, routes: routeChanger, keys: keyRotator,
-		quota: quotaStore,
+		quota: quotaStore, weekly: weeklyQuota,
 	}
 }
 
@@ -619,6 +663,25 @@ type portalQuotaStateFake struct {
 	state quota.RuntimeState
 	found bool
 	err   error
+}
+
+type portalWeeklyQuotaFake struct {
+	result       usage.WeeklyQuota
+	err          error
+	user         string
+	defaultLimit *int64
+	calls        int
+}
+
+func (reader *portalWeeklyQuotaFake) WeeklyQuota(
+	_ context.Context,
+	user string,
+	defaultLimit *int64,
+) (usage.WeeklyQuota, error) {
+	reader.calls++
+	reader.user = user
+	reader.defaultLimit = cloneInt64(defaultLimit)
+	return reader.result, reader.err
 }
 
 func (store *portalQuotaStateFake) ReadRuntimeState(

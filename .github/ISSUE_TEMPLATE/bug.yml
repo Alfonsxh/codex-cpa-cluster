@@ -51,7 +51,7 @@ body:
     id: diagnostics
     attributes:
       label: 已脱敏的诊断信息
-      description: 可包含 docker compose ps、codex-cpa health 和必要日志。
+      description: 可包含 docker compose ps、目标烟测结果和必要的 Go 服务日志。
       render: shell
   - type: checkboxes
     id: checks

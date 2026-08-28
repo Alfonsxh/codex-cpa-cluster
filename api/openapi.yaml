@@ -3,8 +3,7 @@ info:
   title: Codex CPA Cluster v2 API
   version: 2.0.0-dev
   description: >-
-    Contract for the isolated Go v2 Admin and self-service APIs. The current
-    Production router remains v1 until the migration gates are complete.
+    Contract for the Go Admin, self-service and public configuration APIs.
 servers:
   - url: /
 tags:
@@ -95,12 +94,50 @@ paths:
                 $ref: "#/components/schemas/OverviewPayload"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /admin/api/overview/catalog:
+    get:
+      operationId: getAdminOverviewCatalog
+      tags: [admin-overview]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Selector identities with current operational status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewCatalog"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/overview/status:
+    get:
+      operationId: getAdminOverviewStatus
+      tags: [admin-overview]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Runtime-bound overview counters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewStatusPayload"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /admin/api/accounts:
     get:
       operationId: listAdminAccounts
       tags: [admin-accounts]
       security:
         - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
+        - name: fresh
+          in: query
+          description: Request a single-flight official quota refresh when the persistent snapshot is old enough.
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
           description: Account catalog
@@ -151,6 +188,33 @@ paths:
       responses:
         "200":
           description: Account state and runtime updated with compensating rollback protection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountUpdateResponse"
+        "409":
+          $ref: "#/components/responses/AccountLifecycleConflictResponse"
+        "503":
+          $ref: "#/components/responses/AccountLifecycleUnavailableResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/policy:
+    post:
+      operationId: updateAdminAccountPolicy
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountUpdateRequest"
+      responses:
+        "200":
+          description: Account selection policy updated with safe fallback routing
           content:
             application/json:
               schema:
@@ -400,6 +464,15 @@ paths:
       security:
         - adminSession: []
       parameters:
+        - name: view
+          in: query
+          schema:
+            type: string
+            enum: [summary, members]
+            default: summary
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
         - name: q
           in: query
           schema:
@@ -408,6 +481,28 @@ paths:
           in: query
           schema:
             type: string
+        - name: usage_state
+          in: query
+          schema:
+            type: string
+            enum: [all, used, unused]
+            default: all
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [email, requests, tokens, quota, last_used]
+            default: tokens
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: fresh
+          in: query
+          schema:
+            type: boolean
         - name: page
           in: query
           schema:
@@ -420,7 +515,8 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
-            default: 25
+            enum: [25, 50, 100]
+            default: 50
       responses:
         "200":
           description: Paginated secret-free user catalog
@@ -450,6 +546,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserCreateResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/users/detail:
+    get:
+      operationId: getAdminUserDetail
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/EmailQuery"
+        - $ref: "#/components/parameters/UsageWindowQuery"
+        - $ref: "#/components/parameters/UsageStartAtQuery"
+        - $ref: "#/components/parameters/UsageEndAtQuery"
+      responses:
+        "200":
+          description: Lazy secret-free user account detail for the selected usage window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/users/quota:
@@ -541,7 +657,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UserEmailConfirmRequest"
+              $ref: "#/components/schemas/UserKeyActionRequest"
       responses:
         "200":
           description: One-time replacement API Key
@@ -564,7 +680,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UserEmailConfirmRequest"
+              $ref: "#/components/schemas/UserEmailRequest"
       responses:
         "200":
           $ref: "#/components/responses/MessageResponse"
@@ -583,7 +699,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UserEmailConfirmRequest"
+              $ref: "#/components/schemas/UserEmailRequest"
       responses:
         "200":
           description: One-time replacement password
@@ -765,6 +881,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GeneralSettingsMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/settings/workspace:
+    get:
+      operationId: getAdminSettingsWorkspace
+      tags: [admin-settings]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Configuration workspace metadata without secret contents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsWorkspace"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/settings/initial-password:
@@ -955,6 +1086,25 @@ paths:
               schema: { $ref: "#/components/schemas/RebalanceAccountResponse" }
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/quota-reset:
+    get:
+      operationId: inspectAdminAccountQuotaReset
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - name: account
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current selectable reset credits and exhausted weekly windows, loaded only when requested
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResetAccountQuotaInspection" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /admin/api/accounts/reset-quota:
     post:
       operationId: resetAdminAccountQuota
@@ -1049,6 +1199,19 @@ paths:
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/users/quota-actions:
+    get:
+      operationId: getAdminUserQuotaOperations
+      tags: [admin-users]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Current-week all-user quota impact used before destructive bulk actions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserQuotaOperationSummary" }
+        default:
+          $ref: "#/components/responses/ErrorResponse"
     post:
       operationId: applyAdminUserQuotaAction
       tags: [admin-users]
@@ -1214,7 +1377,7 @@ paths:
           description: Compatibility alias for recent runtime jobs
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RuntimeJobCatalog" }
+              schema: { $ref: "#/components/schemas/LegacyRuntimeJobCatalog" }
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/jobs/{id}:
@@ -1233,7 +1396,7 @@ paths:
           description: Compatibility alias for current runtime job status
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RuntimeJobResponse" }
+              schema: { $ref: "#/components/schemas/LegacyRuntimeJobResponse" }
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/jobs/cancel:
@@ -1254,7 +1417,7 @@ paths:
           description: Compatibility alias for queued or running job cancellation
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RuntimeJobCancelResponse" }
+              schema: { $ref: "#/components/schemas/LegacyRuntimeJobCancelResponse" }
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/operations:
@@ -1275,12 +1438,12 @@ paths:
           description: Existing identical job reused
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RuntimeJobSubmissionResponse" }
+              schema: { $ref: "#/components/schemas/LegacyRuntimeJobSubmissionResponse" }
         "202":
           description: Runtime job accepted into the bounded pool
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RuntimeJobSubmissionResponse" }
+              schema: { $ref: "#/components/schemas/LegacyRuntimeJobSubmissionResponse" }
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/operations/impact:
@@ -1401,6 +1564,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PortalKeyResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /usage/me/quota:
+    get:
+      operationId: getPortalQuota
+      tags: [portal]
+      security:
+        - portalSession: []
+      responses:
+        "200":
+          description: Current user's natural-week weighted Token quota
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalQuota"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /usage/me/accounts:
@@ -1745,6 +1923,69 @@ components:
         unassigned_users: { type: integer }
         teams: { type: integer }
         incomplete_key_matrices: { type: integer }
+    OverviewCatalog:
+      type: object
+      additionalProperties: false
+      required: [generated_at, accounts, users]
+      properties:
+        generated_at:
+          type: integer
+          format: int64
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/OverviewCatalogAccount"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/OverviewCatalogUser"
+    OverviewCatalogAccount:
+      type: object
+      additionalProperties: false
+      required: [id, operational_status]
+      properties:
+        id:
+          type: string
+        operational_status:
+          $ref: "#/components/schemas/AccountOperationalStatus"
+    OverviewCatalogUser:
+      type: object
+      additionalProperties: false
+      required: [email, status]
+      properties:
+        email:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [active, inactive]
+    OverviewStatusPayload:
+      type: object
+      additionalProperties: false
+      required:
+        - generated_at
+        - authorized_accounts
+        - running_services
+        - total_services
+        - requests_5m
+        - warnings
+      properties:
+        generated_at:
+          type: integer
+          format: int64
+        authorized_accounts:
+          type: integer
+        running_services:
+          type: integer
+        total_services:
+          type: integer
+        requests_5m:
+          type: integer
+          format: int64
+        warnings:
+          type: array
+          items:
+            type: string
     AccountState:
       type: object
       additionalProperties: false
@@ -1768,6 +2009,112 @@ components:
         headroom: { type: number }
         reset_at: { type: integer, format: int64 }
         observed_at: { type: integer, format: int64 }
+    AccountWeeklyWindow:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - label
+        - metered_feature
+        - window_slot
+        - used_percent
+        - remaining_percent
+        - reported_used_percent
+        - reset_at
+        - reset_after_seconds
+        - window_seconds
+        - limit_reached
+        - resettable
+      properties:
+        key: { type: string }
+        label: { type: string }
+        metered_feature: { type: [string, "null"] }
+        window_slot: { type: string }
+        used_percent: { type: number }
+        remaining_percent: { type: number }
+        reported_used_percent: { type: number }
+        reset_at: { type: [integer, "null"], format: int64 }
+        reset_after_seconds: { type: [integer, "null"], format: int64 }
+        window_seconds: { type: integer, format: int64 }
+        limit_reached: { type: boolean }
+        resettable: { type: boolean }
+    AccountQuota:
+      type: object
+      additionalProperties: false
+      required: [account, status, plan_type, allowed, limit_reached, reset_credit_count, weekly, weekly_windows]
+      properties:
+        account: { type: string }
+        status: { type: string }
+        plan_type: { type: [string, "null"] }
+        allowed: { type: [boolean, "null"] }
+        limit_reached: { type: [boolean, "null"] }
+        reset_credit_count: { type: [integer, "null"], format: int64 }
+        weekly:
+          oneOf:
+            - $ref: "#/components/schemas/AccountWeeklyWindow"
+            - type: "null"
+        weekly_windows:
+          type: array
+          items: { $ref: "#/components/schemas/AccountWeeklyWindow" }
+    AccountRuntime:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - query_status
+        - credential_status
+        - credential_count
+        - credential_unavailable
+        - credential_unavailable_count
+        - credential_disabled
+        - credential_disabled_count
+        - native_success
+        - native_failed
+        - error_log_files
+        - error_log_status
+        - window_seconds
+        - requests
+        - error_count
+        - rate_429_count
+        - server_error_count
+        - affected_users
+        - last_error_at
+        - last_error_status
+        - error_rate_percent
+        - error_age_seconds
+      properties:
+        state: { type: string }
+        query_status: { type: string }
+        credential_status: { type: string }
+        credential_count: { type: integer }
+        credential_unavailable: { type: boolean }
+        credential_unavailable_count: { type: integer }
+        credential_disabled: { type: boolean }
+        credential_disabled_count: { type: integer }
+        native_success: { type: integer, format: int64 }
+        native_failed: { type: integer, format: int64 }
+        error_log_files: { type: integer }
+        error_log_status: { type: string }
+        window_seconds: { type: integer, format: int64 }
+        requests: { type: integer }
+        error_count: { type: integer }
+        rate_429_count: { type: integer }
+        server_error_count: { type: integer }
+        affected_users: { type: integer }
+        last_error_at: { type: integer, format: int64 }
+        last_error_status: { type: integer }
+        error_rate_percent: { type: number }
+        error_age_seconds: { type: [integer, "null"], format: int64 }
+    AccountOperationalStatus:
+      type: object
+      additionalProperties: false
+      required: [code, label, tone, reason, selectable]
+      properties:
+        code: { type: string }
+        label: { type: string }
+        tone: { type: string, enum: [success, warning, danger, neutral] }
+        reason: { type: string }
+        selectable: { type: boolean }
     Account:
       type: object
       additionalProperties: false
@@ -1776,11 +2123,33 @@ components:
         - email
         - port
         - proxy_mode
+        - proxy_source
+        - proxy_display
         - enabled
         - default
+        - service
+        - container_state
+        - container_status
+        - container_health
+        - runtime_state
+        - oauth_configured
+        - auth_files
+        - auth_state
+        - associated_users
         - routed_users
         - active_users_1h
+        - active_user_emails_1h
+        - reset_credit_count
+        - resettable
+        - reset_window_labels
+        - quota
+        - usage
+        - usage_available
+        - usage_window_start_at
+        - usage_window_available
         - account_state
+        - runtime
+        - operational_status
         - state_available
         - proxy_configured
       properties:
@@ -1788,22 +2157,81 @@ components:
         email: { type: string, format: email }
         port: { type: integer }
         proxy_mode: { type: string }
+        proxy_source: { type: string, enum: [account, default, direct] }
+        proxy_display:
+          type: string
+          description: Effective proxy URL with password redacted, or direct; never contains a plaintext proxy password.
         enabled: { type: boolean }
         default: { type: boolean }
+        service: { type: string }
+        container_state: { type: string }
+        container_status: { type: string }
+        container_health: { type: string }
+        runtime_state: { type: string, enum: [running, stopped, disabled, unknown] }
+        oauth_configured: { type: [boolean, "null"] }
+        auth_files: { type: integer }
+        auth_state: { type: string, enum: [configured, pending, unknown] }
+        associated_users: { type: integer }
         routed_users: { type: integer }
         active_users_1h: { type: [integer, "null"] }
+        active_user_emails_1h:
+          type: array
+          items: { type: string, format: email }
+          description: Authenticated rolling-hour distinct user identities, sorted by normalized email
+        reset_credit_count: { type: [integer, "null"], format: int64 }
+        resettable: { type: boolean }
+        reset_window_labels:
+          type: array
+          items: { type: string }
+        quota: { $ref: "#/components/schemas/AccountQuota" }
+        usage: { $ref: "#/components/schemas/UsageMetrics" }
+        usage_available: { type: boolean }
+        usage_window_start_at: { type: [integer, "null"], format: int64 }
+        usage_window_available: { type: boolean }
         account_state: { $ref: "#/components/schemas/AccountState" }
+        runtime: { $ref: "#/components/schemas/AccountRuntime" }
+        operational_status: { $ref: "#/components/schemas/AccountOperationalStatus" }
         state_available: { type: boolean }
         proxy_configured: { type: boolean }
     AccountCatalog:
       type: object
       additionalProperties: false
-      required: [accounts, generated_at, warnings]
+      required:
+        - accounts
+        - generated_at
+        - window
+        - window_seconds
+        - window_start_at
+        - window_start_at_by_account
+        - window_end_at
+        - window_timezone
+        - quota_generated_at
+        - quota_cached
+        - quota_refreshing
+        - quota_cache_ttl_seconds
+        - collector
+        - warnings
       properties:
         accounts:
           type: array
           items: { $ref: "#/components/schemas/Account" }
         generated_at: { type: integer, format: int64 }
+        window:
+          oneOf:
+            - type: integer
+            - type: string
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: [integer, "null"], format: int64 }
+        window_start_at_by_account:
+          type: [object, "null"]
+          additionalProperties: { type: integer, format: int64 }
+        window_end_at: { type: [integer, "null"], format: int64 }
+        window_timezone: { type: string }
+        quota_generated_at: { type: [integer, "null"], format: int64 }
+        quota_cached: { type: boolean }
+        quota_refreshing: { type: boolean }
+        quota_cache_ttl_seconds: { type: integer, format: int64 }
+        collector: { $ref: "#/components/schemas/CollectorStatus" }
         warnings:
           type: array
           items: { type: string }
@@ -1867,11 +2295,11 @@ components:
           type: string
           maxLength: 2048
           writeOnly: true
-          description: Omit to retain the encrypted value; send an empty string to clear it.
+          description: Omit or send an empty string to retain the encrypted value, matching the legacy write-only editor.
         group_enabled: { type: boolean }
         default_group: { type: boolean }
         fallback_account:
-          type: string
+          type: [string, "null"]
           pattern: "^[a-z][a-z0-9-]{1,31}$"
         confirm:
           type: string
@@ -1927,7 +2355,7 @@ components:
         confirm: { type: string }
         revoke_keys: { type: boolean }
         fallback_account:
-          type: string
+          type: [string, "null"]
           pattern: "^[a-z][a-z0-9-]{1,31}$"
     AccountDeleteResult:
       type: object
@@ -2015,7 +2443,7 @@ components:
     RuntimeService:
       type: object
       additionalProperties: false
-      required: [service, container_id, name, image, state, status]
+      required: [service, container_id, name, image, state, status, health]
       properties:
         service: { type: string }
         container_id: { type: string, maxLength: 12 }
@@ -2023,6 +2451,7 @@ components:
         image: { type: string }
         state: { type: string }
         status: { type: string }
+        health: { type: string }
     RuntimeServiceCatalog:
       type: object
       additionalProperties: false
@@ -2048,7 +2477,7 @@ components:
       additionalProperties: false
       required: [action, target, services]
       properties:
-        action: { type: string, enum: [start, stop, restart] }
+        action: { type: string, enum: [start, stop, restart, login, image-pull, image-update, health, verify-routing, render] }
         target: { type: string }
         services:
           type: array
@@ -2060,7 +2489,7 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
-        action: { type: string, enum: [start, stop, restart] }
+        action: { type: string, enum: [start, stop, restart, login, image-pull, image-update] }
         target: { type: string }
         status:
           type: string
@@ -2069,6 +2498,7 @@ components:
         started_at: { type: integer, format: int64 }
         finished_at: { type: integer, format: int64 }
         result: { $ref: "#/components/schemas/RuntimeOperationResult" }
+        output: { type: string, maxLength: 2097184 }
         error: { type: string }
     RuntimeJobCatalog:
       type: object
@@ -2083,7 +2513,7 @@ components:
       additionalProperties: false
       required: [action, target, confirm]
       properties:
-        action: { type: string, enum: [start, up, stop, restart] }
+        action: { type: string, enum: [start, up, stop, restart, login, image-pull, image-update, health, verify-routing, render] }
         target: { type: string, minLength: 1 }
         confirm:
           type: string
@@ -2109,6 +2539,54 @@ components:
       properties:
         message: { type: string }
         job: { $ref: "#/components/schemas/RuntimeJob" }
+    LegacyRuntimeJob:
+      type: object
+      additionalProperties: false
+      required: [id, name, target, status, created_at, started_at, finished_at, exit_code]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        target: { type: string }
+        status:
+          type: string
+          enum: [queued, running, cancelling, succeeded, failed, cancelled]
+        created_at: { type: integer, format: int64 }
+        started_at: { type: [integer, "null"], format: int64 }
+        finished_at: { type: [integer, "null"], format: int64 }
+        exit_code: { type: [integer, "null"] }
+        output:
+          type: array
+          maxItems: 2000
+          items: { type: string }
+    LegacyRuntimeJobCatalog:
+      type: object
+      additionalProperties: false
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/LegacyRuntimeJob" }
+    LegacyRuntimeJobResponse:
+      type: object
+      additionalProperties: false
+      required: [job]
+      properties:
+        job: { $ref: "#/components/schemas/LegacyRuntimeJob" }
+    LegacyRuntimeJobSubmissionResponse:
+      type: object
+      additionalProperties: false
+      required: [message, job, reused]
+      properties:
+        message: { type: string }
+        job: { $ref: "#/components/schemas/LegacyRuntimeJob" }
+        reused: { type: boolean }
+    LegacyRuntimeJobCancelResponse:
+      type: object
+      additionalProperties: false
+      required: [message, job]
+      properties:
+        message: { type: string }
+        job: { $ref: "#/components/schemas/LegacyRuntimeJob" }
     Team:
       type: object
       additionalProperties: false
@@ -2173,6 +2651,9 @@ components:
         - team_id
         - team
         - team_membership_version
+        - account_count
+        - usage
+        - weekly_quota
       properties:
         email: { type: string, format: email }
         status: { type: string, enum: [active, inactive] }
@@ -2188,6 +2669,9 @@ components:
             - $ref: "#/components/schemas/UserTeam"
             - type: "null"
         team_membership_version: { type: integer, format: int64 }
+        account_count: { type: integer }
+        usage: { $ref: "#/components/schemas/WeightedUsageMetrics" }
+        weekly_quota: { $ref: "#/components/schemas/UserWeeklyQuota" }
     Pagination:
       type: object
       additionalProperties: false
@@ -2200,13 +2684,106 @@ components:
     UserCatalog:
       type: object
       additionalProperties: false
-      required: [users, pagination, generated_at]
+      required:
+        - users
+        - accounts
+        - teams
+        - tags
+        - collector
+        - pagination
+        - generated_at
+        - window
+        - window_seconds
+        - window_start_at
+        - window_end_at
+        - window_timezone
+        - summary_generated_at
+        - summary_cached
       properties:
         users:
           type: array
           items: { $ref: "#/components/schemas/UserSummary" }
+        accounts:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [email]
+            properties:
+              email: { type: string, format: email }
+        teams:
+          type: array
+          items: { $ref: "#/components/schemas/Team" }
+        tags:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        collector: { $ref: "#/components/schemas/CollectorStatus" }
         pagination: { $ref: "#/components/schemas/Pagination" }
         generated_at: { type: integer, format: int64 }
+        window: { $ref: "#/components/schemas/UsageWindow" }
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: [integer, "null"], format: int64 }
+        window_end_at: { type: [integer, "null"], format: int64 }
+        window_timezone: { type: string }
+        summary_generated_at: { type: integer, format: int64 }
+        summary_cached: { type: boolean }
+    UserKeyPreview:
+      type: object
+      additionalProperties: false
+      required: [label, account, account_email, user, status, created_at, updated_at, preview]
+      properties:
+        label: { type: string }
+        account: { type: string }
+        account_email: { type: string }
+        user: { type: string, format: email }
+        status: { type: string }
+        created_at: { type: integer, format: int64 }
+        updated_at: { type: integer, format: int64 }
+        preview: { type: string }
+    UserAccountDetail:
+      type: object
+      additionalProperties: false
+      required: [account, account_email, status, history_count, key, usage]
+      properties:
+        account: { type: string }
+        account_email: { type: string, format: email }
+        status: { type: string, enum: [active, inactive, revoked, missing] }
+        history_count: { type: integer }
+        key:
+          oneOf:
+            - $ref: "#/components/schemas/UserKeyPreview"
+            - type: "null"
+        usage: { $ref: "#/components/schemas/WeightedUsageMetrics" }
+    UserDetail:
+      allOf:
+        - $ref: "#/components/schemas/UserSummary"
+        - type: object
+          required: [accounts]
+          properties:
+            accounts:
+              type: array
+              items: { $ref: "#/components/schemas/UserAccountDetail" }
+    UserDetailResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - generated_at
+        - window
+        - window_seconds
+        - window_start_at
+        - window_end_at
+        - window_timezone
+        - user
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window: { $ref: "#/components/schemas/UsageWindow" }
+        window_seconds: { type: [integer, "null"], format: int64 }
+        window_start_at: { type: [integer, "null"], format: int64 }
+        window_end_at: { type: [integer, "null"], format: int64 }
+        window_timezone: { type: string }
+        user: { $ref: "#/components/schemas/UserDetail" }
     CreateUserRequest:
       type: object
       additionalProperties: false
@@ -2214,60 +2791,63 @@ components:
       properties:
         email: { type: string, format: email }
         team_id: { type: [string, "null"] }
-    UserCreateCredential:
+    UserOneTimeKey:
       type: object
       additionalProperties: false
-      required: [user, api_key, initial_password, team_id, accounts, snapshot_generation]
+      required: [label, account, account_email, user, status, created_at, updated_at, preview, key]
       properties:
+        label: { type: string }
+        account: { type: string }
+        account_email: { type: string }
         user: { type: string, format: email }
-        api_key: { type: string }
-        initial_password: { type: string }
-        team_id: { type: [string, "null"] }
-        accounts: { type: integer }
-        snapshot_generation: { type: string }
+        status: { type: string }
+        created_at: { type: integer, format: int64 }
+        updated_at: { type: integer, format: int64 }
+        preview: { type: string }
+        key: { type: string }
     UserCreateResponse:
       type: object
       additionalProperties: false
-      required: [message, user]
+      required: [message, keys, initial_password, team_id]
       properties:
         message: { type: string }
-        user: { $ref: "#/components/schemas/UserCreateCredential" }
-    UserEmailConfirmRequest:
+        keys:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/UserOneTimeKey" }
+        initial_password: { type: string }
+        team_id: { type: [string, "null"] }
+    UserEmailRequest:
       type: object
       additionalProperties: false
-      required: [email, confirm]
+      required: [email]
       properties:
         email: { type: string, format: email }
-        confirm: { type: string }
-    UserKeyRotation:
+    UserKeyActionRequest:
       type: object
       additionalProperties: false
-      required: [api_key, snapshot_generation]
+      required: [label]
       properties:
-        api_key: { type: string }
-        snapshot_generation: { type: string }
+        label: { type: string }
     UserKeyRotationResponse:
       type: object
       additionalProperties: false
-      required: [message, key]
+      required: [message, keys]
       properties:
         message: { type: string }
-        key: { $ref: "#/components/schemas/UserKeyRotation" }
-    UserPasswordReset:
-      type: object
-      additionalProperties: false
-      required: [user, initial_password, password_change_required]
-      properties:
-        user: { type: string, format: email }
-        initial_password: { type: string }
-        password_change_required: { type: boolean }
+        keys:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/UserOneTimeKey" }
     UserPasswordResetResponse:
       type: object
       additionalProperties: false
-      required: [message, password]
+      required: [message, user, initial_password, password_change_required]
       properties:
         message: { type: string }
-        password: { $ref: "#/components/schemas/UserPasswordReset" }
+        user: { type: string, format: email }
+        initial_password: { type: string }
+        password_change_required: { type: boolean }
     DeleteUserRequest:
       type: object
       additionalProperties: false
@@ -2279,7 +2859,7 @@ components:
     UpdateUserTeamRequest:
       type: object
       additionalProperties: false
-      required: [email, team_id, expected_team_id]
+      required: [email, team_id]
       properties:
         email: { type: string, format: email }
         team_id: { type: [string, "null"] }
@@ -2295,6 +2875,7 @@ components:
           maxItems: 500
           items: { type: string, format: email }
         team_id: { type: [string, "null"] }
+        expected_team_id: { type: [string, "null"] }
     UserQuotaMode:
       type: string
       enum: [inherit, unlimited, custom]
@@ -2320,15 +2901,23 @@ components:
         - used_tokens
         - weighted_used_tokens
         - raw_used_tokens
+        - unweighted_used_tokens
+        - weighted_raw_used_tokens
+        - usage_reset_tokens
         - remaining_tokens
         - used_percent
         - limit_reached
+        - source
         - policy_mode
         - policy_tokens
+        - policy_updated_at
+        - policy_updated_by
         - policy_reset_at
         - default_limit_tokens
         - unlimited
+        - soft_limit
         - quota_unit
+        - adjustment_count
         - personal_policy_reset_enabled
       properties:
         period: { type: string, const: natural_week }
@@ -2341,15 +2930,23 @@ components:
         used_tokens: { type: integer, format: int64 }
         weighted_used_tokens: { type: integer, format: int64 }
         raw_used_tokens: { type: integer, format: int64 }
+        unweighted_used_tokens: { type: integer, format: int64 }
+        weighted_raw_used_tokens: { type: integer, format: int64 }
+        usage_reset_tokens: { type: integer, format: int64 }
         remaining_tokens: { type: [integer, "null"], format: int64 }
         used_percent: { type: [number, "null"] }
         limit_reached: { type: boolean }
+        source: { type: string, enum: [default, user_unlimited, user_custom] }
         policy_mode: { $ref: "#/components/schemas/UserQuotaMode" }
         policy_tokens: { type: [integer, "null"], format: int64 }
+        policy_updated_at: { type: [integer, "null"], format: int64 }
+        policy_updated_by: { type: [string, "null"] }
         policy_reset_at: { type: [integer, "null"], format: int64 }
         default_limit_tokens: { type: [integer, "null"], format: int64 }
         unlimited: { type: boolean }
+        soft_limit: { type: boolean }
         quota_unit: { type: string, const: weighted_tokens }
+        adjustment_count: { type: integer, format: int64 }
         personal_policy_reset_enabled: { type: boolean }
     UserQuotaAdjustment:
       type: object
@@ -2437,6 +3034,44 @@ components:
       properties:
         message: { type: string }
         settings: { $ref: "#/components/schemas/GeneralSettings" }
+    SettingsWorkspaceStorage:
+      type: object
+      additionalProperties: false
+      required: [label, path, exists, mode]
+      properties:
+        label: { type: string }
+        path: { type: string }
+        exists: { type: boolean }
+        mode: { type: string }
+    SettingsWorkspaceBackups:
+      type: object
+      additionalProperties: false
+      required: [count, latest]
+      properties:
+        count: { type: integer, minimum: 0 }
+        latest: { type: string }
+    SettingsWorkspaceAudit:
+      type: object
+      additionalProperties: false
+      required: [timestamp, action, target, outcome]
+      properties:
+        timestamp: { type: integer, format: int64 }
+        action: { type: string }
+        target: { type: string }
+        outcome: { type: string }
+    SettingsWorkspace:
+      type: object
+      additionalProperties: false
+      required: [storage, backups, recent_audit]
+      properties:
+        storage:
+          type: array
+          items: { $ref: "#/components/schemas/SettingsWorkspaceStorage" }
+        backups: { $ref: "#/components/schemas/SettingsWorkspaceBackups" }
+        recent_audit:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/SettingsWorkspaceAudit" }
     InitialPasswordRequest:
       type: object
       additionalProperties: false
@@ -2669,6 +3304,13 @@ components:
           type: string
           description: One-time browser-memory reveal; clients must not cache or persist this value.
         generated_at: { type: integer, format: int64 }
+    PortalQuota:
+      type: object
+      additionalProperties: false
+      required: [generated_at, weekly_quota]
+      properties:
+        generated_at: { type: integer, format: int64 }
+        weekly_quota: { $ref: "#/components/schemas/UserWeeklyQuota" }
     PortalAccountStatus:
       type: object
       additionalProperties: false
@@ -2956,6 +3598,28 @@ components:
         reset_type: { type: string }
         status: { type: string }
         redeemed_at: { type: integer, format: int64 }
+    ResetQuotaCreditOption:
+      type: object
+      additionalProperties: false
+      required: [id, title]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 512 }
+        title: { type: string }
+        expires_at: { type: integer, format: int64 }
+    ResetAccountQuotaInspection:
+      type: object
+      additionalProperties: false
+      required: [account, available_count, details_truncated, windows, credits]
+      properties:
+        account: { type: string }
+        available_count: { type: [integer, "null"], format: int64 }
+        details_truncated: { type: boolean }
+        windows:
+          type: array
+          items: { $ref: "#/components/schemas/ResetQuotaWindow" }
+        credits:
+          type: array
+          items: { $ref: "#/components/schemas/ResetQuotaCreditOption" }
     ResetAccountQuotaResponse:
       type: object
       additionalProperties: false
@@ -3429,7 +4093,7 @@ components:
       additionalProperties: false
       required: [action]
       properties:
-        action: { type: string, enum: [start, up, stop, restart] }
+        action: { type: string, enum: [start, up, stop, restart, login, image-pull, image-update, health, verify-routing, render] }
         target: { type: string, default: all }
     LegacyRuntimeJobCancelRequest:
       type: object

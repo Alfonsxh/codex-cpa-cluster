@@ -42,9 +42,8 @@ func NormalizePublicPath(path string) (string, bool) {
 	return "", false
 }
 
-// ExtractBearer accepts the same case-insensitive scheme and surrounding
-// whitespace as the OpenResty request gate, while rejecting embedded
-// whitespace in the Key itself.
+// ExtractBearer accepts a case-insensitive scheme and surrounding whitespace
+// while rejecting embedded whitespace in the Key itself.
 func ExtractBearer(header string) (string, bool) {
 	match := bearerPattern.FindStringSubmatch(header)
 	if len(match) != 2 || match[1] == "" {

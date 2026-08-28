@@ -8,16 +8,19 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountlifecycle"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountstatus"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/identity"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/notifications"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
 	"github.com/gin-gonic/gin"
 )
@@ -492,6 +495,20 @@ func TestUserTeamAPIValidatesUsersAndRejectsStaleMembership(t *testing.T) {
 	}, headers, nil)
 	assertAdminError(t, response, http.StatusConflict, "team_membership_conflict")
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/users/team/batch", map[string]any{
+		"users":            []string{"alice@example.com"},
+		"team_id":          nil,
+		"expected_team_id": nil,
+	}, headers, nil)
+	assertAdminError(t, response, http.StatusConflict, "team_membership_conflict")
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/users/team/batch", map[string]any{
+		"users":            []string{"alice@example.com"},
+		"team_id":          nil,
+		"expected_team_id": created.Team.ID,
+	}, headers, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected batch reassignment status = %d, body = %s", response.Code, response.Body.String())
+	}
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/users/team/batch", map[string]any{
 		"users":   []string{"missing@example.com"},
 		"team_id": created.Team.ID,
 	}, headers, nil)
@@ -522,7 +539,29 @@ func TestUserTeamAPIRejectsMutationWhenUsageIdentitySyncIsUnavailable(t *testing
 }
 
 func TestUserListAPIIsFineGrainedPaginatedAndSecretFree(t *testing.T) {
-	server, store := newTestAdmin(t)
+	base, store := newTestAdmin(t)
+	base.Close()
+	reader := &fakeUsageReader{
+		collectorResult: usage.CollectorStatus{Status: "healthy"},
+		userSummaries: map[string]usage.WeightedMetrics{
+			"alice@example.com": {
+				RawMetrics: usage.RawMetrics{
+					RequestCount: 3, SuccessCount: 2, FailedCount: 1,
+					TotalTokens: 900, LastUsedAt: 950,
+				},
+				WeightedTokens: 1_100,
+			},
+		},
+	}
+	fixedNow := time.Unix(1_787_500_800, 0)
+	server, err := New(Config{
+		Store: store, Usage: reader, Users: &fakeUserLifecycle{},
+		Now: func() time.Time { return fixedNow },
+	})
+	if err != nil {
+		t.Fatalf("New user catalog Admin: %v", err)
+	}
+	t.Cleanup(server.Close)
 	if err := store.WriteRoutes(context.Background(), map[string]string{
 		"alice@example.com": "alpha",
 	}); err != nil {
@@ -531,7 +570,7 @@ func TestUserListAPIIsFineGrainedPaginatedAndSecretFree(t *testing.T) {
 	response := performAdminRequest(
 		server,
 		http.MethodGet,
-		"/admin/api/users?page=1&page_size=25&q=alice",
+		"/admin/api/users?view=summary&window=today&page=1&page_size=25&q=alice&sort=tokens&direction=desc",
 		nil,
 		map[string]string{"X-Management-Key": "test-management-key"},
 		nil,
@@ -553,10 +592,31 @@ func TestUserListAPIIsFineGrainedPaginatedAndSecretFree(t *testing.T) {
 		payload.Pagination.Page != 1 || payload.Pagination.PageSize != 25 || payload.Pagination.Total != 1 {
 		t.Fatalf("user list payload = %#v", payload)
 	}
+	expectedStart := time.Date(
+		fixedNow.UTC().Year(), fixedNow.UTC().Month(), fixedNow.UTC().Day(),
+		0, 0, 0, 0, time.UTC,
+	).Unix()
+	if reader.userSummaryCalls != 1 || reader.userSummaryStartAt != expectedStart {
+		t.Fatalf("user summary calls = %d, start=%d", reader.userSummaryCalls, reader.userSummaryStartAt)
+	}
 	if bytes.Contains(response.Body.Bytes(), []byte("test_external_alice")) ||
-		bytes.Contains(response.Body.Bytes(), []byte(`"tags"`)) ||
-		bytes.Contains(response.Body.Bytes(), []byte(`"accounts"`)) {
+		bytes.Contains(response.Body.Bytes(), []byte(`"key":"`)) {
 		t.Fatalf("fine-grained user list leaked unrelated data: %s", response.Body.String())
+	}
+
+	response = performAdminRequest(
+		server,
+		http.MethodGet,
+		"/admin/api/users?view=members&window=today&page=1&page_size=50&q=alice&sort=tokens&direction=desc",
+		nil,
+		map[string]string{"X-Management-Key": "test-management-key"},
+		nil,
+	)
+	if response.Code != http.StatusOK || reader.selectedUserSummaryCalls != 1 ||
+		strings.Join(reader.selectedUserSummaryUsers, ",") != "alice@example.com" ||
+		!strings.Contains(response.Body.String(), `"accounts":{}`) ||
+		!strings.Contains(response.Body.String(), `"teams":[]`) {
+		t.Fatalf("member catalog = %d %s reader=%#v", response.Code, response.Body.String(), reader)
 	}
 
 	response = performAdminRequest(
@@ -567,10 +627,90 @@ func TestUserListAPIIsFineGrainedPaginatedAndSecretFree(t *testing.T) {
 		map[string]string{"X-Management-Key": "test-management-key"},
 		nil,
 	)
+	assertAdminError(t, response, http.StatusBadRequest, "invalid_page_size")
+}
+
+func TestUserDetailAPIIsLazyWindowedAndNeverReturnsRawKey(t *testing.T) {
+	base, store := newTestAdmin(t)
+	base.Close()
+	reader := &fakeUsageReader{
+		collectorResult: usage.CollectorStatus{Status: "healthy"},
+		userSummaries:   map[string]usage.WeightedMetrics{},
+		userAccountResult: usage.UserAccountSummary{
+			Totals: usage.WeightedMetrics{
+				RawMetrics:     usage.RawMetrics{RequestCount: 2, TotalTokens: 700, LastUsedAt: 900},
+				WeightedTokens: 850,
+			},
+			Accounts: []usage.UserAccountUsage{{
+				Account: "alpha",
+				WeightedMetrics: usage.WeightedMetrics{
+					RawMetrics:     usage.RawMetrics{RequestCount: 2, TotalTokens: 700, LastUsedAt: 900},
+					WeightedTokens: 850,
+				},
+			}},
+		},
+	}
+	fixedNow := time.Unix(1_787_500_800, 0)
+	server, err := New(Config{
+		Store: store, Usage: reader, Users: &fakeUserLifecycle{},
+		Now: func() time.Time { return fixedNow },
+	})
+	if err != nil {
+		t.Fatalf("New user detail Admin: %v", err)
+	}
+	t.Cleanup(server.Close)
+	headers := map[string]string{"X-Management-Key": "test-management-key"}
+
+	response := performAdminRequest(
+		server, http.MethodGet,
+		"/admin/api/users?view=summary&window=today&page=1&page_size=50&sort=tokens&direction=desc",
+		nil, headers, nil,
+	)
+	if response.Code != http.StatusOK || reader.userAccountCalls != 0 {
+		t.Fatalf("catalog eagerly loaded detail = %d calls=%d body=%s", response.Code, reader.userAccountCalls, response.Body.String())
+	}
+
+	response = performAdminRequest(
+		server, http.MethodGet,
+		"/admin/api/users/detail?email=alice%40example.com&window=today",
+		nil, headers, nil,
+	)
+	if response.Code != http.StatusOK || reader.userAccountCalls != 1 ||
+		reader.userAccountEmail != "alice@example.com" ||
+		!strings.Contains(response.Body.String(), `"account_count":1`) ||
+		!strings.Contains(response.Body.String(), `"weighted_tokens":850`) ||
+		!strings.Contains(response.Body.String(), `"preview":"test_external_••••lice"`) ||
+		strings.Contains(response.Body.String(), "test_external_alice") {
+		t.Fatalf("user detail response = %d %s, reader=%#v", response.Code, response.Body.String(), reader)
+	}
+
+	response = performAdminRequest(
+		server, http.MethodGet,
+		"/admin/api/users/detail?email=missing%40example.com&window=today",
+		nil, headers, nil,
+	)
+	assertAdminError(t, response, http.StatusNotFound, "user_not_found")
+	if reader.userAccountCalls != 1 {
+		t.Fatal("unknown user reached usage detail reader")
+	}
+
+	response = performAdminRequest(server, http.MethodGet, "/admin/api/users/detail", nil, headers, nil)
 	assertAdminError(t, response, http.StatusBadRequest, "invalid_request")
 }
 
-func TestUserLifecycleGinContractsRequireConfirmationAndReturnSecretsOnce(t *testing.T) {
+func TestUserCatalogAndDetailFailClosedWithoutRequiredReaders(t *testing.T) {
+	server, _ := newTestAdmin(t)
+	headers := map[string]string{"X-Management-Key": "test-management-key"}
+	for _, path := range []string{
+		"/admin/api/users?view=summary&window=today&page=1&page_size=50&sort=tokens&direction=desc",
+		"/admin/api/users/detail?email=alice%40example.com&window=today",
+	} {
+		response := performAdminRequest(server, http.MethodGet, path, nil, headers, nil)
+		assertAdminError(t, response, http.StatusServiceUnavailable, "usage_not_ready")
+	}
+}
+
+func TestUserLifecycleGinContractsMatchLegacyRequestsAndReturnSecretsOnce(t *testing.T) {
 	base, store := newTestAdmin(t)
 	base.Close()
 	lifecycle := &fakeUserLifecycle{}
@@ -585,7 +725,10 @@ func TestUserLifecycleGinContractsRequireConfirmationAndReturnSecretsOnce(t *tes
 		"email": "new@example.com",
 	}, headers, nil)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "one-time-api-key") ||
-		!strings.Contains(response.Body.String(), "one-time-password") {
+		!strings.Contains(response.Body.String(), "one-time-password") ||
+		!strings.Contains(response.Body.String(), `"keys"`) ||
+		!strings.Contains(response.Body.String(), `"initial_password":"one-time-password"`) ||
+		response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("create user response = %d %s", response.Code, response.Body.String())
 	}
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/keys/rotate", map[string]any{
@@ -596,21 +739,26 @@ func TestUserLifecycleGinContractsRequireConfirmationAndReturnSecretsOnce(t *tes
 		t.Fatal("rotation ran without exact confirmation")
 	}
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/keys/rotate", map[string]any{
-		"email": "new@example.com", "confirm": "rotate",
+		"label": "new@example.com:alpha",
 	}, headers, nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "rotated-one-time-key") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "rotated-one-time-key") ||
+		!strings.Contains(response.Body.String(), `"keys"`) ||
+		response.Header().Get("Cache-Control") != "no-store" || lifecycle.rotateCalls != 1 {
 		t.Fatalf("rotate user response = %d %s", response.Code, response.Body.String())
 	}
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/users/reset-password", map[string]any{
-		"email": "new@example.com", "confirm": "reset",
+		"email": "new@example.com",
 	}, headers, nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "one-time-password") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"initial_password":"one-time-password"`) ||
+		strings.Contains(response.Body.String(), `"password":{`) ||
+		response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("reset password response = %d %s", response.Code, response.Body.String())
 	}
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/users/revoke", map[string]any{
-		"email": "new@example.com", "confirm": "revoke",
+		"email": "new@example.com",
 	}, headers, nil)
-	if response.Code != http.StatusOK || lifecycle.revokeCalls != 1 {
+	if response.Code != http.StatusOK || lifecycle.revokeCalls != 1 ||
+		!strings.Contains(response.Body.String(), `"revoked":1`) {
 		t.Fatalf("revoke user response = %d %s", response.Code, response.Body.String())
 	}
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/users/delete", map[string]any{
@@ -679,7 +827,13 @@ func TestUserQuotaActionGinContractRequiresExactConfirmationAndBoundsScope(t *te
 	t.Cleanup(server.Close)
 	headers := map[string]string{"X-Management-Key": "test-management-key"}
 
-	response := performAdminRequest(server, http.MethodPost, "/admin/api/users/quota-actions", map[string]any{
+	response := performAdminRequest(server, http.MethodGet, "/admin/api/users/quota-actions", nil, headers, nil)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total_users":2`) ||
+		!strings.Contains(response.Body.String(), `"users_with_usage":1`) {
+		t.Fatalf("quota operation summary response = %d %s", response.Code, response.Body.String())
+	}
+
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/users/quota-actions", map[string]any{
 		"action": "add_bonus", "scope": "selected", "users": []string{"alice@example.com"},
 		"token_amount": "200", "reason": "temporary capacity", "confirm": "wrong",
 	}, headers, nil)
@@ -866,19 +1020,30 @@ func TestAccountQuotaResetRequiresExactConfirmationAndMapsSafeResult(t *testing.
 	base, store := newTestAdmin(t)
 	base.Close()
 	expiresAt := int64(1_786_579_200)
-	resetter := &fakeQuotaResetter{result: quota.ResetResult{
-		Account: "alpha", WindowsReset: 1, Code: "rate_limit_reset_credit_consumed",
-		Windows: []quota.ResetWindow{{Key: "default:primary_window", Label: "常规周限额"}},
-		Credit:  quota.ResetCreditResult{Title: "Full reset", ExpiresAt: &expiresAt, Status: "redeemed"},
-	}}
+	resetter := &fakeQuotaResetter{
+		inspection: quota.ResetInspection{
+			Account: "alpha", AvailableCount: func() *int64 { value := int64(2); return &value }(),
+			Windows: []quota.ResetWindow{{Key: "default:primary_window", Label: "常规周限额"}},
+			Credits: []quota.ResetCreditOption{{ID: "credit-selected", Title: "Full reset", ExpiresAt: &expiresAt}},
+		},
+		result: quota.ResetResult{
+			Account: "alpha", WindowsReset: 1, Code: "rate_limit_reset_credit_consumed",
+			Windows: []quota.ResetWindow{{Key: "default:primary_window", Label: "常规周限额"}},
+			Credit:  quota.ResetCreditResult{Title: "Full reset", ExpiresAt: &expiresAt, Status: "redeemed"},
+		}}
 	server, err := New(Config{Store: store, QuotaResetter: resetter})
 	if err != nil {
 		t.Fatalf("New quota reset admin: %v", err)
 	}
 	t.Cleanup(server.Close)
 	headers := map[string]string{"X-Management-Key": "test-management-key"}
+	response := performAdminRequest(server, http.MethodGet, "/admin/api/accounts/quota-reset?account=alpha", nil, headers, nil)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"available_count":2`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"credit-selected"`)) || resetter.inspectCalls != 1 {
+		t.Fatalf("quota reset inspection = %d, %s, resetter = %#v", response.Code, response.Body.String(), resetter)
+	}
 
-	response := performAdminRequest(server, http.MethodPost, "/admin/api/accounts/reset-quota", map[string]any{
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/accounts/reset-quota", map[string]any{
 		"account": "alpha", "credit_id": "credit-selected", "confirm": "wrong",
 	}, headers, nil)
 	assertAdminError(t, response, http.StatusBadRequest, "invalid_confirmation")
@@ -959,6 +1124,20 @@ func TestAccountLifecycleCompatibilityRoutesEnforceConfirmationsAndReturnSecretF
 	}, headers, nil)
 	if response.Code != http.StatusOK || service.updateRequest.NewAccountID != "gamma" {
 		t.Fatalf("update account response = %d %s request=%#v", response.Code, response.Body.String(), service.updateRequest)
+	}
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/accounts/update", map[string]any{
+		"id": "alpha", "new_id": "alpha", "email": "alpha@accounts.example.com",
+		"confirm": "", "proxy_mode": "custom", "proxy_url": "",
+	}, headers, nil)
+	if response.Code != http.StatusOK || service.updateRequest.ProxyURL != nil {
+		t.Fatalf("legacy empty proxy must retain encrypted value: %d %s request=%#v", response.Code, response.Body.String(), service.updateRequest)
+	}
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/accounts/policy", map[string]any{
+		"id": "alpha", "group_enabled": false, "default_group": false, "fallback_account": "beta",
+	}, headers, nil)
+	if response.Code != http.StatusOK || service.updateRequest.Enabled == nil || *service.updateRequest.Enabled ||
+		service.updateRequest.FallbackAccount != "beta" {
+		t.Fatalf("update account policy response = %d %s request=%#v", response.Code, response.Body.String(), service.updateRequest)
 	}
 
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/accounts/clear-auth", map[string]any{
@@ -1065,6 +1244,141 @@ func TestOverviewSummaryIsBoundedAndNeverReturnsIdentitiesOrSecrets(t *testing.T
 	} {
 		if strings.Contains(response.Body.String(), forbidden) {
 			t.Fatalf("overview summary leaks %q: %s", forbidden, response.Body.String())
+		}
+	}
+}
+
+func TestOverviewCatalogUsesTheAccountPageOperationalStatusContract(t *testing.T) {
+	base, store := newTestAdmin(t)
+	base.Close()
+	ctx := context.Background()
+	if err := store.WriteAccounts(ctx, []controlplane.Account{
+		{ID: "alpha", Email: "alpha@accounts.example.com", Port: 18318, GroupEnabled: true, DefaultGroup: true},
+		{ID: "beta", Email: "beta@accounts.example.com", Port: 18319, GroupEnabled: false},
+	}); err != nil {
+		t.Fatalf("write overview catalog accounts: %v", err)
+	}
+	if err := store.WriteKeyRecords(ctx, []controlplane.KeyRecord{
+		{Label: "alice@example.com:alpha", Account: "alpha", AccountEmail: "alpha@accounts.example.com", User: "alice@example.com", Status: "active", Key: "test_external_alice", CreatedAt: 100, UpdatedAt: 100},
+		{Label: "bob@example.com:alpha", Account: "alpha", AccountEmail: "alpha@accounts.example.com", User: "bob@example.com", Status: "revoked", Key: "test_external_bob", CreatedAt: 100, UpdatedAt: 100},
+	}); err != nil {
+		t.Fatalf("write overview catalog users: %v", err)
+	}
+	remaining := 80.0
+	if err := store.WriteRuntimeState(ctx, quota.RuntimeStateName, quota.RuntimeState{
+		Version: 1,
+		Snapshot: quota.Snapshot{Accounts: []quota.AccountQuota{
+			{Account: "alpha", Status: "ok", Weekly: &quota.WeeklyWindow{RemainingPercent: remaining}},
+			{Account: "beta", Status: "ok", Weekly: &quota.WeeklyWindow{RemainingPercent: remaining}},
+		}},
+	}); err != nil {
+		t.Fatalf("write overview catalog quota state: %v", err)
+	}
+	server, err := New(Config{
+		Store: store,
+		AccountStates: staticAdminAccountStates{states: map[string]failover.AccountState{
+			"alpha": {Account: "alpha", Eligible: true, RemainingPercent: &remaining},
+			"beta":  {Account: "beta", Eligible: true, RemainingPercent: &remaining},
+		}},
+		AccountRuntime: staticAdminAccountRuntime{states: map[string]accountstatus.State{
+			"alpha": {AuthFiles: 1, Runtime: accountstatus.Runtime{State: "available"}},
+			"beta":  {AuthFiles: 1, Runtime: accountstatus.Runtime{State: "available"}},
+		}},
+		OAuth: mappedAdminOAuth{configured: map[string]bool{"alpha": true, "beta": true}},
+		Runtime: &fakeRuntimeCatalog{services: []runtimeops.Service{
+			{Service: "cliproxy-alpha", State: "running"},
+			{Service: "cliproxy-beta", State: "running"},
+		}},
+		Now: func() time.Time { return time.Unix(1_800_000_000, 0) },
+	})
+	if err != nil {
+		t.Fatalf("New overview catalog Admin: %v", err)
+	}
+	t.Cleanup(server.Close)
+	response := performAdminRequest(server, http.MethodGet, "/admin/api/overview/catalog", nil,
+		map[string]string{"X-Management-Key": "test-management-key"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("overview catalog = %d %s", response.Code, response.Body.String())
+	}
+	var payload overviewCatalogResponse
+	decodeAdminResponse(t, response, &payload)
+	if payload.GeneratedAt != 1_800_000_000 || len(payload.Accounts) != 2 || len(payload.Users) != 2 {
+		t.Fatalf("overview catalog shape = %#v", payload)
+	}
+	if payload.Accounts[0].ID != "alpha" || payload.Accounts[0].OperationalStatus.Code != "available" ||
+		payload.Accounts[1].ID != "beta" || payload.Accounts[1].OperationalStatus.Code != "disabled" {
+		t.Fatalf("overview operational statuses = %#v", payload.Accounts)
+	}
+	if payload.Users[0] != (overviewCatalogUser{Email: "alice@example.com", Status: "active"}) ||
+		payload.Users[1] != (overviewCatalogUser{Email: "bob@example.com", Status: "inactive"}) {
+		t.Fatalf("overview user statuses = %#v", payload.Users)
+	}
+	for _, forbidden := range []string{"alpha@accounts.example.com", "test_external_alice", "test-management-key"} {
+		if strings.Contains(response.Body.String(), forbidden) {
+			t.Fatalf("overview catalog leaks %q: %s", forbidden, response.Body.String())
+		}
+	}
+
+	unauthorized := performAdminRequest(server, http.MethodGet, "/admin/api/overview/catalog", nil, nil, nil)
+	assertAdminError(t, unauthorized, http.StatusUnauthorized, "unauthorized")
+}
+
+func TestOverviewStatusUsesLiveOAuthRuntimeAndFiveMinuteUsage(t *testing.T) {
+	base, store := newTestAdmin(t)
+	base.Close()
+	ctx := context.Background()
+	if err := store.WriteAccounts(ctx, []controlplane.Account{
+		{ID: "alpha", Email: "alpha@accounts.example.com", Port: 18318, GroupEnabled: true, DefaultGroup: true},
+		{ID: "beta", Email: "beta@accounts.example.com", Port: 18319, GroupEnabled: true},
+	}); err != nil {
+		t.Fatalf("write overview status accounts: %v", err)
+	}
+	usageReader := &fakeUsageReader{publicResult: map[string]usage.PublicAccountUsage{
+		"alpha": {Account: "alpha", RequestCount: 41},
+		"beta":  {Account: "beta", RequestCount: 6},
+	}}
+	server, err := New(Config{
+		Store: store,
+		OAuth: mappedAdminOAuth{configured: map[string]bool{"alpha": true}},
+		Runtime: &fakeRuntimeCatalog{services: []runtimeops.Service{
+			{Service: "gateway", State: "running"},
+			{Service: "admin", State: "running"},
+			{Service: "usage-collector", State: "exited"},
+			{Service: "cliproxy-alpha", State: "running"},
+		}},
+		Usage: usageReader,
+		Now:   func() time.Time { return time.Unix(1_800_000_000, 0) },
+	})
+	if err != nil {
+		t.Fatalf("New overview status Admin: %v", err)
+	}
+	t.Cleanup(server.Close)
+	response := performAdminRequest(server, http.MethodGet, "/admin/api/overview/status", nil,
+		map[string]string{"X-Management-Key": "test-management-key"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("overview status = %d %s", response.Code, response.Body.String())
+	}
+	var payload overviewStatusResponse
+	decodeAdminResponse(t, response, &payload)
+	if payload.GeneratedAt != 1_800_000_000 || payload.AuthorizedAccounts != 1 ||
+		payload.RunningServices != 3 || payload.TotalServices != 4 || payload.Requests5M != 47 ||
+		len(payload.Warnings) != 0 {
+		t.Fatalf("overview status payload = %#v", payload)
+	}
+	if usageReader.publicCalls != 1 || usageReader.publicStartAt != 1_799_999_700 ||
+		usageReader.publicEndAt != 1_800_000_000 ||
+		!slices.Equal(usageReader.publicAccounts, []string{"alpha", "beta"}) {
+		t.Fatalf("overview public usage request = %#v", usageReader)
+	}
+}
+
+func TestOverviewCatalogAndStatusFailClosedWhenLiveDependenciesAreMissing(t *testing.T) {
+	server, _ := newTestAdmin(t)
+	headers := map[string]string{"X-Management-Key": "test-management-key"}
+	for _, path := range []string{"/admin/api/overview/catalog", "/admin/api/overview/status"} {
+		response := performAdminRequest(server, http.MethodGet, path, nil, headers, nil)
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s missing dependencies = %d %s", path, response.Code, response.Body.String())
 		}
 	}
 }
@@ -1233,6 +1547,17 @@ func TestNativeAccountsRequireAdminAndExposeLocalURLOnlyForLoopbackHost(t *testi
 
 func TestAccountCatalogReturnsOnlyAccountScopedLiveData(t *testing.T) {
 	server, store := newTestAdmin(t)
+	resetCount := int64(1)
+	resetAt := int64(200)
+	if err := store.WriteRuntimeState(context.Background(), quota.RuntimeStateName, quota.RuntimeState{
+		Version: 1,
+		Snapshot: quota.Snapshot{Accounts: []quota.AccountQuota{{
+			Account: "alpha", ResetCreditCount: &resetCount,
+			WeeklyWindows: []quota.WeeklyWindow{{Label: "常规周限额", ResetAt: &resetAt, Resettable: true}},
+		}}},
+	}); err != nil {
+		t.Fatalf("write quota state: %v", err)
+	}
 	if err := store.WriteRoutes(context.Background(), map[string]string{
 		"alice@example.com": "alpha",
 	}); err != nil {
@@ -1245,7 +1570,16 @@ func TestAccountCatalogReturnsOnlyAccountScopedLiveData(t *testing.T) {
 			Headroom: 79, RemainingPercent: &remaining, ObservedAt: 100,
 		},
 	}}
-	server.activity = staticAdminActivity{counts: map[string]int{"alpha": 1}}
+	server.activity = staticAdminActivity{
+		counts: map[string]int{"alpha": 1},
+		emails: map[string][]string{"alpha": {"alice@example.com"}},
+	}
+	server.usage = &fakeUsageReader{accountSummaries: map[string]usage.AccountUsageSummary{
+		"alpha": {
+			Account: "alpha", ActiveUsers: 1,
+			RawMetrics: usage.RawMetrics{RequestCount: 3, FailedCount: 1, TotalTokens: 120, LastUsedAt: 90},
+		},
+	}}
 	response := performAdminRequest(
 		server,
 		http.MethodGet,
@@ -1264,8 +1598,234 @@ func TestAccountCatalogReturnsOnlyAccountScopedLiveData(t *testing.T) {
 	decodeAdminResponse(t, response, &payload)
 	if len(payload.Accounts) != 1 || payload.Accounts[0].RoutedUsers != 1 ||
 		payload.Accounts[0].ActiveUsers1H == nil || *payload.Accounts[0].ActiveUsers1H != 1 ||
-		!payload.Accounts[0].StateAvailable || len(payload.Warnings) != 0 {
+		len(payload.Accounts[0].ActiveEmails1H) != 1 || payload.Accounts[0].ActiveEmails1H[0] != "alice@example.com" ||
+		payload.Accounts[0].ResetCreditCount == nil || *payload.Accounts[0].ResetCreditCount != 1 ||
+		!payload.Accounts[0].Resettable || len(payload.Accounts[0].ResetWindowLabels) != 1 ||
+		!payload.Accounts[0].StateAvailable || !payload.Accounts[0].UsageAvailable ||
+		payload.Accounts[0].Usage.TotalTokens != 120 || payload.Accounts[0].AssociatedUsers != 1 ||
+		len(payload.Warnings) != 0 {
 		t.Fatalf("account catalog = %#v", payload)
+	}
+}
+
+func TestAccountCatalogFreshRequestsQuotaWorkerAndReturnsLegacyRefreshMetadata(t *testing.T) {
+	server, store := newTestAdmin(t)
+	server.now = func() time.Time { return time.Unix(100, 0) }
+	server.usage = &fakeUsageReader{collectorResult: usage.CollectorStatus{
+		Status: "healthy", HeartbeatAt: 99, EventCount: 3, CollectionStartedAt: 10,
+	}}
+	if err := store.WriteRuntimeState(context.Background(), quota.RuntimeStateName, quota.RuntimeState{
+		Version: 1,
+		Snapshot: quota.Snapshot{
+			GeneratedAt: 50, CacheTTLSeconds: 60,
+			Accounts: []quota.AccountQuota{{Account: "alpha", Status: "ok", WeeklyWindows: []quota.WeeklyWindow{}}},
+		},
+	}); err != nil {
+		t.Fatalf("write quota state: %v", err)
+	}
+	headers := map[string]string{"X-Management-Key": "test-management-key"}
+	response := performAdminRequest(
+		server, http.MethodGet, "/admin/api/accounts?window=today&fresh=1", nil, headers, nil,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("fresh account catalog = %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		QuotaGeneratedAt     *int64                `json:"quota_generated_at"`
+		QuotaCached          bool                  `json:"quota_cached"`
+		QuotaRefreshing      bool                  `json:"quota_refreshing"`
+		QuotaCacheTTLSeconds int64                 `json:"quota_cache_ttl_seconds"`
+		Collector            usage.CollectorStatus `json:"collector"`
+	}
+	decodeAdminResponse(t, response, &payload)
+	if payload.QuotaGeneratedAt == nil || *payload.QuotaGeneratedAt != 50 || !payload.QuotaCached ||
+		!payload.QuotaRefreshing || payload.QuotaCacheTTLSeconds != 60 || payload.Collector.Status != "healthy" {
+		t.Fatalf("fresh account metadata = %#v", payload)
+	}
+	request, found, err := quota.ReadRefreshRequest(context.Background(), store)
+	if err != nil || !found || !request.Pending() {
+		t.Fatalf("quota refresh request = (%#v, %v, %v)", request, found, err)
+	}
+
+	response = performAdminRequest(
+		server, http.MethodGet, "/admin/api/accounts?window=today&fresh=1", nil, headers, nil,
+	)
+	var duplicate quota.RefreshRequestState
+	if _, err := store.ReadRuntimeState(context.Background(), quota.RefreshRequestStateName, &duplicate); err != nil ||
+		duplicate.RequestID != request.RequestID {
+		t.Fatalf("duplicate fresh request = (%#v, %v)", duplicate, err)
+	}
+
+	if err := quota.MarkRefreshCompleted(context.Background(), store, request.RequestID, time.Unix(101, 0), nil); err != nil {
+		t.Fatalf("complete quota refresh request: %v", err)
+	}
+	if err := store.WriteRuntimeState(context.Background(), quota.RuntimeStateName, quota.RuntimeState{
+		Version: 1,
+		Snapshot: quota.Snapshot{
+			GeneratedAt: 100, CacheTTLSeconds: 60,
+			Accounts: []quota.AccountQuota{{Account: "alpha", Status: "ok", WeeklyWindows: []quota.WeeklyWindow{}}},
+		},
+	}); err != nil {
+		t.Fatalf("write refreshed quota state: %v", err)
+	}
+	server.now = func() time.Time { return time.Unix(110, 0) }
+	response = performAdminRequest(
+		server, http.MethodGet, "/admin/api/accounts?window=today&fresh=1", nil, headers, nil,
+	)
+	decodeAdminResponse(t, response, &payload)
+	if payload.QuotaGeneratedAt == nil || *payload.QuotaGeneratedAt != 100 || payload.QuotaRefreshing {
+		t.Fatalf("throttled fresh account metadata = %#v", payload)
+	}
+	var throttled quota.RefreshRequestState
+	if _, err := store.ReadRuntimeState(context.Background(), quota.RefreshRequestStateName, &throttled); err != nil ||
+		throttled.RequestID != request.RequestID {
+		t.Fatalf("throttled fresh request changed state = (%#v, %v)", throttled, err)
+	}
+}
+
+func TestAccountCatalogPreservesLegacyContainerRuntimeAndOperationalStatusFacts(t *testing.T) {
+	server, store := newTestAdmin(t)
+	allowed := true
+	resetAt := int64(200)
+	if err := store.WriteRuntimeState(context.Background(), quota.RuntimeStateName, quota.RuntimeState{
+		Version: 1,
+		Snapshot: quota.Snapshot{Accounts: []quota.AccountQuota{{
+			Account: "alpha", Status: "ok", Allowed: &allowed,
+			Weekly: &quota.WeeklyWindow{RemainingPercent: 84, ResetAt: &resetAt},
+		}}},
+	}); err != nil {
+		t.Fatalf("write quota state: %v", err)
+	}
+	server.runtime = &fakeRuntimeCatalog{services: []runtimeops.Service{{
+		Service: "cliproxy-alpha", State: "running", Status: "Up 8 days (healthy)", Health: "healthy",
+	}}}
+	server.oauth = staticAdminOAuth{}
+	server.accountRuntime = staticAdminAccountRuntime{states: map[string]accountstatus.State{
+		"alpha": {
+			Reason: accountstatus.ReasonDegraded, AuthFiles: 1,
+			Runtime: accountstatus.Runtime{
+				State: "degraded", QueryStatus: "ok", CredentialStatus: "active", CredentialCount: 1,
+				ErrorCount: 1, ErrorLogStatus: "ok", ErrorLogFiles: 2,
+			},
+		},
+	}}
+	remaining := 84.0
+	server.accountStates = staticAdminAccountStates{states: map[string]failover.AccountState{
+		"alpha": {
+			Account: "alpha", Eligible: true, Reason: accountstatus.ReasonDegraded,
+			Headroom: 79, RemainingPercent: &remaining, ObservedAt: 100,
+		},
+	}}
+	response := performAdminRequest(
+		server, http.MethodGet, "/admin/api/accounts", nil,
+		map[string]string{"X-Management-Key": "test-management-key"}, nil,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("account catalog status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Accounts []accountListItem `json:"accounts"`
+	}
+	decodeAdminResponse(t, response, &payload)
+	if len(payload.Accounts) != 1 {
+		t.Fatalf("account catalog = %#v", payload)
+	}
+	account := payload.Accounts[0]
+	if account.Service != "cliproxy-alpha" || account.ContainerState != "running" ||
+		account.ContainerStatus != "Up 8 days (healthy)" || account.ContainerHealth != "healthy" ||
+		account.ProxySource != "direct" || account.ProxyDisplay != "direct" ||
+		account.AuthFiles != 1 || account.AuthState != "configured" ||
+		account.Runtime.ErrorCount != 1 || account.Runtime.ErrorLogFiles != 2 ||
+		account.OperationalStatus.Code != "degraded" || account.OperationalStatus.Label != "近期异常" ||
+		account.OperationalStatus.Reason != "账号近期出现请求异常" || !account.OperationalStatus.Selectable {
+		t.Fatalf("legacy account facts = %#v", account)
+	}
+}
+
+func TestAccountCatalogReturnsLegacyProxySourceAndRedactedDisplay(t *testing.T) {
+	server, store := newTestAdmin(t)
+	accounts, err := store.ReadAccounts(context.Background())
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("read account = (%#v, %v)", accounts, err)
+	}
+	accounts[0].ProxyMode = "custom"
+	if err := store.WriteAccounts(context.Background(), accounts); err != nil {
+		t.Fatalf("write custom proxy account: %v", err)
+	}
+	if err := store.WriteSecret(
+		context.Background(), "cpa_account_proxy_url:alpha", "socks5://proxy-user:plain-secret@127.0.0.1:1080",
+	); err != nil {
+		t.Fatalf("write account proxy: %v", err)
+	}
+	response := performAdminRequest(
+		server, http.MethodGet, "/admin/api/accounts", nil,
+		map[string]string{"X-Management-Key": "test-management-key"}, nil,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("account catalog = %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Accounts []accountListItem `json:"accounts"`
+	}
+	decodeAdminResponse(t, response, &payload)
+	if len(payload.Accounts) != 1 || payload.Accounts[0].ProxySource != "account" ||
+		payload.Accounts[0].ProxyDisplay != "socks5://proxy-user:***@127.0.0.1:1080" ||
+		!payload.Accounts[0].ProxyConfigured {
+		t.Fatalf("account proxy presentation = %#v", payload.Accounts)
+	}
+	if strings.Contains(response.Body.String(), "plain-secret") {
+		t.Fatalf("account catalog leaked proxy password: %s", response.Body.String())
+	}
+}
+
+func TestAccountCatalogPreservesCustomAndPerAccountQuotaWindows(t *testing.T) {
+	server, store := newTestAdmin(t)
+	server.now = func() time.Time { return time.Unix(10_000, 0) }
+	resetAt := int64(10_600)
+	if err := store.WriteRuntimeState(context.Background(), quota.RuntimeStateName, quota.RuntimeState{
+		Version: 1,
+		Snapshot: quota.Snapshot{Accounts: []quota.AccountQuota{{
+			Account: "alpha", Status: "ok", Weekly: &quota.WeeklyWindow{
+				WindowSeconds: 3_600, ResetAt: &resetAt,
+			},
+		}}},
+	}); err != nil {
+		t.Fatalf("write quota state: %v", err)
+	}
+	reader := &fakeUsageReader{accountSummaries: map[string]usage.AccountUsageSummary{
+		"alpha": {Account: "alpha", RawMetrics: usage.RawMetrics{RequestCount: 2, TotalTokens: 120}},
+	}}
+	server.usage = reader
+	headers := map[string]string{"X-Management-Key": "test-management-key"}
+
+	response := performAdminRequest(
+		server, http.MethodGet,
+		"/admin/api/accounts?window=custom&start_at=6&end_at=9",
+		nil, headers, nil,
+	)
+	if response.Code != http.StatusOK || reader.accountSummaryStartAt != 6 ||
+		reader.accountSummaryEndAt == nil || *reader.accountSummaryEndAt != 9 ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"window":"custom"`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"window_start_at":6`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"window_end_at":9`)) {
+		t.Fatalf("custom account catalog = %d %s reader=%#v", response.Code, response.Body.String(), reader)
+	}
+
+	response = performAdminRequest(
+		server, http.MethodGet, "/admin/api/accounts?window=since_reset", nil, headers, nil,
+	)
+	if response.Code != http.StatusOK || reader.accountSummaryByStartCalls != 1 ||
+		reader.accountSummaryStartAtByAccount["alpha"] != 7_000 ||
+		reader.accountSummaryEndAt == nil || *reader.accountSummaryEndAt != 10_000 ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"window":"since_reset"`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"window_start_at":null`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"window_start_at_by_account":{"alpha":7000}`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"usage_window_start_at":7000`)) ||
+		!bytes.Contains(response.Body.Bytes(), []byte(`"usage_window_available":true`)) {
+		t.Fatalf("since-reset account catalog = %d %s reader=%#v", response.Code, response.Body.String(), reader)
+	}
+	if reader.accountSummaryCalls != 1 {
+		t.Fatalf("since-reset account catalog used ordinary summary query: %#v", reader)
 	}
 }
 
@@ -1650,11 +2210,14 @@ type fakeAdminRebalancer struct {
 }
 
 type fakeQuotaResetter struct {
-	result   quota.ResetResult
-	err      error
-	calls    int
-	account  string
-	creditID string
+	inspection   quota.ResetInspection
+	inspectErr   error
+	inspectCalls int
+	result       quota.ResetResult
+	err          error
+	calls        int
+	account      string
+	creditID     string
 }
 
 type fakeAccountLifecycle struct {
@@ -1749,6 +2312,18 @@ func (service *fakeUserLifecycle) ReadUserQuota(context.Context, string) (UserQu
 	}, nil
 }
 
+func (service *fakeUserLifecycle) ReadUserQuotas(_ context.Context, users []string) (map[string]UserWeeklyQuota, error) {
+	result := make(map[string]UserWeeklyQuota, len(users))
+	for _, user := range users {
+		quota, err := service.ReadUserQuota(context.Background(), user)
+		if err != nil {
+			return nil, err
+		}
+		result[user] = quota.WeeklyQuota
+	}
+	return result, nil
+}
+
 func (service *fakeUserLifecycle) UpdateUserQuota(
 	_ context.Context,
 	_ string,
@@ -1773,6 +2348,10 @@ func (service *fakeUserLifecycle) UpdateUserQuota(
 func (service *fakeUserLifecycle) ClearUserQuota(context.Context, string) (UserQuotaResult, error) {
 	service.quotaMode = "inherit"
 	return service.ReadUserQuota(context.Background(), "new@example.com")
+}
+
+func (service *fakeUserLifecycle) ReadQuotaOperations(context.Context) (UserQuotaOperationSummary, error) {
+	return UserQuotaOperationSummary{TotalUsers: 2, UsersWithUsage: 1, TotalUsedTokens: 300, TotalRawUsedTokens: 150}, nil
 }
 
 func (service *fakeUserLifecycle) ApplyUserQuotaAction(
@@ -1806,12 +2385,41 @@ type staticAdminAccountStates struct {
 	states map[string]failover.AccountState
 }
 
+type staticAdminOAuth struct{}
+
+func (staticAdminOAuth) Load(string) (quota.OAuthRecord, error) {
+	return quota.OAuthRecord{AccountID: "alpha"}, nil
+}
+
+type mappedAdminOAuth struct {
+	configured map[string]bool
+}
+
+func (loader mappedAdminOAuth) Load(account string) (quota.OAuthRecord, error) {
+	if !loader.configured[account] {
+		return quota.OAuthRecord{}, quota.ErrOAuthMissing
+	}
+	return quota.OAuthRecord{AccessToken: "test-token", AccountID: account}, nil
+}
+
+type staticAdminAccountRuntime struct {
+	states map[string]accountstatus.State
+}
+
+func (runtime staticAdminAccountRuntime) Observe(
+	_ context.Context,
+	_ map[string]string,
+) map[string]accountstatus.State {
+	return runtime.states
+}
+
 func (provider staticAdminAccountStates) AccountStates(context.Context) (map[string]failover.AccountState, error) {
 	return provider.states, nil
 }
 
 type staticAdminActivity struct {
 	counts map[string]int
+	emails map[string][]string
 }
 
 type fakeAdminNotificationSender struct {
@@ -1833,25 +2441,48 @@ func (sender *fakeAdminNotificationSender) Send(_ context.Context, content strin
 }
 
 type fakeUsageReader struct {
-	userResult            usage.UserBreakdown
-	accountResult         usage.AccountBreakdown
-	userCalls             int
-	accountCalls          int
-	userStartAt           int64
-	accountStartAt        int64
-	userEndAt             *int64
-	accountEndAt          *int64
-	teamResult            map[string]usage.TeamUsageMetrics
-	teamBreakdownResult   usage.TeamBreakdown
-	teamCalls             int
-	teamBreakdownCalls    int
-	trendResult           usage.TokenTrend
-	collectorResult       usage.CollectorStatus
-	trendCalls            int
-	trendStartAt          int64
-	trendEndAt            int64
-	trendBucketSeconds    int64
-	trendStartAtByAccount map[string]int64
+	userResult                     usage.UserBreakdown
+	accountResult                  usage.AccountBreakdown
+	userCalls                      int
+	accountCalls                   int
+	userStartAt                    int64
+	accountStartAt                 int64
+	userEndAt                      *int64
+	accountEndAt                   *int64
+	teamResult                     map[string]usage.TeamUsageMetrics
+	teamBreakdownResult            usage.TeamBreakdown
+	teamCalls                      int
+	teamBreakdownCalls             int
+	trendResult                    usage.TokenTrend
+	collectorResult                usage.CollectorStatus
+	trendCalls                     int
+	trendStartAt                   int64
+	trendEndAt                     int64
+	trendBucketSeconds             int64
+	trendStartAtByAccount          map[string]int64
+	accountSummaries               map[string]usage.AccountUsageSummary
+	accountSummaryCalls            int
+	accountSummaryByStartCalls     int
+	accountSummaryStartAt          int64
+	accountSummaryEndAt            *int64
+	accountSummaryStartAtByAccount map[string]int64
+	userSummaries                  map[string]usage.WeightedMetrics
+	userSummaryCalls               int
+	selectedUserSummaryCalls       int
+	selectedUserSummaryUsers       []string
+	userSummaryStartAt             int64
+	userSummaryEndAt               *int64
+	userAccountResult              usage.UserAccountSummary
+	userAccountCalls               int
+	userAccountEmail               string
+	userAccountStartAt             int64
+	userAccountEndAt               *int64
+	publicResult                   map[string]usage.PublicAccountUsage
+	publicError                    error
+	publicCalls                    int
+	publicAccounts                 []string
+	publicStartAt                  int64
+	publicEndAt                    int64
 }
 
 type fakeReleaseCatalog struct {
@@ -1884,6 +2515,101 @@ func (reader *fakeUsageReader) TokenTimeSeries(
 
 func (reader *fakeUsageReader) Status(context.Context) (usage.CollectorStatus, error) {
 	return reader.collectorResult, nil
+}
+
+func (reader *fakeUsageReader) PublicGatewayUsage(
+	_ context.Context,
+	accounts []string,
+	startAt int64,
+	endAt int64,
+) (map[string]usage.PublicAccountUsage, error) {
+	reader.publicCalls++
+	reader.publicAccounts = append([]string(nil), accounts...)
+	reader.publicStartAt, reader.publicEndAt = startAt, endAt
+	result := make(map[string]usage.PublicAccountUsage, len(reader.publicResult))
+	for account, item := range reader.publicResult {
+		result[account] = item
+	}
+	return result, reader.publicError
+}
+
+func (reader *fakeUsageReader) UserSummaries(
+	_ context.Context,
+	startAt int64,
+	endAt *int64,
+) (map[string]usage.WeightedMetrics, error) {
+	reader.userSummaryCalls++
+	reader.userSummaryStartAt = startAt
+	reader.userSummaryEndAt = cloneTestInt64(endAt)
+	result := make(map[string]usage.WeightedMetrics, len(reader.userSummaries))
+	for user, summary := range reader.userSummaries {
+		result[user] = summary
+	}
+	return result, nil
+}
+
+func (reader *fakeUsageReader) UserSummariesForUsers(
+	_ context.Context,
+	users []string,
+	startAt int64,
+	endAt *int64,
+) (map[string]usage.WeightedMetrics, error) {
+	reader.selectedUserSummaryCalls++
+	reader.selectedUserSummaryUsers = append([]string(nil), users...)
+	reader.userSummaryStartAt = startAt
+	reader.userSummaryEndAt = cloneTestInt64(endAt)
+	result := make(map[string]usage.WeightedMetrics, len(users))
+	for _, user := range users {
+		result[user] = reader.userSummaries[user]
+	}
+	return result, nil
+}
+
+func (reader *fakeUsageReader) UserAccounts(
+	_ context.Context,
+	email string,
+	startAt int64,
+	endAt *int64,
+) (usage.UserAccountSummary, error) {
+	reader.userAccountCalls++
+	reader.userAccountEmail = email
+	reader.userAccountStartAt = startAt
+	reader.userAccountEndAt = cloneTestInt64(endAt)
+	return reader.userAccountResult, nil
+}
+
+func (reader *fakeUsageReader) AccountSummaries(
+	_ context.Context,
+	accounts []string,
+	startAt int64,
+	endAt *int64,
+) (map[string]usage.AccountUsageSummary, error) {
+	reader.accountSummaryCalls++
+	reader.accountSummaryStartAt = startAt
+	reader.accountSummaryEndAt = cloneTestInt64(endAt)
+	result := make(map[string]usage.AccountUsageSummary, len(accounts))
+	for _, account := range accounts {
+		result[account] = reader.accountSummaries[account]
+	}
+	return result, nil
+}
+
+func (reader *fakeUsageReader) AccountSummariesByStart(
+	_ context.Context,
+	startAtByAccount map[string]int64,
+	endAt *int64,
+) (map[string]usage.AccountUsageSummary, error) {
+	reader.accountSummaryByStartCalls++
+	reader.accountSummaryStartAtByAccount = make(map[string]int64, len(startAtByAccount))
+	for account, startAt := range startAtByAccount {
+		reader.accountSummaryStartAtByAccount[account] = startAt
+	}
+	reader.accountSummaryEndAt = cloneTestInt64(endAt)
+	result := make(map[string]usage.AccountUsageSummary, len(startAtByAccount))
+	for account := range startAtByAccount {
+		result[account] = reader.accountSummaries[account]
+	}
+	return result, nil
 }
 
 func (reader *fakeUsageReader) UserBreakdown(
@@ -1945,6 +2671,10 @@ func (activity staticAdminActivity) RefreshActiveUsersLastHour(context.Context) 
 	return activity.counts, nil
 }
 
+func (activity staticAdminActivity) ActiveUserEmailsLastHour(context.Context) (map[string][]string, error) {
+	return activity.emails, nil
+}
+
 func (rebalancer *fakeAdminRebalancer) RebalanceAll(context.Context) (failover.RebalanceResult, error) {
 	rebalancer.calls++
 	return rebalancer.result, rebalancer.err
@@ -1968,6 +2698,12 @@ func (resetter *fakeQuotaResetter) Reset(
 	resetter.account = account
 	resetter.creditID = creditID
 	return resetter.result, resetter.err
+}
+
+func (resetter *fakeQuotaResetter) Inspect(_ context.Context, account string) (quota.ResetInspection, error) {
+	resetter.inspectCalls++
+	resetter.account = account
+	return resetter.inspection, resetter.inspectErr
 }
 
 func performAdminRequest(

@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { AdminTable } from "./AdminTable";
+import { NativeTableViewport } from "./NativeTableViewport";
 import { PageState } from "./PageState";
 import { PageToolbar } from "./PageToolbar";
 import { TokenValue } from "./TokenValue";
@@ -27,6 +28,59 @@ describe("shared Admin UI components", () => {
     );
 
     expect(screen.getByText("还没有记录")).toBeInTheDocument();
+  });
+
+  it("exposes native-table overflow boundaries for shadows and keyboard scrolling", async () => {
+    render(<NativeTableViewport aria-label="测试表格"><table><tbody><tr><td>数据</td></tr></tbody></table></NativeTableViewport>);
+    const viewport = screen.getByLabelText("测试表格");
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 300 },
+      scrollTop: { configurable: true, writable: true, value: 0 }
+    });
+    fireEvent(window, new Event("resize"));
+    await waitFor(() => expect(viewport).toHaveAttribute("data-scroll-overflow", "true"));
+    expect(viewport).toHaveClass("can-scroll-down");
+    expect(viewport).not.toHaveClass("can-scroll-up");
+    expect(viewport).toHaveAttribute("tabindex", "0");
+
+    viewport.scrollTop = 100;
+    fireEvent.scroll(viewport);
+    await waitFor(() => expect(viewport).toHaveClass("can-scroll-up", "can-scroll-down"));
+
+    viewport.scrollTop = 200;
+    fireEvent.scroll(viewport);
+    await waitFor(() => expect(viewport).not.toHaveClass("can-scroll-down"));
+  });
+
+  it("makes an overflowing AdminTable keyboard-scrollable even when overflow is horizontal only", async () => {
+    const { container } = render(
+      <AdminTable<{ id: string }>
+        rowKey="id"
+        columns={[{ title: "ID", dataIndex: "id", width: 900 }]}
+        dataSource={[{ id: "alpha" }]}
+        minWidth={900}
+      />
+    );
+    const viewport = container.querySelector<HTMLElement>(".admin-table-viewport");
+    const body = container.querySelector<HTMLElement>(".ant-table-body");
+    expect(viewport).not.toBeNull();
+    expect(body).not.toBeNull();
+    let scrollWidth = 1_000;
+    Object.defineProperties(body, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 100 },
+      clientWidth: { configurable: true, value: 500 },
+      scrollWidth: { configurable: true, get: () => scrollWidth }
+    });
+    fireEvent.scroll(body as HTMLElement);
+    await waitFor(() => expect(viewport).toHaveAttribute("data-scroll-overflow", "true"));
+    expect(viewport).toHaveAttribute("tabindex", "0");
+
+    scrollWidth = 500;
+    fireEvent.scroll(body as HTMLElement);
+    await waitFor(() => expect(viewport).toHaveAttribute("data-scroll-overflow", "false"));
+    expect(viewport).not.toHaveAttribute("tabindex");
   });
 
   it("shows compact Token units while preserving the exact value as a tooltip", () => {

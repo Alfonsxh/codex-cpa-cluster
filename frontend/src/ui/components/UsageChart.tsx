@@ -32,15 +32,19 @@ export type UsageChartProps = {
   buckets: number[];
   series: TokenSeries[];
   summary?: boolean;
+  includeDateLabels?: boolean;
   ariaLabel: string;
 };
 
-export function UsageChart({ buckets, series, summary = false, ariaLabel }: UsageChartProps) {
+export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, ariaLabel }: UsageChartProps) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
   const height = summary ? 260 : 300;
-  const labels = useMemo(() => buckets.map(formatChartTime), [buckets]);
+  const labels = useMemo(
+    () => buckets.map((timestamp) => formatChartTime(timestamp, includeDateLabels)),
+    [buckets, includeDateLabels]
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -49,13 +53,27 @@ export function UsageChart({ buckets, series, summary = false, ariaLabel }: Usag
     const chart = echarts.init(container, undefined, { renderer: "svg" });
     chartRef.current = chart;
     const dark = theme === "dark";
-    const axisColor = dark ? "#8d98ad" : "#7b8496";
+    const axisColor = dark ? "#7f8ba3" : "#8b95a7";
     const gridColor = dark ? "#273247" : "#e3e8f1";
+    const chartWidth = Math.round(container.getBoundingClientRect().width) || 1_000;
+    const recordedMaximum = Math.max(1, ...series.flatMap((item) => item.values.map((value) => Number(value) || 0)));
+    const maximum = summary ? recordedMaximum * 1.08 : recordedMaximum;
+    const xLabelIndexes = new Set([0, 0.25, 0.5, 0.75, 1].map((ratio) => (
+      Math.round(Math.max(0, labels.length - 1) * ratio)
+    )));
     const option: UsageChartOption = {
       animation: false,
       color: [...usageChartColors],
       aria: { enabled: true, description: ariaLabel },
-      grid: { left: 58, right: 16, top: 22, bottom: 34, containLabel: false },
+      grid: {
+        // Frozen v1 renders non-summary SVGs in a fixed 1000px viewBox and
+        // stretches them to the panel width. Scale its plot margins too.
+        left: summary ? chartWidth <= 520 ? 58 : 64 : chartWidth * 72 / 1_000,
+        right: summary ? 16 : chartWidth * 20 / 1_000,
+        top: 24,
+        bottom: 44,
+        containLabel: false
+      },
       tooltip: {
         trigger: "axis",
         triggerOn: "mousemove|click|mousewheel",
@@ -82,22 +100,26 @@ export function UsageChart({ buckets, series, summary = false, ariaLabel }: Usag
         axisTick: { show: false },
         axisLabel: {
           color: axisColor,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
           fontSize: 9,
-          interval: Math.max(0, Math.ceil(labels.length / 5) - 1),
+          margin: 22,
+          interval: (index: number) => xLabelIndexes.has(index),
           hideOverlap: true
         }
       },
       yAxis: {
         type: "value",
         min: 0,
+        max: maximum,
+        interval: maximum / 4,
         splitNumber: 4,
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
           color: axisColor,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
           fontSize: 9,
+          margin: 12,
           formatter: (value: number) => formatTokens(value)
         },
         splitLine: { lineStyle: { color: gridColor, width: 1 } }
@@ -108,19 +130,19 @@ export function UsageChart({ buckets, series, summary = false, ariaLabel }: Usag
         data: item.values,
         showSymbol: summary,
         symbol: "circle",
-        symbolSize: summary ? 5 : 4,
+        symbolSize: summary ? 6 : 4,
         sampling: "lttb",
         smooth: false,
         connectNulls: false,
         emphasis: { focus: "series" },
-        lineStyle: { width: 2, color: usageChartColors[index % usageChartColors.length] },
+        lineStyle: { width: summary ? 2.5 : 2, color: usageChartColors[index % usageChartColors.length] },
         itemStyle: {
           color: dark ? "#151b28" : "#ffffff",
           borderColor: usageChartColors[index % usageChartColors.length],
           borderWidth: 2
         },
         areaStyle: summary
-          ? { color: usageChartColors[index % usageChartColors.length], opacity: 0.13 }
+          ? { color: dark ? "#262d51" : "#eef0ff", opacity: 0.62 }
           : undefined
       }))
     };
@@ -210,10 +232,13 @@ function chartValue(value: CallbackDataParams["value"]) {
   return Number(value ?? 0);
 }
 
-function formatChartTime(timestamp: number) {
+function formatChartTime(timestamp: number, includeDate: boolean) {
   if (!timestamp) return "—";
   const date = new Date(timestamp * 1000);
-  return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return includeDate
+    ? `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${time}`
+    : time;
 }
 
 function formatTimestamp(timestamp: number) {

@@ -1,5 +1,9 @@
 # Go v2 React Web
 
+Admin、Portal 与使用中心统一使用 React 组件层。页面、交互和安全状态由
+[`e2e/visual.spec.ts`](e2e/visual.spec.ts) 的桌面、窄屏、移动端、明暗主题及异常状态矩阵约束；
+调整基准图前必须先确认行为和布局变化符合产品验收要求。
+
 ## Product job
 
 让用户从框架化 Portal 快速进入 Admin 或 Usage；让已登录管理员从 Native 页面安全查看本机业务 CPA；让管理页面在不预取无关账号、用量和日志数据的前提下完成控制面工作。

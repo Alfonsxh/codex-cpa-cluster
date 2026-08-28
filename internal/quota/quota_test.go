@@ -341,6 +341,76 @@ func TestRefresherPublishesOrderedSecretFreeSnapshot(t *testing.T) {
 	}
 }
 
+func TestRefreshRequestIsSingleFlightAndHonorsLegacyMinimumAge(t *testing.T) {
+	ctx := context.Background()
+	store, err := controlplane.Open(ctx, t.TempDir(), controlplane.Options{})
+	if err != nil {
+		t.Fatalf("open control-plane store: %v", err)
+	}
+	defer store.Close()
+
+	requestedAt := time.Unix(100, 0)
+	request, requested, err := RequestRefresh(ctx, store, requestedAt)
+	if err != nil || !requested || !request.Pending() || request.RequestedAt != 100 {
+		t.Fatalf("first refresh request = (%#v, %v, %v)", request, requested, err)
+	}
+	duplicate, requested, err := RequestRefresh(ctx, store, time.Unix(101, 0))
+	if err != nil || requested || duplicate.RequestID != request.RequestID || !duplicate.Pending() {
+		t.Fatalf("single-flight refresh request = (%#v, %v, %v)", duplicate, requested, err)
+	}
+	if err := MarkRefreshStarted(ctx, store, request.RequestID, time.Unix(102, 0)); err != nil {
+		t.Fatalf("mark refresh started: %v", err)
+	}
+	if err := MarkRefreshCompleted(ctx, store, request.RequestID, time.Unix(103, 0), nil); err != nil {
+		t.Fatalf("mark refresh completed: %v", err)
+	}
+	completed, found, err := ReadRefreshRequest(ctx, store)
+	if err != nil || !found || completed.Pending() || completed.StartedID != request.RequestID ||
+		completed.CompletedID != request.RequestID || completed.CompletedAt != 103 || completed.LastError != "" {
+		t.Fatalf("completed refresh request = (%#v, %v, %v)", completed, found, err)
+	}
+
+	if err := store.WriteRuntimeState(ctx, RuntimeStateName, RuntimeState{
+		Version:  runtimeStateVersion,
+		Snapshot: Snapshot{GeneratedAt: 100, CacheTTLSeconds: 60, Accounts: []AccountQuota{}},
+	}); err != nil {
+		t.Fatalf("write current quota snapshot: %v", err)
+	}
+	throttled, requested, err := RequestRefresh(ctx, store, time.Unix(114, 0))
+	if err != nil || requested || throttled.RequestID != request.RequestID {
+		t.Fatalf("throttled refresh request = (%#v, %v, %v)", throttled, requested, err)
+	}
+	aged, requested, err := RequestRefresh(ctx, store, time.Unix(115, 0))
+	if err != nil || !requested || !aged.Pending() || aged.RequestID == request.RequestID {
+		t.Fatalf("aged refresh request = (%#v, %v, %v)", aged, requested, err)
+	}
+}
+
+func TestRefreshRequestFailureIsBoundedAndRecoverable(t *testing.T) {
+	ctx := context.Background()
+	store, err := controlplane.Open(ctx, t.TempDir(), controlplane.Options{})
+	if err != nil {
+		t.Fatalf("open control-plane store: %v", err)
+	}
+	defer store.Close()
+	request, requested, err := RequestRefresh(ctx, store, time.Unix(100, 0))
+	if err != nil || !requested {
+		t.Fatalf("request refresh = (%#v, %v, %v)", request, requested, err)
+	}
+	runError := errors.New(strings.Repeat("quota failed ", 100))
+	if err := MarkRefreshCompleted(ctx, store, request.RequestID, time.Unix(101, 0), runError); err != nil {
+		t.Fatalf("mark failed refresh completed: %v", err)
+	}
+	failed, _, err := ReadRefreshRequest(ctx, store)
+	if err != nil || failed.Pending() || len([]rune(failed.LastError)) != 500 {
+		t.Fatalf("failed refresh state = (%#v, %v)", failed, err)
+	}
+	retry, requested, err := RequestRefresh(ctx, store, time.Unix(102, 0))
+	if err != nil || !requested || retry.RequestID == request.RequestID || retry.LastError != "" {
+		t.Fatalf("retry refresh request = (%#v, %v, %v)", retry, requested, err)
+	}
+}
+
 type fakeProxyStore struct {
 	values map[string]string
 }

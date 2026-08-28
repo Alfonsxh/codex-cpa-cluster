@@ -362,6 +362,32 @@ func (store *Store) UserExists(ctx context.Context, userEmail string) (bool, err
 	return exists == 1, nil
 }
 
+// ListUserSummaries returns the complete secret-free control-plane catalog in
+// one read snapshot. The Admin user page joins these rows with one batched
+// usage summary before applying usage-aware sorting and pagination; raw Key
+// material is never selected by this query.
+func (store *Store) ListUserSummaries(ctx context.Context) ([]UserSummary, error) {
+	transaction, err := store.db.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin control-plane user summary snapshot: %w", err)
+	}
+	defer transaction.Rollback()
+	rows := make([]UserSummary, 0)
+	if err := transaction.SelectContext(ctx, &rows, userListQuery+`
+SELECT email, status, active_keys, active_accounts, total_records,
+       created_at, updated_at, route_account_id, team_id,
+       team_membership_version, team_name, team_description
+  FROM catalog
+ ORDER BY email COLLATE NOCASE`); err != nil {
+		return nil, fmt.Errorf("list control-plane user summaries: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, fmt.Errorf("commit control-plane user summary snapshot: %w", err)
+	}
+	hydrateUserSummaryTeams(rows)
+	return rows, nil
+}
+
 func (store *Store) ListUsers(ctx context.Context, options UserListOptions) (UserPage, error) {
 	query := strings.ToLower(strings.TrimSpace(options.Query))
 	if utf8.RuneCountInString(query) > 200 {
@@ -416,6 +442,13 @@ SELECT email, status, active_keys, active_accounts, total_records,
 	if err := transaction.Commit(); err != nil {
 		return UserPage{}, fmt.Errorf("commit control-plane user list snapshot: %w", err)
 	}
+	hydrateUserSummaryTeams(rows)
+	return UserPage{
+		Users: rows, Page: page, PageSize: pageSize, Total: total, TotalPages: totalPages,
+	}, nil
+}
+
+func hydrateUserSummaryTeams(rows []UserSummary) {
 	for index := range rows {
 		if rows[index].TeamID == nil || rows[index].TeamName == nil {
 			continue
@@ -426,9 +459,6 @@ SELECT email, status, active_keys, active_accounts, total_records,
 			Description: optionalStringValue(rows[index].TeamDescription),
 		}
 	}
-	return UserPage{
-		Users: rows, Page: page, PageSize: pageSize, Total: total, TotalPages: totalPages,
-	}, nil
 }
 
 func userListWhere(query string, teamID string) (string, []any) {

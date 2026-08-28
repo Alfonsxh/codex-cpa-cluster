@@ -2,8 +2,10 @@ package runtimeops
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -17,6 +19,8 @@ import (
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/containerd/errdefs"
 	"github.com/go-resty/resty/v2"
+	"github.com/google/uuid"
+	"github.com/moby/moby/api/pkg/stdcopy"
 	containertypes "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	networktypes "github.com/moby/moby/api/types/network"
@@ -30,6 +34,7 @@ const (
 	defaultAccountImage        = "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23"
 	defaultAccountProbeTimeout = 12 * time.Second
 	accountContainerPort       = "8317/tcp"
+	maximumOAuthSnapshotBytes  = 2 * 1024 * 1024
 )
 
 var runtimeIdentifierPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
@@ -40,6 +45,10 @@ type AccountRuntimeStore interface {
 	ReadInternalKeys(context.Context) (map[string]controlplane.InternalKey, error)
 }
 
+type CPAImageProjector interface {
+	ProjectCPAImage(context.Context, string) error
+}
+
 type AccountLifecycleDockerClient interface {
 	DockerClient
 	ContainerCreate(context.Context, dockerclient.ContainerCreateOptions) (dockerclient.ContainerCreateResult, error)
@@ -48,25 +57,28 @@ type AccountLifecycleDockerClient interface {
 }
 
 type AccountRuntimeConfig struct {
-	Root         string
-	NetworkName  string
-	InstanceName string
-	ProbeTimeout time.Duration
-	HTTPClient   *resty.Client
+	Root           string
+	NetworkName    string
+	InstanceName   string
+	ProbeTimeout   time.Duration
+	HTTPClient     *resty.Client
+	ImageProjector CPAImageProjector
 }
 
 // AccountRuntime uses the same Moby client and exact Compose labels as the
 // bounded runtime API. It recreates one business CPA at a time and retains a
 // deterministic rollback specification until the lifecycle Saga completes.
 type AccountRuntime struct {
-	client       AccountLifecycleDockerClient
-	project      string
-	root         string
-	network      string
-	instance     string
-	store        AccountRuntimeStore
-	http         *resty.Client
-	probeTimeout time.Duration
+	client         AccountLifecycleDockerClient
+	accounts       AccountCatalog
+	project        string
+	root           string
+	network        string
+	instance       string
+	store          AccountRuntimeStore
+	http           *resty.Client
+	probeTimeout   time.Duration
+	imageProjector CPAImageProjector
 }
 
 func NewAccountRuntime(
@@ -108,10 +120,198 @@ func NewAccountRuntime(
 		httpClient = resty.New().SetTimeout(3 * time.Second).SetRedirectPolicy(resty.NoRedirectPolicy())
 	}
 	return &AccountRuntime{
-		client: client, project: manager.project, root: root, network: networkName,
+		client: client, accounts: manager.accounts, project: manager.project, root: root, network: networkName,
 		instance: instanceName, store: store, http: httpClient,
-		probeTimeout: config.ProbeTimeout,
+		probeTimeout: config.ProbeTimeout, imageProjector: config.ImageProjector,
 	}, nil
+}
+
+type accountOAuthDockerClient interface {
+	AccountLifecycleDockerClient
+	ContainerAttach(context.Context, string, dockerclient.ContainerAttachOptions) (dockerclient.ContainerAttachResult, error)
+	ContainerWait(context.Context, string, dockerclient.ContainerWaitOptions) dockerclient.ContainerWaitResult
+}
+
+type oauthFileIdentity struct {
+	size   int64
+	mtime  int64
+	digest [sha256.Size]byte
+}
+
+// Login runs CLIProxyAPI's remote-friendly device flow in an isolated,
+// one-off Moby container. It reuses the account's exact immutable image,
+// config, proxy/network, and OAuth bind mount without stopping or replacing
+// the customer-serving CPA container.
+func (runtime *AccountRuntime) Login(
+	ctx context.Context,
+	rawAccountID string,
+	output io.Writer,
+) (OperationResult, error) {
+	accountID, err := controlplane.NormalizeAccountID(rawAccountID)
+	if err != nil || accountID != strings.ToLower(strings.TrimSpace(rawAccountID)) {
+		return OperationResult{}, fmt.Errorf("%w: invalid OAuth account", ErrRuntimeTarget)
+	}
+	if output == nil {
+		return OperationResult{}, errors.New("OAuth device login requires an output writer")
+	}
+	client, ok := runtime.client.(accountOAuthDockerClient)
+	if !ok {
+		return OperationResult{}, errors.New("Moby client does not implement OAuth device login")
+	}
+	accounts, err := runtime.accounts.ReadAccounts(ctx)
+	if err != nil {
+		return OperationResult{}, fmt.Errorf("read OAuth account catalog: %w", err)
+	}
+	var account controlplane.Account
+	found := false
+	for _, candidate := range accounts {
+		if candidate.ID == accountID {
+			account = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return OperationResult{}, fmt.Errorf("%w: OAuth account %s does not exist", ErrRuntimeTarget, accountID)
+	}
+	authRoot := filepath.Join(runtime.root, "auth", accountID)
+	before, err := snapshotOAuthFiles(authRoot)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	options, err := runtime.createOptions(ctx, account)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	operationID := uuid.NewString()
+	options.Name = runtime.instance + "-oauth-" + accountID + "-" + operationID[:8]
+	options.Config.Cmd = []string{
+		"./CLIProxyAPI", "-config", "/CLIProxyAPI/configs/" + accountID + ".yaml",
+		"-codex-device-login", "-no-browser",
+	}
+	options.Config.AttachStdout = true
+	options.Config.AttachStderr = true
+	options.Config.ExposedPorts = nil
+	options.Config.Labels = map[string]string{
+		"io.codex-cpa.account":    accountID,
+		"io.codex-cpa.managed-by": "go-v2",
+		"io.codex-cpa.operation":  "oauth-device-login",
+	}
+	options.HostConfig.AutoRemove = false
+	options.HostConfig.PortBindings = nil
+	options.HostConfig.RestartPolicy = containertypes.RestartPolicy{Name: containertypes.RestartPolicyDisabled}
+	options.NetworkingConfig = &networktypes.NetworkingConfig{EndpointsConfig: map[string]*networktypes.EndpointSettings{
+		runtime.network: {Aliases: []string{"oauth-" + accountID + "-" + operationID[:8]}},
+	}}
+	created, err := client.ContainerCreate(ctx, options)
+	if err != nil {
+		return OperationResult{}, fmt.Errorf("create OAuth login container for %s: %w", accountID, err)
+	}
+	defer func() {
+		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		_, _ = client.ContainerRemove(cleanupContext, created.ID, dockerclient.ContainerRemoveOptions{Force: true})
+	}()
+	attached, err := client.ContainerAttach(ctx, created.ID, dockerclient.ContainerAttachOptions{
+		Stream: true, Stdout: true, Stderr: true,
+	})
+	if err != nil {
+		return OperationResult{}, fmt.Errorf("attach OAuth login output for %s: %w", accountID, err)
+	}
+	defer attached.Close()
+	wait := client.ContainerWait(ctx, created.ID, dockerclient.ContainerWaitOptions{
+		Condition: containertypes.WaitConditionNextExit,
+	})
+	copyDone := make(chan error, 1)
+	go func() {
+		_, copyError := stdcopy.StdCopy(output, output, attached.Reader)
+		copyDone <- copyError
+	}()
+	if _, err := client.ContainerStart(ctx, created.ID, dockerclient.ContainerStartOptions{}); err != nil {
+		return OperationResult{}, fmt.Errorf("start OAuth login container for %s: %w", accountID, err)
+	}
+	var exitCode int64
+	select {
+	case response := <-wait.Result:
+		exitCode = response.StatusCode
+		if response.Error != nil && strings.TrimSpace(response.Error.Message) != "" {
+			return OperationResult{}, fmt.Errorf("OAuth login container failed: %s", Sanitize(response.Error.Message))
+		}
+	case waitError := <-wait.Error:
+		return OperationResult{}, fmt.Errorf("wait for OAuth login container: %w", waitError)
+	case <-ctx.Done():
+		return OperationResult{}, ctx.Err()
+	}
+	select {
+	case copyError := <-copyDone:
+		if copyError != nil {
+			return OperationResult{}, fmt.Errorf("read OAuth login output: %w", copyError)
+		}
+	case <-time.After(5 * time.Second):
+		return OperationResult{}, errors.New("OAuth login output did not close after container exit")
+	case <-ctx.Done():
+		return OperationResult{}, ctx.Err()
+	}
+	if exitCode != 0 {
+		return OperationResult{}, fmt.Errorf("OAuth login container exited with code %d", exitCode)
+	}
+	after, err := snapshotOAuthFiles(authRoot)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if oauthSnapshotsEqual(before, after) {
+		return OperationResult{}, errors.New("OAuth 授权未完成：没有检测到新增或更新的认证文件")
+	}
+	return OperationResult{Action: "login", Target: accountID, Services: []Service{}}, nil
+}
+
+func snapshotOAuthFiles(root string) (map[string]oauthFileIdentity, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("read OAuth directory: %w", err)
+	}
+	result := make(map[string]oauthFileIdentity)
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil {
+			return nil, fmt.Errorf("inspect OAuth file: %w", err)
+		}
+		if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > maximumOAuthSnapshotBytes {
+			return nil, errors.New("OAuth directory contains an unsafe JSON file")
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open OAuth file for verification: %w", err)
+		}
+		hash := sha256.New()
+		_, copyError := io.Copy(hash, io.LimitReader(file, maximumOAuthSnapshotBytes+1))
+		closeError := file.Close()
+		if copyError != nil || closeError != nil {
+			return nil, errors.Join(copyError, closeError)
+		}
+		var digest [sha256.Size]byte
+		copy(digest[:], hash.Sum(nil))
+		result[entry.Name()] = oauthFileIdentity{
+			size: info.Size(), mtime: info.ModTime().UnixNano(), digest: digest,
+		}
+	}
+	return result, nil
+}
+
+func oauthSnapshotsEqual(left, right map[string]oauthFileIdentity) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for name, identity := range left {
+		if right[name] != identity {
+			return false
+		}
+	}
+	return true
 }
 
 func (runtime *AccountRuntime) ReservedHostPorts(ctx context.Context) (map[int]struct{}, error) {
@@ -343,7 +543,16 @@ func (runtime *AccountRuntime) createAccountContainer(
 	account controlplane.Account,
 	start bool,
 ) (string, error) {
-	options, err := runtime.createOptions(ctx, account)
+	return runtime.createAccountContainerWithImage(ctx, account, start, "")
+}
+
+func (runtime *AccountRuntime) createAccountContainerWithImage(
+	ctx context.Context,
+	account controlplane.Account,
+	start bool,
+	imageReference string,
+) (string, error) {
+	options, err := runtime.createOptionsWithImage(ctx, account, imageReference)
 	if err != nil {
 		return "", err
 	}
@@ -369,6 +578,14 @@ func (runtime *AccountRuntime) createOptions(
 	ctx context.Context,
 	account controlplane.Account,
 ) (dockerclient.ContainerCreateOptions, error) {
+	return runtime.createOptionsWithImage(ctx, account, "")
+}
+
+func (runtime *AccountRuntime) createOptionsWithImage(
+	ctx context.Context,
+	account controlplane.Account,
+	imageReference string,
+) (dockerclient.ContainerCreateOptions, error) {
 	accountID, err := controlplane.NormalizeAccountID(account.ID)
 	if err != nil || accountID != account.ID || account.Port < 1 || account.Port > 65535 {
 		return dockerclient.ContainerCreateOptions{}, fmt.Errorf("%w: invalid account container metadata", ErrRuntimeTarget)
@@ -386,6 +603,12 @@ func (runtime *AccountRuntime) createOptions(
 	image, listenAddress, err := runtime.imageAndListenAddress(ctx)
 	if err != nil {
 		return dockerclient.ContainerCreateOptions{}, err
+	}
+	if strings.TrimSpace(imageReference) != "" {
+		image = strings.TrimSpace(imageReference)
+	}
+	if image == "" || len(image) > 512 || strings.ContainsAny(image, "\r\n\t \x00") {
+		return dockerclient.ContainerCreateOptions{}, errors.New("CPA image reference is invalid")
 	}
 	hostAddress, err := netip.ParseAddr(listenAddress)
 	if err != nil || !hostAddress.IsLoopback() {
@@ -532,7 +755,7 @@ func (runtime *AccountRuntime) findAccountContainer(ctx context.Context, account
 		matches = append(matches, Service{
 			Service: service, ContainerID: shortID(candidate.ID), Name: name,
 			Image: candidate.Image, State: strings.ToLower(strings.TrimSpace(string(candidate.State))),
-			Status: candidate.Status, dockerID: candidate.ID,
+			Status: candidate.Status, dockerID: candidate.ID, imageID: candidate.ImageID,
 		})
 	}
 	if len(matches) > 1 {

@@ -2,9 +2,11 @@ package runtimeops
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -162,6 +164,81 @@ func TestAccountRuntimeReconcileReplacesInterruptedRenameCandidate(t *testing.T)
 	}
 }
 
+func TestAccountRuntimeLoginUsesIsolatedOneOffContainerAndRequiresOAuthChange(t *testing.T) {
+	root := newRuntimeRoot(t, "alpha")
+	client := &fakeAccountLifecycleClient{
+		containers:  runtimeFixtureContainers(),
+		oauthOutput: "Codex device URL: https://auth.example.test/device\nCodex device code: ABCD-EFGH\n",
+	}
+	manager := newRuntimeTestManager(t, client)
+	manager.accounts = staticAccountCatalog{accounts: []controlplane.Account{{ID: "alpha", Port: 18318}}}
+	runtime := newAccountRuntimeForTest(t, manager, root, &recordingRoundTripper{status: http.StatusOK})
+	client.oauthStartHook = func() {
+		writeRuntimeTestFile(t, filepath.Join(root, "auth", "alpha", "codex.json"), `{"access_token":"new"}`)
+	}
+	var output strings.Builder
+	result, err := runtime.Login(context.Background(), "alpha", &output)
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if result.Action != "login" || result.Target != "alpha" ||
+		!strings.Contains(output.String(), "Codex device code: ABCD-EFGH") {
+		t.Fatalf("OAuth result=%#v output=%q", result, output.String())
+	}
+	if len(client.creates) != 1 {
+		t.Fatalf("OAuth create calls = %d", len(client.creates))
+	}
+	created := client.creates[0]
+	if !strings.HasPrefix(created.Name, "fixture-oauth-alpha-") ||
+		created.Config.Image != "registry.example.com/cpa@sha256:immutable" ||
+		strings.Join(created.Config.Cmd, " ") != "./CLIProxyAPI -config /CLIProxyAPI/configs/alpha.yaml -codex-device-login -no-browser" {
+		t.Fatalf("OAuth create identity = %#v", created)
+	}
+	if created.Config.ExposedPorts != nil || len(created.HostConfig.PortBindings) != 0 ||
+		created.HostConfig.RestartPolicy.Name != containertypes.RestartPolicyDisabled ||
+		created.Config.Labels[composeProjectLabel] != "" || created.Config.Labels[composeServiceLabel] != "" ||
+		created.Config.Labels["com.docker.compose.oneoff"] != "" ||
+		created.Config.Labels["io.codex-cpa.operation"] != "oauth-device-login" {
+		t.Fatalf("OAuth container was not isolated from the service directory: %#v", created)
+	}
+	if len(created.HostConfig.Mounts) != 4 || len(client.stopped) != 0 || len(client.restarted) != 0 ||
+		len(client.removed) != 1 || client.removed[0] != "created-1" {
+		t.Fatalf("OAuth lifecycle calls: mounts=%d stopped=%#v restarted=%#v removed=%#v", len(created.HostConfig.Mounts), client.stopped, client.restarted, client.removed)
+	}
+}
+
+func TestAccountRuntimeLoginRejectsExitFailureAndUnchangedOAuth(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		exitCode   int64
+		mutateAuth bool
+		want       string
+	}{
+		{name: "non-zero exit", exitCode: 7, mutateAuth: true, want: "exited with code 7"},
+		{name: "unchanged auth", exitCode: 0, mutateAuth: false, want: "没有检测到新增或更新的认证文件"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := newRuntimeRoot(t, "alpha")
+			client := &fakeAccountLifecycleClient{oauthOutput: "device flow finished\n", oauthExitCode: test.exitCode}
+			manager := newRuntimeTestManager(t, client)
+			manager.accounts = staticAccountCatalog{accounts: []controlplane.Account{{ID: "alpha", Port: 18318}}}
+			runtime := newAccountRuntimeForTest(t, manager, root, &recordingRoundTripper{status: http.StatusOK})
+			if test.mutateAuth {
+				client.oauthStartHook = func() {
+					writeRuntimeTestFile(t, filepath.Join(root, "auth", "alpha", "codex.json"), `{"access_token":"new"}`)
+				}
+			}
+			_, err := runtime.Login(context.Background(), "alpha", io.Discard)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Login error = %v, want %q", err, test.want)
+			}
+			if len(client.removed) != 1 || client.removed[0] != "created-1" {
+				t.Fatalf("failed OAuth container was not removed: %#v", client.removed)
+			}
+		})
+	}
+}
+
 func newAccountRuntimeForTest(
 	t *testing.T,
 	manager *Manager,
@@ -226,13 +303,18 @@ func accountContainerSummary(id, account string, state containertypes.ContainerS
 }
 
 type fakeAccountLifecycleClient struct {
-	containers  []containertypes.Summary
-	creates     []dockerclient.ContainerCreateOptions
-	started     []string
-	stopped     []string
-	restarted   []string
-	removed     []string
-	createCount int
+	containers     []containertypes.Summary
+	creates        []dockerclient.ContainerCreateOptions
+	started        []string
+	stopped        []string
+	restarted      []string
+	removed        []string
+	createCount    int
+	oauthOutput    string
+	oauthExitCode  int64
+	oauthWaitError error
+	oauthStartHook func()
+	oauthStream    net.Conn
 }
 
 func (client *fakeAccountLifecycleClient) ContainerList(
@@ -278,7 +360,45 @@ func (client *fakeAccountLifecycleClient) ContainerStart(
 ) (dockerclient.ContainerStartResult, error) {
 	client.started = append(client.started, id)
 	client.setState(id, containertypes.StateRunning)
+	if client.oauthStream != nil {
+		stream := client.oauthStream
+		client.oauthStream = nil
+		header := make([]byte, 8)
+		header[0] = 1
+		binary.BigEndian.PutUint32(header[4:], uint32(len(client.oauthOutput)))
+		_, _ = stream.Write(header)
+		_, _ = io.WriteString(stream, client.oauthOutput)
+		_ = stream.Close()
+		if client.oauthStartHook != nil {
+			client.oauthStartHook()
+		}
+	}
 	return dockerclient.ContainerStartResult{}, nil
+}
+
+func (client *fakeAccountLifecycleClient) ContainerAttach(
+	_ context.Context,
+	_ string,
+	_ dockerclient.ContainerAttachOptions,
+) (dockerclient.ContainerAttachResult, error) {
+	reader, writer := net.Pipe()
+	client.oauthStream = writer
+	return dockerclient.ContainerAttachResult{HijackedResponse: dockerclient.NewHijackedResponse(reader, "application/vnd.docker.raw-stream")}, nil
+}
+
+func (client *fakeAccountLifecycleClient) ContainerWait(
+	_ context.Context,
+	_ string,
+	_ dockerclient.ContainerWaitOptions,
+) dockerclient.ContainerWaitResult {
+	results := make(chan containertypes.WaitResponse, 1)
+	errors := make(chan error, 1)
+	if client.oauthWaitError != nil {
+		errors <- client.oauthWaitError
+	} else {
+		results <- containertypes.WaitResponse{StatusCode: client.oauthExitCode}
+	}
+	return dockerclient.ContainerWaitResult{Result: results, Error: errors}
 }
 
 func (client *fakeAccountLifecycleClient) ContainerStop(

@@ -112,7 +112,7 @@ func ParseAuthSnapshot(reader io.Reader) (*AuthSnapshot, error) {
 	snapshot := &AuthSnapshot{
 		Version:     input.Version,
 		Generation:  input.Generation,
-		GeneratedAt: luaNumberOrFallback(input.GeneratedAt, 0),
+		GeneratedAt: snapshotNumberOrFallback(input.GeneratedAt, 0),
 		Records:     input.Records,
 	}
 	seen := make(map[string]struct{}, len(snapshot.Records))
@@ -148,7 +148,7 @@ func ParseQuotaSnapshot(reader io.Reader) (*QuotaSnapshot, error) {
 	snapshot := &QuotaSnapshot{
 		Version:       input.Version,
 		Generation:    input.Generation,
-		GeneratedAt:   luaNumberOrFallback(input.GeneratedAt, 0),
+		GeneratedAt:   snapshotNumberOrFallback(input.GeneratedAt, 0),
 		ContentSHA256: input.ContentSHA256,
 		Records:       make([]QuotaRecord, 0, len(input.Records)),
 	}
@@ -182,11 +182,11 @@ func ParseQuotaSnapshot(reader io.Reader) (*QuotaSnapshot, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid quota used_tokens at index %d: %w", index, err)
 		}
-		rawUsed, err := optionalLuaFloor(rawRecord.RawUsedTokens, used)
+		rawUsed, err := optionalSnapshotFloor(rawRecord.RawUsedTokens, used)
 		if err != nil {
 			return nil, fmt.Errorf("invalid quota raw_used_tokens at index %d: %w", index, err)
 		}
-		weightedRawUsed, err := optionalLuaFloor(rawRecord.WeightedRawUsedTokens, used)
+		weightedRawUsed, err := optionalSnapshotFloor(rawRecord.WeightedRawUsedTokens, used)
 		if err != nil {
 			return nil, fmt.Errorf("invalid quota weighted_raw_used_tokens at index %d: %w", index, err)
 		}
@@ -231,7 +231,7 @@ func ParseQuotaHeartbeat(reader io.Reader) (*QuotaHeartbeat, error) {
 		return nil, fmt.Errorf("invalid quota heartbeat fail_open_after_seconds: %w", err)
 	}
 	staleAfter := int64(15)
-	if parsed, ok := luaNumber(input.StaleAfterSeconds); ok {
+	if parsed, ok := snapshotNumber(input.StaleAfterSeconds); ok {
 		staleAfter, err = floorInt64(parsed)
 		if err != nil {
 			return nil, fmt.Errorf("invalid quota heartbeat stale_after_seconds: %w", err)
@@ -290,23 +290,23 @@ func floorInt64(value float64) (int64, error) {
 	return int64(math.Floor(value)), nil
 }
 
-func optionalLuaFloor(value any, fallback int64) (int64, error) {
-	parsed, ok := luaNumber(value)
+func optionalSnapshotFloor(value any, fallback int64) (int64, error) {
+	parsed, ok := snapshotNumber(value)
 	if !ok {
 		return fallback, nil
 	}
 	return floorInt64(parsed)
 }
 
-func luaNumberOrFallback(value any, fallback float64) float64 {
-	parsed, ok := luaNumber(value)
+func snapshotNumberOrFallback(value any, fallback float64) float64 {
+	parsed, ok := snapshotNumber(value)
 	if !ok {
 		return fallback
 	}
 	return parsed
 }
 
-func luaNumber(value any) (float64, bool) {
+func snapshotNumber(value any) (float64, bool) {
 	var parsed float64
 	switch candidate := value.(type) {
 	case float64:

@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountlifecycle"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountstatus"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -29,18 +32,56 @@ type AccountLifecycleService interface {
 	ClearAuth(context.Context, string) (accountlifecycle.AuthClearResult, error)
 }
 
+type accountActivityEmailReader interface {
+	ActiveUserEmailsLastHour(context.Context) (map[string][]string, error)
+}
+
+type AccountRuntimeReader interface {
+	Observe(context.Context, map[string]string) map[string]accountstatus.State
+}
+
+type accountOperationalStatus struct {
+	Code       string `json:"code"`
+	Label      string `json:"label"`
+	Tone       string `json:"tone"`
+	Reason     string `json:"reason"`
+	Selectable bool   `json:"selectable"`
+}
+
 type accountListItem struct {
-	ID              string                `json:"id"`
-	Email           string                `json:"email"`
-	Port            int                   `json:"port"`
-	ProxyMode       string                `json:"proxy_mode"`
-	Enabled         bool                  `json:"enabled"`
-	Default         bool                  `json:"default"`
-	RoutedUsers     int                   `json:"routed_users"`
-	ActiveUsers1H   *int                  `json:"active_users_1h"`
-	AccountState    failover.AccountState `json:"account_state"`
-	StateAvailable  bool                  `json:"state_available"`
-	ProxyConfigured bool                  `json:"proxy_configured"`
+	ID                   string                   `json:"id"`
+	Email                string                   `json:"email"`
+	Port                 int                      `json:"port"`
+	ProxyMode            string                   `json:"proxy_mode"`
+	ProxySource          string                   `json:"proxy_source"`
+	ProxyDisplay         string                   `json:"proxy_display"`
+	Enabled              bool                     `json:"enabled"`
+	Default              bool                     `json:"default"`
+	Service              string                   `json:"service"`
+	ContainerState       string                   `json:"container_state"`
+	ContainerStatus      string                   `json:"container_status"`
+	ContainerHealth      string                   `json:"container_health"`
+	RuntimeState         string                   `json:"runtime_state"`
+	OAuthConfigured      *bool                    `json:"oauth_configured"`
+	AuthFiles            int                      `json:"auth_files"`
+	AuthState            string                   `json:"auth_state"`
+	AssociatedUsers      int                      `json:"associated_users"`
+	RoutedUsers          int                      `json:"routed_users"`
+	ActiveUsers1H        *int                     `json:"active_users_1h"`
+	ActiveEmails1H       []string                 `json:"active_user_emails_1h"`
+	ResetCreditCount     *int64                   `json:"reset_credit_count"`
+	Resettable           bool                     `json:"resettable"`
+	ResetWindowLabels    []string                 `json:"reset_window_labels"`
+	Quota                quota.AccountQuota       `json:"quota"`
+	Usage                usage.RawMetrics         `json:"usage"`
+	UsageAvailable       bool                     `json:"usage_available"`
+	UsageWindowStartAt   *int64                   `json:"usage_window_start_at"`
+	UsageWindowAvailable bool                     `json:"usage_window_available"`
+	AccountState         failover.AccountState    `json:"account_state"`
+	Runtime              accountstatus.Runtime    `json:"runtime"`
+	OperationalStatus    accountOperationalStatus `json:"operational_status"`
+	StateAvailable       bool                     `json:"state_available"`
+	ProxyConfigured      bool                     `json:"proxy_configured"`
 }
 
 func (server *Server) listAccounts(c *gin.Context) {
@@ -48,25 +89,67 @@ func (server *Server) listAccounts(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "账号目录服务尚未就绪", "accounts_not_ready")
 		return
 	}
+	window, err := server.parseAccountListUsageWindow(c)
+	if err != nil {
+		writeUsageWindowError(c, err)
+		return
+	}
+	if c.Query("fresh") == "1" {
+		if _, _, err := quota.RequestRefresh(c.Request.Context(), server.store, server.now()); err != nil {
+			server.internalError(c, "request official quota refresh", err)
+			return
+		}
+	}
+	sinceReset := window.Window == sinceResetWindow
+	accounts, err := server.accounts.ReadAccounts(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read account catalog", err)
+		return
+	}
+	accountIDs := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		accountIDs = append(accountIDs, account.ID)
+	}
 	var (
-		accounts       []controlplane.Account
-		routes         map[string]string
-		states         map[string]failover.AccountState
-		activity       map[string]int
-		stateError     error
-		activityError  error
-		secretStatuses map[string]controlplane.SecretStatus
+		routes          map[string]string
+		states          map[string]failover.AccountState
+		activity        map[string]int
+		activityEmails  map[string][]string
+		usageSummaries  map[string]usage.AccountUsageSummary
+		keyRecords      []controlplane.KeyRecord
+		stateError      error
+		activityError   error
+		usageError      error
+		keyRecordError  error
+		secretStatuses  map[string]controlplane.SecretStatus
+		officialQuota   quota.RuntimeState
+		quotaStateError error
+		runtimeServices []runtimeops.Service
+		runtimeError    error
+		refreshRequest  quota.RefreshRequestState
+		refreshError    error
+		collector       usage.CollectorStatus
+		collectorError  error
+		settings        map[string]any
 	)
 	group, groupContext := errgroup.WithContext(c.Request.Context())
 	group.Go(func() error {
 		var err error
-		accounts, err = server.accounts.ReadAccounts(groupContext)
+		secretStatuses, err = server.store.SecretStatuses(groupContext)
 		return err
 	})
 	group.Go(func() error {
 		var err error
-		secretStatuses, err = server.store.SecretStatuses(groupContext)
+		settings, err = server.store.ReadSettings(groupContext)
 		return err
+	})
+	group.Go(func() error {
+		_, quotaStateError = server.store.ReadRuntimeState(groupContext, quota.RuntimeStateName, &officialQuota)
+		return nil
+	})
+	group.Go(func() error {
+		refreshRequest, _, refreshError = quota.ReadRefreshRequest(groupContext, server.store)
+		return nil
 	})
 	group.Go(func() error {
 		var err error
@@ -81,7 +164,51 @@ func (server *Server) listAccounts(c *gin.Context) {
 	}
 	if server.activity != nil {
 		group.Go(func() error {
+			if reader, ok := server.activity.(accountActivityEmailReader); ok {
+				activityEmails, activityError = reader.ActiveUserEmailsLastHour(groupContext)
+				if activityError == nil {
+					activity = make(map[string]int, len(activityEmails))
+					for account, emails := range activityEmails {
+						activity[account] = len(emails)
+					}
+				}
+				return nil
+			}
 			activity, activityError = server.activity.RefreshActiveUsersLastHour(groupContext)
+			return nil
+		})
+	}
+	if !sinceReset {
+		if reader, ok := server.usage.(AccountUsageSummaryReader); ok {
+			group.Go(func() error {
+				usageSummaries, usageError = reader.AccountSummaries(
+					groupContext, accountIDs, window.queryStartAt, window.queryEndAt,
+				)
+				return nil
+			})
+		} else {
+			usageError = errors.New("account usage summary reader is unavailable")
+		}
+	}
+	if server.usage != nil {
+		group.Go(func() error {
+			collector, collectorError = server.usage.Status(groupContext)
+			return nil
+		})
+	} else {
+		collector = usage.CollectorStatus{Status: "unavailable"}
+	}
+	if reader, ok := server.store.(interface {
+		ReadKeyRecords(context.Context) ([]controlplane.KeyRecord, error)
+	}); ok {
+		group.Go(func() error {
+			keyRecords, keyRecordError = reader.ReadKeyRecords(groupContext)
+			return nil
+		})
+	}
+	if server.runtime != nil {
+		group.Go(func() error {
+			runtimeServices, runtimeError = server.runtime.List(groupContext)
 			return nil
 		})
 	}
@@ -89,7 +216,31 @@ func (server *Server) listAccounts(c *gin.Context) {
 		server.internalError(c, "read account catalog", err)
 		return
 	}
-	warnings := make([]string, 0, 2)
+	quotaByAccount := make(map[string]quota.AccountQuota, len(officialQuota.Snapshot.Accounts))
+	for _, accountQuota := range officialQuota.Snapshot.Accounts {
+		quotaByAccount[accountQuota.Account] = accountQuota
+	}
+	var usageStartAtByAccount map[string]int64
+	if sinceReset {
+		usageStartAtByAccount = make(map[string]int64, len(accounts))
+		for _, account := range accounts {
+			accountQuota := quotaByAccount[account.ID]
+			if accountQuota.Weekly == nil {
+				continue
+			}
+			if startAt, found := weeklyWindowStart(*accountQuota.Weekly, window.GeneratedAt); found {
+				usageStartAtByAccount[account.ID] = startAt
+			}
+		}
+		if reader, ok := server.usage.(AccountUsageSummaryByAccountReader); ok {
+			usageSummaries, usageError = reader.AccountSummariesByStart(
+				c.Request.Context(), usageStartAtByAccount, window.WindowEndAt,
+			)
+		} else {
+			usageError = errors.New("per-account usage summary reader is unavailable")
+		}
+	}
+	warnings := make([]string, 0, 6)
 	if stateError != nil {
 		server.logger.Warn("account operational state is unavailable", zap.Error(stateError))
 		warnings = append(warnings, "账号额度状态暂不可用，已按状态未知展示")
@@ -98,12 +249,73 @@ func (server *Server) listAccounts(c *gin.Context) {
 		server.logger.Warn("one-hour account activity is unavailable", zap.Error(activityError))
 		warnings = append(warnings, "近 1 小时活跃用户数暂不可用")
 	}
+	if usageError != nil {
+		server.logger.Warn("account usage summaries are unavailable", zap.Error(usageError))
+		warnings = append(warnings, "当前用量范围的账号请求与 Token 统计暂不可用")
+	}
+	if keyRecordError != nil {
+		server.logger.Warn("account key associations are unavailable", zap.Error(keyRecordError))
+		warnings = append(warnings, "账号关联用户数暂不可用")
+	}
+	if quotaStateError != nil {
+		server.logger.Warn("official quota reset summary is unavailable", zap.Error(quotaStateError))
+		warnings = append(warnings, "周限额重置状态暂不可用")
+	}
+	if refreshError != nil {
+		server.logger.Warn("official quota refresh request state is unavailable", zap.Error(refreshError))
+		warnings = append(warnings, "周限额刷新状态暂不可用")
+	}
+	if collectorError != nil {
+		server.logger.Warn("usage collector status is unavailable", zap.Error(collectorError))
+		collector = usage.CollectorStatus{Status: "unavailable"}
+		warnings = append(warnings, "用量采集器状态暂不可用")
+	}
+	if runtimeError != nil {
+		server.logger.Warn("account container status is unavailable", zap.Error(runtimeError))
+		warnings = append(warnings, "CPA 容器状态暂不可用")
+	}
+	if sinceReset && len(usageStartAtByAccount) < len(accounts) {
+		warnings = append(warnings, fmt.Sprintf(
+			"%d 个 CPA 未获得额度周期边界，本周期用量显示为不可用",
+			len(accounts)-len(usageStartAtByAccount),
+		))
+	}
 	routedCounts := make(map[string]int)
 	for _, account := range routes {
 		routedCounts[account]++
 	}
+	associatedUsers := make(map[string]map[string]struct{})
+	for _, record := range keyRecords {
+		if record.Status != "active" || record.Account == "" || record.User == "" {
+			continue
+		}
+		if associatedUsers[record.Account] == nil {
+			associatedUsers[record.Account] = make(map[string]struct{})
+		}
+		associatedUsers[record.Account][record.User] = struct{}{}
+	}
+	servicesByName := make(map[string]runtimeops.Service, len(runtimeServices))
+	runningAccountServices := make(map[string]string)
+	for _, service := range runtimeServices {
+		servicesByName[service.Service] = service
+		if service.State == "running" && strings.HasPrefix(service.Service, "cliproxy-") {
+			runningAccountServices[strings.TrimPrefix(service.Service, "cliproxy-")] = service.Service
+		}
+	}
+	runtimeStatuses := make(map[string]accountstatus.State)
+	if server.accountRuntime != nil && len(runningAccountServices) > 0 {
+		runtimeStatuses = server.accountRuntime.Observe(c.Request.Context(), runningAccountServices)
+	}
 	items := make([]accountListItem, 0, len(accounts))
 	for _, account := range accounts {
+		proxyConfigured := secretStatuses["cpa_account_proxy_url:"+account.ID].SHA256 != ""
+		proxySource, proxyDisplay, err := accountProxyPresentation(
+			c.Request.Context(), server.store, settings, account, proxyConfigured,
+		)
+		if err != nil {
+			server.internalError(c, "read account proxy presentation", err)
+			return
+		}
 		state, stateAvailable := states[account.ID]
 		if !stateAvailable {
 			state = failover.AccountState{Account: account.ID, Reason: "quota_unavailable"}
@@ -113,20 +325,290 @@ func (server *Server) listAccounts(c *gin.Context) {
 			count := activity[account.ID]
 			activeUsers = &count
 		}
+		var oauthConfigured *bool
+		if server.oauth != nil {
+			configured := false
+			if _, loadError := server.oauth.Load(account.ID); loadError == nil {
+				configured = true
+				oauthConfigured = &configured
+			} else if errors.Is(loadError, quota.ErrOAuthMissing) {
+				oauthConfigured = &configured
+			} else {
+				server.logger.Warn(
+					"account OAuth status is unavailable",
+					zap.String("account", account.ID), zap.Error(loadError),
+				)
+			}
+		}
+		runtimeState := "unknown"
+		switch {
+		case !account.GroupEnabled:
+			runtimeState = "disabled"
+		case stateAvailable && state.Reason == "container_not_running":
+			runtimeState = "stopped"
+		case stateAvailable:
+			runtimeState = "running"
+		}
+		accountUsage := usageSummaries[account.ID]
+		usageWindowStartAt := window.WindowStartAt
+		usageWindowAvailable := usageError == nil
+		if sinceReset {
+			startAt, found := usageStartAtByAccount[account.ID]
+			usageWindowAvailable = usageError == nil && found
+			if found {
+				startAtCopy := startAt
+				usageWindowStartAt = &startAtCopy
+			} else {
+				usageWindowStartAt = nil
+			}
+		}
+		accountQuota := quotaByAccount[account.ID]
+		if accountQuota.WeeklyWindows == nil {
+			accountQuota.WeeklyWindows = make([]quota.WeeklyWindow, 0)
+		}
+		resetWindowLabels := make([]string, 0)
+		for _, window := range accountQuota.WeeklyWindows {
+			if window.Resettable {
+				resetWindowLabels = append(resetWindowLabels, window.Label)
+			}
+		}
+		resettable := accountQuota.ResetCreditCount != nil && *accountQuota.ResetCreditCount > 0 && len(resetWindowLabels) > 0
+		serviceName := "cliproxy-" + account.ID
+		service, serviceFound := servicesByName[serviceName]
+		containerState := "missing"
+		containerStatus := ""
+		containerHealth := ""
+		if serviceFound {
+			containerState, containerStatus, containerHealth = service.State, service.Status, service.Health
+		} else if server.runtime == nil {
+			containerState = runtimeState
+		}
+		runtimeStatus := runtimeStatuses[account.ID]
+		authFiles := runtimeStatus.AuthFiles
+		authState := "unknown"
+		if oauthConfigured != nil {
+			if *oauthConfigured {
+				authState = "configured"
+				if authFiles == 0 {
+					authFiles = 1
+				}
+			} else {
+				authState = "pending"
+			}
+		}
+		operationalStatus := buildAccountOperationalStatus(
+			account.GroupEnabled, containerState, authFiles, accountQuota,
+			runtimeStatus.Runtime, state, stateAvailable && stateError == nil,
+		)
 		items = append(items, accountListItem{
 			ID: account.ID, Email: account.Email, Port: account.Port,
-			ProxyMode: account.ProxyMode, Enabled: account.GroupEnabled,
-			Default: account.DefaultGroup, RoutedUsers: routedCounts[account.ID],
-			ActiveUsers1H: activeUsers, AccountState: state,
-			StateAvailable:  stateAvailable && stateError == nil,
-			ProxyConfigured: secretStatuses["cpa_account_proxy_url:"+account.ID].SHA256 != "",
+			ProxyMode: account.ProxyMode, ProxySource: proxySource, ProxyDisplay: proxyDisplay,
+			Enabled: account.GroupEnabled,
+			Default: account.DefaultGroup, Service: serviceName,
+			ContainerState: containerState, ContainerStatus: containerStatus, ContainerHealth: containerHealth,
+			RuntimeState:    runtimeState,
+			OAuthConfigured: oauthConfigured, AssociatedUsers: len(associatedUsers[account.ID]),
+			AuthFiles: authFiles, AuthState: authState,
+			RoutedUsers: routedCounts[account.ID], ActiveUsers1H: activeUsers,
+			ActiveEmails1H:   append([]string{}, activityEmails[account.ID]...),
+			ResetCreditCount: accountQuota.ResetCreditCount, Resettable: resettable,
+			ResetWindowLabels: resetWindowLabels, Quota: accountQuota,
+			Usage: accountUsage.RawMetrics, UsageAvailable: usageWindowAvailable,
+			UsageWindowStartAt: usageWindowStartAt, UsageWindowAvailable: usageWindowAvailable,
+			AccountState: state, Runtime: runtimeStatus.Runtime,
+			OperationalStatus: operationalStatus,
+			StateAvailable:    stateAvailable && stateError == nil,
+			ProxyConfigured:   proxyConfigured,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"accounts":     items,
-		"generated_at": server.now().Unix(),
-		"warnings":     warnings,
+		"accounts":                   items,
+		"generated_at":               window.GeneratedAt,
+		"window":                     window.Window,
+		"window_seconds":             window.WindowSeconds,
+		"window_start_at":            window.WindowStartAt,
+		"window_start_at_by_account": usageStartAtByAccount,
+		"window_end_at":              window.WindowEndAt,
+		"window_timezone":            window.WindowTimezone,
+		"quota_generated_at":         nullablePositiveTimestamp(officialQuota.Snapshot.GeneratedAt),
+		"quota_cached":               quotaStateError == nil && officialQuota.Snapshot.GeneratedAt > 0,
+		"quota_refreshing":           refreshError == nil && refreshRequest.Pending(),
+		"quota_cache_ttl_seconds":    officialQuota.Snapshot.CacheTTLSeconds,
+		"collector":                  collector,
+		"warnings":                   warnings,
 	})
+}
+
+func accountProxyPresentation(
+	ctx context.Context,
+	store interface {
+		ReadSecret(context.Context, string) (string, bool, error)
+	},
+	settings map[string]any,
+	account controlplane.Account,
+	customConfigured bool,
+) (string, string, error) {
+	mode := strings.TrimSpace(account.ProxyMode)
+	if mode == "" {
+		mode = "inherit"
+	}
+	secretName := ""
+	source := "direct"
+	switch mode {
+	case "direct":
+		return source, "direct", nil
+	case "custom":
+		source = "account"
+		if !customConfigured {
+			return source, "", nil
+		}
+		secretName = "cpa_account_proxy_url:" + account.ID
+	case "inherit":
+		proxyEnabled, _ := settings["cpa.proxy_enabled"].(bool)
+		if !proxyEnabled {
+			return source, "direct", nil
+		}
+		source = "default"
+		secretName = "cpa_default_proxy_url"
+	default:
+		return "", "", fmt.Errorf("account %s has invalid proxy mode %q", account.ID, mode)
+	}
+	value, found, err := store.ReadSecret(ctx, secretName)
+	if err != nil {
+		return "", "", fmt.Errorf("read effective proxy for account %s: %w", account.ID, err)
+	}
+	if !found || strings.TrimSpace(value) == "" {
+		return source, "", nil
+	}
+	return source, redactAccountProxyURL(value), nil
+}
+
+func redactAccountProxyURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "direct" {
+		return value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	authority := parsed.Host
+	if parsed.User != nil {
+		authority = url.PathEscape(parsed.User.Username()) + ":***@" + authority
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + authority
+}
+
+func nullablePositiveTimestamp(value int64) *int64 {
+	if value <= 0 {
+		return nil
+	}
+	return &value
+}
+
+func buildAccountOperationalStatus(
+	enabled bool,
+	containerState string,
+	authFiles int,
+	accountQuota quota.AccountQuota,
+	runtime accountstatus.Runtime,
+	state failover.AccountState,
+	stateAvailable bool,
+) accountOperationalStatus {
+	status := func(code, label, tone, reason string, selectable bool) accountOperationalStatus {
+		return accountOperationalStatus{Code: code, Label: label, Tone: tone, Reason: reason, Selectable: selectable}
+	}
+	switch {
+	case !enabled:
+		return status("disabled", "已停用", "neutral", "账号已停用", false)
+	case containerState != "running":
+		return status("stopped", "已停止", "danger", "CPA 容器未运行", false)
+	case authFiles <= 0:
+		return status("auth_missing", "未授权", "danger", "OAuth 尚未授权", false)
+	case state.Exhausted || state.Reason == accountstatus.ReasonQuotaExhausted ||
+		boolFalse(accountQuota.Allowed) || boolValue(accountQuota.LimitReached) ||
+		accountQuota.Weekly != nil && accountQuota.Weekly.LimitReached:
+		return status("quota_exhausted", "额度耗尽", "danger", "账号周额度已耗尽", false)
+	}
+	runtimeReason := state.Reason
+	switch {
+	case runtime.State == "unavailable" && runtimeReason == accountstatus.ReasonTransientCooldown,
+		runtimeReason == accountstatus.ReasonTransientCooldown:
+		return status("transient_cooldown", "临时冷却", "warning", "上游请求临时失败，CPA 正在等待凭据冷却恢复", true)
+	case runtime.State == "unavailable", runtimeReason == accountstatus.ReasonCredentialUnavailable:
+		return status("credential_unavailable", "凭据不可用", "danger", "OAuth 凭据已失效，需要重新授权", false)
+	case runtime.State == "rate_limited", runtimeReason == accountstatus.ReasonRateLimited:
+		return status("rate_limited", "限流中", "warning", "账号近期出现 429，仍可选择并稍后重试", true)
+	case runtime.State == "degraded", runtimeReason == accountstatus.ReasonDegraded:
+		return status("degraded", "近期异常", "warning", "账号近期出现请求异常", true)
+	case runtime.State == "unknown", runtimeReason == accountstatus.ReasonRuntimeUnknown:
+		return status("unknown", "状态未知", "neutral", "CPA 原生状态暂不可查询", true)
+	case !stateAvailable || accountQuota.Status != "ok" || accountQuota.Weekly == nil:
+		return status("quota_unknown", "额度未知", "neutral", "额度状态暂不可确认", true)
+	case accountQuota.Weekly.RemainingPercent <= 10:
+		return status("quota_warning", "注意额度", "warning", "周额度剩余不高于 10%", true)
+	default:
+		return status("available", "可用", "success", "容器、OAuth 与额度均正常", true)
+	}
+}
+
+func boolValue(value *bool) bool {
+	return value != nil && *value
+}
+
+func boolFalse(value *bool) bool {
+	return value != nil && !*value
+}
+
+func (server *Server) parseAccountListUsageWindow(c *gin.Context) (usageWindowContext, error) {
+	raw := strings.ToLower(strings.TrimSpace(c.Query("window")))
+	if raw != sinceResetWindow {
+		return server.parseUsageWindow(c, false)
+	}
+	generatedAt := server.now().Unix()
+	endAt := generatedAt
+	return usageWindowContext{
+		GeneratedAt:   generatedAt,
+		Window:        sinceResetWindow,
+		WindowSeconds: nil,
+		WindowStartAt: nil,
+		WindowEndAt:   &endAt,
+		queryEndAt:    &endAt,
+	}, nil
+}
+
+func (server *Server) inspectAccountQuotaReset(c *gin.Context) {
+	account := strings.ToLower(strings.TrimSpace(c.Query("account")))
+	if account == "" {
+		writeError(c, http.StatusBadRequest, "请选择要重置周限额的 CPA", "invalid_request")
+		return
+	}
+	inspector, ok := server.quotaResetter.(quotaResetInspector)
+	if !ok {
+		writeError(c, http.StatusServiceUnavailable, "周限额重置详情服务尚未就绪", "quota_reset_not_ready")
+		return
+	}
+	result, err := inspector.Inspect(c.Request.Context(), account)
+	if err != nil {
+		server.writeQuotaResetReadError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (server *Server) writeQuotaResetReadError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, controlplane.ErrInvalidCatalogInput):
+		writeError(c, http.StatusBadRequest, "周限额重置参数无效", "invalid_request")
+	case errors.Is(err, quota.ErrResetAccountNotFound):
+		writeError(c, http.StatusNotFound, "CPA 账号不存在", "account_not_found")
+	case errors.Is(err, quota.ErrOAuthMissing):
+		writeError(c, http.StatusConflict, "该 CPA 尚未完成 OAuth 授权", "quota_auth_missing")
+	case errors.Is(err, quota.ErrAuthExpired):
+		writeError(c, http.StatusConflict, "上游 OAuth 授权已失效，请重新完成 OAuth 后再重试", "quota_auth_expired")
+	default:
+		writeError(c, http.StatusBadGateway, "无法读取上游周限额重置详情，请稍后重试", "quota_upstream_unavailable")
+	}
 }
 
 func (server *Server) createAccount(c *gin.Context) {
@@ -173,9 +655,15 @@ func (server *Server) updateAccount(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "重命名确认内容必须与当前 CPA 标识完全一致", "invalid_confirmation")
 		return
 	}
+	proxyURL := body.ProxyURL
+	if proxyURL != nil && strings.TrimSpace(*proxyURL) == "" {
+		// The legacy account editor always submits an empty write-only field
+		// when the operator leaves the encrypted proxy unchanged.
+		proxyURL = nil
+	}
 	result, err := server.accountLifecycle.Update(c.Request.Context(), accountlifecycle.UpdateRequest{
 		AccountID: body.ID, NewAccountID: body.NewID, Email: body.Email,
-		ProxyMode: body.ProxyMode, ProxyURL: body.ProxyURL, Enabled: body.GroupEnabled,
+		ProxyMode: body.ProxyMode, ProxyURL: proxyURL, Enabled: body.GroupEnabled,
 		Default: body.DefaultGroup, FallbackAccount: body.FallbackAccount,
 	})
 	if err != nil {

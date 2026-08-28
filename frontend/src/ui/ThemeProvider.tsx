@@ -1,4 +1,3 @@
-import { MoonOutlined, SunOutlined } from "@ant-design/icons";
 import { App as AntApp, ConfigProvider, theme as antTheme, type ThemeConfig } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { createContext, useContext, useLayoutEffect, useMemo, useState } from "react";
@@ -159,7 +158,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider value={value}>
-      <ConfigProvider locale={zhCN} theme={componentTheme}>
+      <ConfigProvider locale={zhCN} theme={componentTheme} button={{ autoInsertSpace: false }}>
         <AntApp>{children}</AntApp>
       </ConfigProvider>
     </ThemeContext.Provider>
@@ -182,7 +181,7 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
       onClick={toggleTheme}
     >
       <span className="theme-toggle-icon" aria-hidden="true">
-        {theme === "dark" ? <SunOutlined /> : <MoonOutlined />}
+        {theme === "dark" ? "☀" : "☾"}
       </span>
       <span className="theme-toggle-label">{nextLabel}</span>
     </button>

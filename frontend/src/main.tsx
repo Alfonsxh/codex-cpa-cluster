@@ -1,4 +1,3 @@
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -27,13 +26,11 @@ if (!root) {
 }
 
 createRoot(root).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <BrowserRouter basename="/admin">
-          <App />
-        </BrowserRouter>
-      </ThemeProvider>
-    </QueryClientProvider>
-  </StrictMode>
+  <QueryClientProvider client={queryClient}>
+    <ThemeProvider>
+      <BrowserRouter basename="/admin">
+        <App />
+      </BrowserRouter>
+    </ThemeProvider>
+  </QueryClientProvider>
 );

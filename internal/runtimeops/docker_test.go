@@ -54,6 +54,19 @@ func TestManagerUsesComposeLabelsAndRestrictsMutatingTargets(t *testing.T) {
 	}
 }
 
+func TestContainerHealthPreservesComposeStatusSemantics(t *testing.T) {
+	for status, expected := range map[string]string{
+		"Up 8 days (healthy)":             "healthy",
+		"Up 3 seconds (health: starting)": "starting",
+		"Up 1 minute (unhealthy)":         "unhealthy",
+		"Exited (1) 2 hours ago":          "",
+	} {
+		if actual := containerHealth(status); actual != expected {
+			t.Fatalf("containerHealth(%q) = %q, want %q", status, actual, expected)
+		}
+	}
+}
+
 func TestManagerStartsStoppedServicesAndRejectsDuplicateComposeService(t *testing.T) {
 	containers := runtimeFixtureContainers()
 	containers[1].State = "exited"

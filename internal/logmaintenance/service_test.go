@@ -199,7 +199,7 @@ func TestRotateFilePreservesWriterInode(t *testing.T) {
 	}
 }
 
-func TestStateJSONMatchesPythonRuntimeContract(t *testing.T) {
+func TestStateJSONMatchesStableRuntimeContract(t *testing.T) {
 	raw, err := json.Marshal(State{
 		HeartbeatAt: 100, LastError: "", Rotations: 2, LastRotated: []string{"logs/gateway/access.tsv"},
 		MaxFileSizeMB: 32, Backups: 2,
@@ -217,7 +217,7 @@ func TestStateJSONMatchesPythonRuntimeContract(t *testing.T) {
 	}
 	for _, key := range expected {
 		if _, found := payload[key]; !found {
-			t.Fatalf("state is missing Python-compatible key %q: %s", key, raw)
+			t.Fatalf("state is missing stable key %q: %s", key, raw)
 		}
 	}
 }

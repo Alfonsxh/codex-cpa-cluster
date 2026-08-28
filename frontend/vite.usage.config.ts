@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => {
       fs: { allow: [frontendRoot] },
       proxy: {
         "^/usage/(session|me)(?:/|$)": proxy(),
+        "/site-config.json": proxy(),
         "/branding": proxy(),
         "/portal/assets": proxy()
       }

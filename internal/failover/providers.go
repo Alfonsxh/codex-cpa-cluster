@@ -28,8 +28,7 @@ type RuntimeStateProvider struct {
 	Now   func() time.Time
 }
 
-// Keep the package-local name while older focused tests and migration code are
-// converted to the complete Python-compatible runtime state.
+// Keep the package-local name for focused account-state tests.
 type accountFailoverRuntimeState = RuntimeState
 
 func (provider RuntimeStateProvider) AccountStates(ctx context.Context) (map[string]AccountState, error) {
@@ -81,9 +80,9 @@ func (provider RuntimeStateProvider) AccountStates(ctx context.Context) (map[str
 	return result, nil
 }
 
-// ReadRuntimeState accepts both the Go controller payload and the current
-// Python v1 payload. Invalid or future payloads fail closed to the default
-// state instead of turning unknown quota into migration capacity.
+// ReadRuntimeState accepts the stable persisted controller payload. Invalid or
+// future payloads fail closed to the default state instead of turning unknown
+// quota into migration capacity.
 func ReadRuntimeState(ctx context.Context, store interface {
 	ReadRuntimeState(context.Context, string, any) (bool, error)
 }) (RuntimeState, bool, error) {

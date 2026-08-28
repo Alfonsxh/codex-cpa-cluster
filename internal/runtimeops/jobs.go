@@ -1,9 +1,11 @@
 package runtimeops
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +34,20 @@ type Controller interface {
 	Restart(context.Context, string) (OperationResult, error)
 }
 
+// LoginController runs one isolated CLIProxyAPI device-login container for an
+// exact CPA account. Output is streamed into the in-memory job so the Admin UI
+// can expose the HTTPS device URL and one-time code while the task is running.
+// Implementations must verify that an OAuth JSON file was actually added or
+// changed; a zero process exit code alone is not success.
+type LoginController interface {
+	Login(context.Context, string, io.Writer) (OperationResult, error)
+}
+
+type ImageController interface {
+	PullImage(context.Context, io.Writer) (OperationResult, error)
+	UpdateImage(context.Context, string, io.Writer) (OperationResult, error)
+}
+
 type Job struct {
 	ID         string           `json:"id"`
 	Name       string           `json:"name"`
@@ -42,6 +58,7 @@ type Job struct {
 	StartedAt  *int64           `json:"started_at,omitempty"`
 	FinishedAt *int64           `json:"finished_at,omitempty"`
 	Result     *OperationResult `json:"result,omitempty"`
+	Output     string           `json:"output,omitempty"`
 	Error      string           `json:"error,omitempty"`
 	cancel     context.CancelFunc
 }
@@ -52,13 +69,17 @@ type JobSubmission struct {
 }
 
 type JobManager struct {
-	controller Controller
-	pool       pond.Pool
-	ctx        context.Context
-	cancel     context.CancelFunc
-	now        func() time.Time
-	newID      func() string
-	history    int
+	controller    Controller
+	login         LoginController
+	images        ImageController
+	diagnostics   DiagnosticController
+	operationLock sync.Locker
+	pool          pond.Pool
+	ctx           context.Context
+	cancel        context.CancelFunc
+	now           func() time.Time
+	newID         func() string
+	history       int
 
 	mu     sync.Mutex
 	jobs   map[string]*Job
@@ -67,10 +88,62 @@ type JobManager struct {
 }
 
 func NewJobManager(controller Controller) (*JobManager, error) {
-	return newJobManager(controller, defaultJobConcurrency, defaultJobQueueSize, defaultJobHistory)
+	return newJobManagerWithControllers(controller, nil, nil, nil, nil, defaultJobConcurrency, defaultJobQueueSize, defaultJobHistory)
 }
 
 func newJobManager(controller Controller, concurrency int, queueSize int, history int) (*JobManager, error) {
+	return newJobManagerWithControllers(controller, nil, nil, nil, nil, concurrency, queueSize, history)
+}
+
+func NewJobManagerWithLogin(controller Controller, login LoginController) (*JobManager, error) {
+	return newJobManagerWithControllers(controller, login, nil, nil, nil, defaultJobConcurrency, defaultJobQueueSize, defaultJobHistory)
+}
+
+func NewJobManagerWithControllers(
+	controller Controller,
+	login LoginController,
+	images ImageController,
+	operationLock sync.Locker,
+) (*JobManager, error) {
+	return newJobManagerWithControllers(
+		controller, login, images, nil, operationLock,
+		defaultJobConcurrency, defaultJobQueueSize, defaultJobHistory,
+	)
+}
+
+func NewJobManagerWithDiagnostics(
+	controller Controller,
+	login LoginController,
+	images ImageController,
+	diagnostics DiagnosticController,
+	operationLock sync.Locker,
+) (*JobManager, error) {
+	return newJobManagerWithControllers(
+		controller, login, images, diagnostics, operationLock,
+		defaultJobConcurrency, defaultJobQueueSize, defaultJobHistory,
+	)
+}
+
+func newJobManagerWithLogin(
+	controller Controller,
+	login LoginController,
+	concurrency int,
+	queueSize int,
+	history int,
+) (*JobManager, error) {
+	return newJobManagerWithControllers(controller, login, nil, nil, nil, concurrency, queueSize, history)
+}
+
+func newJobManagerWithControllers(
+	controller Controller,
+	login LoginController,
+	images ImageController,
+	diagnostics DiagnosticController,
+	operationLock sync.Locker,
+	concurrency int,
+	queueSize int,
+	history int,
+) (*JobManager, error) {
 	if controller == nil {
 		return nil, errors.New("runtime jobs require a controller")
 	}
@@ -79,7 +152,7 @@ func newJobManager(controller Controller, concurrency int, queueSize int, histor
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &JobManager{
-		controller: controller,
+		controller: controller, login: login, images: images, diagnostics: diagnostics, operationLock: operationLock,
 		pool: pond.NewPool(
 			concurrency,
 			pond.WithContext(ctx),
@@ -95,8 +168,25 @@ func newJobManager(controller Controller, concurrency int, queueSize int, histor
 func (manager *JobManager) Submit(action string, target string) (JobSubmission, error) {
 	action = strings.ToLower(strings.TrimSpace(action))
 	target = normalizeTarget(target)
-	if action != "start" && action != "up" && action != "stop" && action != "restart" {
+	if action != "start" && action != "up" && action != "stop" && action != "restart" && action != "login" &&
+		action != "image-pull" && action != "image-update" && action != "health" &&
+		action != "verify-routing" && action != "render" {
 		return JobSubmission{}, fmt.Errorf("%w: unsupported action %s", ErrRuntimeTarget, action)
+	}
+	if action == "login" && manager.login == nil {
+		return JobSubmission{}, fmt.Errorf("%w: OAuth device login is unavailable", ErrRuntimeTarget)
+	}
+	if (action == "image-pull" || action == "image-update") && manager.images == nil {
+		return JobSubmission{}, fmt.Errorf("%w: CPA image operations are unavailable", ErrRuntimeTarget)
+	}
+	if (action == "health" || action == "verify-routing" || action == "render") && manager.diagnostics == nil {
+		return JobSubmission{}, fmt.Errorf("%w: runtime diagnostics are unavailable", ErrRuntimeTarget)
+	}
+	if action == "image-pull" && target != "all" {
+		return JobSubmission{}, fmt.Errorf("%w: CPA image pull target must be all", ErrRuntimeTarget)
+	}
+	if action == "health" || action == "verify-routing" || action == "render" {
+		target = "all"
 	}
 	if action == "up" {
 		action = "start"
@@ -118,7 +208,7 @@ func (manager *JobManager) Submit(action string, target string) (JobSubmission, 
 
 	jobContext, cancel := context.WithCancel(manager.ctx)
 	job := &Job{
-		ID: manager.newID(), Name: jobName(action), Action: action, Target: target,
+		ID: manager.newID(), Name: jobName(action, target), Action: action, Target: target,
 		Status: "queued", CreatedAt: manager.now().Unix(), cancel: cancel,
 	}
 	manager.jobs[job.ID] = job
@@ -233,6 +323,37 @@ func (manager *JobManager) execute(ctx context.Context, id string) error {
 		result, err = manager.controller.Stop(ctx, target)
 	case "restart":
 		result, err = manager.controller.Restart(ctx, target)
+	case "login":
+		output := &jobOutputWriter{manager: manager, id: id}
+		result, err = manager.login.Login(ctx, target, output)
+		output.Flush()
+	case "image-pull", "image-update":
+		output := &jobOutputWriter{manager: manager, id: id}
+		if manager.operationLock != nil {
+			manager.operationLock.Lock()
+			defer manager.operationLock.Unlock()
+		}
+		if action == "image-pull" {
+			result, err = manager.images.PullImage(ctx, output)
+		} else {
+			result, err = manager.images.UpdateImage(ctx, target, output)
+		}
+		output.Flush()
+	case "health", "verify-routing", "render":
+		output := &jobOutputWriter{manager: manager, id: id}
+		if action == "render" && manager.operationLock != nil {
+			manager.operationLock.Lock()
+			defer manager.operationLock.Unlock()
+		}
+		switch action {
+		case "health":
+			result, err = manager.diagnostics.Health(ctx, output)
+		case "verify-routing":
+			result, err = manager.diagnostics.VerifyRouting(ctx, output)
+		case "render":
+			result, err = manager.diagnostics.Render(ctx, output)
+		}
+		output.Flush()
 	default:
 		err = fmt.Errorf("%w: unsupported action %s", ErrRuntimeTarget, action)
 	}
@@ -245,6 +366,50 @@ func (manager *JobManager) execute(ctx context.Context, id string) error {
 		manager.mu.Unlock()
 	}
 	return err
+}
+
+// jobOutputWriter publishes complete lines only. Holding the final partial
+// line prevents a credential-shaped value split across Docker stream chunks
+// from becoming observable before the aggregate sanitizer can inspect it.
+type jobOutputWriter struct {
+	manager *JobManager
+	id      string
+	pending bytes.Buffer
+}
+
+func (writer *jobOutputWriter) Write(payload []byte) (int, error) {
+	original := len(payload)
+	_, _ = writer.pending.Write(payload)
+	for {
+		index := bytes.IndexByte(writer.pending.Bytes(), '\n')
+		if index < 0 {
+			break
+		}
+		writer.manager.appendOutput(writer.id, string(writer.pending.Next(index+1)))
+	}
+	return original, nil
+}
+
+func (writer *jobOutputWriter) Flush() {
+	if writer.pending.Len() > 0 {
+		writer.manager.appendOutput(writer.id, writer.pending.String())
+		writer.pending.Reset()
+	}
+}
+
+func (manager *JobManager) appendOutput(id string, payload string) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	job := manager.jobs[id]
+	if job == nil || payload == "" {
+		return
+	}
+	combined := job.Output + payload
+	const limit = 2 * 1024 * 1024
+	if len(combined) > limit {
+		combined = combined[:limit] + "\n[输出已截断]\n"
+	}
+	job.Output = Sanitize(strings.ToValidUTF8(combined, "�"))
 }
 
 func (manager *JobManager) finish(id string, err error) {
@@ -302,7 +467,7 @@ func (manager *JobManager) trimLocked() {
 	}
 }
 
-func jobName(action string) string {
+func jobName(action, target string) string {
 	switch action {
 	case "start":
 		return "启动服务"
@@ -310,6 +475,21 @@ func jobName(action string) string {
 		return "停止服务"
 	case "restart":
 		return "重启服务"
+	case "login":
+		return "OAuth 授权"
+	case "image-pull":
+		return "拉取 CPA 镜像"
+	case "image-update":
+		if target == "all" {
+			return "更新全部 CPA 镜像"
+		}
+		return "更新 CPA 镜像"
+	case "health":
+		return "健康检查"
+	case "verify-routing":
+		return "路由验证"
+	case "render":
+		return "渲染并校验配置"
 	default:
 		return "运行维护"
 	}

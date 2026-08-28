@@ -103,12 +103,13 @@ describe("GeneralSettingsPage", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "立即设置" }));
-    await user.type(screen.getByLabelText("初始密码"), "future-user-password!");
-    await user.type(screen.getByLabelText("确认初始密码"), "future-user-password!");
+    await user.type(screen.getByLabelText("新初始密码"), "future-user-password!");
+    await user.type(screen.getByLabelText("再次输入"), "future-user-password!");
     await user.click(screen.getByRole("button", { name: "安全保存" }));
 
     expect(await screen.findByText("用户初始密码已安全保存；已有用户密码不会自动变化")).toBeInTheDocument();
-    expect(screen.getByLabelText("初始密码")).toHaveValue("");
+    expect(screen.queryByLabelText("新初始密码")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("future-user-password!")).not.toBeInTheDocument();
     const request = fetchMock.mock.calls.find(([path]) => String(path) === "/admin/api/settings/initial-password");
     expect(request?.[1]).toMatchObject({
       method: "POST",

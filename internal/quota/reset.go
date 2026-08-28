@@ -56,6 +56,20 @@ type ResetCreditResult struct {
 	RedeemedAt *int64 `json:"redeemed_at,omitempty"`
 }
 
+type ResetCreditOption struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	ExpiresAt *int64 `json:"expires_at,omitempty"`
+}
+
+type ResetInspection struct {
+	Account          string              `json:"account"`
+	AvailableCount   *int64              `json:"available_count"`
+	DetailsTruncated bool                `json:"details_truncated"`
+	Windows          []ResetWindow       `json:"windows"`
+	Credits          []ResetCreditOption `json:"credits"`
+}
+
 type ResetResult struct {
 	Account      string            `json:"account"`
 	Windows      []ResetWindow     `json:"windows"`
@@ -68,6 +82,77 @@ type resetCredit struct {
 	ID        string
 	Title     string
 	ExpiresAt *int64
+}
+
+// Inspect reads the current upstream weekly windows and selectable reset
+// credits without consuming a credit. The Admin UI calls it only when an
+// authenticated operator opens the reset dialog, keeping these details out of
+// the initial account catalog and revalidating them again inside Reset.
+func (resetter *Resetter) Inspect(ctx context.Context, rawAccountID string) (ResetInspection, error) {
+	accountID := strings.ToLower(strings.TrimSpace(rawAccountID))
+	if !accountIDPattern.MatchString(accountID) {
+		return ResetInspection{}, fmt.Errorf("%w: invalid account", controlplane.ErrInvalidCatalogInput)
+	}
+	accounts, err := resetter.store.ReadAccounts(ctx)
+	if err != nil {
+		return ResetInspection{}, fmt.Errorf("read account before quota reset inspection: %w", err)
+	}
+	var account controlplane.Account
+	found := false
+	for _, item := range accounts {
+		if item.ID == accountID {
+			account = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ResetInspection{}, ErrResetAccountNotFound
+	}
+	settings, err := resetter.store.ReadSettings(ctx)
+	if err != nil {
+		return ResetInspection{}, fmt.Errorf("read settings before quota reset inspection: %w", err)
+	}
+	auth, err := (OAuthLoader{Root: resetter.root}).Load(accountID)
+	if err != nil {
+		return ResetInspection{}, err
+	}
+	proxyURL, err := (ProxyResolver{Store: resetter.store, Settings: settings}).Resolve(ctx, account)
+	if err != nil {
+		return ResetInspection{}, err
+	}
+	usagePayload, err := resetter.client.Fetch(ctx, auth, proxyURL)
+	if err != nil {
+		return ResetInspection{}, err
+	}
+	creditPayload, err := resetter.client.FetchResetCredits(ctx, auth, proxyURL)
+	if err != nil {
+		return ResetInspection{}, err
+	}
+	inspection := ResetInspection{
+		Account: accountID, AvailableCount: nonnegativeInt(creditPayload["available_count"]),
+		Windows: make([]ResetWindow, 0), Credits: make([]ResetCreditOption, 0),
+	}
+	for _, window := range Normalize(accountID, usagePayload).WeeklyWindows {
+		if window.Resettable {
+			inspection.Windows = append(inspection.Windows, ResetWindow{
+				Key: window.Key, Label: window.Label, PreviousResetAt: window.ResetAt,
+			})
+		}
+	}
+	for _, raw := range list(creditPayload["credits"]) {
+		item := object(raw)
+		id := strings.TrimSpace(stringValue(item["id"]))
+		if id == "" || len(id) > 512 || containsControl(id) ||
+			strings.TrimSpace(stringValue(item["status"])) != "available" || item["is_supported_by_plan"] == false {
+			continue
+		}
+		inspection.Credits = append(inspection.Credits, ResetCreditOption{
+			ID: id, Title: boundedResetText(item["title"], 120), ExpiresAt: resetTimestamp(item["expires_at"]),
+		})
+	}
+	inspection.DetailsTruncated = inspection.AvailableCount != nil && *inspection.AvailableCount > int64(len(inspection.Credits))
+	return inspection, nil
 }
 
 func NewResetter(config ResetterConfig) (*Resetter, error) {

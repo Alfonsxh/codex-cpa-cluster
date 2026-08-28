@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestFileAuditRecorderAppendsPythonCompatibleSecretFreeJSON(t *testing.T) {
+func TestFileAuditRecorderAppendsStableSecretFreeJSON(t *testing.T) {
 	root := t.TempDir()
 	recorder := FileAuditRecorder{
 		Root: root, Now: func() time.Time { return time.Unix(0, 0) }, Fence: &testWriteFence{},

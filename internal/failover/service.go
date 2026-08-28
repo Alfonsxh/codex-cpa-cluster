@@ -271,7 +271,12 @@ func (service *Service) applyPlan(ctx context.Context, plan Plan) (RebalanceResu
 		)
 	}
 	result.SnapshotGeneration = snapshot.Generation
-	activity, refreshError := service.Activity.RefreshActiveUsersLastHour(ctx)
+	// Route and snapshot activation have already committed at this point. A
+	// browser disconnect must not cancel the immediate post-migration activity
+	// refresh and leave the Admin catalog stale until its next ordinary read.
+	refreshContext, cancelRefresh := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancelRefresh()
+	activity, refreshError := service.Activity.RefreshActiveUsersLastHour(refreshContext)
 	if refreshError != nil {
 		result.Warning = "routes changed, but the one-hour active-user refresh failed: " + refreshError.Error()
 		return result, nil

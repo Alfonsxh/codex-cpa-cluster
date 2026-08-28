@@ -8,7 +8,7 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-func TestPasswordHashMatchesPythonScryptContract(t *testing.T) {
+func TestPasswordHashMatchesStableScryptContract(t *testing.T) {
 	encoded, err := hashPasswordWithSalt("test-secret-123", []byte("0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("hashPasswordWithSalt: %v", err)

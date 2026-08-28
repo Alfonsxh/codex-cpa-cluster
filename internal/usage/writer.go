@@ -152,9 +152,9 @@ type identityRow struct {
 	TeamMembershipVersion int64  `db:"team_membership_version"`
 }
 
-// OpenWriterPath opens an existing Python schema-v10 usage database for the
-// Go collector. It never creates or migrates the database, which keeps the
-// dual-version cutover explicit and reversible.
+// OpenWriterPath opens an existing schema-v10 usage database for the Go
+// collector. It never creates or migrates the database, which keeps ownership
+// activation explicit and reversible.
 func OpenWriterPath(path string, now func() time.Time) (*Writer, error) {
 	absolutePath, err := filepath.Abs(path)
 	if err != nil {

@@ -109,32 +109,43 @@ type ComposeEnvironmentProjector struct {
 	Root string
 }
 
+// ProjectCPAImage atomically replaces only CLIPROXY_IMAGE in the already
+// initialized private Compose projection. Image application must not rewrite
+// component images or deployment-owned listener settings as a side effect.
+func (projector *ComposeEnvironmentProjector) ProjectCPAImage(ctx context.Context, resolvedReference string) error {
+	resolvedReference = strings.TrimSpace(resolvedReference)
+	if resolvedReference == "" || len(resolvedReference) > 512 || strings.ContainsAny(resolvedReference, "\r\n\t \x00") {
+		return errors.New("resolved CPA image reference is invalid")
+	}
+	path, raw, err := projector.readExisting(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := parseComposeEnvironment(raw); err != nil {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+	matches := 0
+	for index, line := range lines {
+		key, _, found := strings.Cut(line, "=")
+		if found && strings.TrimSpace(key) == "CLIPROXY_IMAGE" {
+			matches++
+			lines[index] = "CLIPROXY_IMAGE=" + resolvedReference
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("existing Compose environment must contain CLIPROXY_IMAGE exactly once, found %d", matches)
+	}
+	return replaceComposeEnvironment(path, []byte(strings.Join(lines, "\n")))
+}
+
 func (projector *ComposeEnvironmentProjector) ProjectConfiguration(
 	ctx context.Context,
 	values map[string]any,
 ) error {
-	if err := ctx.Err(); err != nil {
+	path, raw, err := projector.readExisting(ctx)
+	if err != nil {
 		return err
-	}
-	root := strings.TrimSpace(projector.Root)
-	if root == "" {
-		return errors.New("Compose environment root is required")
-	}
-	absoluteRoot, err := filepath.Abs(root)
-	if err != nil {
-		return fmt.Errorf("resolve Compose environment root: %w", err)
-	}
-	path := filepath.Join(filepath.Clean(absoluteRoot), "state", "compose.env")
-	information, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("inspect existing Compose environment: %w", err)
-	}
-	if !information.Mode().IsRegular() || information.Mode()&os.ModeSymlink != 0 {
-		return errors.New("existing Compose environment must be a regular file")
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read existing Compose environment: %w", err)
 	}
 	existing, err := parseComposeEnvironment(raw)
 	if err != nil {
@@ -147,9 +158,6 @@ func (projector *ComposeEnvironmentProjector) ProjectConfiguration(
 		"WEB_RUNTIME_IMAGE":           firstNonEmpty(existing["WEB_RUNTIME_IMAGE"], "codex-cpa-web:local"),
 		"GATEWAY_RUNTIME_IMAGE":       firstNonEmpty(existing["GATEWAY_RUNTIME_IMAGE"], "codex-cpa-gateway:local"),
 		"EDGE_RUNTIME_IMAGE":          firstNonEmpty(existing["EDGE_RUNTIME_IMAGE"], "codex-cpa-edge:local"),
-		"ADMIN_BASE_IMAGE":            configurationText(values, "runtime.admin_base_image"),
-		"GATEWAY_IMAGE":               configurationText(values, "runtime.gateway_image"),
-		"EDGE_IMAGE":                  configurationText(values, "runtime.gateway_image"),
 		"GATEWAY_LISTEN_ADDRESS":      configurationText(values, "gateway.listen_address"),
 		"GATEWAY_PORT":                configurationText(values, "gateway.port"),
 		"GATEWAY_INTERNAL_PORT":       configurationText(values, "gateway.internal_port"),
@@ -159,7 +167,7 @@ func (projector *ComposeEnvironmentProjector) ProjectConfiguration(
 	}
 	order := []string{
 		"CLIPROXY_IMAGE", "ADMIN_IMAGE", "WEB_RUNTIME_IMAGE", "GATEWAY_RUNTIME_IMAGE", "EDGE_RUNTIME_IMAGE",
-		"ADMIN_BASE_IMAGE", "GATEWAY_IMAGE", "EDGE_IMAGE", "GATEWAY_LISTEN_ADDRESS", "GATEWAY_PORT",
+		"GATEWAY_LISTEN_ADDRESS", "GATEWAY_PORT",
 		"GATEWAY_INTERNAL_PORT", "MANAGEMENT_LISTEN_ADDRESS", "MANAGEMENT_PORT", "BUSINESS_CPA_LISTEN_ADDRESS",
 	}
 	var content strings.Builder
@@ -174,7 +182,38 @@ func (projector *ComposeEnvironmentProjector) ProjectConfiguration(
 		content.WriteString(value)
 		content.WriteByte('\n')
 	}
-	if err := renameio.WriteFile(path, []byte(content.String()), 0o600); err != nil {
+	return replaceComposeEnvironment(path, []byte(content.String()))
+}
+
+func (projector *ComposeEnvironmentProjector) readExisting(ctx context.Context) (string, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	root := strings.TrimSpace(projector.Root)
+	if root == "" {
+		return "", nil, errors.New("Compose environment root is required")
+	}
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve Compose environment root: %w", err)
+	}
+	path := filepath.Join(filepath.Clean(absoluteRoot), "state", "compose.env")
+	information, err := os.Lstat(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("inspect existing Compose environment: %w", err)
+	}
+	if !information.Mode().IsRegular() || information.Mode()&os.ModeSymlink != 0 {
+		return "", nil, errors.New("existing Compose environment must be a regular file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("read existing Compose environment: %w", err)
+	}
+	return path, raw, nil
+}
+
+func replaceComposeEnvironment(path string, content []byte) error {
+	if err := renameio.WriteFile(path, content, 0o600); err != nil {
 		return fmt.Errorf("replace Compose environment: %w", err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {

@@ -119,9 +119,9 @@ func TestQuotaRowsAndMarkdownMatchV1Contract(t *testing.T) {
 		t.Fatalf("BuildMarkdownV2: %v", err)
 	}
 	for _, expected := range []string{
-		"| CPA账号 / 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
+		"| CPA 账号 | 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
 		"> 应用地址：[http://cpa.example.com/usage/](http://cpa.example.com/usage/)",
-		"🔴 cpa-10 · 常规周限额", "100% | 3 | 2",
+		"| 🔴 cpa-10 | 常规周限额 |", "100% | 3 | 2",
 	} {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("markdown is missing %q:\n%s", expected, content)
@@ -131,6 +131,25 @@ func TestQuotaRowsAndMarkdownMatchV1Contract(t *testing.T) {
 		strings.Index(content, "cpa-2") < strings.Index(content, "cpa-10") &&
 		strings.Index(content, "cpa-10") < strings.Index(content, "cpa-3")) {
 		t.Fatalf("markdown row ordering:\n%s", content)
+	}
+}
+
+func TestQuotaRowsDistinguishDefaultAndAdditionalWindowLabels(t *testing.T) {
+	snapshot := Snapshot{Accounts: []AccountSnapshot{testAccountSnapshot("alpha", 25, "upstream default")}}
+	snapshot.Accounts[0].Quota.WeeklyWindows = append(
+		snapshot.Accounts[0].Quota.WeeklyWindows,
+		quota.WeeklyWindow{Key: "additional:gpt-reserve:primary_window", Label: "gpt-reserve", UsedPercent: 30},
+		quota.WeeklyWindow{Key: "additional:codex-models:primary_window", Label: "Codex Models", UsedPercent: 40},
+	)
+	rows := QuotaRows(snapshot, 90, nil)
+	want := []string{"常规周限额", "附加额度窗口（gpt-reserve）", "附加额度窗口（Codex Models）"}
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %#v", rows)
+	}
+	for index := range want {
+		if rows[index].Label != want[index] {
+			t.Fatalf("rows[%d].Label = %q, want %q", index, rows[index].Label, want[index])
+		}
 	}
 }
 

@@ -51,6 +51,13 @@ type UsageReader interface {
 	UserBreakdown(context.Context, string, string, int64, *int64) (usage.UserBreakdown, error)
 }
 
+// QuotaReader deliberately keeps the natural-week quota read separate from
+// session/credential ownership. Portal pages can therefore request the
+// summary only when it is visible without widening the session store API.
+type QuotaReader interface {
+	WeeklyQuota(context.Context, string, *int64) (usage.WeeklyQuota, error)
+}
+
 type RouteChanger interface {
 	MoveUser(context.Context, string, string, string) (failover.RebalanceResult, error)
 }
@@ -75,6 +82,7 @@ type Config struct {
 	Identity      IdentityStore
 	Sessions      SessionStore
 	Usage         UsageReader
+	Quotas        QuotaReader
 	States        failover.AccountStateProvider
 	Activity      failover.ActivityProvider
 	Routes        RouteChanger
@@ -93,6 +101,7 @@ type Server struct {
 	identity      IdentityStore
 	sessions      SessionStore
 	usage         UsageReader
+	quotas        QuotaReader
 	states        failover.AccountStateProvider
 	activity      failover.ActivityProvider
 	routes        RouteChanger
@@ -153,7 +162,7 @@ func New(config Config) (*Server, error) {
 		config.LoginLimiter = NewLoginLimiter(config.Now)
 	}
 	return &Server{
-		identity: config.Identity, sessions: config.Sessions, usage: config.Usage,
+		identity: config.Identity, sessions: config.Sessions, usage: config.Usage, quotas: config.Quotas,
 		states: config.States, activity: config.Activity, routes: config.Routes, keys: config.Keys,
 		quotaStore:  config.QuotaStore,
 		publicUsage: config.PublicUsage, inflight: config.Inflight,
@@ -170,6 +179,7 @@ func (server *Server) Register(router gin.IRouter) {
 	usageRoutes.DELETE("/session", server.deleteSession)
 	usageRoutes.GET("/me/profile", server.readProfile)
 	usageRoutes.GET("/me/key", server.readKey)
+	usageRoutes.GET("/me/quota", server.readQuota)
 	usageRoutes.GET("/me/accounts", server.readAccounts)
 	usageRoutes.GET("/me/route", server.readRoute)
 	usageRoutes.GET("/me/usage-breakdown", server.readUsageBreakdown)
@@ -423,6 +433,76 @@ func (server *Server) readKey(c *gin.Context) {
 	})
 }
 
+type portalWeeklyQuota struct {
+	usage.WeeklyQuota
+	PersonalPolicyResetEnabled bool `json:"personal_policy_reset_enabled"`
+}
+
+func (server *Server) readQuota(c *gin.Context) {
+	auth, ok := server.requireAuth(c, false)
+	if !ok {
+		return
+	}
+	if server.quotas == nil {
+		writeError(c, http.StatusServiceUnavailable, "个人周额度服务尚未就绪", "quota_not_ready")
+		return
+	}
+	settings, err := server.identity.ReadSettings(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read portal quota settings", err)
+		return
+	}
+	defaultLimit, resetOnNewWeek, err := portalQuotaConfiguration(settings)
+	if err != nil {
+		server.internalError(c, "parse portal quota settings", err)
+		return
+	}
+	weekly, err := server.quotas.WeeklyQuota(c.Request.Context(), auth.Session.User, defaultLimit)
+	if err != nil {
+		server.internalError(c, "read portal weekly quota", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"generated_at": server.now().Unix(),
+		"weekly_quota": portalWeeklyQuota{
+			WeeklyQuota: weekly, PersonalPolicyResetEnabled: resetOnNewWeek,
+		},
+	})
+}
+
+func portalQuotaConfiguration(settings map[string]any) (*int64, bool, error) {
+	resetOnNewWeek := true
+	if raw, found := settings["user_quota.reset_personal_weekly_on_new_week"]; found {
+		value, valid := raw.(bool)
+		if !valid {
+			return nil, false, errors.New("user quota reset policy must be a boolean")
+		}
+		resetOnNewWeek = value
+	}
+	var defaultLimit *int64
+	if raw, found := settings["user_quota.default_weekly_tokens"]; found && raw != nil {
+		var value int64
+		switch typed := raw.(type) {
+		case int:
+			value = int64(typed)
+		case int64:
+			value = typed
+		case float64:
+			value = int64(typed)
+			if float64(value) != typed {
+				return nil, false, errors.New("default weekly quota must be a positive integer or null")
+			}
+		default:
+			return nil, false, errors.New("default weekly quota must be a positive integer or null")
+		}
+		if value <= 0 || value > 1_000_000_000_000 {
+			return nil, false, errors.New("default weekly quota is outside the supported range")
+		}
+		defaultLimit = &value
+	}
+	return defaultLimit, resetOnNewWeek, nil
+}
+
 func (server *Server) readRoute(c *gin.Context) {
 	auth, ok := server.requireAuth(c, false)
 	if !ok {
@@ -540,7 +620,7 @@ func (server *Server) readUsageBreakdown(c *gin.Context) {
 		"window_seconds": window.Seconds, "window_start_at": window.StartAt,
 		"window_end_at": window.EndAt, "window_timezone": window.Timezone,
 		"account": optionalAccount(account), "user": auth.Session.User,
-		"definition":            "仅统计 Go/Python Collector 已持久化的业务请求；加权 Token 使用事件写入时冻结的倍率",
+		"definition":            "仅统计 Collector 已持久化的业务请求；加权 Token 使用事件写入时冻结的倍率",
 		"collection_started_at": breakdown.CollectionStartedAt,
 		"effective_start_at":    breakdown.EffectiveStartAt,
 		"totals":                breakdown.Totals, "models": breakdown.Models,

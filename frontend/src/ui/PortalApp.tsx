@@ -1,10 +1,4 @@
-import {
-  ArrowRightOutlined,
-  BarChartOutlined,
-  ControlOutlined
-} from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Card, Col, Row, Space, Tag, Typography } from "antd";
 import { useEffect } from "react";
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 
@@ -18,8 +12,6 @@ import {
 } from "../api/public-site";
 import type { NativeAccount, PublicSiteConfiguration } from "../api/public-site";
 import { ThemeToggle, useTheme, type ThemeMode } from "./ThemeProvider";
-
-const { Paragraph, Text, Title } = Typography;
 
 export function PortalApp() {
   return (
@@ -46,43 +38,38 @@ export function PortalLandingApp() {
               alt={branding.configuration.product_name}
             />
           </a>
-          <Title id="portal-title">选择要进入的界面</Title>
-          <Paragraph>添加和管理业务 CPA，或进入使用中心查看自己的 Key、账号与用量。</Paragraph>
+          <h1 id="portal-title">选择要进入的界面</h1>
+          <p className="portal-subtitle">添加和管理业务 CPA，或进入使用中心查看自己的 Key、账号与用量。</p>
         </section>
-        <Space className="portal-header-actions" size="middle" wrap>
-          {branding.degraded ? <Tag color="warning">默认品牌配置</Tag> : null}
-          <Badge status="success" text={branding.configuration.environment_label || "Self-hosted service"} />
-          <ThemeToggle />
-        </Space>
+        <div className="portal-header-actions">
+          <div className="portal-environment"><span aria-hidden="true" /><b>{branding.configuration.environment_label || "Self-hosted service"}</b></div>
+          <ThemeToggle className="portal-theme-toggle" />
+        </div>
       </header>
 
-      <Row gutter={[20, 20]} className="portal-entry-grid" aria-label="可用界面">
-        <Col xs={24} lg={12}>
-          <EntryCard
-            className="portal-entry-primary"
-            href="/admin/"
-            number="01"
-            badge="需要管理密钥"
-            icon={<ControlOutlined aria-hidden="true" />}
-            eyebrow="CONTROL PLANE"
-            title="综合管理平台"
-            description="添加业务 CPA、管理用户与 Key、OAuth 授权、容器、日志和诊断任务。"
-            action="进入管理平台"
-          />
-        </Col>
-        <Col xs={24} lg={12}>
-          <EntryCard
-            href="/usage/"
-            number="02"
-            badge="邮箱进入"
-            icon={<BarChartOutlined aria-hidden="true" />}
-            eyebrow="ACCESS & OBSERVABILITY"
-            title="使用中心"
-            description="查看唯一 API Key，切换 CPA 账号，并统计各账号的请求和 Token 用量。"
-            action="进入使用中心"
-          />
-        </Col>
-      </Row>
+      <section className="portal-entry-grid" aria-label="可用界面">
+        <EntryCard
+          className="portal-entry-primary"
+          href="/admin/"
+          number="01"
+          badge="需要管理密钥"
+          icon="control"
+          eyebrow="CONTROL PLANE"
+          title="综合管理平台"
+          description="添加业务 CPA、管理用户与 Key、OAuth 授权、容器、日志和诊断任务。"
+          action="进入管理平台"
+        />
+        <EntryCard
+          href="/usage/"
+          number="02"
+          badge="邮箱进入"
+          icon="usage"
+          eyebrow="ACCESS & OBSERVABILITY"
+          title="使用中心"
+          description="查看唯一 API Key，切换 CPA 账号，并统计各账号的请求和 Token 用量。"
+          action="进入使用中心"
+        />
+      </section>
       <PortalFooter productName={branding.configuration.product_name} />
     </main>
   );
@@ -190,22 +177,28 @@ function EntryCard({
   href: string;
   number: string;
   badge: string;
-  icon: React.ReactNode;
+  icon: "control" | "usage";
   eyebrow: string;
   title: string;
   description: string;
   action: string;
 }) {
   return (
-    <a href={href} className="portal-entry-link">
-      <Card className={`portal-entry-card ${className}`} hoverable>
-        <div className="portal-card-top"><span>{number}</span><Tag>{badge}</Tag></div>
-        <div className="portal-card-icon">{icon}</div>
-        <Text className="portal-eyebrow">{eyebrow}</Text>
-        <Title level={2}>{title}</Title>
-        <Paragraph>{description}</Paragraph>
-        <strong><span>{action}</span><ArrowRightOutlined /></strong>
-      </Card>
+    <a href={href} className={`portal-entry-card ${className}`.trim()}>
+      <div className="portal-card-top"><span>{number}</span><span className={`portal-access ${className ? "guarded" : "public"}`}>{badge}</span></div>
+      <div className="portal-card-content">
+        <span className="portal-card-icon" aria-hidden="true">
+          {icon === "control" ? (
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5h16M7 3.5v6M17 3.5v6M6 12h5v5H6zM14 12h4M14 16h4M4 20.5h16" /></svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 19.5V14m5 5.5V9m5 10.5V12m5 7.5V5M3 20.5h18" /></svg>
+          )}
+        </span>
+        <p className="portal-eyebrow">{eyebrow}</p>
+        <h2>{title}</h2>
+        <p>{description}</p>
+      </div>
+      <span className="portal-enter"><span>{action}</span><b>→</b></span>
     </a>
   );
 }

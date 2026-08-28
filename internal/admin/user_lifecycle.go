@@ -54,8 +54,10 @@ type UserLifecycleService interface {
 	ResetUserPassword(context.Context, string) (PasswordResetResult, error)
 	DeleteUser(context.Context, string, bool) (UserDeleteResult, error)
 	ReadUserQuota(context.Context, string) (UserQuotaResult, error)
+	ReadUserQuotas(context.Context, []string) (map[string]UserWeeklyQuota, error)
 	UpdateUserQuota(context.Context, string, string, *int64) (UserQuotaResult, error)
 	ClearUserQuota(context.Context, string) (UserQuotaResult, error)
+	ReadQuotaOperations(context.Context) (UserQuotaOperationSummary, error)
 	ApplyUserQuotaAction(context.Context, UserQuotaActionRequest) (UserQuotaActionResponse, error)
 }
 
@@ -320,6 +322,48 @@ func (manager *UserManager) ReadUserQuota(ctx context.Context, rawUser string) (
 		return UserQuotaResult{}, err
 	}
 	return manager.readUserQuota(ctx, user, defaultLimit, resetOnNewWeek, "read user weekly quota")
+}
+
+func (manager *UserManager) ReadUserQuotas(
+	ctx context.Context,
+	rawUsers []string,
+) (map[string]UserWeeklyQuota, error) {
+	settings, err := manager.store.ReadSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read user quota catalog settings: %w", err)
+	}
+	defaultLimit, resetOnNewWeek, err := userQuotaConfiguration(settings)
+	if err != nil {
+		return nil, err
+	}
+	users := make([]string, 0, len(rawUsers))
+	seen := make(map[string]struct{}, len(rawUsers))
+	for _, rawUser := range rawUsers {
+		user := strings.ToLower(strings.TrimSpace(rawUser))
+		if user == "" {
+			continue
+		}
+		if _, found := seen[user]; found {
+			continue
+		}
+		seen[user] = struct{}{}
+		users = append(users, user)
+	}
+	quotas, err := manager.credentials.WeeklyQuotas(ctx, users, defaultLimit)
+	if err != nil {
+		return nil, fmt.Errorf("read user weekly quota catalog: %w", err)
+	}
+	result := make(map[string]UserWeeklyQuota, len(users))
+	for _, user := range users {
+		quota, found := quotas[user]
+		if !found {
+			return nil, fmt.Errorf("read user weekly quota catalog: missing %s", user)
+		}
+		result[user] = UserWeeklyQuota{
+			WeeklyQuota: quota, PersonalPolicyResetEnabled: resetOnNewWeek,
+		}
+	}
+	return result, nil
 }
 
 func (manager *UserManager) UpdateUserQuota(

@@ -9,12 +9,14 @@ export type ApiErrorBody = {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly retryAfterSeconds: number;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, retryAfterSeconds = 0) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -52,7 +54,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     const error = new ApiError(
       response.status,
       payload.error?.code ?? "request_failed",
-      payload.error?.message ?? `请求失败（HTTP ${response.status}）`
+      payload.error?.message ?? `请求失败（HTTP ${response.status}）`,
+      parseRetryAfterSeconds(response.headers.get("Retry-After"))
     );
     if (response.status === 401) {
       const event: UnauthorizedEvent = {
@@ -68,4 +71,10 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     throw error;
   }
   return (await response.json()) as T;
+}
+
+function parseRetryAfterSeconds(value: string | null): number {
+  if (!value) return 0;
+  const seconds = Number.parseInt(value, 10);
+  return Number.isFinite(seconds) ? Math.max(0, Math.min(seconds, 3_600)) : 0;
 }

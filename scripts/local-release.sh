@@ -33,7 +33,7 @@ if ! printf '%s' "$GH_REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
   exit 1
 fi
 
-for command in git docker gh python3 make; do
+for command in git docker gh go make; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "缺少发布依赖：$command" >&2
     exit 1
@@ -115,11 +115,9 @@ IMAGE_PREFIXES="$IMAGE_PREFIX" \
 mkdir -p "$DIST_DIR"
 ARCHIVE="$DIST_DIR/codex-cpa-cluster-$VERSION.tar.gz"
 RELEASE_DESCRIPTOR="$DIST_DIR/release-$VERSION.json"
-INSTALLER="$DIST_DIR/codex-cpa"
 CHECKSUMS="$DIST_DIR/SHA256SUMS"
 sh "$ROOT_DIR/scripts/package-release.sh" "$ARCHIVE"
-install -m 0755 "$ROOT_DIR/codex-cpa" "$INSTALLER"
-python3 "$ROOT_DIR/scripts/release_manifest.py" release \
+go run "$ROOT_DIR/cmd/releasectl" manifest descriptor \
   --root "$ROOT_DIR" \
   --output "$RELEASE_DESCRIPTOR" \
   --release-version "$VERSION" \
@@ -127,23 +125,9 @@ python3 "$ROOT_DIR/scripts/release_manifest.py" release \
   --image-prefix "$IMAGE_PREFIX" \
   --archive-name "$(basename -- "$ARCHIVE")"
 
-# 使用 Python 生成跨 macOS/Linux 一致的 SHA-256 文件格式。
-python3 - "$ARCHIVE" "$RELEASE_DESCRIPTOR" "$INSTALLER" "$CHECKSUMS" <<'PY'
-import hashlib
-import os
-import sys
-from pathlib import Path
-
-artifacts = [Path(item) for item in sys.argv[1:-1]]
-output = Path(sys.argv[-1])
-lines = []
-for artifact in artifacts:
-    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-    lines.append("{}  {}".format(digest, artifact.name))
-temporary = output.with_name(".{}.{}.tmp".format(output.name, os.getpid()))
-temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
-os.replace(temporary, output)
-PY
+go run "$ROOT_DIR/cmd/releasectl" checksum \
+  --output "$CHECKSUMS" \
+  "$ARCHIVE" "$RELEASE_DESCRIPTOR"
 
 if [ -z "$REMOTE_TAG_REVISION" ]; then
   git -C "$ROOT_DIR" push "$GIT_REMOTE" "refs/tags/$VERSION"
@@ -153,7 +137,6 @@ if [ "$RELEASE_STATE" = missing ]; then
   gh release create "$VERSION" \
     "$ARCHIVE#Deployment archive" \
     "$RELEASE_DESCRIPTOR#Release descriptor" \
-    "$INSTALLER#Installer and upgrader" \
     "$CHECKSUMS#SHA-256 checksums" \
     --repo "$GH_REPO" \
     --verify-tag \
@@ -164,7 +147,6 @@ else
   gh release upload "$VERSION" \
     "$ARCHIVE#Deployment archive" \
     "$RELEASE_DESCRIPTOR#Release descriptor" \
-    "$INSTALLER#Installer and upgrader" \
     "$CHECKSUMS#SHA-256 checksums" \
     --repo "$GH_REPO" \
     --clobber

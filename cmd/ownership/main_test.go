@@ -51,12 +51,26 @@ func TestOwnershipActivationStatusAndReleaseNeverPrintToken(t *testing.T) {
 		&read,
 		commandConfig{Root: root, TTL: 30 * time.Second},
 		ownership.RuntimeScope,
+		"",
 	); err != nil {
 		t.Fatalf("runStatus: %v", err)
 	}
 	readStatus := decodeLeaseStatus(t, read.Bytes())
 	if readStatus.Generation != status.Generation || strings.Contains(read.String(), "token") {
 		t.Fatalf("read status = %#v raw %s", readStatus, read.String())
+	}
+	var owner bytes.Buffer
+	if err := runStatus(
+		context.Background(),
+		&owner,
+		commandConfig{Root: root, TTL: 30 * time.Second},
+		ownership.RuntimeScope,
+		"owner",
+	); err != nil {
+		t.Fatalf("runStatus owner field: %v", err)
+	}
+	if owner.String() != "go-v2\n" {
+		t.Fatalf("owner field = %q", owner.String())
 	}
 
 	var released bytes.Buffer
@@ -108,7 +122,7 @@ func TestOwnershipActivationRequiresExactExpiredGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed target: %v", err)
 	}
-	prior, err := seed.TakeLease(ctx, ownership.RuntimeScope, "python-v1", 5*time.Second)
+	prior, err := seed.TakeLease(ctx, ownership.RuntimeScope, "go-previous", 5*time.Second)
 	if err != nil {
 		t.Fatalf("seed prior ownership: %v", err)
 	}
@@ -121,7 +135,7 @@ func TestOwnershipActivationRequiresExactExpiredGeneration(t *testing.T) {
 		&bytes.Buffer{},
 		commandConfig{Root: root, TTL: 30 * time.Second},
 		"go-v2",
-		"python-v1",
+		"go-previous",
 		prior.Generation+1,
 		"go-v2",
 		false,
@@ -137,7 +151,7 @@ func TestOwnershipActivationRequiresExactExpiredGeneration(t *testing.T) {
 		&activated,
 		commandConfig{Root: root, TTL: 30 * time.Second},
 		"go-v2",
-		"python-v1",
+		"go-previous",
 		prior.Generation,
 		"go-v2",
 		false,

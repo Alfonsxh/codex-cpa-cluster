@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -40,9 +41,8 @@ var requiredUsageEventColumns = []string{
 	"weight_policy_version",
 }
 
-// Store is a live, read-only view of the usage database still written by the
-// Python collector during the dual-version migration. It deliberately owns no
-// application mutex and relies on SQLite WAL snapshots for consistent reads.
+// Store is a live, read-only view of the usage database. It deliberately owns
+// no application mutex and relies on SQLite WAL snapshots for consistent reads.
 type Store struct {
 	db  *sqlx.DB
 	now func() time.Time
@@ -213,6 +213,128 @@ type UserAccountSummary struct {
 	Accounts []UserAccountUsage `json:"accounts"`
 }
 
+// UserSummaries returns one compact usage row per user for the management
+// catalog. The query deliberately groups the complete selected time window in
+// one read-only SQLite snapshot so server-side Token/request sorting does not
+// paginate the control-plane catalog before usage is joined.
+func (store *Store) UserSummaries(
+	ctx context.Context,
+	startAt int64,
+	endAt *int64,
+) (map[string]WeightedMetrics, error) {
+	return store.userSummaries(ctx, nil, startAt, endAt)
+}
+
+// UserSummariesForUsers keeps team-member lookups proportional to the
+// filtered control-plane candidates instead of aggregating every historical
+// user in the selected window. The JSON array is produced internally from
+// normalized user identities, so it never becomes executable SQL text.
+func (store *Store) UserSummariesForUsers(
+	ctx context.Context,
+	users []string,
+	startAt int64,
+	endAt *int64,
+) (map[string]WeightedMetrics, error) {
+	normalized := make([]string, 0, len(users))
+	seen := make(map[string]struct{}, len(users))
+	for _, user := range users {
+		user = strings.ToLower(strings.TrimSpace(user))
+		if user == "" {
+			continue
+		}
+		if _, exists := seen[user]; exists {
+			continue
+		}
+		seen[user] = struct{}{}
+		normalized = append(normalized, user)
+	}
+	if len(normalized) == 0 {
+		return map[string]WeightedMetrics{}, nil
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("encode selected user usage identities: %w", err)
+	}
+	return store.userSummaries(ctx, encoded, startAt, endAt)
+}
+
+func (store *Store) userSummaries(
+	ctx context.Context,
+	selectedUsers []byte,
+	startAt int64,
+	endAt *int64,
+) (map[string]WeightedMetrics, error) {
+	result := make(map[string]WeightedMetrics)
+	transaction, err := store.db.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin user usage summary snapshot: %w", err)
+	}
+	defer transaction.Rollback()
+
+	clauses := []string{"user_email <> ''", "occurred_at >= ?"}
+	parameters := []any{maxInt64(startAt, 0)}
+	if len(selectedUsers) > 0 {
+		clauses = append(clauses, "lower(trim(user_email)) IN (SELECT lower(trim(value)) FROM json_each(?))")
+		parameters = append(parameters, string(selectedUsers))
+	}
+	if endAt != nil {
+		clauses = append(clauses, "occurred_at < ?")
+		parameters = append(parameters, *endAt)
+	}
+	rows := make([]struct {
+		User            string `db:"user_email"`
+		RequestCount    int64  `db:"request_count"`
+		SuccessCount    int64  `db:"success_count"`
+		FailedCount     int64  `db:"failed_count"`
+		InputTokens     int64  `db:"input_tokens"`
+		OutputTokens    int64  `db:"output_tokens"`
+		ReasoningTokens int64  `db:"reasoning_tokens"`
+		CachedTokens    int64  `db:"cached_tokens"`
+		TotalTokens     int64  `db:"total_tokens"`
+		WeightedTokens  int64  `db:"weighted_tokens"`
+		LastUsedAt      int64  `db:"last_used_at"`
+	}, 0)
+	query := `
+		SELECT lower(trim(user_email)) AS user_email,
+		       COUNT(*) AS request_count,
+		       COALESCE(SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END), 0) AS success_count,
+		       COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0) AS failed_count,
+		       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+		       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+		       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+		       COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+		       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+		       COALESCE(SUM(CASE
+		               WHEN weight_policy_version = 'legacy-v1'
+		                    AND weighted_tokens = 0 AND total_tokens > 0
+		               THEN total_tokens
+		               ELSE weighted_tokens
+		           END), 0) AS weighted_tokens,
+		       COALESCE(MAX(occurred_at), 0) AS last_used_at
+		  FROM usage_events
+		 WHERE ` + strings.Join(clauses, " AND ") + `
+		 GROUP BY lower(trim(user_email))
+		 ORDER BY lower(trim(user_email))`
+	if err := transaction.SelectContext(ctx, &rows, query, parameters...); err != nil {
+		return nil, fmt.Errorf("query user usage summaries: %w", err)
+	}
+	for _, row := range rows {
+		result[row.User] = WeightedMetrics{
+			RawMetrics: RawMetrics{
+				RequestCount: row.RequestCount, SuccessCount: row.SuccessCount, FailedCount: row.FailedCount,
+				InputTokens: row.InputTokens, OutputTokens: row.OutputTokens,
+				ReasoningTokens: row.ReasoningTokens, CachedTokens: row.CachedTokens,
+				TotalTokens: row.TotalTokens, LastUsedAt: row.LastUsedAt,
+			},
+			WeightedTokens: row.WeightedTokens,
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, fmt.Errorf("commit user usage summary snapshot: %w", err)
+	}
+	return result, nil
+}
+
 type AccountModelUsage struct {
 	Model string `json:"model"`
 	RawMetrics
@@ -230,6 +352,12 @@ type AccountBreakdown struct {
 	Totals              RawMetrics                `json:"totals"`
 	Models              []AccountModelUsage       `json:"models"`
 	Combinations        []AccountCombinationUsage `json:"combinations"`
+}
+
+type AccountUsageSummary struct {
+	Account     string `json:"account"`
+	ActiveUsers int64  `json:"active_users"`
+	RawMetrics
 }
 
 type breakdownRow struct {
@@ -382,7 +510,7 @@ func (store *Store) UserBreakdown(
 
 // UserAccounts returns the compact per-account rows used by the self-service
 // table. Unlike model breakdowns it includes failed requests and events without
-// model aliases, matching the Python usage_for_users contract.
+// model aliases, matching the stable usage-for-users contract.
 func (store *Store) UserAccounts(
 	ctx context.Context,
 	userEmail string,
@@ -453,6 +581,201 @@ func (store *Store) UserAccounts(
 	}
 	if err := transaction.Commit(); err != nil {
 		return result, fmt.Errorf("commit user account usage snapshot: %w", err)
+	}
+	return result, nil
+}
+
+// AccountSummaries returns one compact usage row per requested CPA account.
+// It is the bounded list-page query: one read-only snapshot, one grouped SQL
+// statement, and no per-account fan-out.
+func (store *Store) AccountSummaries(
+	ctx context.Context,
+	accounts []string,
+	startAt int64,
+	endAt *int64,
+) (map[string]AccountUsageSummary, error) {
+	accountIDs := normalizedStrings(accounts, false)
+	result := make(map[string]AccountUsageSummary, len(accountIDs))
+	for _, account := range accountIDs {
+		result[account] = AccountUsageSummary{Account: account}
+	}
+	if len(accountIDs) == 0 {
+		return result, nil
+	}
+
+	transaction, err := store.db.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin account usage summary snapshot: %w", err)
+	}
+	defer transaction.Rollback()
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(accountIDs)), ",")
+	clauses := []string{"account IN (" + placeholders + ")", "occurred_at >= ?"}
+	parameters := make([]any, 0, len(accountIDs)+2)
+	for _, account := range accountIDs {
+		parameters = append(parameters, account)
+	}
+	parameters = append(parameters, maxInt64(startAt, 0))
+	if endAt != nil {
+		clauses = append(clauses, "occurred_at < ?")
+		parameters = append(parameters, *endAt)
+	}
+
+	rows := make([]struct {
+		Account         string `db:"account"`
+		ActiveUsers     int64  `db:"active_users"`
+		RequestCount    int64  `db:"request_count"`
+		SuccessCount    int64  `db:"success_count"`
+		FailedCount     int64  `db:"failed_count"`
+		InputTokens     int64  `db:"input_tokens"`
+		OutputTokens    int64  `db:"output_tokens"`
+		ReasoningTokens int64  `db:"reasoning_tokens"`
+		CachedTokens    int64  `db:"cached_tokens"`
+		TotalTokens     int64  `db:"total_tokens"`
+		LastUsedAt      int64  `db:"last_used_at"`
+	}, 0, len(accountIDs))
+	query := `
+		SELECT account,
+		       COUNT(DISTINCT CASE WHEN user_email <> '' THEN user_email END) AS active_users,
+		       COUNT(*) AS request_count,
+		       COALESCE(SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END), 0) AS success_count,
+		       COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0) AS failed_count,
+		       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+		       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+		       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+		       COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+		       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+		       COALESCE(MAX(occurred_at), 0) AS last_used_at
+		  FROM usage_events
+		 WHERE ` + strings.Join(clauses, " AND ") + `
+		 GROUP BY account
+		 ORDER BY account`
+	if err := transaction.SelectContext(ctx, &rows, query, parameters...); err != nil {
+		return nil, fmt.Errorf("query account usage summaries: %w", err)
+	}
+	for _, row := range rows {
+		if _, found := result[row.Account]; !found {
+			continue
+		}
+		result[row.Account] = AccountUsageSummary{
+			Account: row.Account, ActiveUsers: row.ActiveUsers,
+			RawMetrics: RawMetrics{
+				RequestCount: row.RequestCount, SuccessCount: row.SuccessCount, FailedCount: row.FailedCount,
+				InputTokens: row.InputTokens, OutputTokens: row.OutputTokens,
+				ReasoningTokens: row.ReasoningTokens, CachedTokens: row.CachedTokens,
+				TotalTokens: row.TotalTokens, LastUsedAt: row.LastUsedAt,
+			},
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, fmt.Errorf("commit account usage summary snapshot: %w", err)
+	}
+	return result, nil
+}
+
+// AccountSummariesByStart returns one compact usage row per CPA while applying
+// an independent start-inclusive boundary to every account. The complete
+// result is read from one SQLite snapshot and one grouped statement so the
+// account page keeps the legacy since-reset semantics without query fan-out.
+func (store *Store) AccountSummariesByStart(
+	ctx context.Context,
+	startAtByAccount map[string]int64,
+	endAt *int64,
+) (map[string]AccountUsageSummary, error) {
+	normalizedStarts := make(map[string]int64, len(startAtByAccount))
+	accountIDs := make([]string, 0, len(startAtByAccount))
+	for rawAccount, startAt := range startAtByAccount {
+		account := strings.ToLower(strings.TrimSpace(rawAccount))
+		if account == "" {
+			continue
+		}
+		if _, found := normalizedStarts[account]; !found {
+			accountIDs = append(accountIDs, account)
+		}
+		normalizedStarts[account] = maxInt64(startAt, 0)
+	}
+	sort.Strings(accountIDs)
+	result := make(map[string]AccountUsageSummary, len(accountIDs))
+	for _, account := range accountIDs {
+		result[account] = AccountUsageSummary{Account: account}
+	}
+	if len(accountIDs) == 0 {
+		return result, nil
+	}
+
+	transaction, err := store.db.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin account usage summary snapshot: %w", err)
+	}
+	defer transaction.Rollback()
+
+	accountPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(accountIDs)), ",")
+	startCases := make([]string, 0, len(accountIDs))
+	parameters := make([]any, 0, len(accountIDs)*3+1)
+	for _, account := range accountIDs {
+		parameters = append(parameters, account)
+	}
+	for _, account := range accountIDs {
+		startCases = append(startCases, "WHEN ? THEN ?")
+		parameters = append(parameters, account, normalizedStarts[account])
+	}
+	clauses := []string{
+		"account IN (" + accountPlaceholders + ")",
+		"occurred_at >= CASE account " + strings.Join(startCases, " ") + " ELSE 9223372036854775807 END",
+	}
+	if endAt != nil {
+		clauses = append(clauses, "occurred_at < ?")
+		parameters = append(parameters, *endAt)
+	}
+
+	rows := make([]struct {
+		Account         string `db:"account"`
+		ActiveUsers     int64  `db:"active_users"`
+		RequestCount    int64  `db:"request_count"`
+		SuccessCount    int64  `db:"success_count"`
+		FailedCount     int64  `db:"failed_count"`
+		InputTokens     int64  `db:"input_tokens"`
+		OutputTokens    int64  `db:"output_tokens"`
+		ReasoningTokens int64  `db:"reasoning_tokens"`
+		CachedTokens    int64  `db:"cached_tokens"`
+		TotalTokens     int64  `db:"total_tokens"`
+		LastUsedAt      int64  `db:"last_used_at"`
+	}, 0, len(accountIDs))
+	query := `
+		SELECT account,
+		       COUNT(DISTINCT CASE WHEN user_email <> '' THEN user_email END) AS active_users,
+		       COUNT(*) AS request_count,
+		       COALESCE(SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END), 0) AS success_count,
+		       COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0) AS failed_count,
+		       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+		       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+		       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+		       COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+		       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+		       COALESCE(MAX(occurred_at), 0) AS last_used_at
+		  FROM usage_events
+		 WHERE ` + strings.Join(clauses, " AND ") + `
+		 GROUP BY account
+		 ORDER BY account`
+	if err := transaction.SelectContext(ctx, &rows, query, parameters...); err != nil {
+		return nil, fmt.Errorf("query per-account usage summaries: %w", err)
+	}
+	for _, row := range rows {
+		if _, found := result[row.Account]; !found {
+			continue
+		}
+		result[row.Account] = AccountUsageSummary{
+			Account: row.Account, ActiveUsers: row.ActiveUsers,
+			RawMetrics: RawMetrics{
+				RequestCount: row.RequestCount, SuccessCount: row.SuccessCount, FailedCount: row.FailedCount,
+				InputTokens: row.InputTokens, OutputTokens: row.OutputTokens,
+				ReasoningTokens: row.ReasoningTokens, CachedTokens: row.CachedTokens,
+				TotalTokens: row.TotalTokens, LastUsedAt: row.LastUsedAt,
+			},
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, fmt.Errorf("commit per-account usage summary snapshot: %w", err)
 	}
 	return result, nil
 }
@@ -545,21 +868,37 @@ func (store *Store) AccountBreakdown(
 }
 
 func (store *Store) RefreshActiveUsersLastHour(ctx context.Context) (map[string]int, error) {
+	emails, err := store.ActiveUserEmailsLastHour(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int, len(emails))
+	for account, users := range emails {
+		result[account] = len(users)
+	}
+	return result, nil
+}
+
+// ActiveUserEmailsLastHour returns the same rolling-hour distinct-user set
+// used by RefreshActiveUsersLastHour. Admin is authenticated and may expose
+// these identities on demand in the account activity tooltip; public usage
+// surfaces must continue to consume only the aggregate count.
+func (store *Store) ActiveUserEmailsLastHour(ctx context.Context) (map[string][]string, error) {
 	rows := make([]struct {
 		Account string `db:"account"`
-		Users   int    `db:"active_users"`
+		Email   string `db:"user_email"`
 	}, 0)
 	if err := store.db.SelectContext(ctx, &rows, `
-        SELECT account, COUNT(DISTINCT user_email) AS active_users
+        SELECT account, LOWER(TRIM(user_email)) AS user_email
           FROM usage_events
-         WHERE occurred_at >= ? AND user_email != ''
-         GROUP BY account
-         ORDER BY account`, store.now().Unix()-int64(time.Hour/time.Second)); err != nil {
-		return nil, fmt.Errorf("query one-hour active users: %w", err)
+         WHERE occurred_at >= ? AND TRIM(user_email) != ''
+         GROUP BY account, LOWER(TRIM(user_email))
+         ORDER BY account, LOWER(TRIM(user_email))`, store.now().Unix()-int64(time.Hour/time.Second)); err != nil {
+		return nil, fmt.Errorf("query one-hour active user emails: %w", err)
 	}
-	result := make(map[string]int, len(rows))
+	result := make(map[string][]string)
 	for _, row := range rows {
-		result[row.Account] = row.Users
+		result[row.Account] = append(result[row.Account], row.Email)
 	}
 	return result, nil
 }

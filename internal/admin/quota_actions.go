@@ -51,6 +51,18 @@ type quotaActionPayload struct {
 	Confirm     string   `json:"confirm"`
 }
 
+func (server *Server) readUserQuotaOperations(c *gin.Context) {
+	if !server.requireUserLifecycle(c) {
+		return
+	}
+	result, err := server.users.ReadQuotaOperations(c.Request.Context())
+	if err != nil {
+		server.writeUserLifecycleError(c, "read user quota operation summary", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func (server *Server) applyUserQuotaAction(c *gin.Context) {
 	if !server.requireUserLifecycle(c) {
 		return
@@ -234,6 +246,42 @@ func (manager *UserManager) ApplyUserQuotaAction(
 		Message:           quotaActionMessage(request.Action, len(users), result),
 		QuotaOperations:   summarizeQuotaOperations(knownUsers, quotas),
 	}, nil
+}
+
+// ReadQuotaOperations returns the exact current-week impact used by the
+// Configuration Center before it enables the destructive all-user reset. It
+// is deliberately read-only and does not acquire the lifecycle writer lock.
+func (manager *UserManager) ReadQuotaOperations(
+	ctx context.Context,
+) (UserQuotaOperationSummary, error) {
+	settings, err := manager.store.ReadSettings(ctx)
+	if err != nil {
+		return UserQuotaOperationSummary{}, fmt.Errorf("read quota operation settings: %w", err)
+	}
+	knownUsers, err := manager.store.KnownUsers(ctx)
+	if err != nil {
+		return UserQuotaOperationSummary{}, fmt.Errorf("list quota operation users: %w", err)
+	}
+	known := make(map[string]struct{}, len(knownUsers))
+	for _, rawUser := range knownUsers {
+		if user := strings.ToLower(strings.TrimSpace(rawUser)); user != "" {
+			known[user] = struct{}{}
+		}
+	}
+	knownUsers = knownUsers[:0]
+	for user := range known {
+		knownUsers = append(knownUsers, user)
+	}
+	sort.Strings(knownUsers)
+	defaultLimit, _, err := userQuotaConfiguration(settings)
+	if err != nil {
+		return UserQuotaOperationSummary{}, err
+	}
+	quotas, err := manager.credentials.WeeklyQuotas(ctx, knownUsers, defaultLimit)
+	if err != nil {
+		return UserQuotaOperationSummary{}, fmt.Errorf("read quota operation summary: %w", err)
+	}
+	return summarizeQuotaOperations(knownUsers, quotas), nil
 }
 
 func quotaActionMessage(action string, selected int, result usage.QuotaActionResult) string {

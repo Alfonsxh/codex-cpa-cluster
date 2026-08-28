@@ -64,8 +64,18 @@ func TestObserverMatchesV1RuntimePrecedenceAndCaches(t *testing.T) {
 	assertState(t, states["theta"], ReasonRuntimeUnknown, false, false)
 
 	firstRequests := transport.requestCount()
-	if firstRequests != len(services) {
-		t.Fatalf("native request count = %d, want %d", firstRequests, len(services))
+	// Every successful auth-files probe is followed by one bounded
+	// request-error-logs probe. theta fails the first probe and therefore does
+	// not issue the second request.
+	if firstRequests != len(services)*2-1 {
+		t.Fatalf("native request count = %d, want %d", firstRequests, len(services)*2-1)
+	}
+	if states["alpha"].Runtime.ErrorCount != 1 || states["alpha"].Runtime.ServerErrorCount != 1 ||
+		states["alpha"].Runtime.AffectedUsers != 1 || states["alpha"].Runtime.ErrorLogStatus != "ok" {
+		t.Fatalf("alpha runtime snapshot = %#v", states["alpha"].Runtime)
+	}
+	if states["beta"].Runtime.Rate429Count != 1 || states["beta"].Runtime.LastErrorStatus != http.StatusTooManyRequests {
+		t.Fatalf("beta runtime snapshot = %#v", states["beta"].Runtime)
 	}
 	states["alpha"] = State{Reason: "caller-mutation"}
 	cached := observer.Observe(context.Background(), services)
@@ -162,6 +172,14 @@ func (transport *runtimeFixtureTransport) RoundTrip(request *http.Request) (*htt
 	transport.requests[request.URL.Hostname()]++
 	if request.Header.Get("Authorization") != "Bearer management-secret" {
 		transport.invalidAuthorization = true
+	}
+	if strings.HasSuffix(request.URL.Path, "/request-error-logs") {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"files":[]}`)),
+			Request:    request,
+		}, nil
 	}
 	payload, found := transport.payloads[request.URL.Hostname()]
 	if !found {

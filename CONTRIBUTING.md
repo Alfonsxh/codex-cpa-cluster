@@ -10,9 +10,9 @@
 4. 运行 `make verify`。
 5. 提交 Pull Request，说明问题、方案、验证和部署影响。
 
-`make verify` 需要 Python 3、Node.js、Go（版本以 `go.mod` 为准）、Lua 5.4 或可用的
-Docker daemon，以及 Docker Compose。首次验证前在 `frontend/` 执行 `npm ci`。Go 与 React
-迁移代码从第一批提交开始即纳入同一质量门禁。
+`make verify` 需要 Node.js 22、Go（版本以 `go.mod` 为准）、可用的 Docker daemon，以及
+Docker Compose。首次验证前在 `frontend/` 和 `tools/openapi/` 执行 `npm ci`。Go 与 React
+代码始终纳入同一质量门禁。
 
 ## Pull Request 要求
 

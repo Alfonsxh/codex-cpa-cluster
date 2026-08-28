@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, subscribeUnauthorized } from "./client";
 import { login } from "./session";
 import { createTeam } from "./teams";
+import { loginPortal } from "./portal";
 
 describe("fine-grained Admin API client", () => {
   beforeEach(() => {
@@ -45,6 +46,18 @@ describe("fine-grained Admin API client", () => {
 
     await expect(createTeam({ name: "Platform", description: "" }, "csrf-test"))
       .rejects.toMatchObject({ status: 409, code: "team_name_conflict" } satisfies Partial<ApiError>);
+  });
+
+  it("parses a bounded Retry-After value for portal login rate limits", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "rate_limited", message: "登录尝试过于频繁" }
+    }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "7" }
+    })));
+
+    await expect(loginPortal("alice@example.com", "password"))
+      .rejects.toMatchObject({ status: 429, code: "rate_limited", retryAfterSeconds: 7 } satisfies Partial<ApiError>);
   });
 
   it("notifies the Admin shell when a fine-grained request loses its session", async () => {

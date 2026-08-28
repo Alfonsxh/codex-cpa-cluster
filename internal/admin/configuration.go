@@ -91,6 +91,7 @@ var configurationDefinitionByKey = func() map[string]configurationDefinition {
 var retiredConfigurationKeys = map[string]struct{}{
 	"gost.enabled": {}, "gost.remote_hosts": {}, "gost.remote_host": {},
 	"gost.port_start": {}, "gost.port_end": {}, "runtime.gost_image": {},
+	"runtime.admin_base_image": {}, "runtime.gateway_image": {},
 }
 
 func buildConfigurationDefinitions() []configurationDefinition {
@@ -212,8 +213,6 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		simple("runtime.cliproxy_image", "CLIProxyAPI 镜像", "image", "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23", "deployment"),
 	)
 	definitions = append(definitions,
-		configurationDefinition{Key: "runtime.gateway_image", Label: "Gateway 基础镜像", ValueType: "image", ApplyMode: "deployment", Default: "docker.m.daocloud.io/openresty/openresty:1.31.1.1-2-alpine-fat@sha256:427d94fea0c24b099e7891e8d1b7976f6d008e2d427e56bab725c8b8b293795b", DigestRequired: true},
-		configurationDefinition{Key: "runtime.admin_base_image", Label: "Admin 构建基础镜像", ValueType: "image", ApplyMode: "deployment", Default: "docker.m.daocloud.io/library/docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c", DigestRequired: true},
 		simple("gateway.listen_address", "网关监听地址", "ip", "127.0.0.1", "deployment"),
 		simple("management.listen_address", "Management 监听地址", "ip", "127.0.0.1", "deployment"),
 		integer("gateway.port", "网关宿主机端口", 18317, 1024, 65535, "deployment"),
@@ -397,23 +396,6 @@ func (server *Server) currentConfiguration(
 	stored = cleaned
 	if stored["account_failover.mode"] == "observe" {
 		stored["account_failover.mode"] = "off"
-	}
-	for key, replacement := range map[string]map[string]string{
-		"runtime.admin_base_image": {
-			"docker:27.5.1-cli": "docker.m.daocloud.io/library/docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c",
-			"docker.m.daocloud.io/library/docker:27.5.1-cli": "docker.m.daocloud.io/library/docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c",
-		},
-		"runtime.gateway_image": {
-			"openresty/openresty:1.31.1.1-2-alpine-fat":                      "docker.m.daocloud.io/openresty/openresty:1.31.1.1-2-alpine-fat@sha256:427d94fea0c24b099e7891e8d1b7976f6d008e2d427e56bab725c8b8b293795b",
-			"openresty/openresty:alpine-fat":                                 "docker.m.daocloud.io/openresty/openresty:1.31.1.1-2-alpine-fat@sha256:427d94fea0c24b099e7891e8d1b7976f6d008e2d427e56bab725c8b8b293795b",
-			"docker.m.daocloud.io/openresty/openresty:1.31.1.1-2-alpine-fat": "docker.m.daocloud.io/openresty/openresty:1.31.1.1-2-alpine-fat@sha256:427d94fea0c24b099e7891e8d1b7976f6d008e2d427e56bab725c8b8b293795b",
-		},
-	} {
-		if value, ok := stored[key].(string); ok {
-			if migrated, found := replacement[value]; found {
-				stored[key] = migrated
-			}
-		}
 	}
 	for _, key := range []string{"accounts.listen_address", "management.listen_address", "gateway.listen_address"} {
 		if stored[key] == "0.0.0.0" || stored[key] == "::" {

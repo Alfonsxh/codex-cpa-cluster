@@ -7,7 +7,7 @@ VERSION=${VERSION:?VERSION 不能为空，例如 v1.0.0}
 PLATFORM=${PLATFORM:-linux/amd64}
 IMAGE_PREFIXES=${IMAGE_PREFIXES:-}
 ALLOW_DIRTY=${ALLOW_DIRTY:-false}
-RELEASE_COMPONENTS="admin web gateway edge v2-control v2-web v2-gateway v2-edge"
+RELEASE_COMPONENTS="control web gateway edge"
 
 case "$VERSION" in
   v[0-9]*.[0-9]*.[0-9]*|[0-9]*.[0-9]*.[0-9]*) ;;
@@ -28,7 +28,7 @@ if [ "$ACTION" = publish ] && [ -z "$IMAGE_PREFIXES" ]; then
   exit 1
 fi
 
-python3 "$ROOT_DIR/scripts/check-public-release.py" --root "$ROOT_DIR"
+go run "$ROOT_DIR/cmd/releasectl" privacy --root "$ROOT_DIR"
 if [ "$ALLOW_DIRTY" != true ] && [ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]; then
   echo "工作区存在未提交修改，拒绝发布；测试构建可显式设置 ALLOW_DIRTY=true" >&2
   exit 1
@@ -45,7 +45,7 @@ if [ "$ACTION" = publish ]; then
 fi
 
 component_digest() {
-  python3 "$ROOT_DIR/scripts/release_manifest.py" digest \
+	go run "$ROOT_DIR/cmd/releasectl" manifest digest \
     --root "$ROOT_DIR" --component "$1"
 }
 
@@ -71,14 +71,10 @@ build_component() {
   "$@"
 }
 
-build_component admin admin/Dockerfile
-build_component web web/Dockerfile
-build_component gateway gateway/Dockerfile
-build_component edge edge/Dockerfile
-build_component v2-control v2/Dockerfile control
-build_component v2-web v2/Dockerfile web
-build_component v2-gateway v2/Dockerfile gateway
-build_component v2-edge v2/Dockerfile edge
+build_component control v2/Dockerfile control
+build_component web v2/Dockerfile web
+build_component gateway v2/Dockerfile gateway
+build_component edge v2/Dockerfile edge
 docker buildx build \
   --platform "$PLATFORM" \
   --load \

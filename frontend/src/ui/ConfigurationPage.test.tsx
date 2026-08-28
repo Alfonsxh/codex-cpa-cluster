@@ -11,6 +11,8 @@ describe("ConfigurationPage", () => {
     let current = configurationFixture();
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
       if (path !== "/admin/api/settings/configuration") throw new Error(`unexpected request: ${path}`);
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { confirm: string; values: Record<string, unknown> };
@@ -28,11 +30,11 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
 
-    expect(await screen.findByText("当前秘密已配置；留空不会覆盖。")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("已配置；留空保持不变")).toHaveValue("");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByPlaceholderText("已配置；留空保持不变")).toHaveValue("");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
 
     await user.type(screen.getByLabelText("搜索配置"), "产品名称");
+    await user.click(await screen.findByRole("button", { name: /产品名称/ }));
     const productName = await screen.findByLabelText("产品名称");
     await user.clear(productName);
     await user.type(productName, "CPA Control");
@@ -40,7 +42,7 @@ describe("ConfigurationPage", () => {
     await user.click(screen.getByRole("button", { name: "保存配置" }));
 
     expect(await screen.findByText("已保存 1 项配置")).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(post?.[0]).toBe("/admin/api/settings/configuration");
     expect(post?.[1]).toMatchObject({
@@ -56,7 +58,10 @@ describe("ConfigurationPage", () => {
   it("requires an impact confirmation before saving account rebuild fields", async () => {
     const current = configurationFixture();
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      if (String(input) !== "/admin/api/settings/configuration") throw new Error(`unexpected request: ${String(input)}`);
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path !== "/admin/api/settings/configuration") throw new Error(`unexpected request: ${path}`);
       if (init?.method === "POST") {
         return jsonResponse({
           message: "已保存 1 项配置",
@@ -75,11 +80,101 @@ describe("ConfigurationPage", () => {
     await user.clear(retry);
     await user.type(retry, "3");
     await user.click(screen.getByRole("button", { name: "保存配置" }));
-    expect(await screen.findByRole("dialog", { name: "保存并应用配置？" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "保存 1 项配置？" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
 
     await user.click(screen.getByRole("button", { name: "保存并应用" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1));
+  });
+
+  it("loads the destructive all-user impact only when User Quota is opened and refreshes it after reset", async () => {
+    let quotaReads = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path === "/admin/api/settings/configuration") return jsonResponse(configurationFixture());
+      if (path === "/admin/api/users/quota-actions" && init?.method === "POST") {
+        return jsonResponse({
+          action: "reset_usage",
+          applied_users: ["alice@example.com", "bob@example.com"],
+          skipped_users: [],
+          message: "已清零 2 位用户的本周已用量；将在下次采集后生效",
+          quota_operations: quotaSummary(0)
+        });
+      }
+      if (path === "/admin/api/users/quota-actions") {
+        quotaReads += 1;
+        return jsonResponse(quotaSummary(quotaReads === 1 ? 2 : 0));
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
+
+    await screen.findByPlaceholderText("已配置；留空保持不变");
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/users/quota-actions")).toBe(false);
+    await user.click(screen.getByRole("button", { name: /用户额度/ }));
+    expect(await screen.findByText("2 位有用量")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "清零全部用户本周已用量" }));
+    await user.type(screen.getByLabelText("操作原因"), "incident correction");
+    await user.type(screen.getByLabelText("清零确认文字"), "RESET ALL USERS");
+    await user.click(screen.getByRole("button", { name: "确认清零" }));
+
+    expect(await screen.findByText("已清零 2 位用户的本周已用量；将在下次采集后生效")).toBeInTheDocument();
+    await waitFor(() => expect(quotaReads).toBe(2));
+    expect(screen.getByRole("button", { name: "当前无需清零" })).toBeDisabled();
+  });
+
+  it("keeps access, storage and audit in the same workspace and expires the session after key rotation", async () => {
+    const rotated = vi.fn();
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path === "/admin/api/settings/configuration") return jsonResponse(configurationFixture());
+      if (path === "/admin/api/settings/management-key" && init?.method === "POST") {
+        return jsonResponse({ message: "管理密钥已更新，请重新登录", rotated: true, services: 0 });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" onManagementKeyRotated={rotated} />);
+
+    await user.click(await screen.findByRole("button", { name: /本地数据/ }));
+    expect(screen.getByText("state/control-plane.sqlite3")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /审计记录/ }));
+    expect(screen.getByText("configuration.update")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /访问凭据/ }));
+    await user.click(screen.getByRole("button", { name: "更换管理密钥" }));
+    await user.type(screen.getByLabelText("新管理密钥"), "replacement-key-2026");
+    await user.type(screen.getByLabelText("再次输入管理密钥"), "replacement-key-2026");
+    await user.click(screen.getByRole("button", { name: "更新并重新进入" }));
+
+    await waitFor(() => expect(rotated).toHaveBeenCalledWith("管理密钥已更新，请重新登录"));
+    const request = fetchMock.mock.calls.find(([path]) => String(path) === "/admin/api/settings/management-key");
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({ new_key: "replacement-key-2026", confirmation: "replacement-key-2026" });
+  });
+
+  it("shows a recoverable empty state when the configuration catalog has no groups", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path === "/admin/api/settings/configuration") {
+        return jsonResponse({ version: 1, generated_at: 1_800_000_000, field_count: 0, groups: [] });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
+
+    expect(await screen.findByText("当前没有可配置项")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "进入访问凭据" }));
+    expect(screen.getByText("管理密钥已配置")).toBeInTheDocument();
   });
 });
 
@@ -87,7 +182,7 @@ function configurationFixture(): ConfigurationCatalog {
   return {
     version: 1,
     generated_at: 1_800_000_000,
-    field_count: 4,
+    field_count: 5,
     groups: [
       {
         name: "CPA 请求",
@@ -155,6 +250,25 @@ function configurationFixture(): ConfigurationCatalog {
             ]
           }
         ]
+      },
+      {
+        name: "用户额度",
+        description: "全部用户的系统默认周额度与网关故障策略。",
+        fields: [
+          {
+            key: "user_quota.default_weekly_tokens",
+            label: "用户周额度系统默认值",
+            description: "个人未配置策略时使用。",
+            type: "nullable_integer",
+            value: 20_000_000,
+            default: null,
+            apply_mode: "quota",
+            editable: true,
+            unit: "Token",
+            min: 1,
+            max: 1_000_000_000_000
+          }
+        ]
       }
     ]
   };
@@ -185,4 +299,55 @@ function jsonResponse(payload: unknown) {
     status: 200,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function supportingSettingsResponse(path: string) {
+  if (path === "/admin/api/settings/general") {
+    return jsonResponse({
+      version: 1,
+      apply_mode: "live",
+      generated_at: 1_800_000_000,
+      values: {
+        product_name: "Codex CPA Cluster",
+        short_name: "Codex CPA",
+        environment_label: "Test",
+        public_base_url: "https://example.test",
+        allowed_email_domains: ["example.com"],
+        key_prefix: "cpa_",
+        provider_name: "Codex CPA",
+        api_key_env: "CPA_API_KEY",
+        default_model: "gpt-5.6-sol"
+      },
+      security: { management_key_configured: true, initial_password_configured: true },
+      branding: { custom_logo: false }
+    });
+  }
+  if (path === "/admin/api/settings/notifications") {
+    return jsonResponse({
+      notifications: { webhook_configured: false, webhook_url: "", heartbeat_at: null, last_success_at: null, last_error: "", next_schedule_at: null },
+      values: { enabled: false, timezone: "UTC", daily_times: "09:00", schedule_grace_minutes: 15, quota_alert_enabled: true, weekly_threshold_percent: 90 }
+    });
+  }
+  if (path === "/admin/api/settings/workspace") {
+    return jsonResponse({
+      storage: [{ label: "控制面数据库", path: "state/control-plane.sqlite3", exists: true, mode: "600" }],
+      backups: { count: 1, latest: "backups/accounts/fixture" },
+      recent_audit: [{ timestamp: 1_800_000_000, action: "configuration.update", target: "settings", outcome: "accepted" }]
+    });
+  }
+  return null;
+}
+
+function quotaSummary(usersWithUsage: number) {
+  return {
+    total_users: 3,
+    users_with_usage: usersWithUsage,
+    total_used_tokens: usersWithUsage ? 3_000_000 : 0,
+    total_raw_used_tokens: usersWithUsage ? 2_000_000 : 0,
+    users_with_personal_policy: 0,
+    users_with_bonus: 0,
+    users_with_usage_reset: 0,
+    week_start_at: 1_799_900_000,
+    week_end_at: 1_800_500_000
+  };
 }

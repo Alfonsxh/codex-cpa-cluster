@@ -74,7 +74,7 @@ export function PortalPasswordModal({
           <Alert
             type="error"
             showIcon
-            message="密码修改失败"
+            title="密码修改失败"
             description={change.error instanceof ApiError ? change.error.message : "请稍后重试"}
           />
         ) : null}

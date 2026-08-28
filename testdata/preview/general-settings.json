@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "apply_mode": "live",
+  "generated_at": 1800000000,
+  "values": {
+    "product_name": "Codex CPA Cluster",
+    "short_name": "Codex CPA",
+    "environment_label": "Test",
+    "public_base_url": "https://example.test",
+    "allowed_email_domains": ["example.com"],
+    "key_prefix": "cpa_",
+    "provider_name": "Codex CPA",
+    "api_key_env": "CPA_API_KEY",
+    "default_model": "gpt-5.6-sol"
+  },
+  "security": {
+    "management_key_configured": true,
+    "initial_password_configured": true
+  },
+  "branding": {
+    "custom_logo": false
+  }
+}

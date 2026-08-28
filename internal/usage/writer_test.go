@@ -155,7 +155,7 @@ func TestWriterDeduplicatesDigestEventsAndNormalizesBearerKeys(t *testing.T) {
 	event := usageEvent("Bearer secret-key", "", now.Unix())
 	if got := usageEventKey("alpha", "", keyHash("Bearer secret-key"), event); got !=
 		"alpha:sha256:e551adaac06d32d6c54b49cf64ffa17529db3cf85ba526b111204f75fdef239e" {
-		t.Fatalf("Python-compatible digest event key = %s", got)
+		t.Fatalf("stable digest event key = %s", got)
 	}
 	first, err := writer.IngestEvents(context.Background(), "alpha", []Event{event}, nil)
 	if err != nil || first.Inserted != 1 {

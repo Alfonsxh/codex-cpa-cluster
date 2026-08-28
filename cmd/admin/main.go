@@ -264,19 +264,15 @@ func runOwnedAdmin(
 		logger.Warn("Docker runtime operations remain disabled", zap.Error(runtimeError))
 	} else {
 		defer runtimeManager.Close()
-		runtimeJobs, err = runtimeops.NewJobManager(runtimeManager)
-		if err != nil {
-			return err
-		}
-		defer runtimeJobs.Close()
 	}
 	runtimeObserver, err := accountstatus.New(accountstatus.Config{Root: config.Root, Secrets: store})
 	if err != nil {
 		return err
 	}
+	oauthLoader := quotaapi.OAuthLoader{Root: config.Root}
 	var stateProvider failover.AccountStateProvider = liveAccountStateProvider{
 		Base: persistedStateProvider, Accounts: store, Runtime: runtimeManager,
-		OAuth: quotaapi.OAuthLoader{Root: config.Root}, Observer: runtimeObserver,
+		OAuth: oauthLoader, Observer: runtimeObserver,
 	}
 	var rebalancer adminapi.AccountRebalancer
 	var routeChanger *failover.Service
@@ -308,6 +304,7 @@ func runOwnedAdmin(
 		}
 		portalServer, err = portalapi.New(portalapi.Config{
 			Identity: store, Sessions: fencedPortalStore, Usage: usageReader,
+			Quotas:      fencedPortalStore,
 			PublicUsage: usageReader, Inflight: gatewayDrainer,
 			States: stateProvider, Activity: usageReader, Routes: routeChanger,
 			Keys: identityService, QuotaStore: store,
@@ -319,15 +316,19 @@ func runOwnedAdmin(
 		}
 	}
 	var accountManager *accountlifecycle.Manager
+	var accountRuntime *runtimeops.AccountRuntime
+	var accountRuntimeError error
 	projectionRenderer := &accountprojection.Renderer{Root: config.Root, Store: store}
+	composeEnvironmentProjector := &adminapi.ComposeEnvironmentProjector{Root: config.Root}
 	if runtimeManager != nil {
 		if !config.RuntimeReadOnly {
-			accountRuntime, accountRuntimeError := runtimeops.NewAccountRuntime(
+			accountRuntime, accountRuntimeError = runtimeops.NewAccountRuntime(
 				runtimeManager,
 				store,
 				runtimeops.AccountRuntimeConfig{
 					Root: config.Root, NetworkName: config.DockerNetwork,
 					InstanceName: config.InstanceName, ProbeTimeout: config.SnapshotTimeout,
+					ImageProjector: composeEnvironmentProjector,
 				},
 			)
 			if accountRuntimeError != nil {
@@ -348,19 +349,44 @@ func runOwnedAdmin(
 			}
 		}
 	}
+	if runtimeManager != nil {
+		diagnostics, diagnosticsError := runtimeops.NewDiagnostics(runtimeops.DiagnosticsConfig{
+			Root: config.Root, Store: store, Projection: projectionRenderer,
+			GatewayProbeURLs: config.GatewayProbes, RenderEnabled: !config.RuntimeReadOnly,
+		})
+		if diagnosticsError != nil {
+			return diagnosticsError
+		}
+		if accountRuntime != nil {
+			runtimeJobs, err = runtimeops.NewJobManagerWithDiagnostics(
+				runtimeManager, accountRuntime, accountRuntime, diagnostics, identityOperationLock,
+			)
+		} else {
+			runtimeJobs, err = runtimeops.NewJobManagerWithDiagnostics(
+				runtimeManager, nil, nil, diagnostics, identityOperationLock,
+			)
+		}
+		if err != nil {
+			return err
+		}
+		defer runtimeJobs.Close()
+	}
 	configurationApplier := &adminapi.ConfigurationRuntimeApplier{
 		Accounts:   store,
 		Projection: configurationProjectionAdapter{renderer: projectionRenderer},
-		Deployment: &adminapi.ComposeEnvironmentProjector{Root: config.Root},
+		Deployment: composeEnvironmentProjector,
 	}
 	if runtimeManager != nil && !config.RuntimeReadOnly {
 		configurationApplier.Runtime = configurationRuntimeAdapter{manager: runtimeManager}
 	}
 	adminServer, err := adminapi.New(adminapi.Config{
+		Root:                 config.Root,
 		Store:                store,
 		Accounts:             store,
 		AccountStates:        stateProvider,
+		AccountRuntime:       runtimeObserver,
 		Activity:             usageReader,
+		OAuth:                oauthLoader,
 		Usage:                usageReader,
 		TeamIdentities:       fencedPortalStore,
 		NotificationSender:   notificationSender,

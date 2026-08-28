@@ -73,7 +73,7 @@ func QuotaRows(snapshot Snapshot, thresholdPercent float64, onlyKeys map[string]
 				usedCopy = 0
 			}
 			row := Row{
-				Key: key, Account: defaultString(account.ID, "unknown"), Label: defaultString(window.Label, "常规周限额"),
+				Key: key, Account: defaultString(account.ID, "unknown"), Label: quotaWindowLabel(window.Key, window.Label),
 				UsedPercent: &usedCopy, ActiveUsers: account.ActiveUsers1H,
 				ResetCount: account.Quota.ResetCreditCount, ResetAt: window.ResetAt,
 				ResetKey: window.ResetAt, Level: level,
@@ -99,6 +99,31 @@ func QuotaRows(snapshot Snapshot, thresholdPercent float64, onlyKeys map[string]
 		return naturalCompare(rows[left].Label, rows[right].Label) < 0
 	})
 	return rows
+}
+
+func quotaWindowLabel(windowKey string, sourceLabel string) string {
+	key := strings.ToLower(strings.TrimSpace(windowKey))
+	label := strings.TrimSpace(sourceLabel)
+	if key == "" || strings.HasPrefix(key, "default:") {
+		return "常规周限额"
+	}
+	if strings.HasPrefix(key, "additional:") {
+		source := label
+		if source == "" {
+			parts := strings.SplitN(key, ":", 3)
+			if len(parts) > 1 {
+				source = strings.ReplaceAll(parts[1], "_", "-")
+			}
+		}
+		if strings.EqualFold(source, "gpt-reserve") {
+			source = "gpt-reserve"
+		}
+		if source == "" {
+			source = "未命名"
+		}
+		return "附加额度窗口（" + source + "）"
+	}
+	return defaultString(label, "常规周限额")
 }
 
 type quotaWindow struct {
@@ -153,19 +178,19 @@ func BuildMarkdownV2(
 	}
 	icons := map[string]string{"normal": "🟢", "warning": "🟠", "exhausted": "🔴", "unavailable": "⚪"}
 	table := []string{
-		"| CPA账号 / 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
-		"| :--- | ---: | ---: | ---: | :--- |",
+		"| CPA 账号 | 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
+		"| :--- | :--- | ---: | ---: | ---: | :--- |",
 	}
 	if len(transitions) > 0 {
 		table = []string{
-			"| 事件 | CPA账号 / 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
-			"| :--- | :--- | ---: | ---: | ---: | :--- |",
+			"| 事件 | CPA 账号 | 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
+			"| :--- | :--- | :--- | ---: | ---: | ---: | :--- |",
 		}
 	}
 	for _, row := range rows {
-		name := fmt.Sprintf("%s %s · %s", icons[row.Level], safeCell(row.Account, 32), safeCell(row.Label, 24))
+		account := fmt.Sprintf("%s %s", icons[row.Level], safeCell(row.Account, 32))
 		cells := []string{
-			name, formatPercent(row.UsedPercent), strconv.Itoa(row.ActiveUsers),
+			account, safeCell(row.Label, 34), formatPercent(row.UsedPercent), strconv.Itoa(row.ActiveUsers),
 			formatOptionalInt(row.ResetCount), formatReset(row.ResetAt, location, now),
 		}
 		if len(transitions) > 0 {
@@ -179,9 +204,9 @@ func BuildMarkdownV2(
 	}
 	if len(rows) == 0 {
 		if len(transitions) > 0 {
-			table = append(table, "| — | ⚪ 暂无匹配账号 | — | 0 | — | — |")
+			table = append(table, "| — | ⚪ 暂无匹配账号 | — | — | 0 | — | — |")
 		} else {
-			table = append(table, "| ⚪ 暂无匹配账号 | — | 0 | — | — |")
+			table = append(table, "| ⚪ 暂无匹配账号 | — | — | 0 | — | — |")
 		}
 	}
 	legend := "> 🟢 正常　🟠 超过阈值　🔴 额度耗尽　⚪ 数据不可用"

@@ -67,6 +67,15 @@ func TestReadOnlyStoreMatchesExistingBreakdownSemantics(t *testing.T) {
 	if activity["alpha"] != 2 || activity["beta"] != 1 {
 		t.Fatalf("one-hour activity = %#v", activity)
 	}
+	activeEmails, err := store.ActiveUserEmailsLastHour(context.Background())
+	if err != nil {
+		t.Fatalf("ActiveUserEmailsLastHour: %v", err)
+	}
+	if len(activeEmails["alpha"]) != 2 || activeEmails["alpha"][0] != "alice@example.com" ||
+		activeEmails["alpha"][1] != "bob@example.com" || len(activeEmails["beta"]) != 1 ||
+		activeEmails["beta"][0] != "alice@example.com" {
+		t.Fatalf("one-hour activity emails = %#v", activeEmails)
+	}
 	if _, err := store.db.Exec("INSERT INTO usage_meta(key, value) VALUES ('forbidden', '1')"); err == nil {
 		t.Fatal("read-only usage store accepted a write")
 	}
@@ -79,6 +88,57 @@ func TestReadOnlyStoreMatchesExistingBreakdownSemantics(t *testing.T) {
 		accounts.Totals.FailedCount != 1 || accounts.Totals.TotalTokens != 230 ||
 		accounts.Totals.WeightedTokens != 280 {
 		t.Fatalf("user account summary = %#v", accounts)
+	}
+	userSummaries, err := store.UserSummaries(context.Background(), 5500, &endAt)
+	if err != nil {
+		t.Fatalf("UserSummaries: %v", err)
+	}
+	if len(userSummaries) != 1 || userSummaries["alice@example.com"].RequestCount != 3 ||
+		userSummaries["alice@example.com"].FailedCount != 1 ||
+		userSummaries["alice@example.com"].TotalTokens != 230 ||
+		userSummaries["alice@example.com"].WeightedTokens != 280 ||
+		userSummaries["alice@example.com"].LastUsedAt != 6200 {
+		t.Fatalf("user usage summaries = %#v", userSummaries)
+	}
+	selectedSummaries, err := store.UserSummariesForUsers(
+		context.Background(), []string{" ALICE@example.com ", "alice@example.com", "missing@example.com"}, 5500, &endAt,
+	)
+	if err != nil {
+		t.Fatalf("UserSummariesForUsers: %v", err)
+	}
+	if len(selectedSummaries) != 1 || selectedSummaries["alice@example.com"].WeightedTokens != 280 {
+		t.Fatalf("selected user usage summaries = %#v", selectedSummaries)
+	}
+	emptySummaries, err := store.UserSummariesForUsers(context.Background(), nil, 5500, &endAt)
+	if err != nil || len(emptySummaries) != 0 {
+		t.Fatalf("empty selected user usage summaries = (%#v, %v)", emptySummaries, err)
+	}
+
+	summaries, err := store.AccountSummaries(
+		context.Background(), []string{"alpha", "beta", "gamma"}, 5500, &endAt,
+	)
+	if err != nil {
+		t.Fatalf("AccountSummaries: %v", err)
+	}
+	if summaries["alpha"].ActiveUsers != 1 || summaries["alpha"].RequestCount != 2 ||
+		summaries["alpha"].FailedCount != 1 || summaries["alpha"].TotalTokens != 150 ||
+		summaries["alpha"].LastUsedAt != 6100 || summaries["beta"].RequestCount != 1 ||
+		summaries["beta"].TotalTokens != 80 || summaries["gamma"].RequestCount != 0 {
+		t.Fatalf("account usage summaries = %#v", summaries)
+	}
+
+	perAccountEndAt := int64(6300)
+	perAccount, err := store.AccountSummariesByStart(
+		context.Background(), map[string]int64{"alpha": 6100, "beta": 6000, "gamma": 6000}, &perAccountEndAt,
+	)
+	if err != nil {
+		t.Fatalf("AccountSummariesByStart: %v", err)
+	}
+	if perAccount["alpha"].RequestCount != 1 || perAccount["alpha"].FailedCount != 1 ||
+		perAccount["alpha"].TotalTokens != 50 || perAccount["alpha"].LastUsedAt != 6100 ||
+		perAccount["beta"].RequestCount != 1 || perAccount["beta"].TotalTokens != 80 ||
+		perAccount["gamma"].RequestCount != 0 {
+		t.Fatalf("per-account usage summaries = %#v", perAccount)
 	}
 }
 

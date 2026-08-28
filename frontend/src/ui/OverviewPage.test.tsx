@@ -48,13 +48,28 @@ describe("OverviewPage legacy dashboard contract", () => {
       },
       cached: false
     };
+    const status = {
+      generated_at: 1_800_000_000,
+      authorized_accounts: 2,
+      running_services: 7,
+      total_services: 8,
+      requests_5m: 74,
+      warnings: []
+    };
     const jobs = {
       jobs: [{ id: "job-1", name: "重启 alpha", action: "restart", target: "alpha", status: "succeeded", created_at: 1_800_000_000 }]
+    };
+    const catalog = {
+      generated_at: 1_800_000_000,
+      accounts: usage.accounts.map((account) => ({ id: account.name, operational_status: { label: "可用", tone: "success" } })),
+      users: [{ email: "alice@example.com", status: "active" }]
     };
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
       const path = String(input);
       if (path.startsWith("/admin/api/overview/usage?")) return Promise.resolve(jsonResponse(usage));
       if (path === "/admin/api/overview/summary") return Promise.resolve(jsonResponse(summary));
+      if (path === "/admin/api/overview/catalog") return Promise.resolve(jsonResponse(catalog));
+      if (path === "/admin/api/overview/status") return Promise.resolve(jsonResponse(status));
       if (path === "/admin/api/runtime/jobs?limit=30") return Promise.resolve(jsonResponse(jobs));
       throw new Error(`unexpected request: ${path}`);
     });
@@ -71,22 +86,26 @@ describe("OverviewPage legacy dashboard contract", () => {
     const metrics = screen.getByLabelText("关键指标");
     expect(within(metrics).getAllByRole("article")).toHaveLength(6);
     expect(within(metrics).getByText("有效用户")).toBeInTheDocument();
-    expect(within(metrics).getByText("启用 CPA")).toBeInTheDocument();
+    expect(within(metrics).getByText("已授权 CPA")).toBeInTheDocument();
+    expect(within(metrics).getByText("运行服务")).toBeInTheDocument();
+    expect(within(metrics).getByText("5 分钟请求")).toBeInTheDocument();
+    expect(within(metrics).getByText("2/3")).toBeInTheDocument();
+    expect(within(metrics).getByText("7/8")).toBeInTheDocument();
+    expect(within(metrics).getByText("74")).toBeInTheDocument();
 
     expect(await screen.findByRole("heading", { name: "所有账号 Token 使用量" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "CPA 账号 Token 使用趋势" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "用户 Token 使用趋势" })).toBeInTheDocument();
     expect(screen.getAllByText("alpha")).not.toHaveLength(0);
-    expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+    expect(screen.getAllByText("alice@example.com")).not.toHaveLength(0);
     expect(screen.getByText("重启 alpha")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: "用户" }));
-    const userOption = await screen.findByTitle("alice@example.com");
-    const identityPopup = userOption.closest(".overview-identity-select-popup");
-    expect(identityPopup).not.toBeNull();
-    expect(identityPopup).toHaveStyle({ width: "420px" });
+    await user.click(screen.getByRole("button", { name: "全部用户" }));
+    expect(await screen.findByPlaceholderText("搜索用户邮箱")).toHaveFocus();
+    expect(await screen.findByTitle("alice@example.com")).toBeVisible();
 
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/usage?window=today&user_limit=10")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/catalog")).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/release"))).toBe(false);
 
     expect(await screen.findByRole("img", { name: /所有账号 Token 使用趋势/ })).toBeInTheDocument();
@@ -95,8 +114,25 @@ describe("OverviewPage legacy dashboard contract", () => {
     await user.click(screen.getByRole("button", { name: "6 小时" }));
     expect(await waitForRequest(fetchMock, "/admin/api/overview/usage?window=21600&user_limit=10")).toBe(true);
 
-    await user.click(screen.getAllByRole("button", { name: "范围内总量 ↓" })[0]);
-    expect(screen.getAllByRole("button", { name: "范围内总量 ↑" })).not.toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+    expect(await screen.findByText("Token 趋势自定义统计范围")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("CUSTOM USAGE RANGE")).toBeInTheDocument();
+    expect(screen.getByText(/查询包含开始时刻，不包含结束时刻。/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /取\s*消/ }));
+    expect(screen.getByRole("button", { name: "6 小时" })).toHaveAttribute("aria-pressed", "true");
+    expect(usageRequests(fetchMock, "custom")).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "自定义" }));
+    await user.click(await screen.findByRole("button", { name: "应用范围" }));
+    await waitForUsageWindow(fetchMock, "custom");
+    const customRequest = new URL(usageRequests(fetchMock, "custom")[0], "http://preview.test");
+    expect(Number(customRequest.searchParams.get("start_at"))).toBeLessThan(Number(customRequest.searchParams.get("end_at")));
+    expect(customRequest.searchParams.get("user_limit")).toBe("10");
+    expect(screen.queryByRole("button", { name: "自定义" })).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: /范围内总量，当前降序/ })[0]);
+    expect(screen.getAllByRole("button", { name: /范围内总量，当前升序/ })).not.toHaveLength(0);
   });
 });
 
@@ -106,6 +142,23 @@ async function waitForRequest(fetchMock: ReturnType<typeof vi.fn>, expected: str
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return false;
+}
+
+async function waitForUsageWindow(fetchMock: ReturnType<typeof vi.fn>, window: string) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (usageRequests(fetchMock, window).length) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`usage request for ${window} was not observed`);
+}
+
+function usageRequests(fetchMock: ReturnType<typeof vi.fn>, window: string) {
+  return fetchMock.mock.calls
+    .map(([path]) => String(path))
+    .filter((path) => {
+      const url = new URL(path, "http://preview.test");
+      return url.pathname === "/admin/api/overview/usage" && url.searchParams.get("window") === window;
+    });
 }
 
 function jsonResponse(payload: unknown) {

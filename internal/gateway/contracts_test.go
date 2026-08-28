@@ -192,7 +192,7 @@ func TestInvalidSnapshotDoesNotReplaceLastGoodGeneration(t *testing.T) {
 	}
 }
 
-func TestQuotaSnapshotNormalizesNumbersLikeLuaContract(t *testing.T) {
+func TestQuotaSnapshotNormalizesStableNumericContract(t *testing.T) {
 	raw := `{
 		"version":1,
 		"generation":"dddddddddddddddddddddddddddddddd",
@@ -219,7 +219,7 @@ func TestQuotaSnapshotNormalizesNumbersLikeLuaContract(t *testing.T) {
 	}
 }
 
-func TestSnapshotOptionalNumbersFollowLuaTonumberFallbacks(t *testing.T) {
+func TestSnapshotOptionalNumbersFollowNumericFallbacks(t *testing.T) {
 	authRaw := `{
 		"version":1,
 		"generation":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",

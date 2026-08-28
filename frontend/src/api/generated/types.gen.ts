@@ -69,6 +69,31 @@ export type OverviewSummary = {
     incomplete_key_matrices: number;
 };
 
+export type OverviewCatalog = {
+    generated_at: number;
+    accounts: Array<OverviewCatalogAccount>;
+    users: Array<OverviewCatalogUser>;
+};
+
+export type OverviewCatalogAccount = {
+    id: string;
+    operational_status: AccountOperationalStatus;
+};
+
+export type OverviewCatalogUser = {
+    email: string;
+    status: 'active' | 'inactive';
+};
+
+export type OverviewStatusPayload = {
+    generated_at: number;
+    authorized_accounts: number;
+    running_services: number;
+    total_services: number;
+    requests_5m: number;
+    warnings: Array<string>;
+};
+
 export type AccountState = {
     account: string;
     eligible: boolean;
@@ -81,16 +106,103 @@ export type AccountState = {
     observed_at: number;
 };
 
+export type AccountWeeklyWindow = {
+    key: string;
+    label: string;
+    metered_feature: string | null;
+    window_slot: string;
+    used_percent: number;
+    remaining_percent: number;
+    reported_used_percent: number;
+    reset_at: number | null;
+    reset_after_seconds: number | null;
+    window_seconds: number;
+    limit_reached: boolean;
+    resettable: boolean;
+};
+
+export type AccountQuota = {
+    account: string;
+    status: string;
+    plan_type: string | null;
+    allowed: boolean | null;
+    limit_reached: boolean | null;
+    reset_credit_count: number | null;
+    weekly: AccountWeeklyWindow | null;
+    weekly_windows: Array<AccountWeeklyWindow>;
+};
+
+export type AccountRuntime = {
+    state: string;
+    query_status: string;
+    credential_status: string;
+    credential_count: number;
+    credential_unavailable: boolean;
+    credential_unavailable_count: number;
+    credential_disabled: boolean;
+    credential_disabled_count: number;
+    native_success: number;
+    native_failed: number;
+    error_log_files: number;
+    error_log_status: string;
+    window_seconds: number;
+    requests: number;
+    error_count: number;
+    rate_429_count: number;
+    server_error_count: number;
+    affected_users: number;
+    last_error_at: number;
+    last_error_status: number;
+    error_rate_percent: number;
+    error_age_seconds: number | null;
+};
+
+export type AccountOperationalStatus = {
+    code: string;
+    label: string;
+    tone: 'success' | 'warning' | 'danger' | 'neutral';
+    reason: string;
+    selectable: boolean;
+};
+
 export type Account = {
     id: string;
     email: string;
     port: number;
     proxy_mode: string;
+    proxy_source: 'account' | 'default' | 'direct';
+    /**
+     * Effective proxy URL with password redacted, or direct; never contains a plaintext proxy password.
+     */
+    proxy_display: string;
     enabled: boolean;
     default: boolean;
+    service: string;
+    container_state: string;
+    container_status: string;
+    container_health: string;
+    runtime_state: 'running' | 'stopped' | 'disabled' | 'unknown';
+    oauth_configured: boolean | null;
+    auth_files: number;
+    auth_state: 'configured' | 'pending' | 'unknown';
+    associated_users: number;
     routed_users: number;
     active_users_1h: number | null;
+    /**
+     * Authenticated rolling-hour distinct user identities, sorted by normalized email
+     */
+    active_user_emails_1h: Array<string>;
+    reset_credit_count: number | null;
+    resettable: boolean;
+    reset_window_labels: Array<string>;
+    quota: AccountQuota;
+    usage: UsageMetrics;
+    usage_available: boolean;
+    usage_window_start_at: number | null;
+    usage_window_available: boolean;
     account_state: AccountState;
+    runtime: AccountRuntime;
+    operational_status: AccountOperationalStatus;
     state_available: boolean;
     proxy_configured: boolean;
 };
@@ -98,6 +210,19 @@ export type Account = {
 export type AccountCatalog = {
     accounts: Array<Account>;
     generated_at: number;
+    window: number | string;
+    window_seconds: number | null;
+    window_start_at: number | null;
+    window_start_at_by_account: {
+        [key: string]: number;
+    } | null;
+    window_end_at: number | null;
+    window_timezone: string;
+    quota_generated_at: number | null;
+    quota_cached: boolean;
+    quota_refreshing: boolean;
+    quota_cache_ttl_seconds: number;
+    collector: CollectorStatus;
     warnings: Array<string>;
 };
 
@@ -135,7 +260,7 @@ export type AccountUpdateRequest = {
     proxy_mode?: 'inherit' | 'custom' | 'direct';
     group_enabled?: boolean;
     default_group?: boolean;
-    fallback_account?: string;
+    fallback_account?: string | null;
     /**
      * Required to equal id when new_id changes.
      */
@@ -174,7 +299,7 @@ export type AccountDeleteRequest = {
     id: string;
     confirm: string;
     revoke_keys: boolean;
-    fallback_account?: string;
+    fallback_account?: string | null;
 };
 
 export type AccountDeleteResult = {
@@ -234,6 +359,7 @@ export type RuntimeService = {
     image: string;
     state: string;
     status: string;
+    health: string;
 };
 
 export type RuntimeServiceCatalog = {
@@ -251,7 +377,7 @@ export type RuntimeLogs = {
 };
 
 export type RuntimeOperationResult = {
-    action: 'start' | 'stop' | 'restart';
+    action: 'start' | 'stop' | 'restart' | 'login' | 'image-pull' | 'image-update' | 'health' | 'verify-routing' | 'render';
     target: string;
     services: Array<RuntimeService>;
 };
@@ -259,13 +385,14 @@ export type RuntimeOperationResult = {
 export type RuntimeJob = {
     id: string;
     name: string;
-    action: 'start' | 'stop' | 'restart';
+    action: 'start' | 'stop' | 'restart' | 'login' | 'image-pull' | 'image-update';
     target: string;
     status: 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
     created_at: number;
     started_at?: number;
     finished_at?: number;
     result?: RuntimeOperationResult;
+    output?: string;
     error?: string;
 };
 
@@ -274,7 +401,7 @@ export type RuntimeJobCatalog = {
 };
 
 export type RuntimeJobRequest = {
-    action: 'start' | 'up' | 'stop' | 'restart';
+    action: 'start' | 'up' | 'stop' | 'restart' | 'login' | 'image-pull' | 'image-update' | 'health' | 'verify-routing' | 'render';
     target: string;
     /**
      * Exact lowercase action and target separated by a colon
@@ -295,6 +422,37 @@ export type RuntimeJobSubmissionResponse = {
 export type RuntimeJobCancelResponse = {
     message: string;
     job: RuntimeJob;
+};
+
+export type LegacyRuntimeJob = {
+    id: string;
+    name: string;
+    target: string;
+    status: 'queued' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+    created_at: number;
+    started_at: number | null;
+    finished_at: number | null;
+    exit_code: number | null;
+    output?: Array<string>;
+};
+
+export type LegacyRuntimeJobCatalog = {
+    jobs: Array<LegacyRuntimeJob>;
+};
+
+export type LegacyRuntimeJobResponse = {
+    job: LegacyRuntimeJob;
+};
+
+export type LegacyRuntimeJobSubmissionResponse = {
+    message: string;
+    job: LegacyRuntimeJob;
+    reused: boolean;
+};
+
+export type LegacyRuntimeJobCancelResponse = {
+    message: string;
+    job: LegacyRuntimeJob;
 };
 
 export type Team = {
@@ -342,6 +500,9 @@ export type UserSummary = {
     team_id: string | null;
     team: UserTeam | null;
     team_membership_version: number;
+    account_count: number;
+    usage: WeightedUsageMetrics;
+    weekly_quota: UserWeeklyQuota;
 };
 
 export type Pagination = {
@@ -353,8 +514,59 @@ export type Pagination = {
 
 export type UserCatalog = {
     users: Array<UserSummary>;
+    accounts: {
+        [key: string]: {
+            email: string;
+        };
+    };
+    teams: Array<Team>;
+    tags: Array<{
+        [key: string]: unknown;
+    }>;
+    collector: CollectorStatus;
     pagination: Pagination;
     generated_at: number;
+    window: UsageWindow;
+    window_seconds: number | null;
+    window_start_at: number | null;
+    window_end_at: number | null;
+    window_timezone: string;
+    summary_generated_at: number;
+    summary_cached: boolean;
+};
+
+export type UserKeyPreview = {
+    label: string;
+    account: string;
+    account_email: string;
+    user: string;
+    status: string;
+    created_at: number;
+    updated_at: number;
+    preview: string;
+};
+
+export type UserAccountDetail = {
+    account: string;
+    account_email: string;
+    status: 'active' | 'inactive' | 'revoked' | 'missing';
+    history_count: number;
+    key: UserKeyPreview | null;
+    usage: WeightedUsageMetrics;
+};
+
+export type UserDetail = UserSummary & {
+    accounts: Array<UserAccountDetail>;
+};
+
+export type UserDetailResponse = {
+    generated_at: number;
+    window: UsageWindow;
+    window_seconds: number | null;
+    window_start_at: number | null;
+    window_end_at: number | null;
+    window_timezone: string;
+    user: UserDetail;
 };
 
 export type CreateUserRequest = {
@@ -362,44 +574,43 @@ export type CreateUserRequest = {
     team_id?: string | null;
 };
 
-export type UserCreateCredential = {
+export type UserOneTimeKey = {
+    label: string;
+    account: string;
+    account_email: string;
     user: string;
-    api_key: string;
-    initial_password: string;
-    team_id: string | null;
-    accounts: number;
-    snapshot_generation: string;
+    status: string;
+    created_at: number;
+    updated_at: number;
+    preview: string;
+    key: string;
 };
 
 export type UserCreateResponse = {
     message: string;
-    user: UserCreateCredential;
+    keys: Array<UserOneTimeKey>;
+    initial_password: string;
+    team_id: string | null;
 };
 
-export type UserEmailConfirmRequest = {
+export type UserEmailRequest = {
     email: string;
-    confirm: string;
 };
 
-export type UserKeyRotation = {
-    api_key: string;
-    snapshot_generation: string;
+export type UserKeyActionRequest = {
+    label: string;
 };
 
 export type UserKeyRotationResponse = {
     message: string;
-    key: UserKeyRotation;
-};
-
-export type UserPasswordReset = {
-    user: string;
-    initial_password: string;
-    password_change_required: boolean;
+    keys: Array<UserOneTimeKey>;
 };
 
 export type UserPasswordResetResponse = {
     message: string;
-    password: UserPasswordReset;
+    user: string;
+    initial_password: string;
+    password_change_required: boolean;
 };
 
 export type DeleteUserRequest = {
@@ -411,12 +622,13 @@ export type DeleteUserRequest = {
 export type UpdateUserTeamRequest = {
     email: string;
     team_id: string | null;
-    expected_team_id: string | null;
+    expected_team_id?: string | null;
 };
 
 export type UpdateUserTeamsRequest = {
     users: Array<string>;
     team_id: string | null;
+    expected_team_id?: string | null;
 };
 
 export type UserQuotaMode = 'inherit' | 'unlimited' | 'custom';
@@ -438,15 +650,23 @@ export type UserWeeklyQuota = {
     used_tokens: number;
     weighted_used_tokens: number;
     raw_used_tokens: number;
+    unweighted_used_tokens: number;
+    weighted_raw_used_tokens: number;
+    usage_reset_tokens: number;
     remaining_tokens: number | null;
     used_percent: number | null;
     limit_reached: boolean;
+    source: 'default' | 'user_unlimited' | 'user_custom';
     policy_mode: UserQuotaMode;
     policy_tokens: number | null;
+    policy_updated_at: number | null;
+    policy_updated_by: string | null;
     policy_reset_at: number | null;
     default_limit_tokens: number | null;
     unlimited: boolean;
+    soft_limit: boolean;
     quota_unit: 'weighted_tokens';
+    adjustment_count: number;
     personal_policy_reset_enabled: boolean;
 };
 
@@ -505,6 +725,31 @@ export type GeneralSettingsUpdateRequest = {
 export type GeneralSettingsMutationResponse = {
     message: string;
     settings: GeneralSettings;
+};
+
+export type SettingsWorkspaceStorage = {
+    label: string;
+    path: string;
+    exists: boolean;
+    mode: string;
+};
+
+export type SettingsWorkspaceBackups = {
+    count: number;
+    latest: string;
+};
+
+export type SettingsWorkspaceAudit = {
+    timestamp: number;
+    action: string;
+    target: string;
+    outcome: string;
+};
+
+export type SettingsWorkspace = {
+    storage: Array<SettingsWorkspaceStorage>;
+    backups: SettingsWorkspaceBackups;
+    recent_audit: Array<SettingsWorkspaceAudit>;
 };
 
 export type InitialPasswordRequest = {
@@ -646,6 +891,11 @@ export type PortalKeyResponse = {
      */
     api_key: string;
     generated_at: number;
+};
+
+export type PortalQuota = {
+    generated_at: number;
+    weekly_quota: UserWeeklyQuota;
 };
 
 export type PortalAccountStatus = {
@@ -828,6 +1078,20 @@ export type ResetQuotaCredit = {
     reset_type?: string;
     status?: string;
     redeemed_at?: number;
+};
+
+export type ResetQuotaCreditOption = {
+    id: string;
+    title: string;
+    expires_at?: number;
+};
+
+export type ResetAccountQuotaInspection = {
+    account: string;
+    available_count: number | null;
+    details_truncated: boolean;
+    windows: Array<ResetQuotaWindow>;
+    credits: Array<ResetQuotaCreditOption>;
 };
 
 export type ResetAccountQuotaResponse = {
@@ -1110,7 +1374,7 @@ export type ManagementKeyRotationResponse = {
 };
 
 export type LegacyRuntimeJobRequest = {
-    action: 'start' | 'up' | 'stop' | 'restart';
+    action: 'start' | 'up' | 'stop' | 'restart' | 'login' | 'image-pull' | 'image-update' | 'health' | 'verify-routing' | 'render';
     target?: string;
 };
 
@@ -1192,12 +1456,12 @@ export type AccountUpdateRequestWritable = {
     email?: string;
     proxy_mode?: 'inherit' | 'custom' | 'direct';
     /**
-     * Omit to retain the encrypted value; send an empty string to clear it.
+     * Omit or send an empty string to retain the encrypted value, matching the legacy write-only editor.
      */
     proxy_url?: string;
     group_enabled?: boolean;
     default_group?: boolean;
-    fallback_account?: string;
+    fallback_account?: string | null;
     /**
      * Required to equal id when new_id changes.
      */
@@ -1407,10 +1671,71 @@ export type GetAdminOverviewSummaryResponses = {
 
 export type GetAdminOverviewSummaryResponse = GetAdminOverviewSummaryResponses[keyof GetAdminOverviewSummaryResponses];
 
-export type ListAdminAccountsData = {
+export type GetAdminOverviewCatalogData = {
     body?: never;
     path?: never;
     query?: never;
+    url: '/admin/api/overview/catalog';
+};
+
+export type GetAdminOverviewCatalogErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetAdminOverviewCatalogError = GetAdminOverviewCatalogErrors[keyof GetAdminOverviewCatalogErrors];
+
+export type GetAdminOverviewCatalogResponses = {
+    /**
+     * Selector identities with current operational status
+     */
+    200: OverviewCatalog;
+};
+
+export type GetAdminOverviewCatalogResponse = GetAdminOverviewCatalogResponses[keyof GetAdminOverviewCatalogResponses];
+
+export type GetAdminOverviewStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/api/overview/status';
+};
+
+export type GetAdminOverviewStatusErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetAdminOverviewStatusError = GetAdminOverviewStatusErrors[keyof GetAdminOverviewStatusErrors];
+
+export type GetAdminOverviewStatusResponses = {
+    /**
+     * Runtime-bound overview counters
+     */
+    200: OverviewStatusPayload;
+};
+
+export type GetAdminOverviewStatusResponse = GetAdminOverviewStatusResponses[keyof GetAdminOverviewStatusResponses];
+
+export type ListAdminAccountsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Route-specific usage range; `custom` also requires `start_at` and `end_at`.
+         */
+        window?: UsageWindow;
+        start_at?: number;
+        end_at?: number;
+        /**
+         * Request a single-flight official quota refresh when the persistent snapshot is old enough.
+         */
+        fresh?: '0' | '1';
+    };
     url: '/admin/api/accounts';
 };
 
@@ -1499,6 +1824,42 @@ export type UpdateAdminAccountResponses = {
 };
 
 export type UpdateAdminAccountResponse = UpdateAdminAccountResponses[keyof UpdateAdminAccountResponses];
+
+export type UpdateAdminAccountPolicyData = {
+    body: AccountUpdateRequestWritable;
+    headers: {
+        'X-CSRF-Token': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/admin/api/accounts/policy';
+};
+
+export type UpdateAdminAccountPolicyErrors = {
+    /**
+     * Safety conflict; `error.code` is `account_requests_active` when Codex requests are still in flight.
+     */
+    409: ErrorEnvelope;
+    /**
+     * Account mutation is unavailable; `error.code` is `account_lifecycle_not_ready` when durable recovery or safe evacuation cannot proceed.
+     */
+    503: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type UpdateAdminAccountPolicyError = UpdateAdminAccountPolicyErrors[keyof UpdateAdminAccountPolicyErrors];
+
+export type UpdateAdminAccountPolicyResponses = {
+    /**
+     * Account selection policy updated with safe fallback routing
+     */
+    200: AccountUpdateResponse;
+};
+
+export type UpdateAdminAccountPolicyResponse = UpdateAdminAccountPolicyResponses[keyof UpdateAdminAccountPolicyResponses];
 
 export type ClearAdminAccountAuthData = {
     body: AccountClearAuthRequest;
@@ -1822,10 +2183,21 @@ export type ListAdminUsersData = {
     body?: never;
     path?: never;
     query?: {
+        view?: 'summary' | 'members';
+        /**
+         * Route-specific usage range; `custom` also requires `start_at` and `end_at`.
+         */
+        window?: UsageWindow;
+        start_at?: number;
+        end_at?: number;
         q?: string;
         team_id?: string;
+        usage_state?: 'all' | 'used' | 'unused';
+        sort?: 'email' | 'requests' | 'tokens' | 'quota' | 'last_used';
+        direction?: 'asc' | 'desc';
+        fresh?: boolean;
         page?: number;
-        page_size?: number;
+        page_size?: 25 | 50 | 100;
     };
     url: '/admin/api/users';
 };
@@ -1875,6 +2247,39 @@ export type CreateAdminUserResponses = {
 };
 
 export type CreateAdminUserResponse = CreateAdminUserResponses[keyof CreateAdminUserResponses];
+
+export type GetAdminUserDetailData = {
+    body?: never;
+    path?: never;
+    query: {
+        email: string;
+        /**
+         * Route-specific usage range; `custom` also requires `start_at` and `end_at`.
+         */
+        window?: UsageWindow;
+        start_at?: number;
+        end_at?: number;
+    };
+    url: '/admin/api/users/detail';
+};
+
+export type GetAdminUserDetailErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetAdminUserDetailError = GetAdminUserDetailErrors[keyof GetAdminUserDetailErrors];
+
+export type GetAdminUserDetailResponses = {
+    /**
+     * Lazy secret-free user account detail for the selected usage window
+     */
+    200: UserDetailResponse;
+};
+
+export type GetAdminUserDetailResponse = GetAdminUserDetailResponses[keyof GetAdminUserDetailResponses];
 
 export type DeleteAdminUserQuotaData = {
     body?: never;
@@ -1995,7 +2400,7 @@ export type GetAdminUserUsageBreakdownResponses = {
 export type GetAdminUserUsageBreakdownResponse = GetAdminUserUsageBreakdownResponses[keyof GetAdminUserUsageBreakdownResponses];
 
 export type RotateAdminUserKeyData = {
-    body: UserEmailConfirmRequest;
+    body: UserKeyActionRequest;
     headers: {
         'X-CSRF-Token': string;
     };
@@ -2023,7 +2428,7 @@ export type RotateAdminUserKeyResponses = {
 export type RotateAdminUserKeyResponse = RotateAdminUserKeyResponses[keyof RotateAdminUserKeyResponses];
 
 export type RevokeAdminUserData = {
-    body: UserEmailConfirmRequest;
+    body: UserEmailRequest;
     headers: {
         'X-CSRF-Token': string;
     };
@@ -2051,7 +2456,7 @@ export type RevokeAdminUserResponses = {
 export type RevokeAdminUserResponse = RevokeAdminUserResponses[keyof RevokeAdminUserResponses];
 
 export type ResetAdminUserPasswordData = {
-    body: UserEmailConfirmRequest;
+    body: UserEmailRequest;
     headers: {
         'X-CSRF-Token': string;
     };
@@ -2326,6 +2731,31 @@ export type UpdateAdminGeneralSettingsResponses = {
 
 export type UpdateAdminGeneralSettingsResponse = UpdateAdminGeneralSettingsResponses[keyof UpdateAdminGeneralSettingsResponses];
 
+export type GetAdminSettingsWorkspaceData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/api/settings/workspace';
+};
+
+export type GetAdminSettingsWorkspaceErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetAdminSettingsWorkspaceError = GetAdminSettingsWorkspaceErrors[keyof GetAdminSettingsWorkspaceErrors];
+
+export type GetAdminSettingsWorkspaceResponses = {
+    /**
+     * Configuration workspace metadata without secret contents
+     */
+    200: SettingsWorkspace;
+};
+
+export type GetAdminSettingsWorkspaceResponse = GetAdminSettingsWorkspaceResponses[keyof GetAdminSettingsWorkspaceResponses];
+
 export type UpdateAdminInitialPasswordData = {
     body: InitialPasswordRequest;
     headers: {
@@ -2579,6 +3009,33 @@ export type RebalanceAdminAccountResponses = {
 
 export type RebalanceAdminAccountResponse = RebalanceAdminAccountResponses[keyof RebalanceAdminAccountResponses];
 
+export type InspectAdminAccountQuotaResetData = {
+    body?: never;
+    path?: never;
+    query: {
+        account: string;
+    };
+    url: '/admin/api/accounts/quota-reset';
+};
+
+export type InspectAdminAccountQuotaResetErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type InspectAdminAccountQuotaResetError = InspectAdminAccountQuotaResetErrors[keyof InspectAdminAccountQuotaResetErrors];
+
+export type InspectAdminAccountQuotaResetResponses = {
+    /**
+     * Current selectable reset credits and exhausted weekly windows, loaded only when requested
+     */
+    200: ResetAccountQuotaInspection;
+};
+
+export type InspectAdminAccountQuotaResetResponse = InspectAdminAccountQuotaResetResponses[keyof InspectAdminAccountQuotaResetResponses];
+
 export type ResetAdminAccountQuotaData = {
     body: ResetAccountQuotaRequestWritable;
     headers: {
@@ -2723,6 +3180,31 @@ export type GetAdminTeamUsageBreakdownResponses = {
 };
 
 export type GetAdminTeamUsageBreakdownResponse = GetAdminTeamUsageBreakdownResponses[keyof GetAdminTeamUsageBreakdownResponses];
+
+export type GetAdminUserQuotaOperationsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/api/users/quota-actions';
+};
+
+export type GetAdminUserQuotaOperationsErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetAdminUserQuotaOperationsError = GetAdminUserQuotaOperationsErrors[keyof GetAdminUserQuotaOperationsErrors];
+
+export type GetAdminUserQuotaOperationsResponses = {
+    /**
+     * Current-week all-user quota impact used before destructive bulk actions
+     */
+    200: UserQuotaOperationSummary;
+};
+
+export type GetAdminUserQuotaOperationsResponse = GetAdminUserQuotaOperationsResponses[keyof GetAdminUserQuotaOperationsResponses];
 
 export type ApplyAdminUserQuotaActionData = {
     body: UserQuotaActionRequestWritable;
@@ -2966,7 +3448,7 @@ export type ListLegacyAdminRuntimeJobsResponses = {
     /**
      * Compatibility alias for recent runtime jobs
      */
-    200: RuntimeJobCatalog;
+    200: LegacyRuntimeJobCatalog;
 };
 
 export type ListLegacyAdminRuntimeJobsResponse = ListLegacyAdminRuntimeJobsResponses[keyof ListLegacyAdminRuntimeJobsResponses];
@@ -2993,7 +3475,7 @@ export type GetLegacyAdminRuntimeJobResponses = {
     /**
      * Compatibility alias for current runtime job status
      */
-    200: RuntimeJobResponse;
+    200: LegacyRuntimeJobResponse;
 };
 
 export type GetLegacyAdminRuntimeJobResponse = GetLegacyAdminRuntimeJobResponses[keyof GetLegacyAdminRuntimeJobResponses];
@@ -3021,7 +3503,7 @@ export type CancelLegacyAdminRuntimeJobResponses = {
     /**
      * Compatibility alias for queued or running job cancellation
      */
-    200: RuntimeJobCancelResponse;
+    200: LegacyRuntimeJobCancelResponse;
 };
 
 export type CancelLegacyAdminRuntimeJobResponse = CancelLegacyAdminRuntimeJobResponses[keyof CancelLegacyAdminRuntimeJobResponses];
@@ -3049,11 +3531,11 @@ export type CreateLegacyAdminRuntimeJobResponses = {
     /**
      * Existing identical job reused
      */
-    200: RuntimeJobSubmissionResponse;
+    200: LegacyRuntimeJobSubmissionResponse;
     /**
      * Runtime job accepted into the bounded pool
      */
-    202: RuntimeJobSubmissionResponse;
+    202: LegacyRuntimeJobSubmissionResponse;
 };
 
 export type CreateLegacyAdminRuntimeJobResponse = CreateLegacyAdminRuntimeJobResponses[keyof CreateLegacyAdminRuntimeJobResponses];
@@ -3262,6 +3744,31 @@ export type GetPortalKeyResponses = {
 };
 
 export type GetPortalKeyResponse = GetPortalKeyResponses[keyof GetPortalKeyResponses];
+
+export type GetPortalQuotaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/usage/me/quota';
+};
+
+export type GetPortalQuotaErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetPortalQuotaError = GetPortalQuotaErrors[keyof GetPortalQuotaErrors];
+
+export type GetPortalQuotaResponses = {
+    /**
+     * Current user's natural-week weighted Token quota
+     */
+    200: PortalQuota;
+};
+
+export type GetPortalQuotaResponse = GetPortalQuotaResponses[keyof GetPortalQuotaResponses];
 
 export type ListPortalAccountsData = {
     body?: never;

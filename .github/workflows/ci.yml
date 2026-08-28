@@ -16,11 +16,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -32,54 +29,71 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install system dependencies
+      - name: Install frontend and OpenAPI dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends lua5.4
-          python3 -m pip install --disable-pip-version-check -r requirements.txt
           npm ci --prefix frontend --registry=https://registry.npmmirror.com
           npm ci --prefix tools/openapi --registry=https://registry.npmmirror.com
 
       - name: Run local quality gate
         run: make verify
 
-  package:
+  browser:
     needs: validate
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install browser dependencies
+        run: |
+          npm ci --prefix frontend --registry=https://registry.npmmirror.com
+          npx --prefix frontend playwright install chromium
+
+      - name: Run React browser matrix
+        run: npm --prefix frontend run test:e2e
+
+  package:
+    needs: [validate, browser]
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
       - name: Build release archive
         run: sh scripts/package-release.sh "dist/codex-cpa-cluster-${GITHUB_SHA::12}.tar.gz"
 
-      - name: Verify release archive
+      - name: Verify Go-only release archive
         run: |
           archive="dist/codex-cpa-cluster-${GITHUB_SHA::12}.tar.gz"
-          tar -tzf "$archive"
-          tar -tzf "$archive" | grep -Fx gateway/gateway_state.lua
-          tar -tzf "$archive" | grep -Fx gateway/request_gate.lua
-          tar -tzf "$archive" | grep -Fx gateway/Dockerfile
-          tar -tzf "$archive" | grep -Fx admin/Dockerfile
-          tar -tzf "$archive" | grep -Fx web/Dockerfile
-          tar -tzf "$archive" | grep -Fx edge/Dockerfile
+          go run ./cmd/releasectl archive verify "$archive"
+          tar -tzf "$archive" | grep -Fx docker-compose.yml
           tar -tzf "$archive" | grep -Fx release-manifest.json
-          tar -tzf "$archive" | grep -Fx scripts/release_manifest.py
-          tar -tzf "$archive" | grep -Fx scripts/edge_slot.py
-          tar -tzf "$archive" | grep -Fx scripts/gateway_release_probe.py
-          tar -tzf "$archive" | grep -Fx scripts/ownership_lease.py
-          tar -tzf "$archive" | grep -Fx admin/account_failover.py
-          tar -tzf "$archive" | grep -Fx scripts/runtime_data_guard.py
-          tar -tzf "$archive" | grep -Fx docker-compose.v2-test.yml
-          tar -tzf "$archive" | grep -Fx go.mod
-          tar -tzf "$archive" | grep -Fx go.sum
           tar -tzf "$archive" | grep -Fx v2/Dockerfile
+          tar -tzf "$archive" | grep -Fx cmd/admin/main.go
           tar -tzf "$archive" | grep -Fx cmd/gateway/main.go
+          tar -tzf "$archive" | grep -Fx cmd/releasectl/main.go
           tar -tzf "$archive" | grep -Fx internal/gateway/server.go
           tar -tzf "$archive" | grep -Fx frontend/package.json
           tar -tzf "$archive" | grep -Fx tools/openapi/package.json
-          if tar -tzf "$archive" | grep -Eq '(^|/)node_modules/|^frontend/dist/'; then
-            echo "release archive contains generated frontend dependencies or output" >&2
+          removed_source_suffix=$(printf '.%s%s' p y)
+          removed_requirement_prefix=$(printf 'require%s' ments)
+          if tar -tzf "$archive" | grep -Eq "(^|/)node_modules/|^frontend/dist/|\\${removed_source_suffix}$|${removed_requirement_prefix}[^/]*\\.txt$"; then
+            echo "release archive contains generated dependencies or removed runtime files" >&2
             exit 1
           fi
 

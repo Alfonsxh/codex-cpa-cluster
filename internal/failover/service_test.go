@@ -113,6 +113,26 @@ func TestRebalanceAllPublishesOnceThenImmediatelyRefreshesActivity(t *testing.T)
 	}
 }
 
+func TestRebalanceAllRefreshesActivityAfterCallerCancellationAtActivation(t *testing.T) {
+	store := seedRebalanceStore(t)
+	defer store.Close()
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	activity := &contextCheckingActivity{counts: map[string]int{"alpha": 2, "beta": 2}}
+	service := Service{
+		Routes: store,
+		States: staticStates{states: map[string]AccountState{
+			"alpha": {Eligible: true, Headroom: 100},
+			"beta":  {Eligible: true, Headroom: 100},
+		}},
+		Activity:  activity,
+		Snapshots: &successfulCancelingPublisher{cancel: cancelRequest},
+	}
+	result, err := service.RebalanceAll(requestContext)
+	if err != nil || !result.ActivityRefreshed || activity.contextError != nil {
+		t.Fatalf("post-activation refresh = result=%#v err=%v context=%v", result, err, activity.contextError)
+	}
+}
+
 func TestRebalanceAllRejectsWholeBatchBeforeWriteForUnsafeUser(t *testing.T) {
 	store := seedRebalanceStore(t)
 	defer store.Close()
@@ -413,6 +433,16 @@ type fakeActivity struct {
 	events []string
 }
 
+type contextCheckingActivity struct {
+	counts       map[string]int
+	contextError error
+}
+
+func (activity *contextCheckingActivity) RefreshActiveUsersLastHour(ctx context.Context) (map[string]int, error) {
+	activity.contextError = ctx.Err()
+	return activity.counts, activity.contextError
+}
+
 func (activity *fakeActivity) ActiveUsersLastHour(context.Context) ([]string, error) {
 	return activity.users, activity.err
 }
@@ -432,6 +462,15 @@ type cancelingPublisher struct {
 	cancel                context.CancelFunc
 	calls                 int
 	rollbackContextActive bool
+}
+
+type successfulCancelingPublisher struct {
+	cancel context.CancelFunc
+}
+
+func (publisher *successfulCancelingPublisher) PublishAuthSnapshot(context.Context, bool) (Snapshot, error) {
+	publisher.cancel()
+	return Snapshot{Generation: "generation-after-cancel"}, nil
 }
 
 func (publisher *cancelingPublisher) PublishAuthSnapshot(ctx context.Context, _ bool) (Snapshot, error) {

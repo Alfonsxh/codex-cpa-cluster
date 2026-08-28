@@ -1,7 +1,6 @@
 import { Button, Result } from "antd";
-import { LogoutOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useCallback } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { ApiError } from "../api/client";
 import {
@@ -12,6 +11,7 @@ import {
 } from "../api/portal";
 import { UsageLoginPage } from "./UsageLoginPage";
 import { ThemeToggle, useTheme } from "./ThemeProvider";
+import { NativeTableViewport } from "./components/NativeTableViewport";
 
 const PortalPasswordModal = lazy(() => import("./PortalPasswordModal").then((module) => ({
   default: module.PortalPasswordModal
@@ -22,6 +22,8 @@ const UsageDashboard = lazy(() => import("./UsageDashboard").then((module) => ({
 
 export function UsageApp() {
   const queryClient = useQueryClient();
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const session = useQuery({
     queryKey: portalSessionQueryKey,
     queryFn: ({ signal }) => readPortalSession(signal),
@@ -38,9 +40,19 @@ export function UsageApp() {
     }
   });
   const expireSession = useCallback(() => {
-    queryClient.removeQueries({ queryKey: portalSessionQueryKey, exact: true });
-    void queryClient.invalidateQueries({ queryKey: portalSessionQueryKey, exact: true });
+    // A child query already proved the cookie is invalid. Clear every cached
+    // management value immediately and show the authentication boundary
+    // without waiting for a second session request to race the stale screen.
+    queryClient.clear();
+    setSessionExpired(true);
   }, [queryClient]);
+  useEffect(() => {
+    if (session.data?.authenticated) setSessionExpired(false);
+  }, [session.data?.authenticated, session.dataUpdatedAt]);
+
+  if (sessionExpired) {
+    return <UsageAuthenticationBoundary />;
+  }
 
   if (session.isPending) {
     return <UsageLoading />;
@@ -70,6 +82,7 @@ export function UsageApp() {
       user={session.data.user}
       loggingOut={logout.isPending}
       onLogout={() => logout.mutate()}
+      onChangePassword={() => setPasswordOpen(true)}
     >
       <Suspense fallback={<UsageLoading />}>
         {session.data.password_change_required ? (
@@ -87,6 +100,13 @@ export function UsageApp() {
             />
           </section>
         ) : <UsageDashboard onSessionExpired={expireSession} />}
+      </Suspense>
+      <Suspense fallback={null}>
+        <PortalPasswordModal
+          open={passwordOpen}
+          onClose={() => setPasswordOpen(false)}
+          onSuccess={() => setPasswordOpen(false)}
+        />
       </Suspense>
     </UsageShell>
   );
@@ -110,9 +130,9 @@ function UsageAuthenticationBoundary() {
         <section className="usage-preview-summary">
           <div className="usage-preview-key">
             <span>我的 API Key</span>
-            <code>—</code>
+            <code>出于安全，仅在需要时读取</code>
             <div>
-              {['复制 Key', '刷新 Key', 'Codex', 'Claude Code', '导入 CC Switch'].map((label) => (
+              {['管理 API Key', '配置 Codex', '配置 Claude Code', '导入 CC Switch'].map((label) => (
                 <button type="button" disabled key={label}>{label}</button>
               ))}
             </div>
@@ -132,7 +152,7 @@ function UsageAuthenticationBoundary() {
               ))}
             </div>
           </div>
-          <div className="usage-preview-table-wrap">
+          <NativeTableViewport className="usage-preview-table-wrap" aria-label="账号明细加载预览">
             <table>
               <thead>
                 <tr>
@@ -145,7 +165,7 @@ function UsageAuthenticationBoundary() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </NativeTableViewport>
         </section>
       </main>
       <UsageLoginPage overlay />
@@ -168,31 +188,45 @@ function UsageShell({
   user,
   loggingOut,
   onLogout,
+  onChangePassword,
   children
 }: {
   user: string;
   loggingOut: boolean;
   onLogout: () => void;
+  onChangePassword: () => void;
   children: React.ReactNode;
 }) {
+  const { theme } = useTheme();
   return (
-    <div className="usage-shell">
-      <header className="usage-topbar">
-        <a className="brand" href="/" aria-label="Codex CPA 使用中心">
-          <span className="brand-mark">C</span>
-          <span>
-            <strong>Codex CPA</strong>
-            <small>Usage center</small>
-          </span>
-        </a>
+    <main className="usage-shell usage-center-shell">
+      <header className="usage-center-head">
+        <div className="usage-brand-block">
+          <a href="/" aria-label="Codex CPA 使用中心">
+            <img
+              className="usage-brand-logo"
+              src={`/portal/assets/codex-cpa-cluster-logo${theme === "dark" ? "-dark" : ""}.svg`}
+              alt="Codex CPA Cluster"
+            />
+          </a>
+          <h1>使用中心</h1>
+        </div>
         <div className="usage-user-actions">
-          <span>{user}</span>
-          <ThemeToggle />
-          <Button icon={<LogoutOutlined aria-hidden="true" />} onClick={onLogout} loading={loggingOut}>退出</Button>
+          <span className="usage-user-badge" title={user}>{user}</span>
+          <button className="usage-link-button usage-password-action" type="button" aria-label="修改密码" onClick={onChangePassword}>
+            <span className="usage-password-action-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6zM12 14v2" /></svg>
+            </span>
+            <span className="usage-password-action-label">修改密码</span>
+          </button>
+          <ThemeToggle className="usage-theme-toggle" />
+          <button className="usage-link-button" type="button" onClick={onLogout} disabled={loggingOut}>
+            {loggingOut ? "退出中…" : "退出"}
+          </button>
         </div>
       </header>
-      <main className="usage-main">{children}</main>
-    </div>
+      <div className="usage-center-content">{children}</div>
+    </main>
   );
 }
 

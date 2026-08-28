@@ -224,8 +224,6 @@ var configurationPresentationByKey = map[string]configurationPresentation{
 	"accounts.port_end":                                  {Group: "账号供应", Description: "只影响后续新建 CPA，必须不小于端口起点。"},
 	"accounts.listen_address":                            {Group: "部署环境", Description: "固定为宿主机回环地址；业务 CPA 只能由本机发布检查或 Docker 内网访问。"},
 	"runtime.cliproxy_image":                             {Group: "部署环境", Description: "作为更新通道；账号管理拉取后识别真实版本，验证通过才固定为不可变镜像。"},
-	"runtime.gateway_image":                              {Group: "部署环境", Description: "仅供源码检出环境本地构建使用；版本化发布镜像由发布工作站在打包时确定。"},
-	"runtime.admin_base_image":                           {Group: "部署环境", Description: "仅供源码检出环境本地构建使用；版本化发布镜像由发布工作站在打包时确定。"},
 	"gateway.listen_address":                             {Group: "部署环境", Description: "固定为宿主机回环地址；公网流量由同一 Docker 网络中的 TLS 入口转发。"},
 	"management.listen_address":                          {Group: "部署环境", Description: "固定为宿主机回环地址；Management API 不直接暴露到公网。"},
 	"gateway.port":                                       {Group: "部署环境", Description: "由 SQLite 自动生成 Compose 投影；修改后管理中心入口地址也会变化。"},

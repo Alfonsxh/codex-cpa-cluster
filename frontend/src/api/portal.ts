@@ -3,6 +3,7 @@ import type {
   PortalAccounts,
   PortalKeyResponse,
   PortalProfile,
+  PortalQuota,
   PortalRoute,
   PortalSession,
   PortalUsageWindow,
@@ -15,6 +16,7 @@ export type {
   PortalAccountStatus,
   PortalKeyResponse,
   PortalProfile,
+  PortalQuota,
   PortalRoute,
   PortalSession,
   PortalUsageWindow
@@ -22,6 +24,7 @@ export type {
 
 export const portalSessionQueryKey = ["portal-session"] as const;
 export const portalProfileQueryKey = ["portal-profile"] as const;
+export const portalQuotaQueryKey = ["portal-quota"] as const;
 export const portalRouteQueryKey = ["portal-route"] as const;
 export const portalAccountsQueryRoot = ["portal-accounts"] as const;
 export const portalBreakdownQueryRoot = ["portal-breakdown"] as const;
@@ -54,7 +57,11 @@ export function readPortalProfile(signal?: AbortSignal): Promise<PortalProfile> 
 }
 
 export function readPortalKey(signal?: AbortSignal): Promise<PortalKeyResponse> {
-  return apiRequest<PortalKeyResponse>("/usage/me/key", { signal });
+  return apiRequest<PortalKeyResponse>("/usage/me/key", { signal, cache: "no-store" });
+}
+
+export function readPortalQuota(signal?: AbortSignal): Promise<PortalQuota> {
+  return apiRequest<PortalQuota>("/usage/me/quota", { signal });
 }
 
 export function readPortalRoute(signal?: AbortSignal): Promise<PortalRoute> {
@@ -108,6 +115,7 @@ export function rotatePortalKey(): Promise<{
 }> {
   return apiRequest("/usage/me/key/rotate", {
     method: "POST",
+    cache: "no-store",
     body: JSON.stringify({ confirm: true })
   });
 }

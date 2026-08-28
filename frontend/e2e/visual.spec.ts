@@ -31,8 +31,15 @@ for (const viewport of viewports) {
           {
             fullPage: false,
             // macOS 15 and 27 rasterize narrow text and native scrollbars
-            // differently; the separate geometry assertions remain exact.
-            maxDiffPixelRatio: viewport.width <= 1024 ? 0.015 : 0.005
+            // differently. The accounts mobile view contains the densest text,
+            // so it gets the same bounded allowance as the Tooltip snapshot;
+            // the separate navigation, geometry and overflow assertions remain exact.
+            maxDiffPixelRatio:
+              route.slug === "accounts" && viewport.width <= 560
+                ? 0.02
+                : viewport.width <= 1024
+                  ? 0.015
+                  : 0.005
           }
         );
       }

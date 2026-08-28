@@ -4,7 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CustomUsageRangeModal } from "./CustomUsageRangeModal";
 
-describe("CustomUsageRangeModal legacy contract", () => {
+const localEpoch = (year: number, month: number, day: number, hour = 0, minute = 0) => (
+  Math.floor(new Date(year, month, day, hour, minute).getTime() / 1000)
+);
+
+describe("CustomUsageRangeModal visual contract", () => {
   it("renders the two-calendar inclusive/exclusive contract and cancels without applying", async () => {
     const onCancel = vi.fn();
     const onApply = vi.fn();
@@ -13,7 +17,7 @@ describe("CustomUsageRangeModal legacy contract", () => {
       <CustomUsageRangeModal
         open
         title="账号信息自定义统计范围"
-        range={{ startAt: 1_787_155_200, endAt: 1_787_241_600 }}
+        range={{ startAt: localEpoch(2026, 7, 20), endAt: localEpoch(2026, 7, 21) }}
         onCancel={onCancel}
         onApply={onApply}
       />
@@ -39,7 +43,7 @@ describe("CustomUsageRangeModal legacy contract", () => {
       <CustomUsageRangeModal
         open
         title="Token 趋势自定义统计范围"
-        range={{ startAt: 1_787_155_200, endAt: 1_787_241_600 }}
+        range={{ startAt: localEpoch(2026, 7, 20), endAt: localEpoch(2026, 7, 21) }}
         onCancel={() => undefined}
         onApply={onApply}
       />
@@ -54,6 +58,9 @@ describe("CustomUsageRangeModal legacy contract", () => {
     fireEvent.change(within(dialog).getByLabelText("开始时间时间"), { target: { value: "08:00" } });
     fireEvent.change(within(dialog).getByLabelText("结束时间时间"), { target: { value: "09:00" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "应用范围" }));
-    expect(onApply).toHaveBeenCalledWith({ startAt: 1_787_184_000, endAt: 1_787_274_000 });
+    expect(onApply).toHaveBeenCalledWith({
+      startAt: localEpoch(2026, 7, 20, 8),
+      endAt: localEpoch(2026, 7, 21, 9)
+    });
   });
 });

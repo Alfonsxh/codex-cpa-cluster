@@ -68,8 +68,8 @@ jobs:
         with:
           name: browser-failure-${{ github.sha }}
           path: |
-            frontend/playwright-report
-            frontend/test-results
+            frontend/test-results/**/*.png
+            frontend/test-results/**/error-context.md
           if-no-files-found: error
           retention-days: 7
 

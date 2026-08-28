@@ -28,7 +28,12 @@ for (const viewport of viewports) {
         if (viewport.width <= 560) await expectActiveNavigationVisible(page);
         await expect(page).toHaveScreenshot(
           `react-${route.slug}-${viewport.name}-${theme}.png`,
-          { fullPage: false }
+          {
+            fullPage: false,
+            // macOS 15 and 27 rasterize narrow text and native scrollbars
+            // differently; the separate geometry assertions remain exact.
+            maxDiffPixelRatio: viewport.width <= 1024 ? 0.015 : 0.005
+          }
         );
       }
     });
@@ -442,7 +447,12 @@ test("30 天图表 Tooltip 为单列 Top 10 且无滚动条", async ({ page }) =
     vertical: element.scrollHeight <= element.clientHeight,
     horizontal: element.scrollWidth <= element.clientWidth
   }))).toEqual({ vertical: true, horizontal: true });
-  await expect(page).toHaveScreenshot("react-overview-tooltip-top10.png", { fullPage: false });
+  await expect(page).toHaveScreenshot("react-overview-tooltip-top10.png", {
+    fullPage: false,
+    // Tooltip glyph antialiasing differs across supported macOS releases.
+    // DOM shape, row count and overflow are asserted immediately above.
+    maxDiffPixelRatio: 0.02
+  });
 });
 
 test("使用中心仅按需读取 API Key，关闭立即清除，刷新后只展示新 Key", async ({ page }) => {

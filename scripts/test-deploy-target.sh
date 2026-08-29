@@ -89,6 +89,11 @@ if [ "${1:-}" = inspect ]; then
       case "$*" in
         *gateway-blue*) printf '%s\n' gateway-blue ;;
         *gateway-green*) printf '%s\n' gateway-green ;;
+        *-usage-collector*) printf '%s\n' usage-collector ;;
+        *-account-failover*) printf '%s\n' account-failover ;;
+        *-log-maintenance*) printf '%s\n' log-maintenance ;;
+        *-notifications*) printf '%s\n' notifications ;;
+        *-quota*) printf '%s\n' quota ;;
         *-admin*) printf '%s\n' admin ;;
         *-web*) printf '%s\n' web ;;
         *-edge*) printf '%s\n' edge ;;
@@ -362,10 +367,17 @@ new_fixture writer-no-dependencies
 write_env "$DEPLOY_ROOT"
 : >"$COMMAND_LOG"
 run_action ordinary up-writers >/dev/null
-grep -E 'compose .*--profile writers up .*--no-deps .*usage-collector quota account-failover log-maintenance' \
-  "$COMMAND_LOG" >/dev/null || {
-    echo "writer rollout did not preserve the data plane with --no-deps" >&2
-    exit 1
-  }
+for service in quota usage-collector account-failover log-maintenance; do
+  grep -E "compose .*--profile writers up .*--no-deps $service$" \
+    "$COMMAND_LOG" >/dev/null || {
+      echo "writer rollout did not start $service independently with --no-deps" >&2
+      exit 1
+    }
+done
+if grep -E 'compose .*--profile writers up .*--no-deps .*usage-collector .*quota' \
+  "$COMMAND_LOG" >/dev/null; then
+  echo "writer rollout started multiple services concurrently" >&2
+  exit 1
+fi
 
 printf '%s\n' 'Go target deployment contract tests passed'

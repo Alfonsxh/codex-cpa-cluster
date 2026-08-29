@@ -825,16 +825,38 @@ case "$ACTION" in
     ;;
   up-writers)
     require_active_owner
-    compose --profile writers up -d --wait --no-deps \
-      usage-collector quota account-failover log-maintenance
-    for service in usage-collector quota account-failover log-maintenance; do
-      require_service_current "${CPA_INSTANCE_NAME:-codex-cpa}-$service" "$service" "$CPA_CONTROL_IMAGE"
+    instance=${CPA_INSTANCE_NAME:-codex-cpa}
+    project=${CPA_COMPOSE_PROJECT_NAME:-codex-cpa}
+    control_network="${project}_control"
+    for pair in \
+      "quota|true" \
+      "usage-collector|true" \
+      "account-failover|true" \
+      "log-maintenance|false"
+    do
+      service=${pair%%|*}
+      needs_upstream=${pair#*|}
+      container="$instance-$service"
+      compose --profile writers up -d --no-deps "$service"
+      ensure_target_network "$container" "$project" "$service" "$control_network"
+      if [ "$needs_upstream" = true ]; then
+        ensure_target_network "$container" "$project" "$service" "$CPA_UPSTREAM_NETWORK"
+      fi
+      wait_target_container "$container"
+      require_service_current "$container" "$service" "$CPA_CONTROL_IMAGE"
     done
     ;;
   up-notifications)
     require_active_owner
-    compose --profile external-effects up -d --wait --no-deps notifications
-    require_service_current "${CPA_INSTANCE_NAME:-codex-cpa}-notifications" notifications "$CPA_CONTROL_IMAGE"
+    instance=${CPA_INSTANCE_NAME:-codex-cpa}
+    project=${CPA_COMPOSE_PROJECT_NAME:-codex-cpa}
+    control_network="${project}_control"
+    container="$instance-notifications"
+    compose --profile external-effects up -d --no-deps notifications
+    ensure_target_network "$container" "$project" notifications "$control_network"
+    ensure_target_network "$container" "$project" notifications "$CPA_UPSTREAM_NETWORK"
+    wait_target_container "$container"
+    require_service_current "$container" notifications "$CPA_CONTROL_IMAGE"
     ;;
   smoke)
     smoke

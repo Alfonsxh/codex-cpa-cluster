@@ -416,7 +416,17 @@ container_config_hash() {
 
 service_config_hash() {
   service=$1
-  output=$(compose config --hash "$service") || {
+  case "$service" in
+    usage-collector|quota|account-failover|log-maintenance)
+      output=$(compose --profile writers config --hash "$service")
+      ;;
+    notifications)
+      output=$(compose --profile external-effects config --hash "$service")
+      ;;
+    *)
+      output=$(compose config --hash "$service")
+      ;;
+  esac || {
     echo "unable to calculate target Compose hash: service=$service" >&2
     return 1
   }

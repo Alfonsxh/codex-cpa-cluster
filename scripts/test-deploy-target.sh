@@ -373,11 +373,31 @@ for service in quota usage-collector account-failover log-maintenance; do
       echo "writer rollout did not start $service independently with --no-deps" >&2
       exit 1
     }
+  grep -E "compose .*--profile writers config --hash $service$" \
+    "$COMMAND_LOG" >/dev/null || {
+      echo "writer rollout did not calculate the $service hash with its profile enabled" >&2
+      exit 1
+    }
 done
 if grep -E 'compose .*--profile writers up .*--no-deps .*usage-collector .*quota' \
   "$COMMAND_LOG" >/dev/null; then
   echo "writer rollout started multiple services concurrently" >&2
   exit 1
 fi
+
+new_fixture notification-profile
+write_env "$DEPLOY_ROOT"
+: >"$COMMAND_LOG"
+run_action ordinary up-notifications >/dev/null
+grep -E 'compose .*--profile external-effects up .*--no-deps notifications$' \
+  "$COMMAND_LOG" >/dev/null || {
+    echo "notification rollout did not start independently with its profile enabled" >&2
+    exit 1
+  }
+grep -E 'compose .*--profile external-effects config --hash notifications$' \
+  "$COMMAND_LOG" >/dev/null || {
+    echo "notification rollout did not calculate its hash with its profile enabled" >&2
+    exit 1
+  }
 
 printf '%s\n' 'Go target deployment contract tests passed'

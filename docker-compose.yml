@@ -1,4 +1,4 @@
-name: ${V2_COMPOSE_PROJECT_NAME:-cliproxy}
+name: ${CPA_COMPOSE_PROJECT_NAME:-codex-cpa}
 
 x-json-logging: &json-logging
   driver: json-file
@@ -7,13 +7,13 @@ x-json-logging: &json-logging
     max-file: "3"
 
 x-control-service: &control-service
-  image: ${V2_CONTROL_IMAGE:?V2_CONTROL_IMAGE is required}
+  image: ${CPA_CONTROL_IMAGE:?CPA_CONTROL_IMAGE is required}
   restart: unless-stopped
   logging: *json-logging
   environment:
-    CLIPROXY_ROOT: ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
+    CLIPROXY_ROOT: ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
   volumes:
-    - ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}:${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
+    - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}:${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
 
 x-worker-health: &worker-health
   interval: 15s
@@ -22,31 +22,9 @@ x-worker-health: &worker-health
   start_period: 20s
 
 services:
-  docker-read-proxy:
-    image: ${V2_CONTROL_IMAGE:?V2_CONTROL_IMAGE is required}
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-docker-read-proxy
-    restart: unless-stopped
-    logging: *json-logging
-    command:
-      - /usr/local/bin/cpa-docker-read-proxy
-      - --listen-unix=/var/run/cpa-docker-read/docker.sock
-      - --upstream-unix=/var/run/docker-host.sock
-      - --compose-project=${V2_LIVE_COMPOSE_PROJECT:?V2_LIVE_COMPOSE_PROJECT is required}
-    volumes:
-      - ${V2_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker-host.sock:ro
-      - docker-read-socket:/var/run/cpa-docker-read
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/cpa-docker-read-proxy", "--health", "--listen-unix=/var/run/cpa-docker-read/docker.sock"]
-      interval: 10s
-      timeout: 5s
-      retries: 4
-      start_period: 10s
-    networks:
-      - control
-
   gateway-blue:
-    image: ${V2_GATEWAY_IMAGE:?V2_GATEWAY_IMAGE is required}
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-gateway-blue
+    image: ${CPA_GATEWAY_IMAGE:?CPA_GATEWAY_IMAGE is required}
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-gateway-blue
     restart: unless-stopped
     logging: *json-logging
     group_add:
@@ -55,13 +33,13 @@ services:
       - --snapshot-dir=/var/run/cliproxy-snapshots
       - --access-log=/var/log/cliproxy/access.tsv
     volumes:
-      - ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}/state/gateway:/var/run/cliproxy-snapshots:ro
-      - ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}/logs/gateway:/var/log/cliproxy
+      - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}/state/gateway:/var/run/cliproxy-snapshots:ro
+      - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}/logs/gateway:/var/log/cliproxy
     expose:
       - "8317"
       - "8319"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8317/__health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8319/__internal/ready"]
       interval: 15s
       timeout: 5s
       retries: 4
@@ -70,8 +48,8 @@ services:
       - upstream
 
   gateway-green:
-    image: ${V2_GATEWAY_IMAGE:?V2_GATEWAY_IMAGE is required}
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-gateway-green
+    image: ${CPA_GATEWAY_IMAGE:?CPA_GATEWAY_IMAGE is required}
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-gateway-green
     restart: unless-stopped
     logging: *json-logging
     group_add:
@@ -80,13 +58,13 @@ services:
       - --snapshot-dir=/var/run/cliproxy-snapshots
       - --access-log=/var/log/cliproxy/access.tsv
     volumes:
-      - ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}/state/gateway:/var/run/cliproxy-snapshots:ro
-      - ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}/logs/gateway:/var/log/cliproxy
+      - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}/state/gateway:/var/run/cliproxy-snapshots:ro
+      - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}/logs/gateway:/var/log/cliproxy
     expose:
       - "8317"
       - "8319"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8317/__health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8319/__internal/ready"]
       interval: 15s
       timeout: 5s
       retries: 4
@@ -96,24 +74,22 @@ services:
 
   admin:
     <<: *control-service
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-admin
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-admin
     command:
       - /usr/local/bin/cpa-admin
-      - --runtime-owner=${V2_RUNTIME_OWNER:-go-v2}
-      - --runtime-read-only=${V2_RUNTIME_READ_ONLY:-true}
+      - --runtime-owner=${CPA_RUNTIME_OWNER:-codex-cpa}
       - --gateway-probe-url=http://edge:8319
-      - --compose-project=${V2_LIVE_COMPOSE_PROJECT:?V2_LIVE_COMPOSE_PROJECT is required}
-      - --docker-network-name=${V2_UPSTREAM_NETWORK:?V2_UPSTREAM_NETWORK is required}
-      - --instance-name=${V2_LIVE_INSTANCE_NAME:?V2_LIVE_INSTANCE_NAME is required}
+      - --compose-project=${CPA_ACCOUNT_COMPOSE_PROJECT:?CPA_ACCOUNT_COMPOSE_PROJECT is required}
+      - --docker-network-name=${CPA_UPSTREAM_NETWORK:?CPA_UPSTREAM_NETWORK is required}
+      - --instance-name=${CPA_ACCOUNT_INSTANCE_NAME:?CPA_ACCOUNT_INSTANCE_NAME is required}
     expose:
       - "8318"
     environment:
-      CLIPROXY_ROOT: ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
-      DOCKER_HOST: ${V2_ADMIN_DOCKER_HOST:-unix:///var/run/cpa-docker-read/docker.sock}
+      CLIPROXY_ROOT: ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
+      DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
-      - ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}:${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
-      - docker-read-socket:/var/run/cpa-docker-read
-      - ${V2_ADMIN_DOCKER_SOCKET_PATH:-/dev/null}:/var/run/docker-direct.sock
+      - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}:${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
+      - ${CPA_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8318/healthz"]
       interval: 15s
@@ -121,8 +97,6 @@ services:
       retries: 4
       start_period: 20s
     depends_on:
-      docker-read-proxy:
-        condition: service_healthy
       gateway-blue:
         condition: service_healthy
       gateway-green:
@@ -132,8 +106,8 @@ services:
       - upstream
 
   web:
-    image: ${V2_WEB_IMAGE:?V2_WEB_IMAGE is required}
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-web
+    image: ${CPA_WEB_IMAGE:?CPA_WEB_IMAGE is required}
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-web
     restart: unless-stopped
     logging: *json-logging
     command:
@@ -153,8 +127,8 @@ services:
       - control
 
   edge:
-    image: ${V2_EDGE_IMAGE:?V2_EDGE_IMAGE is required}
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-edge
+    image: ${CPA_EDGE_IMAGE:?CPA_EDGE_IMAGE is required}
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-edge
     restart: unless-stopped
     logging: *json-logging
     command:
@@ -165,10 +139,10 @@ services:
       - --green-public-target=http://gateway-green:8317
       - --green-internal-target=http://gateway-green:8319
     ports:
-      - "${V2_PUBLIC_BIND_ADDRESS:-127.0.0.1}:${V2_PUBLIC_PORT:?V2_PUBLIC_PORT is required}:8317"
-      - "127.0.0.1:${V2_INTERNAL_PORT:?V2_INTERNAL_PORT is required}:8319"
+      - "${CPA_PUBLIC_BIND_ADDRESS:-127.0.0.1}:${CPA_PUBLIC_PORT:?CPA_PUBLIC_PORT is required}:8317"
+      - "127.0.0.1:${CPA_INTERNAL_PORT:?CPA_INTERNAL_PORT is required}:8319"
     volumes:
-      - ${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}/state/edge:/var/run/cliproxy-edge:ro
+      - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}/state/edge:/var/run/cliproxy-edge:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8317/__health"]
       interval: 15s
@@ -188,16 +162,16 @@ services:
   usage-collector:
     <<: *control-service
     profiles: ["writers"]
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-usage-collector
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-usage-collector
     command:
       - /usr/local/bin/cpa-collector
-      - --runtime-owner=${V2_RUNTIME_OWNER:-go-v2}
+      - --runtime-owner=${CPA_RUNTIME_OWNER:-codex-cpa}
     healthcheck:
       <<: *worker-health
       test:
         - CMD
         - /usr/local/bin/cpa-collector
-        - --root=${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
+        - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
     depends_on:
       admin:
@@ -209,16 +183,16 @@ services:
   quota:
     <<: *control-service
     profiles: ["writers"]
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-quota
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-quota
     command:
       - /usr/local/bin/cpa-quota
-      - --runtime-owner=${V2_RUNTIME_OWNER:-go-v2}
+      - --runtime-owner=${CPA_RUNTIME_OWNER:-codex-cpa}
     healthcheck:
       <<: *worker-health
       test:
         - CMD
         - /usr/local/bin/cpa-quota
-        - --root=${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
+        - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
     depends_on:
       admin:
@@ -230,17 +204,17 @@ services:
   account-failover:
     <<: *control-service
     profiles: ["writers"]
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-account-failover
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-account-failover
     command:
       - /usr/local/bin/cpa-failover
-      - --runtime-owner=${V2_RUNTIME_OWNER:-go-v2}
+      - --runtime-owner=${CPA_RUNTIME_OWNER:-codex-cpa}
       - --gateway-probe-url=http://edge:8319
     healthcheck:
       <<: *worker-health
       test:
         - CMD
         - /usr/local/bin/cpa-failover
-        - --root=${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
+        - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
     depends_on:
       edge:
@@ -252,16 +226,16 @@ services:
   log-maintenance:
     <<: *control-service
     profiles: ["writers"]
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-log-maintenance
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-log-maintenance
     command:
       - /usr/local/bin/cpa-log-maintenance
-      - --runtime-owner=${V2_RUNTIME_OWNER:-go-v2}
+      - --runtime-owner=${CPA_RUNTIME_OWNER:-codex-cpa}
     healthcheck:
       <<: *worker-health
       test:
         - CMD
         - /usr/local/bin/cpa-log-maintenance
-        - --root=${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
+        - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
     depends_on:
       admin:
@@ -272,16 +246,16 @@ services:
   notifications:
     <<: *control-service
     profiles: ["external-effects"]
-    container_name: ${V2_INSTANCE_NAME:-cliproxy}-notifications
+    container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-notifications
     command:
       - /usr/local/bin/cpa-notifications
-      - --runtime-owner=${V2_RUNTIME_OWNER:-go-v2}
+      - --runtime-owner=${CPA_RUNTIME_OWNER:-codex-cpa}
     healthcheck:
       <<: *worker-health
       test:
         - CMD
         - /usr/local/bin/cpa-notifications
-        - --root=${V2_DEPLOY_ROOT:?V2_DEPLOY_ROOT is required}
+        - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
     depends_on:
       admin:
@@ -298,7 +272,4 @@ networks:
     driver: bridge
   upstream:
     external: true
-    name: ${V2_UPSTREAM_NETWORK:?V2_UPSTREAM_NETWORK is required}
-
-volumes:
-  docker-read-socket:
+    name: ${CPA_UPSTREAM_NETWORK:?CPA_UPSTREAM_NETWORK is required}

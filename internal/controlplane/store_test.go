@@ -69,7 +69,7 @@ func TestOpenExistingDefersInitializationUntilExplicitlyOwned(t *testing.T) {
 	if schemaMigrations != 0 {
 		t.Fatal("OpenExisting initialized schema before ownership")
 	}
-	if _, err := store.TakeLease(ctx, "runtime-writer", "go-v2", 30*time.Second); err != nil {
+	if _, err := store.TakeLease(ctx, "runtime-writer", "codex-cpa", 30*time.Second); err != nil {
 		t.Fatalf("TakeLease before initialization: %v", err)
 	}
 	if err := store.InitializeExisting(ctx); err != nil {
@@ -99,11 +99,11 @@ func TestInitializeExistingRejectsReleasedWorkerGeneration(t *testing.T) {
 		t.Fatalf("OpenExisting: %v", err)
 	}
 	defer store.Close()
-	runtimeLease, err := store.TakeLease(ctx, "runtime-writer", "go-v2", 30*time.Second)
+	runtimeLease, err := store.TakeLease(ctx, "runtime-writer", "codex-cpa", 30*time.Second)
 	if err != nil {
 		t.Fatalf("take runtime lease: %v", err)
 	}
-	workerLease, err := store.TakeLease(ctx, "admin", "go-v2:admin", 30*time.Second)
+	workerLease, err := store.TakeLease(ctx, "admin", "codex-cpa:admin", 30*time.Second)
 	if err != nil {
 		t.Fatalf("take worker lease: %v", err)
 	}

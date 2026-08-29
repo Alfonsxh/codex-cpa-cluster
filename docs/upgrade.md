@@ -6,12 +6,14 @@
 
 - `state/control-plane.sqlite3`
 - `state/usage.sqlite3`
+- 当前发布包中的 `docker-compose.yml` 与 `release-manifest.json`
 - 匹配的 `secrets/control-plane.key`
+- `state/gateway/`、`state/edge/active-gateway.conf` 与可写的 `logs/gateway/`
 - 当前账号 OAuth 与运行配置
 
-发布工具不会从退役控制文件初始化目标，也不会替换现有 OAuth。数据库 Schema 新于候选镜像支持范围时必须停止，不得降级数据文件。
+发布工具不会从退役控制文件初始化目标，也不会替换现有 OAuth。数据库 Schema 新于目标镜像支持范围时必须停止，不得降级数据文件。
 
-## 发布候选
+## 发布版本
 
 操作者工作站执行：
 
@@ -29,28 +31,29 @@ make package VERSION=v2.0.0
 
 1. 记录升级前数据库 `quick_check`、Schema、关键行数、活动槽和真实请求结果。
 2. 生成两份 SQLite、匹配主密钥、OAuth 和账号配置的可恢复备份。
-3. 使用仓库外 Test 环境文件执行 `config`、`pull` 和 `verify-images`。
-4. 确认旧 Writer 已停止后，完成受控所有权激活。
-5. 依次执行 `up-core`、`up-writers` 和 `smoke`；通知另行批准。
+3. 将同一发布包的 `docker-compose.yml` 与 `release-manifest.json` 放入 Test 目标目录，再使用仓库外 Test `target.env` 执行 `config`、`pull` 和 `verify-images`；只接受发布描述中的源码摘要标签，并拒绝不匹配的 Compose 副本、符号链接运行目录、缺失活动槽或不可判定的 Compose Hash。
+4. 确认既有 Writer 已停止后，完成受控所有权激活。
+5. 执行 `up-core`：更新非活动 Gateway、切换新请求、等待旧槽排空，再更新旧槽；随后执行 `up-writers` 和 `smoke`。通知另行批准。
 6. 验证 Admin、Portal、使用中心、浏览器矩阵和同一个真实 API Key 的模型、非流式 Responses、SSE。
 7. 对比升级前后数据库事实，确认用量只增不减且 API Key/路由未被重建。
 
 ```sh
-V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh pull
-V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh verify-images
-V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh activate
-V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-core
-V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-writers
-V2_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh smoke
+CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh pull
+CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh verify-images
+CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh activate
+CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-core
+CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-writers
+CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh smoke
 ```
 
 ## 最小影响原则
 
 - Web 或 Admin 更新不要求重建上游账号容器。
-- Gateway 候选先在非活动槽健康，再由稳定 Edge 只切换新请求。
+- 新 Gateway 先在非活动槽健康，再由稳定 Edge 只切换新请求。
 - 已建立 SSE 留在原槽排空，不重放。
 - Edge 持有公开端口；重建 Edge 必须有明确维护窗口和端口验证。
 - Writer 只有一个有效 Generation，所有权切换后旧进程失败关闭。
+- Edge 镜像或 Compose 配置变化不是普通蓝绿更新，必须显式确认维护窗口；没有确认时部署在重建前失败关闭。
 
 ## 回滚
 

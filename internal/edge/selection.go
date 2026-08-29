@@ -138,7 +138,7 @@ func (selector *Selector) Refresh() (bool, error) {
 		return false, nil
 	}
 	selector.slot.Store(slot)
-	selector.logger.Info("Go v2 Edge activated Gateway slot", zap.String("slot", string(slot)))
+	selector.logger.Info("Go Edge activated Gateway slot", zap.String("slot", string(slot)))
 	return true, nil
 }
 
@@ -154,7 +154,7 @@ func (selector *Selector) Run(ctx context.Context) error {
 	refresh := func() {
 		if _, err := selector.Refresh(); err != nil {
 			selector.logger.Warn(
-				"Go v2 Edge rejected active Gateway selection; keeping previous slot",
+				"Go Edge rejected active Gateway selection; keeping previous slot",
 				zap.String("slot", string(selector.Slot())),
 				zap.Error(err),
 			)

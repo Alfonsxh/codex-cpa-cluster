@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
-PROJECT=${V2_FAULT_PROJECT:-codex-cpa-v2-fault-test}
-PUBLIC_PORT=${V2_FAULT_PUBLIC_PORT:-29317}
-INTERNAL_PORT=${V2_FAULT_INTERNAL_PORT:-29319}
+PROJECT=${FAULT_TEST_PROJECT:-codex-cpa-fault-test}
+PUBLIC_PORT=${FAULT_TEST_PUBLIC_PORT:-29317}
+INTERNAL_PORT=${FAULT_TEST_INTERNAL_PORT:-29319}
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TEMP_DIR=$(mktemp -d)
 GATEWAY_FIXTURES="$TEMP_DIR/gateway"
@@ -13,20 +13,20 @@ INTERNAL_URL="http://127.0.0.1:${INTERNAL_PORT}"
 
 case "$PROJECT" in
   *[!A-Za-z0-9_.-]*|'')
-    echo "invalid v2 fault Test Compose project name" >&2
+    echo "invalid fault Test Compose project name" >&2
     exit 1
     ;;
 esac
 
 compose() {
-  V2_TEST_PUBLIC_PORT="$PUBLIC_PORT" \
-  V2_TEST_INTERNAL_PORT="$INTERNAL_PORT" \
-  V2_TEST_GATEWAY_FIXTURE_DIR="$GATEWAY_FIXTURES" \
-  V2_TEST_EDGE_FIXTURE_DIR="$EDGE_FIXTURES" \
+  TEST_PUBLIC_PORT="$PUBLIC_PORT" \
+  TEST_INTERNAL_PORT="$INTERNAL_PORT" \
+  TEST_GATEWAY_FIXTURE_DIR="$GATEWAY_FIXTURES" \
+  TEST_EDGE_FIXTURE_DIR="$EDGE_FIXTURES" \
     docker compose \
       -p "$PROJECT" \
       --project-directory "$ROOT_DIR" \
-      -f "$ROOT_DIR/docker-compose.v2-test.yml" \
+      -f "$ROOT_DIR/docker-compose.test.yml" \
       "$@"
 }
 
@@ -36,8 +36,8 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-cp -R "$ROOT_DIR/testdata/v2/gateway" "$GATEWAY_FIXTURES"
-cp -R "$ROOT_DIR/testdata/v2/edge" "$EDGE_FIXTURES"
+cp -R "$ROOT_DIR/testdata/runtime/gateway" "$GATEWAY_FIXTURES"
+cp -R "$ROOT_DIR/testdata/runtime/edge" "$EDGE_FIXTURES"
 cp "$GATEWAY_FIXTURES/auth-snapshot.json" "$TEMP_DIR/auth-snapshot.valid.json"
 
 compose up -d --build --wait
@@ -131,4 +131,4 @@ grep -F 'event: response.completed' "$TEMP_DIR/drain-stream.txt" >/dev/null
 grep -F 'data: [DONE]' "$TEMP_DIR/drain-stream.txt" >/dev/null
 wait_for_status 200
 
-printf '%s\n' 'Go v2 isolated fault, fencing, recovery, and stream-drain test passed'
+printf '%s\n' 'Go isolated fault, fencing, recovery, and stream-drain test passed'

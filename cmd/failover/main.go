@@ -101,7 +101,7 @@ func newCommand() *cobra.Command {
 	flags.Duration("snapshot-timeout", 8*time.Second, "maximum auth snapshot activation wait")
 	flags.Bool("once", false, "force one complete failover check and exit")
 	flags.Bool("health", false, "read the failover heartbeat without mutating the target")
-	flags.String("runtime-owner", "go-v2", "explicitly activated runtime ownership label")
+	flags.String("runtime-owner", "codex-cpa", "explicitly activated runtime ownership label")
 	flags.Duration("lease-ttl", 30*time.Second, "runtime and worker ownership lease lifetime")
 	if err := settings.BindPFlags(flags); err != nil {
 		panic(err)
@@ -198,12 +198,12 @@ func run(config appConfig) error {
 		if _, err := workerScheduler.AddFunc(scheduler.Every(config.SchedulerInterval), func() { runRound(false) }); err != nil {
 			return fmt.Errorf("schedule account failover: %w", err)
 		}
-		logger.Info("Go v2 account failover controller started", zap.Duration("scheduler_interval", config.SchedulerInterval))
+		logger.Info("Go account failover controller started", zap.Duration("scheduler_interval", config.SchedulerInterval))
 		workerScheduler.Start()
 		<-runContext.Done()
 		waitForJobs := workerScheduler.Stop()
 		<-waitForJobs.Done()
-		logger.Info("Go v2 account failover controller stopped")
+		logger.Info("Go account failover controller stopped")
 		return nil
 	})
 }

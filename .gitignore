@@ -1,7 +1,7 @@
 *.sqlite3
 
 .env
-v2-target.env
+target.env
 dist/
 node_modules/
 frontend/playwright-report/

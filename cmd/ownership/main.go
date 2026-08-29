@@ -113,7 +113,7 @@ func newActivateCommand(settings *viper.Viper, output io.Writer) *cobra.Command 
 	var expectedGeneration int64
 	var confirmation string
 	var allowEmpty bool
-	var legacyBootstrapConfirmation string
+	var writersStoppedConfirmation string
 	command := &cobra.Command{
 		Use:   "activate",
 		Short: "Activate runtime ownership after the previous runtime is stopped",
@@ -121,19 +121,19 @@ func newActivateCommand(settings *viper.Viper, output io.Writer) *cobra.Command 
 		RunE: func(command *cobra.Command, _ []string) error {
 			return runActivate(command.Context(), output, commandConfig{
 				Root: settings.GetString("root"), TTL: settings.GetDuration("ttl"),
-			}, owner, expectedOwner, expectedGeneration, confirmation, allowEmpty, legacyBootstrapConfirmation)
+			}, owner, expectedOwner, expectedGeneration, confirmation, allowEmpty, writersStoppedConfirmation)
 		},
 	}
-	command.Flags().StringVar(&owner, "owner", "go-v2", "runtime owner label")
+	command.Flags().StringVar(&owner, "owner", "codex-cpa", "runtime owner label")
 	command.Flags().StringVar(&expectedOwner, "expected-owner", "", "required previous owner when replacing an expired lease")
 	command.Flags().Int64Var(&expectedGeneration, "expected-generation", 0, "required previous generation when replacing an expired lease")
 	command.Flags().StringVar(&confirmation, "confirm-owner", "", "repeat the new owner label to confirm activation")
 	command.Flags().BoolVar(&allowEmpty, "allow-empty-bootstrap", false, "allow first ownership record only for an isolated Test root")
 	command.Flags().StringVar(
-		&legacyBootstrapConfirmation,
-		"confirm-legacy-bootstrap",
+		&writersStoppedConfirmation,
+		"confirm-existing-writers-stopped",
 		"",
-		"for a first live cutover, confirm as legacy-writers-stopped:<absolute-root>",
+		"for a first controlled cutover, confirm as writers-stopped:<absolute-root>",
 	)
 	return command
 }
@@ -222,7 +222,7 @@ func runActivate(
 	expectedGeneration int64,
 	confirmation string,
 	allowEmpty bool,
-	legacyBootstrapConfirmation string,
+	writersStoppedConfirmation string,
 ) error {
 	owner = strings.TrimSpace(owner)
 	expectedOwner = strings.TrimSpace(expectedOwner)
@@ -252,14 +252,14 @@ func runActivate(
 		if err != nil {
 			return fmt.Errorf("resolve ownership root: %w", err)
 		}
-		expectedLegacyConfirmation := "legacy-writers-stopped:" + filepath.Clean(cleanRoot)
-		if allowEmpty && legacyBootstrapConfirmation != "" {
-			return errors.New("isolated and legacy ownership bootstrap confirmations are mutually exclusive")
+		expectedWritersStoppedConfirmation := "writers-stopped:" + filepath.Clean(cleanRoot)
+		if allowEmpty && writersStoppedConfirmation != "" {
+			return errors.New("isolated and controlled ownership bootstrap confirmations are mutually exclusive")
 		}
-		if !allowEmpty && legacyBootstrapConfirmation != expectedLegacyConfirmation {
+		if !allowEmpty && writersStoppedConfirmation != expectedWritersStoppedConfirmation {
 			return fmt.Errorf(
-				"empty ownership bootstrap requires --allow-empty-bootstrap on an isolated Test root or --confirm-legacy-bootstrap %q after every legacy writer has stopped",
-				expectedLegacyConfirmation,
+				"empty ownership bootstrap requires --allow-empty-bootstrap on an isolated Test root or --confirm-existing-writers-stopped %q after every existing writer has stopped",
+				expectedWritersStoppedConfirmation,
 			)
 		}
 		if expectedOwner != "" {
@@ -269,7 +269,7 @@ func runActivate(
 			return errors.New("--expected-generation must be zero when no prior ownership lease exists")
 		}
 	} else {
-		if allowEmpty || legacyBootstrapConfirmation != "" {
+		if allowEmpty || writersStoppedConfirmation != "" {
 			return errors.New("bootstrap confirmation flags require an empty ownership history")
 		}
 		if current.ExpiresAt > time.Now().Unix() {

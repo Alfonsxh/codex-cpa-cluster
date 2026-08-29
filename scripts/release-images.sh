@@ -71,18 +71,19 @@ build_component() {
   "$@"
 }
 
-build_component control v2/Dockerfile control
-build_component web v2/Dockerfile web
-build_component gateway v2/Dockerfile gateway
-build_component edge v2/Dockerfile edge
+build_component control Dockerfile control
+build_component web Dockerfile web
+build_component gateway Dockerfile gateway
+build_component edge Dockerfile edge
 docker buildx build \
   --platform "$PLATFORM" \
   --load \
+  --target release \
   --build-arg "RELEASE_VERSION=$VERSION" \
   --build-arg "RELEASE_REVISION=$REVISION" \
   -t "codex-cpa-release:build-$SAFE_VERSION" \
-  -f "$ROOT_DIR/release/Dockerfile" \
-  "$ROOT_DIR/release"
+  -f "$ROOT_DIR/Dockerfile" \
+  "$ROOT_DIR"
 
 [ "$ACTION" = publish ] || exit 0
 

@@ -1,5 +1,5 @@
 const configurationSections = [
-  { to: "/configuration", index: "01", label: "运行配置", description: "路由、配额与部署参数" },
+  { to: "/configuration", index: "01", label: "运行配置", description: "路由、配额与账号参数" },
   { to: "/settings", index: "02", label: "通用设置", description: "品牌、身份与安全" },
   { to: "/notifications", index: "03", label: "通知设置", description: "企业微信与预警规则" }
 ] as const;

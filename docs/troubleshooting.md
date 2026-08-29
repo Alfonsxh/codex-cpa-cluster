@@ -3,10 +3,10 @@
 所有命令都必须使用当前操作者提供的 Test/Production 私有环境文件。先确认目标，再执行只读诊断；不要从旧归档或 Git 历史推断主机和目录。
 
 ```sh
-V2_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh config
-V2_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh ownership-status
-V2_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh ps
-V2_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh smoke
+CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh config
+CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh ownership-status
+CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh ps
+CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh smoke
 ```
 
 查看 Go 服务日志：
@@ -55,16 +55,23 @@ curl --noproxy '*' -I http://127.0.0.1:<public-port>/portal/assets/codex-cpa-clu
 
 ## 所有权激活失败
 
-如果已有活动所有者，先查明并停止旧 Writer，等待或显式完成受控所有权交接。空所有权历史只允许：
+如果已有活动所有者，先查明并停止既有 Writer，等待或显式完成受控所有权交接。空所有权历史只允许：
 
-- 隔离测试：`V2_BOOTSTRAP_MODE=isolated-test`。
-- 经批准的正式切换：`V2_BOOTSTRAP_MODE=legacy-cutover`，并精确确认旧 Writer 已停止的目标目录。
+- 隔离测试：`CPA_BOOTSTRAP_MODE=isolated-test`。
+- 经批准的正式切换：`CPA_BOOTSTRAP_MODE=controlled-cutover`，并用 `CPA_CONFIRM_WRITERS_STOPPED` 精确重复已停止全部既有 Writer 的目标目录。
 
 不要删除所有权记录或直接修改 SQLite 绕过 Fencing。
 
 ## 发布或镜像校验失败
 
 - 四个镜像必须来自同一发布 Manifest。
-- `io.codex-cpa.component` 与 `io.codex-cpa.component-digest` 必须匹配。
+- 目标引用必须是发布描述中的 `:sha256-<源码摘要>` 标签。
+- `io.codex-cpa.component`、`io.codex-cpa.component-digest` 与 `io.codex-cpa.source-digest` 必须匹配。
 - 移动标签、容器启动时间和本地 image ID 不能代替组件源码摘要。
 - Registry 凭据只存在于操作者与目标机 Docker Credential Store，不打印到日志。
+
+## Gateway 排空或 Edge 维护确认失败
+
+- 排空超时不会终止旧 SSE；旧槽保持运行。修复异常长请求后重新执行 `up-core`，脚本仍会先检查该槽 `/__stats`。
+- Edge 镜像或 Compose Hash 变化时，`verify-images` 会在重建前失败。只有已批准维护窗口时，才设置 `CPA_ALLOW_EDGE_RECREATE=true`，并用 `CPA_CONFIRM_EDGE_MAINTENANCE` 精确重复 `CPA_DEPLOY_ROOT`。
+- `target.env` 是正式控制面唯一配置来源；不要把配置中心的 `state/compose.env` 改造成第二份控制面环境文件。

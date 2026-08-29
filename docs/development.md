@@ -43,11 +43,11 @@ npm --prefix frontend run test:e2e
 ## 隔离数据面
 
 ```sh
-make v2-test-build
-make v2-test-up
-make v2-test-smoke
-make v2-test-faults
-make v2-test-down
+make test-build
+make test-up
+make test-smoke
+make test-faults
+make test-down
 ```
 
 故障演练覆盖上游不可用、无效 Key、损坏鉴权快照、Edge 非法槽位、蓝绿切换和 SSE 排空。

@@ -68,6 +68,11 @@ func TestArchiveVerificationRejectsRemovedRuntimePaths(t *testing.T) {
 		"gateway/request_gate.lua",
 		"requirements-test.txt",
 		"admin/index.html",
+		"cmd/docker-read-" + "proxy/main.go",
+		"internal/dockerread" + "proxy/server.go",
+		"release/Docker" + "file",
+		"testdata/v" + "2/fixture.json",
+		"v" + "2/Dockerfile",
 	} {
 		t.Run(path, func(t *testing.T) {
 			archive := filepath.Join(t.TempDir(), "removed-runtime.tar.gz")
@@ -93,6 +98,44 @@ func TestArchiveVerificationRejectsRemovedRuntimePaths(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := verifyArchive(archive); err == nil || !strings.Contains(err.Error(), "removed runtime path") {
+				t.Fatalf("verifyArchive error = %v", err)
+			}
+		})
+	}
+}
+
+func TestArchiveVerificationRejectsGeneratedArtifacts(t *testing.T) {
+	for _, path := range []string{
+		"frontend/dist/admin/index.html",
+		"frontend/node_modules/package/index.js",
+		"frontend/coverage/index.html",
+		"frontend/playwright-report/index.html",
+		"frontend/test-results/.last-run.json",
+	} {
+		t.Run(path, func(t *testing.T) {
+			archive := filepath.Join(t.TempDir(), "generated-artifact.tar.gz")
+			file, err := os.Create(archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			compressed := gzip.NewWriter(file)
+			writer := tar.NewWriter(compressed)
+			if err := writer.WriteHeader(&tar.Header{Name: path, Mode: 0o600, Size: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.Write([]byte("x")); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := compressed.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := verifyArchive(archive); err == nil || !strings.Contains(err.Error(), "generated test or build artifact") {
 				t.Fatalf("verifyArchive error = %v", err)
 			}
 		})

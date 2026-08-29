@@ -45,7 +45,7 @@ func newCommand() *cobra.Command {
 	settings.AutomaticEnv()
 	command := &cobra.Command{
 		Use:           "cpa-web",
-		Short:         "Run the Go v2 React static Web and Admin proxy",
+		Short:         "Run the Go React static Web and Admin proxy",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PreRunE: func(command *cobra.Command, _ []string) error {
@@ -112,7 +112,7 @@ func run(config appConfig) error {
 	defer stop()
 	errorChannel := make(chan error, 1)
 	go func() {
-		logger.Info("Go v2 Web listener ready", zap.String("address", config.Address))
+		logger.Info("Go Web listener ready", zap.String("address", config.Address))
 		err := httpServer.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil

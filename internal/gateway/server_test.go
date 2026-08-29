@@ -42,6 +42,10 @@ func (recorder *closeNotifyRecorder) CloseNotify() <-chan bool {
 func TestHTTPGatewayPublicOrderingAndCompatibleErrors(t *testing.T) {
 	now := time.Unix(1000, 0)
 	emptyGateway := newTestHTTPGateway(t, NewEngine(), now, nil, nil)
+	notReady := performRequest(emptyGateway.InternalHandler(), http.MethodGet, "/__internal/ready", "")
+	if notReady.Code != http.StatusServiceUnavailable || notReady.Header().Get("Retry-After") != "1" {
+		t.Fatalf("empty Gateway readiness = status %d retry %q", notReady.Code, notReady.Header().Get("Retry-After"))
+	}
 
 	unknown := performRequest(emptyGateway.PublicHandler(), http.MethodGet, "/admin/secrets", "")
 	if unknown.Code != http.StatusNotFound {
@@ -75,6 +79,10 @@ func TestHTTPGatewayPublicOrderingAndCompatibleErrors(t *testing.T) {
 	)
 	if publicInternal.Code != http.StatusNotFound {
 		t.Fatalf("public internal probe status = %d, want 404", publicInternal.Code)
+	}
+	publicReadiness := performRequest(gateway.PublicHandler(), http.MethodGet, "/__internal/ready", "")
+	if publicReadiness.Code != http.StatusNotFound {
+		t.Fatalf("public readiness status = %d, want 404", publicReadiness.Code)
 	}
 }
 
@@ -162,6 +170,10 @@ func TestHTTPGatewayInternalProbeBypassesQuotaAndReportsStatus(t *testing.T) {
 		}, nil
 	})
 	gateway := newTestHTTPGateway(t, engine, now, transport, nil)
+	ready := performRequest(gateway.InternalHandler(), http.MethodGet, "/__internal/ready", "")
+	if ready.Code != http.StatusOK || strings.TrimSpace(ready.Body.String()) != "ready" {
+		t.Fatalf("Gateway readiness = status %d body %q", ready.Code, ready.Body.String())
+	}
 	probe := performRequest(
 		gateway.InternalHandler(),
 		http.MethodGet,

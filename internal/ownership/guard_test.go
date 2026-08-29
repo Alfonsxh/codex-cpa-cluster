@@ -15,7 +15,7 @@ func TestRunJoinsRuntimeTakesWorkerAndReleasesWorker(t *testing.T) {
 	store := &fakeLeaseStore{}
 	operationCalled := false
 	err := Run(context.Background(), store, Config{
-		RuntimeOwner: "go-v2", WorkerScope: "quota", WorkerOwner: "go-v2:test",
+		RuntimeOwner: "codex-cpa", WorkerScope: "quota", WorkerOwner: "codex-cpa:test",
 		TTL: 5 * time.Second, RenewInterval: time.Second,
 	}, func(context.Context, context.Context) error {
 		operationCalled = true
@@ -39,7 +39,7 @@ func TestRunCancelsOperationWhenHeartbeatLosesLease(t *testing.T) {
 	store := &fakeLeaseStore{renewError: controlplane.ErrLeaseLost}
 	started := time.Now()
 	err := Run(context.Background(), store, Config{
-		RuntimeOwner: "go-v2", WorkerScope: "collector", WorkerOwner: "go-v2:test",
+		RuntimeOwner: "codex-cpa", WorkerScope: "collector", WorkerOwner: "codex-cpa:test",
 		TTL: 5 * time.Second, RenewInterval: time.Second,
 	}, func(ctx context.Context, fence context.Context) error {
 		<-ctx.Done()
@@ -63,7 +63,7 @@ func TestRunDoesNotStartWithoutTransferredRuntimeOwnership(t *testing.T) {
 	store := &fakeLeaseStore{joinError: controlplane.ErrLeaseMissing}
 	called := false
 	err := Run(context.Background(), store, Config{
-		RuntimeOwner: "go-v2", WorkerScope: "notifications", WorkerOwner: "go-v2:test",
+		RuntimeOwner: "codex-cpa", WorkerScope: "notifications", WorkerOwner: "codex-cpa:test",
 		TTL: 5 * time.Second, RenewInterval: time.Second,
 	}, func(context.Context, context.Context) error {
 		called = true
@@ -84,7 +84,7 @@ func TestRunWithExistingStoreRequiresActivatedRuntimeBeforeOperation(t *testing.
 	if err := seed.Close(); err != nil {
 		t.Fatalf("close seed target: %v", err)
 	}
-	config, err := WorkerConfig("go-v2", "admin", 30*time.Second)
+	config, err := WorkerConfig("codex-cpa", "admin", 30*time.Second)
 	if err != nil {
 		t.Fatalf("WorkerConfig: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestRunWithExistingStoreRequiresActivatedRuntimeBeforeOperation(t *testing.
 	if err != nil {
 		t.Fatalf("open ownership activator: %v", err)
 	}
-	if _, err := activator.TakeLease(ctx, RuntimeScope, "go-v2", 30*time.Second); err != nil {
+	if _, err := activator.TakeLease(ctx, RuntimeScope, "codex-cpa", 30*time.Second); err != nil {
 		t.Fatalf("activate runtime ownership: %v", err)
 	}
 	if err := activator.Close(); err != nil {
@@ -157,7 +157,7 @@ func TestGoWorkerLeaseGroupTransfersAllScopesAndRejectsDuplicate(t *testing.T) {
 		t.Fatalf("open worker-group activator: %v", err)
 	}
 	runtimeLease, err := activator.TakeLease(
-		context.Background(), RuntimeScope, "go-v2", 5*time.Second,
+		context.Background(), RuntimeScope, "codex-cpa", 5*time.Second,
 	)
 	if err != nil {
 		t.Fatalf("activate worker-group runtime: %v", err)
@@ -174,7 +174,7 @@ func TestGoWorkerLeaseGroupTransfersAllScopesAndRejectsDuplicate(t *testing.T) {
 	results := make(chan error, len(workerScopes))
 	for _, scope := range workerScopes {
 		scope := scope
-		config, err := WorkerConfig("go-v2", scope, 5*time.Second)
+		config, err := WorkerConfig("codex-cpa", scope, 5*time.Second)
 		if err != nil {
 			t.Fatalf("worker config %s: %v", scope, err)
 		}
@@ -218,7 +218,7 @@ func TestGoWorkerLeaseGroupTransfersAllScopesAndRejectsDuplicate(t *testing.T) {
 	}
 
 	duplicateCalled := false
-	duplicateConfig, err := WorkerConfig("go-v2", "admin", 5*time.Second)
+	duplicateConfig, err := WorkerConfig("codex-cpa", "admin", 5*time.Second)
 	if err != nil {
 		cancelGroup()
 		t.Fatalf("duplicate worker config: %v", err)

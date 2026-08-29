@@ -86,7 +86,7 @@ func newCommand() *cobra.Command {
 	flags.Duration("max-health-age", 3*time.Minute, "maximum healthy heartbeat age")
 	flags.Bool("once", false, "evaluate one notification round and exit")
 	flags.Bool("health", false, "read notification health without mutating the target")
-	flags.String("runtime-owner", "go-v2", "explicitly activated runtime ownership label")
+	flags.String("runtime-owner", "codex-cpa", "explicitly activated runtime ownership label")
 	flags.Duration("lease-ttl", 30*time.Second, "runtime and worker ownership lease lifetime")
 	if err := settings.BindPFlags(flags); err != nil {
 		panic(err)
@@ -165,12 +165,12 @@ func run(config appConfig) error {
 		if runContext.Err() != nil {
 			return nil
 		}
-		logger.Info("Go v2 notification worker started", zap.Duration("interval", config.Interval))
+		logger.Info("Go notification worker started", zap.Duration("interval", config.Interval))
 		workerScheduler.Start()
 		<-runContext.Done()
 		waitForJobs := workerScheduler.Stop()
 		<-waitForJobs.Done()
-		logger.Info("Go v2 notification worker stopped")
+		logger.Info("Go notification worker stopped")
 		return nil
 	})
 }

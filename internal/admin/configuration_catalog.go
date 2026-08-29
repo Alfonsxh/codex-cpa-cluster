@@ -153,7 +153,7 @@ var configurationGroupDescriptions = map[string]string{
 	"企业微信通知": "配置定时额度报告、发送时区和阈值预警。",
 	"会话与采集":  "控制使用中心会话有效期与用量采集器吞吐。",
 	"账号供应":   "只影响之后创建的业务 CPA，现有账号保持原端口。",
-	"部署环境":   "保存宿主监听、端口、镜像和发布参数；变更等待明确的部署流程。",
+	"账号与发布":  "管理业务 CPA 的本机监听、镜像通道和应用版本提醒；正式控制面参数只来自 target.env。",
 }
 
 var configurationPresentationByKey = map[string]configurationPresentation{
@@ -222,13 +222,7 @@ var configurationPresentationByKey = map[string]configurationPresentation{
 	"collector.batch_size":                               {Group: "会话与采集", Description: "每次从单个 CPA 用量队列读取的最大事件数。"},
 	"accounts.port_start":                                {Group: "账号供应", Description: "只影响后续新建 CPA，现有账号端口保持不变。"},
 	"accounts.port_end":                                  {Group: "账号供应", Description: "只影响后续新建 CPA，必须不小于端口起点。"},
-	"accounts.listen_address":                            {Group: "部署环境", Description: "固定为宿主机回环地址；业务 CPA 只能由本机发布检查或 Docker 内网访问。"},
-	"runtime.cliproxy_image":                             {Group: "部署环境", Description: "作为更新通道；账号管理拉取后识别真实版本，验证通过才固定为不可变镜像。"},
-	"gateway.listen_address":                             {Group: "部署环境", Description: "固定为宿主机回环地址；公网流量由同一 Docker 网络中的 TLS 入口转发。"},
-	"management.listen_address":                          {Group: "部署环境", Description: "固定为宿主机回环地址；Management API 不直接暴露到公网。"},
-	"gateway.port":                                       {Group: "部署环境", Description: "由 SQLite 自动生成 Compose 投影；修改后管理中心入口地址也会变化。"},
-	"gateway.internal_port":                              {Group: "部署环境", Description: "仅绑定宿主机回环地址，供发布验收读取快照和验证真实路由。"},
-	"management.port":                                    {Group: "部署环境", Description: "仅绑定宿主机回环地址，供本机管理与发布检查使用。"},
-	"delivery.gateway_drain_timeout_seconds":             {Group: "部署环境", Description: "蓝绿发布等待旧 Gateway 长连接结束的最长时间。", Unit: "秒"},
-	"delivery.release_metadata_image":                    {Group: "部署环境", Description: "Admin 只读检查项目新版本所使用的 metadata 镜像；可留空关闭提醒。"},
+	"accounts.listen_address":                            {Group: "账号与发布", Description: "固定为宿主机回环地址；业务 CPA 只能由本机发布检查或 Docker 内网访问。"},
+	"runtime.cliproxy_image":                             {Group: "账号与发布", Description: "作为业务 CPA 更新通道；账号管理拉取后识别真实版本，验证通过才固定为不可变镜像。"},
+	"delivery.release_metadata_image":                    {Group: "账号与发布", Description: "Admin 只读检查项目新版本所使用的 metadata 镜像；可留空关闭提醒。"},
 }

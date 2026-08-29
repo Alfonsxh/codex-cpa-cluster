@@ -14,14 +14,14 @@ func TestLeaseTakeRenewReleaseAndFenceStaleOwner(t *testing.T) {
 	store := openLeaseTestStore(t, t.TempDir(), func() time.Time { return now })
 	defer store.Close()
 
-	lease, err := store.TakeLease(ctx, "usage-collector", "go-v2:first", 30*time.Second)
+	lease, err := store.TakeLease(ctx, "usage-collector", "codex-cpa:first", 30*time.Second)
 	if err != nil {
 		t.Fatalf("TakeLease: %v", err)
 	}
 	if lease.Generation != 1 || lease.ExpiresAt != 1_030 || lease.Token == "" {
 		t.Fatalf("initial lease = %#v", lease)
 	}
-	if _, err := store.TakeLease(ctx, "usage-collector", "go-v2:second", 30*time.Second); !errors.Is(err, ErrLeaseHeld) {
+	if _, err := store.TakeLease(ctx, "usage-collector", "codex-cpa:second", 30*time.Second); !errors.Is(err, ErrLeaseHeld) {
 		t.Fatalf("second TakeLease error = %v, want ErrLeaseHeld", err)
 	}
 
@@ -37,7 +37,7 @@ func TestLeaseTakeRenewReleaseAndFenceStaleOwner(t *testing.T) {
 		t.Fatalf("stale RenewLease error = %v, want ErrLeaseLost", err)
 	}
 
-	replacement, err := store.TakeLease(ctx, "usage-collector", "go-v2:second", 30*time.Second)
+	replacement, err := store.TakeLease(ctx, "usage-collector", "codex-cpa:second", 30*time.Second)
 	if err != nil {
 		t.Fatalf("replacement TakeLease: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestLeaseExpiresBeforeTakeoverAndCannotBeRevived(t *testing.T) {
 		t.Fatalf("TakeLease: %v", err)
 	}
 	now = now.Add(5 * time.Second)
-	second, err := store.TakeLease(ctx, "notifications", "go-v2", 10*time.Second)
+	second, err := store.TakeLease(ctx, "notifications", "codex-cpa", 10*time.Second)
 	if err != nil {
 		t.Fatalf("take expired lease: %v", err)
 	}
@@ -75,15 +75,15 @@ func TestJoinLeaseRequiresExplicitActiveOwner(t *testing.T) {
 	store := openLeaseTestStore(t, t.TempDir(), func() time.Time { return now })
 	defer store.Close()
 
-	if _, err := store.JoinLease(ctx, "runtime-writer", "go-v2", 30*time.Second); !errors.Is(err, ErrLeaseMissing) {
+	if _, err := store.JoinLease(ctx, "runtime-writer", "codex-cpa", 30*time.Second); !errors.Is(err, ErrLeaseMissing) {
 		t.Fatalf("empty JoinLease error = %v, want ErrLeaseMissing", err)
 	}
-	active, err := store.TakeLease(ctx, "runtime-writer", "go-v2", 30*time.Second)
+	active, err := store.TakeLease(ctx, "runtime-writer", "codex-cpa", 30*time.Second)
 	if err != nil {
 		t.Fatalf("TakeLease: %v", err)
 	}
 	now = now.Add(5 * time.Second)
-	joined, err := store.JoinLease(ctx, "runtime-writer", "go-v2", 30*time.Second)
+	joined, err := store.JoinLease(ctx, "runtime-writer", "codex-cpa", 30*time.Second)
 	if err != nil {
 		t.Fatalf("JoinLease: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestLeaseCorruptionFailsClosed(t *testing.T) {
 	if err := store.WriteRuntimeState(ctx, "ownership_lease:quota", map[string]any{"version": 99}); err != nil {
 		t.Fatalf("seed corrupt lease: %v", err)
 	}
-	if _, err := store.TakeLease(ctx, "quota", "go-v2", 30*time.Second); !errors.Is(err, ErrLeaseStateInvalid) {
+	if _, err := store.TakeLease(ctx, "quota", "codex-cpa", 30*time.Second); !errors.Is(err, ErrLeaseStateInvalid) {
 		t.Fatalf("TakeLease corrupt error = %v, want ErrLeaseStateInvalid", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestConcurrentLeaseTakeHasSingleWinner(t *testing.T) {
 			_, errorsByWorker[index] = store.TakeLease(
 				ctx,
 				"log-maintenance",
-				"go-v2:worker",
+				"codex-cpa:worker",
 				30*time.Second,
 			)
 		}(index, store)
@@ -160,11 +160,11 @@ func TestInstalledWriteFenceRejectsStaleGenerationAtomically(t *testing.T) {
 	clock := func() time.Time { return now }
 	stale := openLeaseTestStore(t, root, clock)
 	defer stale.Close()
-	runtimeLease, err := stale.TakeLease(ctx, "runtime-writer", "go-v2", 5*time.Second)
+	runtimeLease, err := stale.TakeLease(ctx, "runtime-writer", "codex-cpa", 5*time.Second)
 	if err != nil {
 		t.Fatalf("take runtime lease: %v", err)
 	}
-	workerLease, err := stale.TakeLease(ctx, "admin", "go-v2:admin", 5*time.Second)
+	workerLease, err := stale.TakeLease(ctx, "admin", "codex-cpa:admin", 5*time.Second)
 	if err != nil {
 		t.Fatalf("take worker lease: %v", err)
 	}
@@ -186,11 +186,11 @@ func TestInstalledWriteFenceRejectsStaleGenerationAtomically(t *testing.T) {
 	now = now.Add(5 * time.Second)
 	replacement := openLeaseTestStore(t, root, clock)
 	defer replacement.Close()
-	newRuntime, err := replacement.TakeLease(ctx, "runtime-writer", "go-v2-next", 30*time.Second)
+	newRuntime, err := replacement.TakeLease(ctx, "runtime-writer", "codex-cpa-next", 30*time.Second)
 	if err != nil {
 		t.Fatalf("replace runtime lease: %v", err)
 	}
-	newWorker, err := replacement.TakeLease(ctx, "admin", "go-v2-next:admin", 30*time.Second)
+	newWorker, err := replacement.TakeLease(ctx, "admin", "codex-cpa-next:admin", 30*time.Second)
 	if err != nil {
 		t.Fatalf("replace worker lease: %v", err)
 	}

@@ -7,20 +7,15 @@ HARBOR_PREFIX ?=
 DOCKERHUB_PREFIX ?=
 GHCR_PREFIX ?=
 IMAGE_PREFIX ?=
-UPDATE_IMAGE_PREFIX ?= $(IMAGE_PREFIX)
-DEPLOY_ROOT ?= /opt/codex-cpa-cluster
-HEALTH_PORT ?=
-CONFIG_PROFILE ?=
-ALLOW_EDGE_RECREATE ?= false
 RELEASE_ARCHIVE ?= dist/codex-cpa-cluster-$(VERSION).tar.gz
 GH_REPO ?= Alfonsxh/codex-cpa-cluster
 GIT_REMOTE ?= origin
 RELEASE_BRANCH ?= main
-V2_TEST_PROJECT ?= codex-cpa-v2-test
-V2_TARGET_ENV ?= v2-target.env
+TEST_PROJECT ?= codex-cpa-test
+TARGET_ENV ?= target.env
 FRONTEND_DEV_UPSTREAM ?= http://127.0.0.1:8318
 
-.PHONY: help verify generate-api check-generated-api frontend-dev frontend-dev-admin frontend-dev-usage frontend-dev-portal v2-test-config v2-test-build v2-test-up v2-test-smoke v2-test-down v2-test-faults v2-target-config v2-target-pull v2-target-verify-images v2-target-ownership-status v2-target-activate v2-target-up-core v2-target-up-writers v2-target-up-notifications v2-target-smoke v2-target-ps v2-target-down v2-lease-rehearsal v2-worker-lease-rehearsal privacy-check package images publish publish-harbor publish-dockerhub publish-ghcr publish-all release-check release deploy
+.PHONY: help verify generate-api check-generated-api frontend-dev frontend-dev-admin frontend-dev-usage frontend-dev-portal test-config test-build test-up test-smoke test-down test-faults target-config target-pull target-verify-images target-ownership-status target-activate target-up-core target-up-writers target-up-notifications target-smoke target-ps target-down lease-rehearsal worker-lease-rehearsal privacy-check package images publish publish-harbor publish-dockerhub publish-ghcr publish-all release-check release deploy
 
 help:
 	@printf '%s\n' \
@@ -30,14 +25,17 @@ help:
 	  'make frontend-dev [FRONTEND_DEV_UPSTREAM=http://test-host:18317]  # Admin，读写代理' \
 	  'make frontend-dev-usage [FRONTEND_DEV_UPSTREAM=http://test-host:18317]' \
 	  'make frontend-dev-portal [FRONTEND_DEV_UPSTREAM=http://test-host:18317]' \
-	  'make v2-test-build' \
-	  'make v2-test-up' \
-	  'make v2-test-smoke' \
-	  'make v2-test-down' \
-	  'make v2-test-faults' \
-	  'make v2-target-config V2_TARGET_ENV=/path/to/v2-target.env' \
-	  'make v2-lease-rehearsal' \
-	  'make v2-worker-lease-rehearsal' \
+	  'make test-build' \
+	  'make test-up' \
+	  'make test-smoke' \
+	  'make test-down' \
+	  'make test-faults' \
+	  'make target-config TARGET_ENV=/path/to/target.env' \
+	  'make target-verify-images TARGET_ENV=/path/to/target.env' \
+	  'make target-ownership-status TARGET_ENV=/path/to/target.env' \
+	  'make deploy TARGET_ENV=/path/to/target.env' \
+	  'make lease-rehearsal' \
+	  'make worker-lease-rehearsal' \
 	  'make privacy-check' \
 	  'make package VERSION=v1.0.0' \
 	  'make images VERSION=v1.0.0 [PLATFORM=linux/amd64]' \
@@ -72,61 +70,61 @@ frontend-dev-portal:
 	@printf 'Portal: http://127.0.0.1:5175/portal/ -> %s（读写）\n' "$(FRONTEND_DEV_UPSTREAM)"
 	CPA_DEV_PROXY_TARGET="$(FRONTEND_DEV_UPSTREAM)" npm --prefix frontend run dev:portal
 
-v2-test-config:
-	docker compose -p $(V2_TEST_PROJECT) -f docker-compose.v2-test.yml config --quiet
+test-config:
+	docker compose -p $(TEST_PROJECT) -f docker-compose.test.yml config --quiet
 
-v2-test-build: v2-test-config
-	docker compose -p $(V2_TEST_PROJECT) -f docker-compose.v2-test.yml build
+test-build: test-config
+	docker compose -p $(TEST_PROJECT) -f docker-compose.test.yml build
 
-v2-test-up: v2-test-config
-	docker compose -p $(V2_TEST_PROJECT) -f docker-compose.v2-test.yml up -d --wait
+test-up: test-config
+	docker compose -p $(TEST_PROJECT) -f docker-compose.test.yml up -d --wait
 
-v2-test-smoke:
-	V2_TEST_PROJECT="$(V2_TEST_PROJECT)" sh scripts/v2-test-smoke.sh
+test-smoke:
+	TEST_PROJECT="$(TEST_PROJECT)" sh scripts/test-smoke.sh
 
-v2-test-down:
-	docker compose -p $(V2_TEST_PROJECT) -f docker-compose.v2-test.yml down --remove-orphans
+test-down:
+	docker compose -p $(TEST_PROJECT) -f docker-compose.test.yml down --remove-orphans
 
-v2-test-faults:
-	sh scripts/v2-test-faults.sh
+test-faults:
+	sh scripts/test-faults.sh
 
-v2-target-config:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh config
+target-config:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh config
 
-v2-target-pull:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh pull
+target-pull:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh pull
 
-v2-target-verify-images:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh verify-images
+target-verify-images:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh verify-images
 
-v2-target-ownership-status:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh ownership-status
+target-ownership-status:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh ownership-status
 
-v2-target-activate:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh activate
+target-activate:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh activate
 
-v2-target-up-core:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh up-core
+target-up-core:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-core
 
-v2-target-up-writers:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh up-writers
+target-up-writers:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-writers
 
-v2-target-up-notifications:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh up-notifications
+target-up-notifications:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-notifications
 
-v2-target-smoke:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh smoke
+target-smoke:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh smoke
 
-v2-target-ps:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh ps
+target-ps:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh ps
 
-v2-target-down:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh down
+target-down:
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh down
 
-v2-lease-rehearsal:
+lease-rehearsal:
 	go test -count=1 -run '^TestWriterLeaseGenerationTransferFencesStaleOwner$$' ./internal/ownership
 
-v2-worker-lease-rehearsal:
+worker-lease-rehearsal:
 	go test -count=1 -run '^TestGoWorkerLeaseGroupTransfersAllScopesAndRejectsDuplicate$$' ./internal/ownership
 
 privacy-check:
@@ -181,9 +179,10 @@ release:
 	  sh scripts/local-release.sh publish
 
 deploy:
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh pull
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh verify-images
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh activate
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh up-core
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh up-writers
-	V2_ENV_FILE="$(V2_TARGET_ENV)" sh scripts/deploy-target.sh smoke
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh config
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh pull
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh verify-images
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh activate
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-core
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-writers
+	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh smoke

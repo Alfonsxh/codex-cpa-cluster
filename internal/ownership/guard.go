@@ -165,7 +165,7 @@ func NewProcessOwner(runtime string) (string, error) {
 func WorkerConfig(runtimeOwner string, workerScope string, ttl time.Duration) (Config, error) {
 	runtimeOwner = strings.TrimSpace(runtimeOwner)
 	if runtimeOwner == "" {
-		runtimeOwner = "go-v2"
+		runtimeOwner = "codex-cpa"
 	}
 	if ttl == 0 {
 		ttl = 30 * time.Second

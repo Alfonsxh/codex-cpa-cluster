@@ -1,4 +1,4 @@
-# Go v2 React Web
+# React Web
 
 Admin、Portal 与使用中心统一使用 React 组件层。页面、交互和安全状态由
 [`e2e/visual.spec.ts`](e2e/visual.spec.ts) 的桌面、窄屏、移动端、明暗主题及异常状态矩阵约束；

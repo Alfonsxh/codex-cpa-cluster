@@ -33,10 +33,15 @@ go run "$ROOT_DIR/cmd/releasectl" manifest create \
 MANIFEST_CREATED=true
 
 COPYFILE_DISABLE=1 tar --no-xattrs \
-  --exclude='*/node_modules' --exclude='frontend/dist' \
+  --exclude='*/node_modules' \
+  --exclude='frontend/dist' \
+  --exclude='frontend/coverage' \
+  --exclude='frontend/playwright-report' \
+  --exclude='frontend/test-results' \
   -czf "$OUTPUT" -C "$ROOT_DIR" \
   .dockerignore \
   .env.example \
+  Dockerfile \
   Makefile \
   CHANGELOG.md \
   CODE_OF_CONDUCT.md \
@@ -47,18 +52,16 @@ COPYFILE_DISABLE=1 tar --no-xattrs \
   api \
   cmd \
   docker-compose.yml \
-  docker-compose.v2-test.yml \
+  docker-compose.test.yml \
   docs \
   frontend \
   go.mod \
   go.sum \
   internal \
-  release \
   scripts \
   testdata/preview \
-  testdata/v2 \
+  testdata/runtime \
   tools/openapi \
-  v2 \
   release-manifest.json
 
 go run "$ROOT_DIR/cmd/releasectl" archive verify "$OUTPUT"

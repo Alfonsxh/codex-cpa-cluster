@@ -67,7 +67,7 @@ func newCommand() *cobra.Command {
 
 	command := &cobra.Command{
 		Use:           "cpa-admin",
-		Short:         "Run the Go v2 CPA control-plane API",
+		Short:         "Run the Go CPA control-plane API",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PreRunE: func(command *cobra.Command, _ []string) error {
@@ -117,7 +117,7 @@ func newCommand() *cobra.Command {
 	flags.StringSlice("gateway-probe-url", []string{"http://edge:8319"}, "Gateway internal URLs used to confirm snapshot activation")
 	flags.Duration("snapshot-timeout", 8*time.Second, "maximum auth snapshot activation wait")
 	flags.Duration("account-drain-timeout", 10*time.Minute, "maximum wait for in-flight CPA requests before account rebuild or deletion")
-	flags.String("runtime-owner", "go-v2", "explicitly activated runtime ownership label")
+	flags.String("runtime-owner", "codex-cpa", "explicitly activated runtime ownership label")
 	flags.Duration("lease-ttl", 30*time.Second, "runtime and Admin ownership lease lifetime")
 	flags.String("compose-project", "cliproxy-multi", "exact Docker Compose project label used by runtime operations")
 	flags.String("docker-network-name", "cliproxy-backend", "exact Docker network used by business CPA containers")
@@ -319,7 +319,7 @@ func runOwnedAdmin(
 	var accountRuntime *runtimeops.AccountRuntime
 	var accountRuntimeError error
 	projectionRenderer := &accountprojection.Renderer{Root: config.Root, Store: store}
-	composeEnvironmentProjector := &adminapi.ComposeEnvironmentProjector{Root: config.Root}
+	composeEnvironmentProjector := &adminapi.AccountComposeEnvironmentProjector{Root: config.Root}
 	if runtimeManager != nil {
 		if !config.RuntimeReadOnly {
 			accountRuntime, accountRuntimeError = runtimeops.NewAccountRuntime(
@@ -372,9 +372,9 @@ func runOwnedAdmin(
 		defer runtimeJobs.Close()
 	}
 	configurationApplier := &adminapi.ConfigurationRuntimeApplier{
-		Accounts:   store,
-		Projection: configurationProjectionAdapter{renderer: projectionRenderer},
-		Deployment: composeEnvironmentProjector,
+		Accounts:           store,
+		Projection:         configurationProjectionAdapter{renderer: projectionRenderer},
+		AccountEnvironment: composeEnvironmentProjector,
 	}
 	if runtimeManager != nil && !config.RuntimeReadOnly {
 		configurationApplier.Runtime = configurationRuntimeAdapter{manager: runtimeManager}
@@ -419,7 +419,7 @@ func runOwnedAdmin(
 	}
 	errorChannel := make(chan error, 1)
 	go func() {
-		logger.Info("Go v2 Admin listener ready", zap.String("address", httpServer.Addr))
+		logger.Info("Go Admin listener ready", zap.String("address", httpServer.Addr))
 		err := httpServer.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil

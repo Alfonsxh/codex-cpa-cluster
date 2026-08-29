@@ -53,29 +53,29 @@ type descriptorRecord struct {
 
 var componentInputs = map[string][]string{
 	"control": {
-		".dockerignore", "go.mod", "go.sum", "v2/Dockerfile",
-		"cmd/admin", "cmd/collector", "cmd/docker-read-proxy", "cmd/failover",
+		".dockerignore", "Dockerfile", "go.mod", "go.sum",
+		"cmd/admin", "cmd/collector", "cmd/failover",
 		"cmd/log-maintenance", "cmd/notifications", "cmd/ownership", "cmd/quota",
 		"cmd/releasectl",
 		"internal/accountlifecycle", "internal/accountprojection", "internal/accountstatus",
 		"internal/admin", "internal/branding", "internal/collector", "internal/contract",
-		"internal/controlplane", "internal/dockerreadproxy", "internal/failover",
+		"internal/controlplane", "internal/failover",
 		"internal/identity", "internal/logmaintenance", "internal/notifications",
 		"internal/ownership", "internal/portal", "internal/quota", "internal/runtimeops",
 		"internal/scheduler", "internal/usage",
 	},
 	"web": {
-		".dockerignore", "go.mod", "go.sum", "v2/Dockerfile", "cmd/web", "internal/web",
+		".dockerignore", "Dockerfile", "go.mod", "go.sum", "cmd/web", "internal/web",
 		"frontend/README.md", "frontend/index.html", "frontend/package.json",
 		"frontend/package-lock.json", "frontend/portal", "frontend/usage", "frontend/scripts",
 		"frontend/src", "frontend/tsconfig.json", "frontend/vite.config.ts",
 		"frontend/vite.portal.config.ts", "frontend/vite.shared.ts", "frontend/vite.usage.config.ts",
 	},
 	"gateway": {
-		".dockerignore", "go.mod", "go.sum", "v2/Dockerfile", "cmd/gateway", "internal/gateway",
+		".dockerignore", "Dockerfile", "go.mod", "go.sum", "cmd/gateway", "internal/gateway",
 	},
 	"edge": {
-		".dockerignore", "go.mod", "go.sum", "v2/Dockerfile", "cmd/edge", "internal/edge",
+		".dockerignore", "Dockerfile", "go.mod", "go.sum", "cmd/edge", "internal/edge",
 	},
 }
 
@@ -512,6 +512,9 @@ func verifyArchive(path string) error {
 		if isRemovedRuntimePath(name) {
 			return fmt.Errorf("release archive contains removed runtime path: %s", name)
 		}
+		if isGeneratedReleaseArtifactPath(name) {
+			return fmt.Errorf("release archive contains generated test or build artifact: %s", name)
+		}
 		for _, part := range strings.Split(name, "/") {
 			if strings.HasPrefix(part, "._") {
 				return fmt.Errorf("release archive contains Apple metadata: %s", name)
@@ -538,6 +541,17 @@ func verifyArchive(path string) error {
 	}
 }
 
+func isGeneratedReleaseArtifactPath(name string) bool {
+	cleaned := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(name)), "./")
+	for _, part := range strings.Split(cleaned, "/") {
+		switch strings.ToLower(part) {
+		case "coverage", "dist", "node_modules", "playwright-report", "test-results":
+			return true
+		}
+	}
+	return false
+}
+
 func isRemovedRuntimePath(name string) bool {
 	cleaned := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(name)), "./")
 	base := strings.ToLower(filepath.Base(cleaned))
@@ -546,6 +560,18 @@ func isRemovedRuntimePath(name string) bool {
 	}
 	if strings.HasPrefix(base, "requirements") && strings.HasSuffix(base, ".txt") {
 		return true
+	}
+	removedPrefixes := []string{
+		"cmd/docker-read-" + "proxy",
+		"internal/dockerread" + "proxy",
+		"release/Docker" + "file",
+		"testdata/v" + "2",
+		"v" + "2",
+	}
+	for _, prefix := range removedPrefixes {
+		if cleaned == prefix || strings.HasPrefix(cleaned, prefix+"/") {
+			return true
+		}
 	}
 	top, _, _ := strings.Cut(cleaned, "/")
 	switch top {

@@ -601,13 +601,6 @@ func (manager *Manager) allocatePort(ctx context.Context) (int, error) {
 	for _, account := range accounts {
 		used[account.Port] = struct{}{}
 	}
-	for _, key := range []string{"gateway.port", "gateway.internal_port", "management.port"} {
-		if value, valueError := optionalIntegerSetting(settings, key); valueError != nil {
-			return 0, valueError
-		} else if value > 0 {
-			used[value] = struct{}{}
-		}
-	}
 	runtimePorts, err := manager.runtime.ReservedHostPorts(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("inspect Docker host ports: %w", err)

@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
-PUBLIC_PORT=${V2_TEST_PUBLIC_PORT:-28317}
-INTERNAL_PORT=${V2_TEST_INTERNAL_PORT:-28319}
-PROJECT=${V2_TEST_PROJECT:-codex-cpa-v2-test}
+PUBLIC_PORT=${TEST_PUBLIC_PORT:-28317}
+INTERNAL_PORT=${TEST_INTERNAL_PORT:-28319}
+PROJECT=${TEST_PROJECT:-codex-cpa-test}
 PUBLIC_URL="http://127.0.0.1:${PUBLIC_PORT}"
 INTERNAL_URL="http://127.0.0.1:${INTERNAL_PORT}"
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -16,7 +16,7 @@ trap cleanup EXIT HUP INT TERM
 
 case "$PROJECT" in
   *[!A-Za-z0-9_.-]*|'')
-    echo "invalid v2 Test Compose project name" >&2
+    echo "invalid Test Compose project name" >&2
     exit 1
     ;;
 esac
@@ -25,7 +25,7 @@ edge_id=$(
   docker compose \
     -p "$PROJECT" \
     --project-directory "$ROOT_DIR" \
-    -f "$ROOT_DIR/docker-compose.v2-test.yml" \
+    -f "$ROOT_DIR/docker-compose.test.yml" \
     ps -q edge
 )
 test -n "$edge_id"
@@ -78,7 +78,7 @@ test "$(grep -Eo '"id"[[:space:]]*:[[:space:]]*"fixture-model"' "$TEMP_DIR/model
 curl --noproxy '*' -fsS -N \
   -H 'Authorization: Bearer fixture-external-key' \
   -H 'Content-Type: application/json' \
-  --data-binary "@$ROOT_DIR/testdata/v2/stream-request.json" \
+  --data-binary "@$ROOT_DIR/testdata/runtime/stream-request.json" \
   "${PUBLIC_URL}/v1/responses" >"$TEMP_DIR/stream.txt"
 grep -F 'event: response.created' "$TEMP_DIR/stream.txt" >/dev/null
 grep -F 'event: response.output_text.delta' "$TEMP_DIR/stream.txt" >/dev/null
@@ -88,5 +88,7 @@ grep -F 'data: [DONE]' "$TEMP_DIR/stream.txt" >/dev/null
 
 slot=$(curl --noproxy '*' -fsS "${INTERNAL_URL}/__internal/edge/slot")
 test "$slot" = "blue"
+readiness=$(curl --noproxy '*' -fsS "${INTERNAL_URL}/__internal/ready")
+test "$readiness" = "ready"
 
-printf '%s\n' 'Go v2 isolated data-plane smoke test passed'
+printf '%s\n' 'Go isolated data-plane smoke test passed'

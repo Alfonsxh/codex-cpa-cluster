@@ -19,7 +19,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -92,6 +91,9 @@ var retiredConfigurationKeys = map[string]struct{}{
 	"gost.enabled": {}, "gost.remote_hosts": {}, "gost.remote_host": {},
 	"gost.port_start": {}, "gost.port_end": {}, "runtime.gost_image": {},
 	"runtime.admin_base_image": {}, "runtime.gateway_image": {},
+	"gateway.listen_address": {}, "gateway.port": {}, "gateway.internal_port": {},
+	"management.listen_address": {}, "management.port": {},
+	"delivery.gateway_drain_timeout_seconds": {},
 }
 
 func buildConfigurationDefinitions() []configurationDefinition {
@@ -213,13 +215,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		simple("runtime.cliproxy_image", "CLIProxyAPI 镜像", "image", "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23", "deployment"),
 	)
 	definitions = append(definitions,
-		simple("gateway.listen_address", "网关监听地址", "ip", "127.0.0.1", "deployment"),
-		simple("management.listen_address", "Management 监听地址", "ip", "127.0.0.1", "deployment"),
-		integer("gateway.port", "网关宿主机端口", 18317, 1024, 65535, "deployment"),
-		integer("gateway.internal_port", "网关内部探针端口", 18316, 1024, 65535, "deployment"),
-		integer("management.port", "Management 宿主机端口", 18318, 1024, 65535, "deployment"),
-		integer("delivery.gateway_drain_timeout_seconds", "Gateway 排空超时", 3600, 30, 7200, "deployment"),
-		simple("delivery.release_metadata_image", "发布更新通道", "optional_image", "", "deployment"),
+		simple("delivery.release_metadata_image", "发布更新通道", "optional_image", "", "live"),
 	)
 	return definitions
 }
@@ -276,12 +272,7 @@ func (server *Server) updateConfiguration(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "不支持的配置项："+strings.Join(unknown, ", "), "invalid_request")
 		return
 	}
-	accounts, err := server.store.ReadAccounts(ctx)
-	if err != nil {
-		server.internalError(c, "read configuration accounts", err)
-		return
-	}
-	if err := validateConfiguration(updated, accounts); err != nil {
+	if err := validateConfiguration(updated); err != nil {
 		writeError(c, http.StatusBadRequest, err.Error(), "invalid_request")
 		return
 	}
@@ -351,7 +342,7 @@ func (server *Server) updateConfiguration(c *gin.Context) {
 	}
 	message := fmt.Sprintf("已保存 %d 项配置", len(changed))
 	if pendingDeployment {
-		message += "；镜像参数可在账号管理中拉取更新，其他部署参数下次部署生效"
+		message += "；业务 CPA 参数已写入私有 Compose 投影，重建对应账号后生效"
 	}
 	c.JSON(http.StatusOK, configurationUpdateResponse{
 		Message: message, Changed: changed, Applied: applied, PendingDeployment: pendingDeployment,
@@ -397,7 +388,7 @@ func (server *Server) currentConfiguration(
 	if stored["account_failover.mode"] == "observe" {
 		stored["account_failover.mode"] = "off"
 	}
-	for _, key := range []string{"accounts.listen_address", "management.listen_address", "gateway.listen_address"} {
+	for _, key := range []string{"accounts.listen_address"} {
 		if stored[key] == "0.0.0.0" || stored[key] == "::" {
 			stored[key] = "127.0.0.1"
 		}
@@ -424,11 +415,7 @@ func (server *Server) currentConfiguration(
 		}
 		effective[definition.Key] = value
 	}
-	accounts, readError := server.store.ReadAccounts(ctx)
-	if readError != nil {
-		return nil, nil, "", false, readError
-	}
-	if validationError := validateConfiguration(effective, accounts); validationError != nil {
+	if validationError := validateConfiguration(effective); validationError != nil {
 		return nil, nil, "", false, validationError
 	}
 	if !reflect.DeepEqual(originalStored, stored) {
@@ -661,43 +648,18 @@ func normalizeConfigurationTimes(definition configurationDefinition, value strin
 	return strings.Join(result, ","), nil
 }
 
-func validateConfiguration(values map[string]any, accounts []controlplane.Account) error {
-	for _, key := range []string{"accounts.listen_address", "management.listen_address", "gateway.listen_address"} {
+func validateConfiguration(values map[string]any) error {
+	for _, key := range []string{"accounts.listen_address"} {
 		address, _ := values[key].(string)
 		parsed := net.ParseIP(address)
 		if parsed == nil || !parsed.IsLoopback() {
-			return errors.New("公网部署的服务监听地址必须使用宿主机回环地址")
+			return errors.New("业务 CPA 监听地址必须使用宿主机回环地址")
 		}
 	}
 	portStart := values["accounts.port_start"].(int64)
 	portEnd := values["accounts.port_end"].(int64)
 	if portStart > portEnd {
 		return errors.New("新账号端口起点不能大于终点")
-	}
-	gatewayPort := values["gateway.port"].(int64)
-	internalPort := values["gateway.internal_port"].(int64)
-	managementPort := values["management.port"].(int64)
-	if gatewayPort >= portStart && gatewayPort <= portEnd {
-		return errors.New("网关端口不能位于新账号端口分配范围内")
-	}
-	existingPorts := make(map[int64]struct{}, len(accounts))
-	for _, account := range accounts {
-		existingPorts[int64(account.Port)] = struct{}{}
-	}
-	if _, found := existingPorts[gatewayPort]; found {
-		return errors.New("网关端口不能与现有业务 CPA 端口重复")
-	}
-	if internalPort == gatewayPort {
-		return errors.New("网关内部探针端口不能与公网网关端口相同")
-	}
-	if _, found := existingPorts[internalPort]; found {
-		return errors.New("网关内部探针端口不能与现有业务 CPA 端口重复")
-	}
-	if gatewayPort == managementPort || internalPort == managementPort {
-		return errors.New("Gateway 公网、内部探针和 Management 端口不能重复")
-	}
-	if _, found := existingPorts[managementPort]; found {
-		return errors.New("Management 端口不能与现有业务 CPA 端口重复")
 	}
 	if values["account_failover.stale_after_seconds"].(int64) < values["account_failover.poll_seconds"].(int64) {
 		return errors.New("账号自动切换额度数据失效时间不能小于检查间隔")

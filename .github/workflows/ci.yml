@@ -94,7 +94,7 @@ jobs:
           go run ./cmd/releasectl archive verify "$archive"
           tar -tzf "$archive" | grep -Fx docker-compose.yml
           tar -tzf "$archive" | grep -Fx release-manifest.json
-          tar -tzf "$archive" | grep -Fx v2/Dockerfile
+          tar -tzf "$archive" | grep -Fx Dockerfile
           tar -tzf "$archive" | grep -Fx cmd/admin/main.go
           tar -tzf "$archive" | grep -Fx cmd/gateway/main.go
           tar -tzf "$archive" | grep -Fx cmd/releasectl/main.go
@@ -103,7 +103,7 @@ jobs:
           tar -tzf "$archive" | grep -Fx tools/openapi/package.json
           removed_source_suffix=$(printf '.%s%s' p y)
           removed_requirement_prefix=$(printf 'require%s' ments)
-          if tar -tzf "$archive" | grep -Eq "(^|/)node_modules/|^frontend/dist/|\\${removed_source_suffix}$|${removed_requirement_prefix}[^/]*\\.txt$"; then
+          if tar -tzf "$archive" | grep -Eq "(^|/)(node_modules|dist|coverage|playwright-report|test-results)/|\\${removed_source_suffix}$|${removed_requirement_prefix}[^/]*\\.txt$"; then
             echo "release archive contains generated dependencies or removed runtime files" >&2
             exit 1
           fi

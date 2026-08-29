@@ -194,7 +194,7 @@ func (runtime *AccountRuntime) Login(
 	options.Config.ExposedPorts = nil
 	options.Config.Labels = map[string]string{
 		"io.codex-cpa.account":    accountID,
-		"io.codex-cpa.managed-by": "go-v2",
+		"io.codex-cpa.managed-by": "codex-cpa",
 		"io.codex-cpa.operation":  "oauth-device-login",
 	}
 	options.HostConfig.AutoRemove = false
@@ -621,7 +621,7 @@ func (runtime *AccountRuntime) createOptionsWithImage(
 		composeServiceLabel:         service,
 		"com.docker.compose.oneoff": "False",
 		"io.codex-cpa.account":      account.ID,
-		"io.codex-cpa.managed-by":   "go-v2",
+		"io.codex-cpa.managed-by":   "codex-cpa",
 	}
 	return dockerclient.ContainerCreateOptions{
 		Name: runtime.instance + "-" + account.ID,

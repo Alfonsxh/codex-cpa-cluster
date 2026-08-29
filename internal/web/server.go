@@ -298,7 +298,7 @@ func (server *Server) recovery() gin.HandlerFunc {
 					panic(recovered)
 				}
 				server.logger.Error(
-					"Go v2 Web request panic",
+					"Go Web request panic",
 					zap.String("method", c.Request.Method),
 					zap.String("path", c.Request.URL.Path),
 					zap.String("panic_type", fmt.Sprintf("%T", recovered)),
@@ -344,7 +344,7 @@ func newProxy(
 			return
 		}
 		logger.Warn(
-			"Go v2 Web Admin request failed",
+			"Go Web Admin request failed",
 			zap.String("method", request.Method),
 			zap.String("path", request.URL.Path),
 			zap.String("error_type", fmt.Sprintf("%T", err)),

@@ -27,10 +27,10 @@ func TestOwnershipActivationStatusAndReleaseNeverPrintToken(t *testing.T) {
 		context.Background(),
 		&activated,
 		commandConfig{Root: root, TTL: 30 * time.Second},
-		"go-v2",
+		"codex-cpa",
 		"",
 		0,
-		"go-v2",
+		"codex-cpa",
 		true,
 		"",
 	)
@@ -38,7 +38,7 @@ func TestOwnershipActivationStatusAndReleaseNeverPrintToken(t *testing.T) {
 		t.Fatalf("runActivate: %v", err)
 	}
 	status := decodeLeaseStatus(t, activated.Bytes())
-	if !status.Found || !status.Active || status.Owner != "go-v2" || status.Generation != 1 {
+	if !status.Found || !status.Active || status.Owner != "codex-cpa" || status.Generation != 1 {
 		t.Fatalf("activated status = %#v", status)
 	}
 	if strings.Contains(activated.String(), "token") {
@@ -69,7 +69,7 @@ func TestOwnershipActivationStatusAndReleaseNeverPrintToken(t *testing.T) {
 	); err != nil {
 		t.Fatalf("runStatus owner field: %v", err)
 	}
-	if owner.String() != "go-v2\n" {
+	if owner.String() != "codex-cpa\n" {
 		t.Fatalf("owner field = %q", owner.String())
 	}
 
@@ -79,7 +79,7 @@ func TestOwnershipActivationStatusAndReleaseNeverPrintToken(t *testing.T) {
 		&released,
 		commandConfig{Root: root, TTL: 30 * time.Second},
 		ownership.RuntimeScope,
-		"go-v2",
+		"codex-cpa",
 		"runtime-writer:1",
 	); err != nil {
 		t.Fatalf("runRelease: %v", err)
@@ -101,10 +101,10 @@ func TestOwnershipActivationRequiresExplicitEmptyBootstrap(t *testing.T) {
 		context.Background(),
 		&bytes.Buffer{},
 		commandConfig{Root: root, TTL: 30 * time.Second},
-		"go-v2",
+		"codex-cpa",
 		"",
 		0,
-		"go-v2",
+		"codex-cpa",
 		false,
 		"",
 	)
@@ -134,10 +134,10 @@ func TestOwnershipActivationRequiresExactExpiredGeneration(t *testing.T) {
 		ctx,
 		&bytes.Buffer{},
 		commandConfig{Root: root, TTL: 30 * time.Second},
-		"go-v2",
+		"codex-cpa",
 		"go-previous",
 		prior.Generation+1,
-		"go-v2",
+		"codex-cpa",
 		false,
 		"",
 	)
@@ -150,22 +150,22 @@ func TestOwnershipActivationRequiresExactExpiredGeneration(t *testing.T) {
 		ctx,
 		&activated,
 		commandConfig{Root: root, TTL: 30 * time.Second},
-		"go-v2",
+		"codex-cpa",
 		"go-previous",
 		prior.Generation,
-		"go-v2",
+		"codex-cpa",
 		false,
 		"",
 	); err != nil {
 		t.Fatalf("activate exact generation: %v", err)
 	}
 	status := decodeLeaseStatus(t, activated.Bytes())
-	if status.Owner != "go-v2" || status.Generation != prior.Generation+1 {
+	if status.Owner != "codex-cpa" || status.Generation != prior.Generation+1 {
 		t.Fatalf("replacement status = %#v", status)
 	}
 }
 
-func TestOwnershipActivationAllowsExplicitLegacyBootstrapOnlyForExactRoot(t *testing.T) {
+func TestOwnershipActivationAllowsControlledBootstrapOnlyForExactRoot(t *testing.T) {
 	root := t.TempDir()
 	store, err := controlplane.Open(context.Background(), root, controlplane.Options{})
 	if err != nil {
@@ -179,15 +179,15 @@ func TestOwnershipActivationAllowsExplicitLegacyBootstrapOnlyForExactRoot(t *tes
 		context.Background(),
 		&bytes.Buffer{},
 		commandConfig{Root: root, TTL: 30 * time.Second},
-		"go-v2",
+		"codex-cpa",
 		"",
 		0,
-		"go-v2",
+		"codex-cpa",
 		false,
-		"legacy-writers-stopped:/wrong/root",
+		"writers-stopped:/wrong/root",
 	)
-	if err == nil || !strings.Contains(err.Error(), "confirm-legacy-bootstrap") {
-		t.Fatalf("wrong legacy confirmation error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "confirm-existing-writers-stopped") {
+		t.Fatalf("wrong writers-stopped confirmation error = %v", err)
 	}
 
 	var activated bytes.Buffer
@@ -195,19 +195,19 @@ func TestOwnershipActivationAllowsExplicitLegacyBootstrapOnlyForExactRoot(t *tes
 		context.Background(),
 		&activated,
 		commandConfig{Root: root, TTL: 30 * time.Second},
-		"go-v2",
+		"codex-cpa",
 		"",
 		0,
-		"go-v2",
+		"codex-cpa",
 		false,
-		"legacy-writers-stopped:"+root,
+		"writers-stopped:"+root,
 	)
 	if err != nil {
-		t.Fatalf("legacy bootstrap: %v", err)
+		t.Fatalf("controlled bootstrap: %v", err)
 	}
 	status := decodeLeaseStatus(t, activated.Bytes())
-	if status.Owner != "go-v2" || status.Generation != 1 {
-		t.Fatalf("legacy bootstrap status = %#v", status)
+	if status.Owner != "codex-cpa" || status.Generation != 1 {
+		t.Fatalf("controlled bootstrap status = %#v", status)
 	}
 }
 

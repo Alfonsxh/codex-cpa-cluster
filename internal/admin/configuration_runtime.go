@@ -28,9 +28,10 @@ type ConfigurationRuntime interface {
 	RestartConfigurationTarget(context.Context, string) error
 }
 
-// ConfigurationDeploymentProjector refreshes the private Compose environment
-// projection without applying a release or changing the active Edge slot.
-type ConfigurationDeploymentProjector interface {
+// ConfigurationAccountEnvironmentProjector refreshes the private business
+// account Compose environment. It never changes formal target.env settings,
+// applies a control-plane release, or switches the active Edge slot.
+type ConfigurationAccountEnvironmentProjector interface {
 	ProjectConfiguration(context.Context, map[string]any) error
 }
 
@@ -38,9 +39,9 @@ type ConfigurationRuntimeApplier struct {
 	Accounts interface {
 		ReadAccounts(context.Context) ([]controlplane.Account, error)
 	}
-	Projection ConfigurationAccountProjector
-	Runtime    ConfigurationRuntime
-	Deployment ConfigurationDeploymentProjector
+	Projection         ConfigurationAccountProjector
+	Runtime            ConfigurationRuntime
+	AccountEnvironment ConfigurationAccountEnvironmentProjector
 }
 
 func (applier *ConfigurationRuntimeApplier) ApplyConfiguration(
@@ -60,9 +61,9 @@ func (applier *ConfigurationRuntimeApplier) ApplyConfiguration(
 	_, quotaChanged := modes["quota"]
 
 	// Validate every dependency before the first file or runtime mutation so a
-	// partially configured candidate Admin always fails closed.
-	if deploymentChanged && applier.Deployment == nil {
-		return errors.New("deployment configuration projector is unavailable")
+	// partially configured Admin always fails closed.
+	if deploymentChanged && applier.AccountEnvironment == nil {
+		return errors.New("account Compose environment projector is unavailable")
 	}
 	if accountsChanged && (applier.Accounts == nil || applier.Projection == nil || applier.Runtime == nil) {
 		return errors.New("account configuration runtime is unavailable")
@@ -72,8 +73,8 @@ func (applier *ConfigurationRuntimeApplier) ApplyConfiguration(
 	}
 
 	if deploymentChanged {
-		if err := applier.Deployment.ProjectConfiguration(ctx, change.After); err != nil {
-			return fmt.Errorf("project deployment configuration: %w", err)
+		if err := applier.AccountEnvironment.ProjectConfiguration(ctx, change.After); err != nil {
+			return fmt.Errorf("project account Compose environment: %w", err)
 		}
 	}
 	if accountsChanged {
@@ -102,17 +103,17 @@ func (applier *ConfigurationRuntimeApplier) ApplyConfiguration(
 	return nil
 }
 
-// ComposeEnvironmentProjector preserves the already-applied component and CPA
-// image identities while regenerating only the deployment settings owned by
-// the Configuration Center. The target must already be initialized.
-type ComposeEnvironmentProjector struct {
+// AccountComposeEnvironmentProjector preserves the already-applied CPA image identity
+// while regenerating only the business-account settings owned by the
+// Configuration Center. Formal control-plane deployment settings live only in
+// the operator-owned target.env and are never projected from SQLite.
+type AccountComposeEnvironmentProjector struct {
 	Root string
 }
 
 // ProjectCPAImage atomically replaces only CLIPROXY_IMAGE in the already
-// initialized private Compose projection. Image application must not rewrite
-// component images or deployment-owned listener settings as a side effect.
-func (projector *ComposeEnvironmentProjector) ProjectCPAImage(ctx context.Context, resolvedReference string) error {
+// initialized private account-Compose projection.
+func (projector *AccountComposeEnvironmentProjector) ProjectCPAImage(ctx context.Context, resolvedReference string) error {
 	resolvedReference = strings.TrimSpace(resolvedReference)
 	if resolvedReference == "" || len(resolvedReference) > 512 || strings.ContainsAny(resolvedReference, "\r\n\t \x00") {
 		return errors.New("resolved CPA image reference is invalid")
@@ -121,25 +122,14 @@ func (projector *ComposeEnvironmentProjector) ProjectCPAImage(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	if _, err := parseComposeEnvironment(raw); err != nil {
+	existing, err := parseComposeEnvironment(raw)
+	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(raw), "\n")
-	matches := 0
-	for index, line := range lines {
-		key, _, found := strings.Cut(line, "=")
-		if found && strings.TrimSpace(key) == "CLIPROXY_IMAGE" {
-			matches++
-			lines[index] = "CLIPROXY_IMAGE=" + resolvedReference
-		}
-	}
-	if matches != 1 {
-		return fmt.Errorf("existing Compose environment must contain CLIPROXY_IMAGE exactly once, found %d", matches)
-	}
-	return replaceComposeEnvironment(path, []byte(strings.Join(lines, "\n")))
+	return writeAccountComposeEnvironment(path, resolvedReference, existing["BUSINESS_CPA_LISTEN_ADDRESS"])
 }
 
-func (projector *ComposeEnvironmentProjector) ProjectConfiguration(
+func (projector *AccountComposeEnvironmentProjector) ProjectConfiguration(
 	ctx context.Context,
 	values map[string]any,
 ) error {
@@ -152,32 +142,29 @@ func (projector *ComposeEnvironmentProjector) ProjectConfiguration(
 		return err
 	}
 
-	projected := map[string]string{
-		"CLIPROXY_IMAGE":              firstNonEmpty(existing["CLIPROXY_IMAGE"], configurationText(values, "runtime.cliproxy_image")),
-		"ADMIN_IMAGE":                 firstNonEmpty(existing["ADMIN_IMAGE"], "codex-cpa-admin:local"),
-		"WEB_RUNTIME_IMAGE":           firstNonEmpty(existing["WEB_RUNTIME_IMAGE"], "codex-cpa-web:local"),
-		"GATEWAY_RUNTIME_IMAGE":       firstNonEmpty(existing["GATEWAY_RUNTIME_IMAGE"], "codex-cpa-gateway:local"),
-		"EDGE_RUNTIME_IMAGE":          firstNonEmpty(existing["EDGE_RUNTIME_IMAGE"], "codex-cpa-edge:local"),
-		"GATEWAY_LISTEN_ADDRESS":      configurationText(values, "gateway.listen_address"),
-		"GATEWAY_PORT":                configurationText(values, "gateway.port"),
-		"GATEWAY_INTERNAL_PORT":       configurationText(values, "gateway.internal_port"),
-		"MANAGEMENT_LISTEN_ADDRESS":   configurationText(values, "management.listen_address"),
-		"MANAGEMENT_PORT":             configurationText(values, "management.port"),
-		"BUSINESS_CPA_LISTEN_ADDRESS": configurationText(values, "accounts.listen_address"),
-	}
-	order := []string{
-		"CLIPROXY_IMAGE", "ADMIN_IMAGE", "WEB_RUNTIME_IMAGE", "GATEWAY_RUNTIME_IMAGE", "EDGE_RUNTIME_IMAGE",
-		"GATEWAY_LISTEN_ADDRESS", "GATEWAY_PORT",
-		"GATEWAY_INTERNAL_PORT", "MANAGEMENT_LISTEN_ADDRESS", "MANAGEMENT_PORT", "BUSINESS_CPA_LISTEN_ADDRESS",
+	return writeAccountComposeEnvironment(
+		path,
+		firstNonEmpty(existing["CLIPROXY_IMAGE"], configurationText(values, "runtime.cliproxy_image")),
+		configurationText(values, "accounts.listen_address"),
+	)
+}
+
+func writeAccountComposeEnvironment(path string, image string, listenAddress string) error {
+	projected := []struct {
+		key   string
+		value string
+	}{
+		{key: "CLIPROXY_IMAGE", value: image},
+		{key: "BUSINESS_CPA_LISTEN_ADDRESS", value: listenAddress},
 	}
 	var content strings.Builder
 	content.WriteString("# Generated from state/control-plane.sqlite3; do not edit.\n")
-	for _, key := range order {
-		value := strings.TrimSpace(projected[key])
+	for _, item := range projected {
+		value := strings.TrimSpace(item.value)
 		if value == "" || strings.ContainsAny(value, "\r\n\x00") {
-			return fmt.Errorf("Compose environment value %s is empty or invalid", key)
+			return fmt.Errorf("account Compose environment value %s is empty or invalid", item.key)
 		}
-		content.WriteString(key)
+		content.WriteString(item.key)
 		content.WriteByte('=')
 		content.WriteString(value)
 		content.WriteByte('\n')
@@ -185,7 +172,7 @@ func (projector *ComposeEnvironmentProjector) ProjectConfiguration(
 	return replaceComposeEnvironment(path, []byte(content.String()))
 }
 
-func (projector *ComposeEnvironmentProjector) readExisting(ctx context.Context) (string, []byte, error) {
+func (projector *AccountComposeEnvironmentProjector) readExisting(ctx context.Context) (string, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}

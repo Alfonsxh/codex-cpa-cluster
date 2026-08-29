@@ -11,10 +11,12 @@ sh -n \
   "$ROOT_DIR/scripts/local-release.sh" \
   "$ROOT_DIR/scripts/package-release.sh" \
   "$ROOT_DIR/scripts/release-images.sh" \
-  "$ROOT_DIR/scripts/v2-test-faults.sh" \
-  "$ROOT_DIR/scripts/v2-test-smoke.sh" \
+  "$ROOT_DIR/scripts/test-deploy-target.sh" \
+  "$ROOT_DIR/scripts/test-faults.sh" \
+  "$ROOT_DIR/scripts/test-smoke.sh" \
   "$ROOT_DIR/scripts/verify.sh"
 (cd "$ROOT_DIR" && sh scripts/check-generated-api.sh)
+sh "$ROOT_DIR/scripts/test-deploy-target.sh"
 UNFORMATTED_GO=$(find "$ROOT_DIR/cmd" "$ROOT_DIR/internal" -type f -name '*.go' -exec gofmt -l {} +)
 if [ -n "$UNFORMATTED_GO" ]; then
   echo "Go 文件未格式化：" >&2
@@ -42,9 +44,9 @@ docker compose \
   --profile external-effects \
   config --quiet
 docker compose \
-  -p codex-cpa-v2-test \
+  -p codex-cpa-test \
   --project-directory "$ROOT_DIR" \
-  -f "$ROOT_DIR/docker-compose.v2-test.yml" \
+  -f "$ROOT_DIR/docker-compose.test.yml" \
   config --quiet
 
 printf '%s\n' '[6/7] 已移除运行时残留'
@@ -73,6 +75,28 @@ if rg --hidden -n "$FORBIDDEN_RUNTIME" \
   --glob '!dist/**' \
   "$ROOT_DIR"; then
   echo "发现已移除运行时的命令引用" >&2
+  exit 1
+fi
+FORBIDDEN_DEPLOYMENT_NAMESPACE=$(printf '%s' 'V''2_|go-''v2|Go[[:space:]]+v''2|cliproxy-''v2|v2-''target|docker-compose\.v2-''test|scripts/v2-''test|testdata/v''2|v''2/Dockerfile|docker-read-''proxy|dockerread''proxy')
+if rg --hidden -n "$FORBIDDEN_DEPLOYMENT_NAMESPACE" \
+  --glob '!frontend/node_modules/**' \
+  --glob '!tools/openapi/node_modules/**' \
+  --glob '!.git/**' \
+  --glob '!.harness/**' \
+  --glob '!dist/**' \
+  "$ROOT_DIR"; then
+  echo "发现迁移期部署命名或已移除的 Docker 只读代理" >&2
+  exit 1
+fi
+DOCKERFILE_COUNT=$(find "$ROOT_DIR" \
+  -path "$ROOT_DIR/.git" -prune -o \
+  -path "$ROOT_DIR/.harness" -prune -o \
+  -path "$ROOT_DIR/dist" -prune -o \
+  -path "$ROOT_DIR/frontend/node_modules" -prune -o \
+  -path "$ROOT_DIR/tools/openapi/node_modules" -prune -o \
+  -type f -name Dockerfile -print | wc -l | tr -d ' ')
+if [ "$DOCKERFILE_COUNT" != 1 ]; then
+  echo "正式构建必须只保留仓库根目录 Dockerfile" >&2
   exit 1
 fi
 

@@ -91,7 +91,7 @@ func newCommand() *cobra.Command {
 	flags.Duration("max-health-age", 3*time.Minute, "maximum healthy heartbeat age")
 	flags.Bool("once", false, "refresh one complete quota snapshot and exit")
 	flags.Bool("health", false, "read the quota heartbeat without mutating the target")
-	flags.String("runtime-owner", "go-v2", "explicitly activated runtime ownership label")
+	flags.String("runtime-owner", "codex-cpa", "explicitly activated runtime ownership label")
 	flags.Duration("lease-ttl", 30*time.Second, "runtime and worker ownership lease lifetime")
 	if err := settings.BindPFlags(flags); err != nil {
 		panic(err)
@@ -168,7 +168,7 @@ func run(config appConfig) error {
 		if runContext.Err() != nil {
 			return nil
 		}
-		logger.Info("Go v2 official quota worker started", zap.Duration("interval", interval))
+		logger.Info("Go official quota worker started", zap.Duration("interval", interval))
 		workerScheduler.Start()
 		requestWatcherDone := make(chan struct{})
 		go func() {
@@ -197,7 +197,7 @@ func run(config appConfig) error {
 		waitForJobs := workerScheduler.Stop()
 		<-waitForJobs.Done()
 		<-requestWatcherDone
-		logger.Info("Go v2 official quota worker stopped")
+		logger.Info("Go official quota worker stopped")
 		return nil
 	})
 }

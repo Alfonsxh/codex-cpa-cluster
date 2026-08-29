@@ -200,7 +200,7 @@ func (server *Server) recovery() gin.HandlerFunc {
 					panic(recovered)
 				}
 				server.logger.Error(
-					"Go v2 Edge request panic",
+					"Go Edge request panic",
 					zap.String("method", c.Request.Method),
 					zap.String("path", c.Request.URL.Path),
 					zap.String("panic_type", fmt.Sprintf("%T", recovered)),
@@ -239,7 +239,7 @@ func newProxy(target *url.URL, name string, transport http.RoundTripper, logger 
 			return
 		}
 		logger.Warn(
-			"Go v2 Edge upstream request failed",
+			"Go Edge upstream request failed",
 			zap.String("upstream", name),
 			zap.String("method", request.Method),
 			zap.String("path", request.URL.Path),

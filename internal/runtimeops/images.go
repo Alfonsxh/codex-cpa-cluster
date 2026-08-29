@@ -680,7 +680,7 @@ func probeCPAImageVersionBanner(
 		Config: &containertypes.Config{
 			Image: imageID, Entrypoint: entrypoint, Cmd: command, NetworkDisabled: true,
 			Labels: map[string]string{
-				"io.codex-cpa.managed-by": "go-v2",
+				"io.codex-cpa.managed-by": "codex-cpa",
 				"io.codex-cpa.operation":  "image-version-probe",
 			},
 		},

@@ -46,7 +46,7 @@ func newCommand() *cobra.Command {
 
 	command := &cobra.Command{
 		Use:           "cpa-gateway",
-		Short:         "Run the Go v2 CPA data-plane gateway",
+		Short:         "Run the Go CPA data-plane gateway",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PreRunE: func(command *cobra.Command, _ []string) error {
@@ -149,7 +149,7 @@ func run(config appConfig) error {
 	go serve("internal", internalServer, logger, errorChannel)
 
 	logger.Info(
-		"Go v2 gateway started",
+		"Go gateway started",
 		zap.String("public_address", config.PublicAddress),
 		zap.String("internal_address", config.InternalAddress),
 		zap.String("snapshot_dir", filepath.Clean(config.SnapshotDir)),
@@ -172,7 +172,7 @@ func run(config appConfig) error {
 		_ = publicServer.Close()
 		_ = internalServer.Close()
 	}
-	logger.Info("Go v2 gateway stopped")
+	logger.Info("Go gateway stopped")
 	return errors.Join(runError, shutdownError)
 }
 

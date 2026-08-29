@@ -14,8 +14,8 @@ import (
 )
 
 func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
-	if len(configurationDefinitions) != 74 {
-		t.Fatalf("configuration definition count = %d, want 74", len(configurationDefinitions))
+	if len(configurationDefinitions) != 68 {
+		t.Fatalf("configuration definition count = %d, want 68", len(configurationDefinitions))
 	}
 	if len(configurationPresentationByKey) != len(configurationDefinitions) {
 		t.Fatalf("configuration presentation count = %d, want %d", len(configurationPresentationByKey), len(configurationDefinitions))
@@ -47,7 +47,7 @@ func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
 	if !reflect.DeepEqual(mode.ChoiceOrder, []string{"off", "active"}) {
 		t.Fatalf("failover choice order = %#v", mode.ChoiceOrder)
 	}
-	if err := validateConfiguration(defaults, nil); err != nil {
+	if err := validateConfiguration(defaults); err != nil {
 		t.Fatalf("default configuration is invalid: %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	}
 	var catalog configurationCatalogResponse
 	decodeAdminResponse(t, response, &catalog)
-	if catalog.Version != 1 || catalog.FieldCount != 74 || len(catalog.Groups) != 10 || catalog.GeneratedAt <= 0 {
+	if catalog.Version != 1 || catalog.FieldCount != 68 || len(catalog.Groups) != 10 || catalog.GeneratedAt <= 0 {
 		t.Fatalf("configuration catalog summary = %#v", catalog)
 	}
 
@@ -84,7 +84,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 			fields[field.Key] = field
 		}
 	}
-	if len(fields) != 74 {
+	if len(fields) != 68 {
 		t.Fatalf("configuration catalog fields = %d", len(fields))
 	}
 	proxy := fields["cpa.proxy_url"]
@@ -124,7 +124,6 @@ func TestConfigurationValueNormalizationCoversSupportedTypesAndBoundaries(t *tes
 		{key: "notification.timezone", raw: "Asia/Shanghai", want: "Asia/Shanghai"},
 		{key: "notification.daily_times", raw: "18:00,9:00,09:00", want: "09:00,18:00"},
 		{key: "runtime.cliproxy_image", raw: "invalid image", wantErr: true},
-		{key: "gateway.listen_address", raw: "::1", wantErr: true},
 		{key: "admin.account_usage.reasoning_effort_color.max", raw: "#B2731E", want: "#b2731e"},
 	}
 	for _, test := range tests {
@@ -177,7 +176,7 @@ func TestConfigurationEndpointAppliesModesKeepsProxySecretOutOfSettingsAndRollsB
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/settings/configuration", map[string]any{
 		"confirm": "save",
 		"values": map[string]any{
-			"cpa.debug": true, "collector.batch_size": 50, "gateway.port": 19000,
+			"cpa.debug": true, "collector.batch_size": 50, "accounts.listen_address": "127.0.0.2",
 			"cpa.proxy_enabled": true, "cpa.proxy_url": firstProxy,
 		},
 	}, headers, nil)
@@ -235,6 +234,7 @@ func TestConfigurationUpdateMigratesObserveAndLegacyProxyOutOfSettings(t *testin
 	const legacyProxy = "http://legacy-user:legacy-secret@127.0.0.1:1080"
 	if err := store.WriteSettings(ctx, map[string]any{
 		"account_failover.mode": "observe", "cpa.proxy_url": legacyProxy, "gost.enabled": false,
+		"gateway.port": int64(18317), "delivery.gateway_drain_timeout_seconds": int64(3600),
 	}); err != nil {
 		t.Fatalf("write legacy settings: %v", err)
 	}
@@ -259,6 +259,11 @@ func TestConfigurationUpdateMigratesObserveAndLegacyProxyOutOfSettings(t *testin
 	if _, found := settings["gost.enabled"]; found {
 		t.Fatalf("retired setting remains: %#v", settings)
 	}
+	for _, key := range []string{"gateway.port", "delivery.gateway_drain_timeout_seconds"} {
+		if _, found := settings[key]; found {
+			t.Fatalf("retired deployment setting %s remains: %#v", key, settings)
+		}
+	}
 	proxy, found, err := store.ReadSecret(ctx, defaultProxySecretName)
 	if err != nil || !found || proxy != legacyProxy {
 		t.Fatalf("migrated proxy = (%q, %v, %v)", proxy, found, err)
@@ -273,12 +278,12 @@ func TestConfigurationRuntimeApplierUsesExactTargetsAndSingleCollectorRestart(t 
 		Accounts: configurationAccounts{accounts: []controlplane.Account{
 			{ID: "beta", GroupEnabled: false}, {ID: "alpha", GroupEnabled: true},
 		}},
-		Projection: projection,
-		Runtime:    runtime,
-		Deployment: deployment,
+		Projection:         projection,
+		Runtime:            runtime,
+		AccountEnvironment: deployment,
 	}
 	change := ConfigurationChange{
-		After: map[string]any{"gateway.port": int64(19000)},
+		After: map[string]any{"accounts.listen_address": "127.0.0.2"},
 		Modes: []string{"quota", "accounts", "collector", "deployment", "live"},
 	}
 	if err := applier.ApplyConfiguration(context.Background(), change); err != nil {
@@ -290,13 +295,13 @@ func TestConfigurationRuntimeApplierUsesExactTargetsAndSingleCollectorRestart(t 
 			projection.calls, deployment.calls, runtime.targets)
 	}
 
-	missingRuntime := &ConfigurationRuntimeApplier{Deployment: deployment}
+	missingRuntime := &ConfigurationRuntimeApplier{AccountEnvironment: deployment}
 	if err := missingRuntime.ApplyConfiguration(context.Background(), ConfigurationChange{Modes: []string{"accounts"}}); err == nil {
 		t.Fatal("account apply unexpectedly accepted missing runtime dependencies")
 	}
 }
 
-func TestComposeEnvironmentProjectorPreservesAppliedImagesAndWritesSecureProjection(t *testing.T) {
+func TestComposeEnvironmentProjectorWritesOnlyAccountRuntimeSettings(t *testing.T) {
 	root := t.TempDir()
 	state := filepath.Join(root, "state")
 	if err := os.MkdirAll(state, 0o700); err != nil {
@@ -321,8 +326,7 @@ func TestComposeEnvironmentProjectorPreservesAppliedImagesAndWritesSecureProject
 		}
 		values[definition.Key] = value
 	}
-	values["gateway.port"] = int64(19000)
-	projector := &ComposeEnvironmentProjector{Root: root}
+	projector := &AccountComposeEnvironmentProjector{Root: root}
 	if err := projector.ProjectConfiguration(context.Background(), values); err != nil {
 		t.Fatalf("ProjectConfiguration: %v", err)
 	}
@@ -331,13 +335,11 @@ func TestComposeEnvironmentProjectorPreservesAppliedImagesAndWritesSecureProject
 		t.Fatalf("read projected environment: %v", err)
 	}
 	content := string(raw)
-	for _, expected := range []string{
-		"CLIPROXY_IMAGE=sha256:applied-cpa", "ADMIN_IMAGE=sha256:applied-admin",
-		"GATEWAY_PORT=19000", "BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.1",
-	} {
-		if !strings.Contains(content, expected) {
-			t.Fatalf("projected environment missing %q:\n%s", expected, content)
-		}
+	want := "# Generated from state/control-plane.sqlite3; do not edit.\n" +
+		"CLIPROXY_IMAGE=sha256:applied-cpa\n" +
+		"BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.1\n"
+	if content != want {
+		t.Fatalf("account Compose projection = %q, want %q", content, want)
 	}
 	information, err := os.Stat(path)
 	if err != nil || information.Mode().Perm() != 0o600 {
@@ -345,7 +347,7 @@ func TestComposeEnvironmentProjectorPreservesAppliedImagesAndWritesSecureProject
 	}
 }
 
-func TestComposeEnvironmentProjectorChangesOnlyCPAImage(t *testing.T) {
+func TestComposeEnvironmentProjectorUpdatesCPAImageAndDropsRetiredKeys(t *testing.T) {
 	root := t.TempDir()
 	state := filepath.Join(root, "state")
 	if err := os.MkdirAll(state, 0o700); err != nil {
@@ -363,7 +365,7 @@ func TestComposeEnvironmentProjectorChangesOnlyCPAImage(t *testing.T) {
 	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
 		t.Fatalf("seed Compose environment: %v", err)
 	}
-	projector := &ComposeEnvironmentProjector{Root: root}
+	projector := &AccountComposeEnvironmentProjector{Root: root}
 	if err := projector.ProjectCPAImage(context.Background(), "registry.example.test/cpa:v2@sha256:new"); err != nil {
 		t.Fatalf("ProjectCPAImage: %v", err)
 	}
@@ -371,11 +373,11 @@ func TestComposeEnvironmentProjectorChangesOnlyCPAImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read projected environment: %v", err)
 	}
-	want := strings.Replace(before,
-		"CLIPROXY_IMAGE=registry.example.test/cpa@sha256:old",
-		"CLIPROXY_IMAGE=registry.example.test/cpa:v2@sha256:new", 1)
+	want := "# Generated from state/control-plane.sqlite3; do not edit.\n" +
+		"CLIPROXY_IMAGE=registry.example.test/cpa:v2@sha256:new\n" +
+		"BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.1\n"
 	if string(raw) != want {
-		t.Fatalf("CPA image projection changed unrelated bytes:\n--- got ---\n%s--- want ---\n%s", raw, want)
+		t.Fatalf("CPA image projection did not canonicalize retired settings:\n--- got ---\n%s--- want ---\n%s", raw, want)
 	}
 	if err := projector.ProjectCPAImage(context.Background(), "mutable image:latest"); err == nil {
 		t.Fatal("ProjectCPAImage accepted an invalid reference")

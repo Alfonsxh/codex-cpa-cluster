@@ -5,7 +5,7 @@
 AGENTS.md
 .claude
 .env
-v2-target.env
+target.env
 .DS_Store
 ._*
 __pycache__

@@ -111,6 +111,14 @@ func NewHTTPGateway(config HTTPGatewayConfig) (*HTTPGateway, error) {
 		return nil, err
 	}
 	internal.Use(gateway.recovery(), gateway.hsts())
+	internal.GET("/__internal/ready", func(c *gin.Context) {
+		if !gateway.engine.AuthenticationReady(gateway.now()) {
+			c.Header("Retry-After", "1")
+			c.Data(http.StatusServiceUnavailable, "text/plain; charset=utf-8", []byte("authentication snapshot unavailable\n"))
+			return
+		}
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte("ready\n"))
+	})
 	internal.GET("/__internal/probe/models", gateway.handleInternalModelProbe)
 	internal.GET("/__internal/snapshots", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gateway.engine.Status())

@@ -49,7 +49,7 @@ func newCommand() *cobra.Command {
 	settings.AutomaticEnv()
 	command := &cobra.Command{
 		Use:           "cpa-edge",
-		Short:         "Run the Go v2 stable CPA Edge",
+		Short:         "Run the stable Go CPA Edge",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PreRunE: func(command *cobra.Command, _ []string) error {
@@ -131,7 +131,7 @@ func run(config appConfig) error {
 	go func() { errorChannel <- selector.Run(ctx) }()
 	go serve("public", publicServer, logger, errorChannel)
 	go serve("internal", internalServer, logger, errorChannel)
-	logger.Info("Go v2 Edge started", zap.String("slot", string(selector.Slot())))
+	logger.Info("Go Edge started", zap.String("slot", string(selector.Slot())))
 	var runError error
 	select {
 	case <-ctx.Done():
@@ -156,7 +156,7 @@ func newHTTPServer(address string, handler http.Handler) *http.Server {
 }
 
 func serve(name string, server *http.Server, logger *zap.Logger, errorsChannel chan<- error) {
-	logger.Info("Go v2 Edge listener ready", zap.String("listener", name), zap.String("address", server.Addr))
+	logger.Info("Go Edge listener ready", zap.String("listener", name), zap.String("address", server.Addr))
 	err := server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil

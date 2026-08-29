@@ -218,11 +218,11 @@ func TestAuthSnapshotPublisherReadsAndReplacesUnderRealStoreFence(t *testing.T) 
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	runtimeLease, err := store.TakeLease(ctx, "runtime-writer", "go-v2", 30*time.Second)
+	runtimeLease, err := store.TakeLease(ctx, "runtime-writer", "codex-cpa", 30*time.Second)
 	if err != nil {
 		t.Fatalf("take runtime lease: %v", err)
 	}
-	workerLease, err := store.TakeLease(ctx, "admin", "go-v2:admin", 30*time.Second)
+	workerLease, err := store.TakeLease(ctx, "admin", "codex-cpa:admin", 30*time.Second)
 	if err != nil {
 		t.Fatalf("take worker lease: %v", err)
 	}

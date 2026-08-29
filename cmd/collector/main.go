@@ -53,7 +53,7 @@ func newCommand() *cobra.Command {
 	settings.AutomaticEnv()
 	command := &cobra.Command{
 		Use:           "cpa-collector",
-		Short:         "Run the Go v2 CPA usage collector",
+		Short:         "Run the Go CPA usage collector",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PreRunE: func(command *cobra.Command, _ []string) error {
@@ -97,7 +97,7 @@ func newCommand() *cobra.Command {
 	flags.Bool("once", false, "run one collection round and exit")
 	flags.Bool("health", false, "check collector heartbeat and exit")
 	flags.Bool("rebuild-weekly-usage", false, "rebuild materialized weekly usage and publish quota state")
-	flags.String("runtime-owner", "go-v2", "explicitly activated runtime ownership label")
+	flags.String("runtime-owner", "codex-cpa", "explicitly activated runtime ownership label")
 	flags.Duration("lease-ttl", 30*time.Second, "runtime and worker ownership lease lifetime")
 	if err := settings.BindPFlags(flags); err != nil {
 		panic(err)
@@ -228,7 +228,7 @@ func runOwnedCollector(
 		}
 		return nil
 	}
-	logger.Info("Go v2 usage collector started", zap.Duration("interval", interval), zap.Int("batch_size", runtimeConfig.BatchSize))
+	logger.Info("Go usage collector started", zap.Duration("interval", interval), zap.Int("batch_size", runtimeConfig.BatchSize))
 	for {
 		result, err := runtime.RunOnce(runContext)
 		if err != nil {
@@ -249,7 +249,7 @@ func runOwnedCollector(
 		select {
 		case <-runContext.Done():
 			timer.Stop()
-			logger.Info("Go v2 usage collector stopped")
+			logger.Info("Go usage collector stopped")
 			return nil
 		case <-timer.C:
 		}

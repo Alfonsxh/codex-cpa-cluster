@@ -1,5 +1,7 @@
 package gateway
 
+import "time"
+
 type SnapshotKindStatus struct {
 	ActiveGeneration        string  `json:"active_generation"`
 	PreviousGeneration      string  `json:"previous_generation"`
@@ -20,6 +22,19 @@ type QuotaSnapshotStatus struct {
 type Status struct {
 	Auth  SnapshotKindStatus  `json:"auth"`
 	Quota QuotaSnapshotStatus `json:"quota"`
+}
+
+// AuthenticationReady reports whether a newly started Gateway has loaded at
+// least one current API Key route. Deployment uses this stronger signal before
+// moving new traffic; the public liveness endpoint intentionally remains
+// independent so an already-running slot can fail closed without being killed.
+func (engine *Engine) AuthenticationReady(now time.Time) bool {
+	auth := engine.auth.Load()
+	if auth == nil || auth.generation == "" || auth.recordCount <= 0 || auth.loadedAt <= 0 {
+		return false
+	}
+	age := now.Unix() - auth.loadedAt
+	return age >= 0 && age <= int64(AuthSnapshotMaxAge/time.Second)
 }
 
 // Status returns the stable operational fields of the internal snapshot

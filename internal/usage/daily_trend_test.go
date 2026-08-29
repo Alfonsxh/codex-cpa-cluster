@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,5 +176,101 @@ func TestUserDailyTrendRejectsUnsafeBounds(t *testing.T) {
 				t.Fatal("invalid daily trend bounds were accepted")
 			}
 		})
+	}
+}
+
+func TestDailyCombinationQueryUsesBoundedUserTimeIndex(t *testing.T) {
+	path := createUsageFixture(t, 10)
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open daily trend plan fixture: %v", err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(
+		`CREATE INDEX usage_events_user_time_test ON usage_events(user_email, occurred_at)`,
+	); err != nil {
+		t.Fatalf("create daily trend plan index: %v", err)
+	}
+	rows, err := database.Query(
+		"EXPLAIN QUERY PLAN "+dailyCombinationQuery,
+		"alice@example.com", int64(1), int64(2),
+	)
+	if err != nil {
+		t.Fatalf("explain daily combination query: %v", err)
+	}
+	defer rows.Close()
+	details := make([]string, 0)
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan daily combination query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate daily combination query plan: %v", err)
+	}
+	if !strings.Contains(strings.Join(details, "\n"), "usage_events_user_time_test") {
+		t.Fatalf("daily combination query does not use the user/time index: %v", details)
+	}
+}
+
+func TestUserDailyTrendKeepsSuccessfulZeroTokenCombination(t *testing.T) {
+	path := createUsageFixture(t, 10)
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open zero-token daily trend fixture: %v", err)
+	}
+	now := time.Now().Unix()
+	if _, err := database.Exec(`DELETE FROM usage_events`); err != nil {
+		database.Close()
+		t.Fatalf("clear zero-token usage events: %v", err)
+	}
+	if _, err := database.Exec(
+		`UPDATE usage_meta SET value = ? WHERE key = 'usage_breakdown_started_at'`, now-3600,
+	); err != nil {
+		database.Close()
+		t.Fatalf("set zero-token collection start: %v", err)
+	}
+	if _, err := database.Exec(
+		`CREATE INDEX usage_events_user_time_test ON usage_events(user_email, occurred_at)`,
+	); err != nil {
+		database.Close()
+		t.Fatalf("create zero-token usage index: %v", err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO usage_events(
+			account, user_email, occurred_at, model, alias, reasoning_effort, failed,
+			input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens,
+			weighted_tokens, weight_policy_version
+		) VALUES
+			('alpha', 'alice@example.com', ?, 'gpt-zero', 'gpt-zero', 'none', 0, 0, 0, 0, 0, 0, 0, 'v2'),
+			('alpha', 'alice@example.com', ?, 'gpt-zero', 'gpt-zero', 'none', 1, 0, 0, 0, 0, 0, 0, 'v2')`,
+		now-120, now-60,
+	); err != nil {
+		database.Close()
+		t.Fatalf("seed zero-token usage: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close zero-token daily trend fixture: %v", err)
+	}
+
+	store, err := OpenReadOnlyPath(path, time.Now)
+	if err != nil {
+		t.Fatalf("open zero-token daily trend store: %v", err)
+	}
+	defer store.Close()
+	trend, err := store.UserDailyTrend(
+		context.Background(), "alice@example.com", 1, "UTC", now,
+		UserTrendModelReasoning,
+	)
+	if err != nil {
+		t.Fatalf("read zero-token daily trend: %v", err)
+	}
+	if len(trend.Days) != 1 || trend.Days[0].RequestCount != 2 ||
+		len(trend.Days[0].Combinations) != 1 ||
+		trend.Days[0].Combinations[0].RequestCount != 2 {
+		t.Fatalf("zero-token daily trend = %#v", trend)
 	}
 }

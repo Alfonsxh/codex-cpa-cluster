@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -127,14 +128,18 @@ func (store *Store) UserDailyTrend(
 		return result, nil
 	}
 
-	encodedBounds, err := json.Marshal(bounds)
-	if err != nil {
-		return result, fmt.Errorf("encode daily usage trend bounds: %w", err)
-	}
 	if dimension == UserTrendTotal {
-		err = queryDailyTotals(ctx, transaction, string(encodedBounds), user, result.EffectiveStartAt, result.Days)
+		encodedBounds, encodeErr := json.Marshal(bounds)
+		if encodeErr != nil {
+			return result, fmt.Errorf("encode daily usage trend bounds: %w", encodeErr)
+		}
+		err = queryDailyTotals(
+			ctx, transaction, string(encodedBounds), user, result.EffectiveStartAt, result.Days,
+		)
 	} else {
-		err = queryDailyCombinations(ctx, transaction, string(encodedBounds), user, result.EffectiveStartAt, result.Days)
+		err = queryDailyCombinations(
+			ctx, transaction, user, result.EffectiveStartAt, endAt, result.Days,
+		)
 	}
 	if err != nil {
 		return result, err
@@ -223,65 +228,114 @@ func queryDailyTotals(
 	return nil
 }
 
+const dailyCombinationQuery = `
+	SELECT occurred_at,
+	       COALESCE(NULLIF(model, ''), 'unknown') AS model,
+	       COALESCE(NULLIF(reasoning_effort, ''), 'unknown') AS reasoning_effort,
+	       COALESCE(failed, 1), COALESCE(total_tokens, 0), COALESCE(weighted_tokens, 0),
+	       COALESCE(weight_policy_version, '')
+	  FROM usage_events
+	 WHERE user_email = ?
+	   AND occurred_at >= ?
+	   AND occurred_at < ?
+	   AND alias != ''
+	 ORDER BY occurred_at`
+
 func queryDailyCombinations(
 	ctx context.Context,
 	transaction *sqlx.Tx,
-	encodedBounds string,
 	user string,
 	effectiveStartAt int64,
+	endAt int64,
 	days []UserDailyUsage,
 ) error {
-	rows := make([]struct {
-		Index           int    `db:"day_index"`
-		Model           string `db:"model"`
-		ReasoningEffort string `db:"reasoning_effort"`
-		RequestCount    int64  `db:"request_count"`
-		SuccessCount    int64  `db:"success_count"`
-		TotalTokens     int64  `db:"total_tokens"`
-		WeightedTokens  int64  `db:"weighted_tokens"`
-	}, 0)
-	if err := transaction.SelectContext(ctx, &rows, `
-		WITH day_bounds AS (
-			SELECT CAST(json_extract(value, '$.index') AS INTEGER) AS day_index,
-			       CAST(json_extract(value, '$.start_at') AS INTEGER) AS start_at,
-			       CAST(json_extract(value, '$.end_at') AS INTEGER) AS end_at
-			  FROM json_each(?)
-		)
-		SELECT bounds.day_index,
-		       COALESCE(NULLIF(events.model, ''), 'unknown') AS model,
-		       COALESCE(NULLIF(events.reasoning_effort, ''), 'unknown') AS reasoning_effort,
-		       COUNT(events.id) AS request_count,
-		       SUM(CASE WHEN events.failed = 0 THEN 1 ELSE 0 END) AS success_count,
-		       SUM(CASE WHEN events.failed = 0 THEN events.total_tokens ELSE 0 END) AS total_tokens,
-		       SUM(CASE WHEN events.failed = 0 THEN
-		           CASE WHEN events.weight_policy_version = 'legacy-v1'
-		                     AND events.weighted_tokens = 0 AND events.total_tokens > 0
-		                THEN events.total_tokens ELSE events.weighted_tokens END
-		           ELSE 0 END) AS weighted_tokens
-		  FROM day_bounds AS bounds
-		  JOIN usage_events AS events
-		    ON events.user_email = ?
-		   AND events.occurred_at >= MAX(bounds.start_at, ?)
-		   AND events.occurred_at < bounds.end_at
-		   AND events.alias != ''
-		 GROUP BY bounds.day_index, model, reasoning_effort
-		 ORDER BY bounds.day_index, weighted_tokens DESC, model, reasoning_effort`,
-		encodedBounds, user, effectiveStartAt); err != nil {
+	type combinationKey struct {
+		model           string
+		reasoningEffort string
+	}
+	rows, err := transaction.QueryxContext(
+		ctx, dailyCombinationQuery, user, effectiveStartAt, endAt,
+	)
+	if err != nil {
 		return fmt.Errorf("query daily usage combinations: %w", err)
 	}
-	for _, row := range rows {
-		if row.Index < 0 || row.Index >= len(days) {
+	defer rows.Close()
+
+	combinations := make([]map[combinationKey]*UserDailyCombination, len(days))
+	successfulCombinations := make([]map[combinationKey]bool, len(days))
+	dayIndex := 0
+	for rows.Next() {
+		var (
+			occurredAt          int64
+			model               string
+			reasoningEffort     string
+			failed              int
+			totalTokens         int64
+			weightedTokens      int64
+			weightPolicyVersion string
+		)
+		if err := rows.Scan(
+			&occurredAt, &model, &reasoningEffort, &failed, &totalTokens,
+			&weightedTokens, &weightPolicyVersion,
+		); err != nil {
+			return fmt.Errorf("scan daily usage combination: %w", err)
+		}
+		for dayIndex < len(days) && occurredAt >= days[dayIndex].EndAt {
+			dayIndex++
+		}
+		if dayIndex >= len(days) {
 			return errors.New("daily usage combination returned an invalid bucket")
 		}
-		days[row.Index].RequestCount += row.RequestCount
-		days[row.Index].TotalTokens += row.TotalTokens
-		days[row.Index].WeightedTokens += row.WeightedTokens
-		if row.SuccessCount <= 0 {
+		if occurredAt < days[dayIndex].StartAt {
+			return errors.New("daily usage combination returned an out-of-order bucket")
+		}
+
+		day := &days[dayIndex]
+		day.RequestCount++
+		key := combinationKey{model: model, reasoningEffort: reasoningEffort}
+		if combinations[dayIndex] == nil {
+			combinations[dayIndex] = make(map[combinationKey]*UserDailyCombination)
+			successfulCombinations[dayIndex] = make(map[combinationKey]bool)
+		}
+		combination := combinations[dayIndex][key]
+		if combination == nil {
+			combination = &UserDailyCombination{Model: model, ReasoningEffort: reasoningEffort}
+			combinations[dayIndex][key] = combination
+		}
+		combination.RequestCount++
+		if failed != 0 {
 			continue
 		}
-		days[row.Index].Combinations = append(days[row.Index].Combinations, UserDailyCombination{
-			Model: row.Model, ReasoningEffort: row.ReasoningEffort, RequestCount: row.RequestCount,
-			TotalTokens: row.TotalTokens, WeightedTokens: row.WeightedTokens,
+		successfulCombinations[dayIndex][key] = true
+		if weightPolicyVersion == "legacy-v1" && weightedTokens == 0 && totalTokens > 0 {
+			weightedTokens = totalTokens
+		}
+		day.TotalTokens += totalTokens
+		day.WeightedTokens += weightedTokens
+		combination.TotalTokens += totalTokens
+		combination.WeightedTokens += weightedTokens
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate daily usage combinations: %w", err)
+	}
+
+	for index, byDimension := range combinations {
+		for key, combination := range byDimension {
+			if !successfulCombinations[index][key] {
+				continue
+			}
+			days[index].Combinations = append(days[index].Combinations, *combination)
+		}
+		sort.Slice(days[index].Combinations, func(left, right int) bool {
+			leftCombination := days[index].Combinations[left]
+			rightCombination := days[index].Combinations[right]
+			if leftCombination.WeightedTokens != rightCombination.WeightedTokens {
+				return leftCombination.WeightedTokens > rightCombination.WeightedTokens
+			}
+			if leftCombination.Model != rightCombination.Model {
+				return leftCombination.Model < rightCombination.Model
+			}
+			return leftCombination.ReasoningEffort < rightCombination.ReasoningEffort
 		})
 	}
 	return nil

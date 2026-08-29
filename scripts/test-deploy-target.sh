@@ -250,6 +250,11 @@ run_action() {
     sh "$ROOT_DIR/scripts/deploy-target.sh" "$action"
 }
 
+if grep -Eq '^[[:space:]]+depends_on:' "$ROOT_DIR/docker-compose.yml"; then
+  echo "formal target Compose must leave dependency ordering to deploy-target.sh" >&2
+  exit 1
+fi
+
 expect_failure() {
   test_name=$1
   expected=$2

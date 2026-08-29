@@ -22,6 +22,9 @@ x-worker-health: &worker-health
   start_period: 20s
 
 services:
+  # scripts/deploy-target.sh owns dependency ordering and readiness checks.
+  # Keep service definitions dependency-free so config hashes remain compatible
+  # with the runtime labels emitted by supported Docker Compose versions.
   gateway-blue:
     image: ${CPA_GATEWAY_IMAGE:?CPA_GATEWAY_IMAGE is required}
     container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-gateway-blue
@@ -96,11 +99,6 @@ services:
       timeout: 5s
       retries: 4
       start_period: 20s
-    depends_on:
-      gateway-blue:
-        condition: service_healthy
-      gateway-green:
-        condition: service_healthy
     networks:
       - control
       - upstream
@@ -120,9 +118,6 @@ services:
       timeout: 5s
       retries: 4
       start_period: 20s
-    depends_on:
-      admin:
-        condition: service_healthy
     networks:
       - control
 
@@ -148,13 +143,6 @@ services:
       interval: 15s
       timeout: 5s
       retries: 4
-    depends_on:
-      gateway-blue:
-        condition: service_healthy
-      gateway-green:
-        condition: service_healthy
-      web:
-        condition: service_healthy
     networks:
       - control
       - ingress
@@ -173,9 +161,6 @@ services:
         - /usr/local/bin/cpa-collector
         - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
-    depends_on:
-      admin:
-        condition: service_healthy
     networks:
       - control
       - upstream
@@ -194,9 +179,6 @@ services:
         - /usr/local/bin/cpa-quota
         - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
-    depends_on:
-      admin:
-        condition: service_healthy
     networks:
       - control
       - upstream
@@ -216,9 +198,6 @@ services:
         - /usr/local/bin/cpa-failover
         - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
-    depends_on:
-      edge:
-        condition: service_healthy
     networks:
       - control
       - upstream
@@ -237,9 +216,6 @@ services:
         - /usr/local/bin/cpa-log-maintenance
         - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
-    depends_on:
-      admin:
-        condition: service_healthy
     networks:
       - control
 
@@ -257,9 +233,6 @@ services:
         - /usr/local/bin/cpa-notifications
         - --root=${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
         - --health
-    depends_on:
-      admin:
-        condition: service_healthy
     networks:
       - control
       - upstream

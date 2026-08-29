@@ -121,7 +121,7 @@ for (const application of applications) {
   if (initialGzipBytes > maxInitialGzipBytes) {
     throw new Error(`${application}: gzipped initial JavaScript exceeds ${maxInitialGzipBytes} bytes (${initialGzipBytes} bytes)`);
   }
-  if (includesECharts !== (application === "admin")) {
+  if (includesECharts !== (application === "admin" || application === "usage")) {
     throw new Error(`${application}: ECharts dependency boundary is invalid`);
   }
 

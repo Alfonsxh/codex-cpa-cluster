@@ -1140,6 +1140,21 @@ func TestAccountLifecycleCompatibilityRoutesEnforceConfirmationsAndReturnSecretF
 		t.Fatalf("update account policy response = %d %s request=%#v", response.Code, response.Body.String(), service.updateRequest)
 	}
 
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/accounts/repair-proxy", map[string]any{
+		"id": "alpha", "proxy_url": "http://proxy-user:proxy-password@proxy.example.com:16169",
+		"confirm": "repair-proxy:wrong",
+	}, headers, nil)
+	assertAdminError(t, response, http.StatusBadRequest, "invalid_confirmation")
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/accounts/repair-proxy", map[string]any{
+		"id": "alpha", "proxy_url": "http://proxy-user:proxy-password@proxy.example.com:16169",
+		"confirm": "repair-proxy:alpha",
+	}, headers, nil)
+	if response.Code != http.StatusOK || !service.updateRequest.AllowUnavailableProxyRepair ||
+		service.updateRequest.ProxyMode != "custom" || service.updateRequest.ProxyURL == nil ||
+		strings.Contains(response.Body.String(), "proxy-password") {
+		t.Fatalf("repair proxy response = %d %s request=%#v", response.Code, response.Body.String(), service.updateRequest)
+	}
+
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/accounts/clear-auth", map[string]any{
 		"id": "alpha", "confirm": "beta",
 	}, headers, nil)
@@ -1184,6 +1199,7 @@ func TestAccountLifecycleMapsDrainAndRecoveryFailuresToStableCodes(t *testing.T)
 	}{
 		{name: "active requests", err: accountlifecycle.ErrAccountDrainTimeout, status: http.StatusConflict, code: "account_requests_active"},
 		{name: "recovery required", err: accountlifecycle.ErrLifecycleRecoveryRequired, status: http.StatusServiceUnavailable, code: "account_lifecycle_not_ready"},
+		{name: "proxy repair rejected", err: accountlifecycle.ErrUnavailableProxyRepairRejected, status: http.StatusConflict, code: "account_proxy_repair_unavailable"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

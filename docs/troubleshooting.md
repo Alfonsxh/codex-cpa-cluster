@@ -53,6 +53,26 @@ curl --noproxy '*' -I http://127.0.0.1:<public-port>/portal/assets/codex-cpa-clu
 
 检查 `usage-collector` 健康和日志、`state/usage.sqlite3` 权限/磁盘空间、Gateway 访问日志是否持续产生事件，以及 Collector 是否仍持有 Writer Lease。Generation 改变后的旧进程不能继续写入。
 
+## 所有 CPA 都因代理投影缺失而不可用
+
+普通账号更新必须先把路由迁移到有额度的健康 CPA 并等待进行中请求排空；如果所有账号都因同一个代理投影问题而不可用，就不存在安全迁移目标。此时只能对一个已经确认不可用、仍有路由的账号执行受限恢复：
+
+```http
+POST /admin/api/accounts/repair-proxy
+X-Management-Key: <当前管理密钥>
+Content-Type: application/json
+
+{
+  "id": "<account-id>",
+  "proxy_url": "http://<existing-proxy>:<port>",
+  "confirm": "repair-proxy:<account-id>"
+}
+```
+
+该动作只允许写入新的独立代理并重建同一个账号；不能同时修改邮箱、标识、启停策略或路由。如果源账号仍可用、没有路由，或已经存在有剩余额度的安全目标，接口会拒绝。第一个账号恢复额度读取后，其余账号必须回到普通更新流程，使用路由迁移与请求排空。代理值只进入加密控制面和生成配置，不会出现在响应中。
+
+这不是修改外部代理拓扑的接口。执行前仍需单独确认既有代理容器、网络与端口健康，并保留控制库、主密钥、OAuth 和账号配置备份。
+
 ## 所有权激活失败
 
 如果已有活动所有者，先查明并停止既有 Writer，等待或显式完成受控所有权交接。空所有权历史只允许：

@@ -814,6 +814,87 @@ func (e PortalSessionAuthenticated) Valid() bool {
 	}
 }
 
+// Defines values for PortalUsageTrendWindowDays.
+const (
+	N30 PortalUsageTrendWindowDays = 30
+	N7  PortalUsageTrendWindowDays = 7
+	N90 PortalUsageTrendWindowDays = 90
+)
+
+// Valid indicates whether the value is a known member of the PortalUsageTrendWindowDays enum.
+func (e PortalUsageTrendWindowDays) Valid() bool {
+	switch e {
+	case N30:
+		return true
+	case N7:
+		return true
+	case N90:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PortalUsageTrendDayCollectionState.
+const (
+	Complete    PortalUsageTrendDayCollectionState = "complete"
+	Partial     PortalUsageTrendDayCollectionState = "partial"
+	Uncollected PortalUsageTrendDayCollectionState = "uncollected"
+)
+
+// Valid indicates whether the value is a known member of the PortalUsageTrendDayCollectionState enum.
+func (e PortalUsageTrendDayCollectionState) Valid() bool {
+	switch e {
+	case Complete:
+		return true
+	case Partial:
+		return true
+	case Uncollected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PortalUsageTrendDimension.
+const (
+	ModelReasoning PortalUsageTrendDimension = "model_reasoning"
+	Total          PortalUsageTrendDimension = "total"
+)
+
+// Valid indicates whether the value is a known member of the PortalUsageTrendDimension enum.
+func (e PortalUsageTrendDimension) Valid() bool {
+	switch e {
+	case ModelReasoning:
+		return true
+	case Total:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PortalUsageTrendWindow.
+const (
+	N30d PortalUsageTrendWindow = "30d"
+	N7d  PortalUsageTrendWindow = "7d"
+	N90d PortalUsageTrendWindow = "90d"
+)
+
+// Valid indicates whether the value is a known member of the PortalUsageTrendWindow enum.
+func (e PortalUsageTrendWindow) Valid() bool {
+	switch e {
+	case N30d:
+		return true
+	case N7d:
+		return true
+	case N90d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PortalUsageWindow1.
 const (
 	PortalUsageWindow1Today PortalUsageWindow1 = "today"
@@ -1772,6 +1853,16 @@ type AccountOperationalStatus struct {
 // AccountOperationalStatusTone defines model for AccountOperationalStatus.Tone.
 type AccountOperationalStatusTone string
 
+// AccountProxyRepairRequest defines model for AccountProxyRepairRequest.
+type AccountProxyRepairRequest struct {
+	// Confirm Must equal repair-proxy followed by a colon and the exact account id.
+	Confirm string `json:"confirm"`
+	Id      string `json:"id"`
+
+	// ProxyUrl New HTTP, HTTPS, or SOCKS5 proxy URL; never returned by the API.
+	ProxyUrl *string `json:"proxy_url,omitempty"`
+}
+
 // AccountQuota defines model for AccountQuota.
 type AccountQuota struct {
 	Account          string                `json:"account"`
@@ -2578,6 +2669,54 @@ type PortalSession struct {
 
 // PortalSessionAuthenticated defines model for PortalSession.Authenticated.
 type PortalSessionAuthenticated bool
+
+// PortalUsageTrend defines model for PortalUsageTrend.
+type PortalUsageTrend struct {
+	CollectionStartedAt int64                      `json:"collection_started_at"`
+	Days                []PortalUsageTrendDay      `json:"days"`
+	Definition          string                     `json:"definition"`
+	Dimension           PortalUsageTrendDimension  `json:"dimension"`
+	EffectiveStartAt    int64                      `json:"effective_start_at"`
+	GeneratedAt         int64                      `json:"generated_at"`
+	Window              PortalUsageTrendWindow     `json:"window"`
+	WindowDays          PortalUsageTrendWindowDays `json:"window_days"`
+	WindowEndAt         int64                      `json:"window_end_at"`
+	WindowStartAt       int64                      `json:"window_start_at"`
+	WindowTimezone      string                     `json:"window_timezone"`
+}
+
+// PortalUsageTrendWindowDays defines model for PortalUsageTrend.WindowDays.
+type PortalUsageTrendWindowDays int
+
+// PortalUsageTrendCombination defines model for PortalUsageTrendCombination.
+type PortalUsageTrendCombination struct {
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	RequestCount    int64  `json:"request_count"`
+	TotalTokens     int64  `json:"total_tokens"`
+	WeightedTokens  int64  `json:"weighted_tokens"`
+}
+
+// PortalUsageTrendDay defines model for PortalUsageTrendDay.
+type PortalUsageTrendDay struct {
+	CollectionState PortalUsageTrendDayCollectionState `json:"collection_state"`
+	Combinations    []PortalUsageTrendCombination      `json:"combinations"`
+	Date            openapi_types.Date                 `json:"date"`
+	EndAt           int64                              `json:"end_at"`
+	RequestCount    int64                              `json:"request_count"`
+	StartAt         int64                              `json:"start_at"`
+	TotalTokens     int64                              `json:"total_tokens"`
+	WeightedTokens  int64                              `json:"weighted_tokens"`
+}
+
+// PortalUsageTrendDayCollectionState defines model for PortalUsageTrendDay.CollectionState.
+type PortalUsageTrendDayCollectionState string
+
+// PortalUsageTrendDimension defines model for PortalUsageTrendDimension.
+type PortalUsageTrendDimension string
+
+// PortalUsageTrendWindow defines model for PortalUsageTrendWindow.
+type PortalUsageTrendWindow string
 
 // PortalUsageWindow defines model for PortalUsageWindow.
 type PortalUsageWindow struct {
@@ -3676,6 +3815,11 @@ type RebalanceAllAdminAccountsParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// RepairUnavailableAdminAccountProxyParams defines parameters for RepairUnavailableAdminAccountProxy.
+type RepairUnavailableAdminAccountProxyParams struct {
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // ResetAdminAccountQuotaParams defines parameters for ResetAdminAccountQuota.
 type ResetAdminAccountQuotaParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
@@ -3991,6 +4135,12 @@ type GetPortalUsageBreakdownParams struct {
 	Window  PortalUsageWindowQuery `form:"window" json:"window"`
 }
 
+// GetPortalUsageTrendParams defines parameters for GetPortalUsageTrend.
+type GetPortalUsageTrendParams struct {
+	Window    *PortalUsageTrendWindow    `form:"window,omitempty" json:"window,omitempty"`
+	Dimension *PortalUsageTrendDimension `form:"dimension,omitempty" json:"dimension,omitempty"`
+}
+
 // CreateAdminAccountJSONRequestBody defines body for CreateAdminAccount for application/json ContentType.
 type CreateAdminAccountJSONRequestBody = AccountCreateRequest
 
@@ -4008,6 +4158,9 @@ type RebalanceAdminAccountJSONRequestBody = RebalanceAccountRequest
 
 // RebalanceAllAdminAccountsJSONRequestBody defines body for RebalanceAllAdminAccounts for application/json ContentType.
 type RebalanceAllAdminAccountsJSONRequestBody = RebalanceAllRequest
+
+// RepairUnavailableAdminAccountProxyJSONRequestBody defines body for RepairUnavailableAdminAccountProxy for application/json ContentType.
+type RepairUnavailableAdminAccountProxyJSONRequestBody = AccountProxyRepairRequest
 
 // ResetAdminAccountQuotaJSONRequestBody defines body for ResetAdminAccountQuota for application/json ContentType.
 type ResetAdminAccountQuotaJSONRequestBody = ResetAccountQuotaRequest

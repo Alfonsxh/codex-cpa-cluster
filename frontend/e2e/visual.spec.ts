@@ -85,6 +85,100 @@ for (const state of ["loading", "empty", "error"] as const) {
   });
 }
 
+test("个人使用中心每日趋势按范围和组合维度独立请求并可收起", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "light");
+  const trendRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/usage/me/usage-trend") trendRequests.push(`${url.pathname}?${url.searchParams.toString()}`);
+  });
+  await installUsageVisualBackend(page);
+  await page.goto("http://127.0.0.1:5194/usage/");
+
+  const chart = page.getByRole("img", { name: /个人每日 Token 用量趋势/ });
+  await expect(chart).toBeVisible();
+  await expect.poll(() => trendRequests).toEqual([
+    "/usage/me/usage-trend?window=30d&dimension=total"
+  ]);
+  const expandedAccountTop = await page.getByText("账号明细", { exact: true }).evaluate((element) => element.getBoundingClientRect().top);
+
+  await page.getByRole("button", { name: /^收起/ }).click();
+  await expect(chart).toHaveCount(0);
+  await expect(page.getByText("30天", { exact: true })).toBeVisible();
+  const collapsedAccountTop = await page.getByText("账号明细", { exact: true }).evaluate((element) => element.getBoundingClientRect().top);
+  expect(collapsedAccountTop).toBeLessThan(expandedAccountTop - 120);
+
+  await page.getByRole("button", { name: /^展开/ }).click();
+  await expect(chart).toBeVisible();
+  await page.getByRole("button", { name: "7天", exact: true }).click();
+  await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
+  await expect.poll(() => trendRequests).toContain(
+    "/usage/me/usage-trend?window=7d&dimension=model_reasoning"
+  );
+  await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
+
+  await chart.focus();
+  const tooltip = page.locator(".usage-trend-tooltip[data-active=true]");
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveAttribute("data-layout", "single-column");
+  expect(await tooltip.evaluate((element) => ({
+    overflowX: getComputedStyle(element).overflowX,
+    overflowY: getComputedStyle(element).overflowY,
+    scrollable: element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth
+  }))).toEqual({ overflowX: "hidden", overflowY: "hidden", scrollable: false });
+});
+
+test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "light");
+  await installUsageVisualBackend(page);
+  await page.goto("http://127.0.0.1:5194/usage/");
+
+  await page.getByRole("button", { name: /^收起/ }).click();
+  await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toHaveCount(0);
+  await expect(page.getByText("账号明细", { exact: true })).toBeVisible();
+  await expect(page).toHaveScreenshot("react-usage-trend-collapsed-desktop-light.png", { fullPage: false });
+});
+
+test("个人使用中心模型与推理强度组合趋势视觉基准", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "light");
+  await installUsageVisualBackend(page);
+  await page.goto("http://127.0.0.1:5194/usage/");
+
+  await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
+  await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeVisible();
+  await expect(page).toHaveScreenshot("react-usage-trend-model-reasoning-desktop-light.png", { fullPage: false });
+});
+
+test("个人使用中心移动端可滚动到账号明细", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setTheme(page, "light");
+  await installUsageVisualBackend(page);
+  await page.goto("http://127.0.0.1:5194/usage/");
+
+  const header = page.locator(".usage-center-head");
+  const content = page.locator(".usage-center-content");
+  const accountSection = page.locator(".usage-account-section");
+  const accountTable = page.locator(".usage-table-wrap");
+  const accountHeading = page.getByText("账号明细", { exact: true });
+  const headerTop = await header.evaluate((element) => element.getBoundingClientRect().top);
+
+  await expect(accountSection).toBeAttached();
+  expect(await accountSection.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(400);
+  expect(await accountTable.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
+  await accountHeading.scrollIntoViewIfNeeded();
+
+  expect(await content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await header.evaluate((element) => element.getBoundingClientRect().top)).toBe(headerTop);
+  const accountHeadingRect = await accountHeading.evaluate((element) => element.getBoundingClientRect());
+  expect(accountHeadingRect.top).toBeGreaterThanOrEqual(0);
+  expect(accountHeadingRect.bottom).toBeLessThanOrEqual(844);
+  await expect(accountTable).toBeVisible();
+});
+
 test("账号展开区复用旧版四层信息结构", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setTheme(page, "dark");
@@ -716,6 +810,51 @@ function usageQuotaFixture() {
   };
 }
 
+function usageTrendFixture(window: string, dimension: string) {
+  const windowDays = window === "7d" ? 7 : window === "90d" ? 90 : 30;
+  const end = Date.UTC(2026, 7, 29) / 1000;
+  const start = end - (windowDays - 1) * 86_400;
+  const combinationDefinitions = [
+    ["gpt-5.4", "high", 0.52],
+    ["gpt-5.4", "medium", 0.26],
+    ["gpt-5.4-mini", "high", 0.16],
+    ["gpt-5.4-mini", "medium", 0.06]
+  ] as const;
+  const days = Array.from({ length: windowDays }, (_, index) => {
+    const totalTokens = 380_000 + index * 22_000 + (index % 5) * 35_000;
+    const weightedTokens = Math.round(totalTokens * 1.28);
+    return {
+      date: new Date((start + index * 86_400) * 1000).toISOString().slice(0, 10),
+      start_at: start + index * 86_400,
+      end_at: start + (index + 1) * 86_400,
+      collection_state: index === 0 && windowDays === 90 ? "partial" : "complete",
+      request_count: 80 + index * 2,
+      total_tokens: totalTokens,
+      weighted_tokens: weightedTokens,
+      combinations: dimension === "model_reasoning" ? combinationDefinitions.map(([model, reasoningEffort, share]) => ({
+        model,
+        reasoning_effort: reasoningEffort,
+        request_count: Math.max(1, Math.round((80 + index * 2) * share)),
+        total_tokens: Math.round(totalTokens * share),
+        weighted_tokens: Math.round(weightedTokens * share)
+      })) : []
+    };
+  });
+  return {
+    generated_at: end,
+    window,
+    window_days: windowDays,
+    window_start_at: days[0]?.start_at ?? start,
+    window_end_at: days.at(-1)?.end_at ?? end,
+    window_timezone: "Asia/Shanghai",
+    dimension,
+    definition: "视觉回归自然日聚合",
+    collection_started_at: days[0]?.start_at ?? start,
+    effective_start_at: days[0]?.start_at ?? start,
+    days
+  };
+}
+
 async function installUsageVisualBackend(page: Page, state: "normal" | "loading" | "empty" | "error" = "normal") {
   await page.route("**/site-config.json", (route) => fulfillJSON(route, {
     version: 1,
@@ -730,7 +869,8 @@ async function installUsageVisualBackend(page: Page, state: "normal" | "loading"
   }));
   await page.route(/\/usage\/(?:session|me)(?:\/|\?|$)/, async (route) => {
     const request = route.request();
-    const path = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const path = url.pathname;
     if (path === "/usage/session") {
       await fulfillJSON(route, { authenticated: true, user: "alice@example.com", expires_at: 1_787_544_000, password_change_required: false });
       return;
@@ -756,6 +896,13 @@ async function installUsageVisualBackend(page: Page, state: "normal" | "loading"
       const payload = usageAccountsFixture();
       if (state === "empty") payload.accounts = [];
       await fulfillJSON(route, payload);
+      return;
+    }
+    if (path === "/usage/me/usage-trend") {
+      await fulfillJSON(route, usageTrendFixture(
+        url.searchParams.get("window") ?? "30d",
+        url.searchParams.get("dimension") ?? "total"
+      ));
       return;
     }
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "visual_not_found", message: path } }) });

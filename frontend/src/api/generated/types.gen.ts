@@ -280,6 +280,14 @@ export type AccountUpdateResponse = {
     account: AccountUpdateResult;
 };
 
+export type AccountProxyRepairRequest = {
+    id: string;
+    /**
+     * Must equal repair-proxy followed by a colon and the exact account id.
+     */
+    confirm: string;
+};
+
 export type AccountClearAuthRequest = {
     id: string;
     confirm: string;
@@ -822,6 +830,10 @@ export type UsageWindow = '3600' | '21600' | '86400' | '604800' | '2592000' | 't
 
 export type PortalUsageWindow = UsageWindow | 'today';
 
+export type PortalUsageTrendWindow = '7d' | '30d' | '90d';
+
+export type PortalUsageTrendDimension = 'total' | 'model_reasoning';
+
 export type UsageMetrics = {
     request_count: number;
     success_count: number;
@@ -866,6 +878,39 @@ export type UsageBreakdown = {
     models: Array<UsageModelMetrics>;
     reasoning_efforts: Array<UsageReasoningMetrics>;
     combinations: Array<UsageCombination>;
+};
+
+export type PortalUsageTrendCombination = {
+    model: string;
+    reasoning_effort: string;
+    request_count: number;
+    total_tokens: number;
+    weighted_tokens: number;
+};
+
+export type PortalUsageTrendDay = {
+    date: string;
+    start_at: number;
+    end_at: number;
+    collection_state: 'uncollected' | 'partial' | 'complete';
+    request_count: number;
+    total_tokens: number;
+    weighted_tokens: number;
+    combinations: Array<PortalUsageTrendCombination>;
+};
+
+export type PortalUsageTrend = {
+    generated_at: number;
+    window: PortalUsageTrendWindow;
+    window_days: 7 | 30 | 90;
+    window_start_at: number;
+    window_end_at: number;
+    window_timezone: string;
+    dimension: PortalUsageTrendDimension;
+    definition: string;
+    collection_started_at: number;
+    effective_start_at: number;
+    days: Array<PortalUsageTrendDay>;
 };
 
 export type PortalLoginRequest = {
@@ -1468,6 +1513,18 @@ export type AccountUpdateRequestWritable = {
     confirm?: string;
 };
 
+export type AccountProxyRepairRequestWritable = {
+    id: string;
+    /**
+     * New HTTP, HTTPS, or SOCKS5 proxy URL; never returned by the API.
+     */
+    proxy_url: string;
+    /**
+     * Must equal repair-proxy followed by a colon and the exact account id.
+     */
+    confirm: string;
+};
+
 export type NotificationWebhookRequestWritable = {
     confirm: 'save';
     webhook_url: string;
@@ -1860,6 +1917,42 @@ export type UpdateAdminAccountPolicyResponses = {
 };
 
 export type UpdateAdminAccountPolicyResponse = UpdateAdminAccountPolicyResponses[keyof UpdateAdminAccountPolicyResponses];
+
+export type RepairUnavailableAdminAccountProxyData = {
+    body: AccountProxyRepairRequestWritable;
+    headers: {
+        'X-CSRF-Token': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/admin/api/accounts/repair-proxy';
+};
+
+export type RepairUnavailableAdminAccountProxyErrors = {
+    /**
+     * Safety conflict; `error.code` is `account_requests_active` when Codex requests are still in flight.
+     */
+    409: ErrorEnvelope;
+    /**
+     * Account mutation is unavailable; `error.code` is `account_lifecycle_not_ready` when durable recovery or safe evacuation cannot proceed.
+     */
+    503: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type RepairUnavailableAdminAccountProxyError = RepairUnavailableAdminAccountProxyErrors[keyof RepairUnavailableAdminAccountProxyErrors];
+
+export type RepairUnavailableAdminAccountProxyResponses = {
+    /**
+     * Ineligible account proxy reprojected and runtime probed
+     */
+    200: AccountUpdateResponse;
+};
+
+export type RepairUnavailableAdminAccountProxyResponse = RepairUnavailableAdminAccountProxyResponses[keyof RepairUnavailableAdminAccountProxyResponses];
 
 export type ClearAdminAccountAuthData = {
     body: AccountClearAuthRequest;
@@ -3849,6 +3942,34 @@ export type GetPortalUsageBreakdownResponses = {
 };
 
 export type GetPortalUsageBreakdownResponse = GetPortalUsageBreakdownResponses[keyof GetPortalUsageBreakdownResponses];
+
+export type GetPortalUsageTrendData = {
+    body?: never;
+    path?: never;
+    query?: {
+        window?: PortalUsageTrendWindow;
+        dimension?: PortalUsageTrendDimension;
+    };
+    url: '/usage/me/usage-trend';
+};
+
+export type GetPortalUsageTrendErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetPortalUsageTrendError = GetPortalUsageTrendErrors[keyof GetPortalUsageTrendErrors];
+
+export type GetPortalUsageTrendResponses = {
+    /**
+     * Current Session user's natural-day usage trend
+     */
+    200: PortalUsageTrend;
+};
+
+export type GetPortalUsageTrendResponse = GetPortalUsageTrendResponses[keyof GetPortalUsageTrendResponses];
 
 export type UpdatePortalPasswordData = {
     body: PortalPasswordRequest;

@@ -288,6 +288,42 @@ describe("UsageDashboard", () => {
       body: JSON.stringify({ confirm: true })
     })));
   }, 15_000);
+
+  it("loads only the selected daily trend range and combined dimension, then preserves cached state while collapsed", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => portalReadResponse(String(input)));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
+
+    expect(await screen.findByRole("heading", { name: "每日用量趋势" })).toBeInTheDocument();
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toEqual([
+      "/usage/me/usage-trend?window=30d&dimension=total"
+    ]));
+    expect(screen.getByText("30天加权")).toBeInTheDocument();
+    expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "7天" }));
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toContain(
+      "/usage/me/usage-trend?window=7d&dimension=total"
+    ));
+    await user.click(screen.getByRole("button", { name: "模型 + 推理强度" }));
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toContain(
+      "/usage/me/usage-trend?window=7d&dimension=model_reasoning"
+    ));
+    expect(screen.getByText("主要组合")).toBeInTheDocument();
+    expect(screen.getAllByText("gpt-5.4 · high").length).toBeGreaterThan(0);
+    expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes("user="))).toBe(false);
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: /^收起/ }));
+    expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
+    expect(screen.getByText("7天")).toBeInTheDocument();
+    const beforeExpand = requestPaths(fetchMock, "/usage/me/usage-trend?").length;
+    await user.click(screen.getByRole("button", { name: /^展开/ }));
+    expect(await screen.findByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeInTheDocument();
+    expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toHaveLength(beforeExpand);
+  });
 });
 
 function renderPortal(element: React.ReactNode) {
@@ -309,7 +345,55 @@ function portalReadResponse(path: string) {
   if (path === "/usage/me/route") return jsonResponse({ current_group: "alpha", generated_at: 10_000 });
   if (path === "/usage/me/quota") return jsonResponse(quota);
   if (path === "/usage/me/accounts?window=today") return jsonResponse(accounts);
+  if (path.startsWith("/usage/me/usage-trend?")) {
+    const url = new URL(path, "http://portal.test");
+    const window = url.searchParams.get("window") ?? "30d";
+    const dimension = url.searchParams.get("dimension") ?? "total";
+    return jsonResponse(usageTrendFixture(window, dimension));
+  }
   throw new Error(`unexpected request: ${path}`);
+}
+
+function usageTrendFixture(window: string, dimension: string) {
+  const windowDays = window === "7d" ? 7 : window === "90d" ? 90 : 30;
+  const start = Date.UTC(2026, 7, 29 - (windowDays - 1)) / 1000;
+  const days = Array.from({ length: windowDays }, (_, index) => {
+    const date = new Date((start + index * 86_400) * 1000).toISOString().slice(0, 10);
+    const total = 100_000 + index * 10_000;
+    return {
+      date,
+      start_at: start + index * 86_400,
+      end_at: start + (index + 1) * 86_400,
+      collection_state: "complete",
+      request_count: 10 + index,
+      total_tokens: total,
+      weighted_tokens: Math.round(total * 1.25),
+      combinations: dimension === "model_reasoning" ? [{
+        model: "gpt-5.4",
+        reasoning_effort: "high",
+        request_count: 10 + index,
+        total_tokens: total,
+        weighted_tokens: Math.round(total * 1.25)
+      }] : []
+    };
+  });
+  return {
+    generated_at: 1_788_000_000,
+    window,
+    window_days: windowDays,
+    window_start_at: days[0]?.start_at ?? 0,
+    window_end_at: days[days.length - 1]?.end_at ?? 0,
+    window_timezone: "Asia/Shanghai",
+    dimension,
+    definition: "test",
+    collection_started_at: days[0]?.start_at ?? 0,
+    effective_start_at: days[0]?.start_at ?? 0,
+    days
+  };
+}
+
+function requestPaths(fetchMock: ReturnType<typeof vi.fn>, prefix: string) {
+  return fetchMock.mock.calls.map(([path]) => String(path)).filter((path) => path.startsWith(prefix));
 }
 
 function metrics(totalTokens: number, weightedTokens: number) {

@@ -165,6 +165,75 @@ func TestPortalUsageReadsAreUserScopedAndBoundedToOneGeneratedWindow(t *testing.
 	}
 }
 
+func TestPortalDailyUsageTrendUsesOnlySessionIdentityAndDedicatedBounds(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	fixture.usage.trend = usage.UserDailyTrend{
+		WindowDays: 30, Timezone: "Asia/Shanghai", WindowStartAt: 1_000, WindowEndAt: 10_000,
+		CollectionStartedAt: 2_000, EffectiveStartAt: 2_000,
+		Dimension: usage.UserTrendModelReasoning,
+		Days: []usage.UserDailyUsage{{
+			Date: "1970-01-01", StartAt: 1_000, EndAt: 10_000,
+			CollectionState: usage.DailyCollectionPartial,
+			RequestCount:    2, TotalTokens: 100, WeightedTokens: 125,
+			Combinations: []usage.UserDailyCombination{{
+				Model: "gpt-5.4", ReasoningEffort: "high", RequestCount: 2,
+				TotalTokens: 100, WeightedTokens: 125,
+			}},
+		}},
+	}
+
+	response := fixture.request(
+		http.MethodGet,
+		"/usage/me/usage-trend?window=30d&dimension=model_reasoning",
+		"",
+		"session",
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("daily trend = %d %s", response.Code, response.Body.String())
+	}
+	if fixture.usage.trendCalls != 1 || fixture.usage.trendUser != "alice@example.com" ||
+		fixture.usage.trendDays != 30 || fixture.usage.trendTimezone != "Asia/Shanghai" ||
+		fixture.usage.trendEndAt != 10_000 || fixture.usage.trendDimension != usage.UserTrendModelReasoning {
+		t.Fatalf("daily trend call = %#v", fixture.usage)
+	}
+	if fixture.usage.accountsCalls != 0 || fixture.usage.breakdownCalls != 0 {
+		t.Fatalf("daily trend widened other usage requests: %#v", fixture.usage)
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"window":"30d"`, `"dimension":"model_reasoning"`, `"window_timezone":"Asia/Shanghai"`,
+		`"model":"gpt-5.4"`, `"reasoning_effort":"high"`, `"weighted_tokens":125`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("daily trend response %s does not contain %s", body, expected)
+		}
+	}
+	if strings.Contains(body, `"user"`) || strings.Contains(body, "bob@example.com") {
+		t.Fatalf("daily trend response leaked a user identity: %s", body)
+	}
+}
+
+func TestPortalDailyUsageTrendRejectsUserOverrideAndInvalidSelectors(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+
+	for _, path := range []string{
+		"/usage/me/usage-trend?window=30d&dimension=total&user=bob@example.com",
+		"/usage/me/usage-trend?window=30d&dimension=total&user=",
+		"/usage/me/usage-trend?window=1d&dimension=total",
+		"/usage/me/usage-trend?window=30d&dimension=model",
+	} {
+		response := fixture.request(http.MethodGet, path, "", "session")
+		assertPortalError(t, response, http.StatusBadRequest, "invalid_request")
+	}
+	if fixture.usage.trendCalls != 0 {
+		t.Fatalf("invalid trend request reached usage store %d times", fixture.usage.trendCalls)
+	}
+	unauthorized := fixture.request(http.MethodGet, "/usage/me/usage-trend", "", "")
+	assertPortalError(t, unauthorized, http.StatusUnauthorized, "session_required")
+}
+
 func TestPortalQuotaIsUserScopedAndUsesTheLiveDefaultPolicy(t *testing.T) {
 	fixture := newPortalFixture(t)
 	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
@@ -592,6 +661,13 @@ type portalUsageFake struct {
 	breakdownEndAt *int64
 	accountsCalls  int
 	breakdownCalls int
+	trend          usage.UserDailyTrend
+	trendUser      string
+	trendDays      int
+	trendTimezone  string
+	trendEndAt     int64
+	trendDimension usage.UserTrendDimension
+	trendCalls     int
 	publicResult   map[string]usage.PublicAccountUsage
 }
 
@@ -632,6 +708,20 @@ func (reader *portalUsageFake) UserBreakdown(
 	reader.breakdownCalls++
 	reader.user, reader.account, reader.startAt, reader.breakdownEndAt = user, account, startAt, cloneInt64(endAt)
 	return reader.breakdown, nil
+}
+
+func (reader *portalUsageFake) UserDailyTrend(
+	_ context.Context,
+	user string,
+	days int,
+	timezone string,
+	endAt int64,
+	dimension usage.UserTrendDimension,
+) (usage.UserDailyTrend, error) {
+	reader.trendCalls++
+	reader.trendUser, reader.trendDays, reader.trendTimezone = user, days, timezone
+	reader.trendEndAt, reader.trendDimension = endAt, dimension
+	return reader.trend, nil
 }
 
 type portalRouteFake struct {

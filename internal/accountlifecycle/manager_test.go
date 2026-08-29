@@ -241,6 +241,105 @@ func TestManagerUpdateRejectsFallbackWithoutQuotaHeadroomBeforeChangingState(t *
 	}
 }
 
+func TestManagerUnavailableProxyRepairBreaksOnlyTheNoFallbackBootstrapDeadlock(t *testing.T) {
+	fixture := newManagerFixture(t)
+	fixture.manager.states = fakeAccountStates{states: map[string]failover.AccountState{
+		"alpha": {Account: "alpha", Eligible: false, Reason: "upstream_unavailable"},
+		"beta":  {Account: "beta", Eligible: false, Reason: "upstream_unavailable"},
+	}}
+	proxyURL := "http://gost-alpha:16169"
+	result, err := fixture.manager.Update(context.Background(), UpdateRequest{
+		AccountID: "alpha", ProxyMode: "custom", ProxyURL: &proxyURL,
+		AllowUnavailableProxyRepair: true,
+	})
+	if err != nil {
+		t.Fatalf("unavailable proxy repair: %v", err)
+	}
+	if result.Account.ID != "alpha" || result.Account.ProxyMode != "custom" ||
+		result.ReroutedUsers != 0 || fixture.drainer.calls != 0 || fixture.snapshots.calls != 1 {
+		t.Fatalf(
+			"repair result=%#v drainer=%d snapshots=%d",
+			result, fixture.drainer.calls, fixture.snapshots.calls,
+		)
+	}
+	routes, readError := fixture.store.ReadRoutes(context.Background())
+	if readError != nil || routes["alice@example.com"] != "alpha" {
+		t.Fatalf("repair changed routes: %#v err=%v", routes, readError)
+	}
+	storedProxy, found, readError := fixture.store.ReadSecret(
+		context.Background(), accountProxySecretPrefix+"alpha",
+	)
+	if readError != nil || !found || storedProxy != proxyURL {
+		t.Fatalf("repair proxy secret = (%q, %v, %v)", storedProxy, found, readError)
+	}
+	if fixture.runtime.lastUpdateBefore.ID != "alpha" || fixture.runtime.lastUpdateAfter.ID != "alpha" ||
+		fixture.runtime.lastUpdateAfter.ProxyMode != "custom" || fixture.runtime.transition.commits != 1 {
+		t.Fatalf("repair runtime transition = %#v -> %#v, %#v",
+			fixture.runtime.lastUpdateBefore, fixture.runtime.lastUpdateAfter, fixture.runtime.transition)
+	}
+	assertUnifiedKeyMatrix(t, fixture.store, map[string]string{
+		"alice@example.com": "cpa_external_alice",
+		"bob@example.com":   "cpa_external_bob",
+	}, 2)
+}
+
+func TestManagerUnavailableProxyRepairRejectsWhenSafeMaintenanceIsPossible(t *testing.T) {
+	tests := []struct {
+		name   string
+		states map[string]failover.AccountState
+		mutate func(*UpdateRequest)
+	}{
+		{
+			name: "eligible fallback exists",
+			states: map[string]failover.AccountState{
+				"alpha": {Account: "alpha", Eligible: false},
+				"beta":  {Account: "beta", Eligible: true, Headroom: 50},
+			},
+		},
+		{
+			name: "source is eligible",
+			states: map[string]failover.AccountState{
+				"alpha": {Account: "alpha", Eligible: true, Headroom: 50},
+				"beta":  {Account: "beta", Eligible: false},
+			},
+		},
+		{
+			name: "metadata also changes",
+			states: map[string]failover.AccountState{
+				"alpha": {Account: "alpha", Eligible: false},
+				"beta":  {Account: "beta", Eligible: false},
+			},
+			mutate: func(request *UpdateRequest) { request.Email = "changed@accounts.example.com" },
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newManagerFixture(t)
+			fixture.manager.states = fakeAccountStates{states: testCase.states}
+			proxyURL := "http://gost-alpha:16169"
+			request := UpdateRequest{
+				AccountID: "alpha", ProxyMode: "custom", ProxyURL: &proxyURL,
+				AllowUnavailableProxyRepair: true,
+			}
+			if testCase.mutate != nil {
+				testCase.mutate(&request)
+			}
+			_, err := fixture.manager.Update(context.Background(), request)
+			if !errors.Is(err, ErrUnavailableProxyRepairRejected) {
+				t.Fatalf("repair error = %v, want ErrUnavailableProxyRepairRejected", err)
+			}
+			if fixture.runtime.lastUpdateBefore.ID != "" || fixture.snapshots.calls != 0 ||
+				fixture.drainer.calls != 0 {
+				t.Fatalf("rejected repair changed runtime: %#v", fixture.runtime)
+			}
+			accounts, readError := fixture.store.ReadAccounts(context.Background())
+			if readError != nil || accounts[0].ProxyMode != "inherit" {
+				t.Fatalf("rejected repair changed account: %#v err=%v", accounts, readError)
+			}
+		})
+	}
+}
+
 func TestManagerDeleteDrainFailureRestoresControlRoutesRuntimeFilesAndKeys(t *testing.T) {
 	fixture := newManagerFixture(t)
 	writeTestFile(t, filepath.Join(fixture.root, "auth", "alpha", "oauth.json"), "oauth-secret")

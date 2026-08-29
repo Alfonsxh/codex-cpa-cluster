@@ -6,6 +6,9 @@ import type {
   PortalQuota,
   PortalRoute,
   PortalSession,
+  PortalUsageTrend,
+  PortalUsageTrendDimension,
+  PortalUsageTrendWindow,
   PortalUsageWindow,
   UsageBreakdown
 } from "./generated";
@@ -19,6 +22,9 @@ export type {
   PortalQuota,
   PortalRoute,
   PortalSession,
+  PortalUsageTrend,
+  PortalUsageTrendDimension,
+  PortalUsageTrendWindow,
   PortalUsageWindow
 } from "./generated";
 
@@ -28,6 +34,7 @@ export const portalQuotaQueryKey = ["portal-quota"] as const;
 export const portalRouteQueryKey = ["portal-route"] as const;
 export const portalAccountsQueryRoot = ["portal-accounts"] as const;
 export const portalBreakdownQueryRoot = ["portal-breakdown"] as const;
+export const portalUsageTrendQueryRoot = ["portal-usage-trend"] as const;
 
 export function portalAccountsQueryKey(window: PortalUsageWindow) {
   return [...portalAccountsQueryRoot, window] as const;
@@ -35,6 +42,13 @@ export function portalAccountsQueryKey(window: PortalUsageWindow) {
 
 export function portalBreakdownQueryKey(account: string, window: PortalUsageWindow) {
   return [...portalBreakdownQueryRoot, account || "all", window] as const;
+}
+
+export function portalUsageTrendQueryKey(
+  window: PortalUsageTrendWindow,
+  dimension: PortalUsageTrendDimension
+) {
+  return [...portalUsageTrendQueryRoot, window, dimension] as const;
 }
 
 export function readPortalSession(signal?: AbortSignal): Promise<PortalSession> {
@@ -84,6 +98,15 @@ export function readPortalBreakdown(
   const query = new URLSearchParams({ window });
   if (account) query.set("account", account);
   return apiRequest<UsageBreakdown>(`/usage/me/usage-breakdown?${query.toString()}`, { signal });
+}
+
+export function readPortalUsageTrend(
+  window: PortalUsageTrendWindow,
+  dimension: PortalUsageTrendDimension,
+  signal?: AbortSignal
+): Promise<PortalUsageTrend> {
+  const query = new URLSearchParams({ window, dimension });
+  return apiRequest<PortalUsageTrend>(`/usage/me/usage-trend?${query.toString()}`, { signal });
 }
 
 export function changePortalPassword(

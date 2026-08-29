@@ -328,6 +328,7 @@ func (server *Server) registerRoutes() {
 	authenticated.POST("/accounts", server.limitBody(defaultBodyLimit), server.createAccount)
 	authenticated.POST("/accounts/update", server.limitBody(defaultBodyLimit), server.updateAccount)
 	authenticated.POST("/accounts/policy", server.limitBody(defaultBodyLimit), server.updateAccount)
+	authenticated.POST("/accounts/repair-proxy", server.limitBody(defaultBodyLimit), server.repairUnavailableAccountProxy)
 	authenticated.POST("/accounts/clear-auth", server.limitBody(defaultBodyLimit), server.clearAccountAuth)
 	authenticated.POST("/accounts/delete", server.limitBody(defaultBodyLimit), server.deleteAccount)
 	authenticated.GET("/native-accounts", server.nativeAccounts)

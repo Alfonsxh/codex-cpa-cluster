@@ -225,6 +225,37 @@ paths:
           $ref: "#/components/responses/AccountLifecycleUnavailableResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/repair-proxy:
+    post:
+      operationId: repairUnavailableAdminAccountProxy
+      tags: [admin-accounts]
+      description: >-
+        Last-resort, explicitly confirmed recovery for one routed account when the source is
+        ineligible and no eligible fallback exists. Only a new custom proxy may change; ordinary
+        account maintenance remains fail-closed and uses route evacuation plus in-flight drain.
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountProxyRepairRequest"
+      responses:
+        "200":
+          description: Ineligible account proxy reprojected and runtime probed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountUpdateResponse"
+        "409":
+          $ref: "#/components/responses/AccountLifecycleConflictResponse"
+        "503":
+          $ref: "#/components/responses/AccountLifecycleUnavailableResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /admin/api/accounts/clear-auth:
     post:
       operationId: clearAdminAccountAuth
@@ -1634,6 +1665,32 @@ paths:
                 $ref: "#/components/schemas/UsageBreakdown"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /usage/me/usage-trend:
+    get:
+      operationId: getPortalUsageTrend
+      tags: [portal]
+      security:
+        - portalSession: []
+      parameters:
+        - name: window
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PortalUsageTrendWindow"
+        - name: dimension
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PortalUsageTrendDimension"
+      responses:
+        "200":
+          description: Current Session user's natural-day usage trend
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalUsageTrend"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /usage/me/password:
     put:
       operationId: updatePortalPassword
@@ -2321,6 +2378,22 @@ components:
       properties:
         message: { type: string }
         account: { $ref: "#/components/schemas/AccountUpdateResult" }
+    AccountProxyRepairRequest:
+      type: object
+      additionalProperties: false
+      required: [id, proxy_url, confirm]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,31}$"
+        proxy_url:
+          type: string
+          maxLength: 2048
+          writeOnly: true
+          description: New HTTP, HTTPS, or SOCKS5 proxy URL; never returned by the API.
+        confirm:
+          type: string
+          description: Must equal repair-proxy followed by a colon and the exact account id.
     AccountClearAuthRequest:
       type: object
       additionalProperties: false
@@ -3180,6 +3253,14 @@ components:
         - $ref: "#/components/schemas/UsageWindow"
         - type: string
           const: today
+    PortalUsageTrendWindow:
+      type: string
+      enum: [7d, 30d, 90d]
+      default: 30d
+    PortalUsageTrendDimension:
+      type: string
+      enum: [total, model_reasoning]
+      default: total
     UsageMetrics:
       type: object
       required:
@@ -3271,6 +3352,72 @@ components:
         combinations:
           type: array
           items: { $ref: "#/components/schemas/UsageCombination" }
+    PortalUsageTrendCombination:
+      type: object
+      additionalProperties: false
+      required: [model, reasoning_effort, request_count, total_tokens, weighted_tokens]
+      properties:
+        model: { type: string }
+        reasoning_effort: { type: string }
+        request_count: { type: integer, format: int64, minimum: 0 }
+        total_tokens: { type: integer, format: int64, minimum: 0 }
+        weighted_tokens: { type: integer, format: int64, minimum: 0 }
+    PortalUsageTrendDay:
+      type: object
+      additionalProperties: false
+      required:
+        - date
+        - start_at
+        - end_at
+        - collection_state
+        - request_count
+        - total_tokens
+        - weighted_tokens
+        - combinations
+      properties:
+        date: { type: string, format: date }
+        start_at: { type: integer, format: int64 }
+        end_at: { type: integer, format: int64 }
+        collection_state:
+          type: string
+          enum: [uncollected, partial, complete]
+        request_count: { type: integer, format: int64, minimum: 0 }
+        total_tokens: { type: integer, format: int64, minimum: 0 }
+        weighted_tokens: { type: integer, format: int64, minimum: 0 }
+        combinations:
+          type: array
+          items: { $ref: "#/components/schemas/PortalUsageTrendCombination" }
+    PortalUsageTrend:
+      type: object
+      additionalProperties: false
+      required:
+        - generated_at
+        - window
+        - window_days
+        - window_start_at
+        - window_end_at
+        - window_timezone
+        - dimension
+        - definition
+        - collection_started_at
+        - effective_start_at
+        - days
+      properties:
+        generated_at: { type: integer, format: int64 }
+        window: { $ref: "#/components/schemas/PortalUsageTrendWindow" }
+        window_days: { type: integer, enum: [7, 30, 90] }
+        window_start_at: { type: integer, format: int64 }
+        window_end_at: { type: integer, format: int64 }
+        window_timezone: { type: string }
+        dimension: { $ref: "#/components/schemas/PortalUsageTrendDimension" }
+        definition: { type: string }
+        collection_started_at: { type: integer, format: int64 }
+        effective_start_at: { type: integer, format: int64 }
+        days:
+          type: array
+          minItems: 7
+          maxItems: 90
+          items: { $ref: "#/components/schemas/PortalUsageTrendDay" }
     PortalLoginRequest:
       type: object
       additionalProperties: false

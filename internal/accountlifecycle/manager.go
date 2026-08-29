@@ -23,9 +23,10 @@ const (
 )
 
 var (
-	ErrLifecycleUnavailable = errors.New("account lifecycle service is unavailable")
-	ErrNoAccountPort        = errors.New("no safe business CPA port is available")
-	ErrRuntimeTransition    = errors.New("account runtime transition failed")
+	ErrLifecycleUnavailable           = errors.New("account lifecycle service is unavailable")
+	ErrNoAccountPort                  = errors.New("no safe business CPA port is available")
+	ErrRuntimeTransition              = errors.New("account runtime transition failed")
+	ErrUnavailableProxyRepairRejected = errors.New("unavailable account proxy repair is not allowed")
 )
 
 type Store interface {
@@ -112,14 +113,15 @@ type CreateResult struct {
 }
 
 type UpdateRequest struct {
-	AccountID       string  `json:"account_id"`
-	NewAccountID    string  `json:"new_account_id"`
-	Email           string  `json:"email"`
-	ProxyMode       string  `json:"proxy_mode"`
-	ProxyURL        *string `json:"proxy_url"`
-	Enabled         *bool   `json:"enabled"`
-	Default         *bool   `json:"default"`
-	FallbackAccount string  `json:"fallback_account"`
+	AccountID                   string  `json:"account_id"`
+	NewAccountID                string  `json:"new_account_id"`
+	Email                       string  `json:"email"`
+	ProxyMode                   string  `json:"proxy_mode"`
+	ProxyURL                    *string `json:"proxy_url"`
+	Enabled                     *bool   `json:"enabled"`
+	Default                     *bool   `json:"default"`
+	FallbackAccount             string  `json:"fallback_account"`
+	AllowUnavailableProxyRepair bool    `json:"-"`
 }
 
 type UpdateResult struct {
@@ -303,6 +305,13 @@ func (manager *Manager) Update(ctx context.Context, request UpdateRequest) (resu
 	if proxyMode == "custom" && desiredProxy == "" {
 		return UpdateResult{}, fmt.Errorf("%w: custom proxy mode requires a proxy URL", controlplane.ErrInvalidCatalogInput)
 	}
+	if request.AllowUnavailableProxyRepair {
+		if err := manager.validateUnavailableProxyRepair(
+			ctx, request, stored.Account, newAccountID, email, proxyMode, desiredProxy,
+		); err != nil {
+			return UpdateResult{}, err
+		}
+	}
 	defaultState := request.Default
 	if request.Enabled != nil && !*request.Enabled && stored.DefaultGroup && defaultState == nil {
 		value := false
@@ -313,11 +322,19 @@ func (manager *Manager) Update(ctx context.Context, request UpdateRequest) (resu
 		return UpdateResult{}, err
 	}
 	defer manager.finalizeOperation(ctx, operation, &returnError)
-	routeTransition, err := manager.planRouteEvacuation(ctx, accountID, request.FallbackAccount)
-	if err != nil {
-		return UpdateResult{}, newCompensatedError(err)
+	var routesTransition *routeTransition
+	if request.AllowUnavailableProxyRepair {
+		routesTransition = &routeTransition{
+			manager: manager, source: accountID,
+			assignments: map[string]string{}, expected: map[string]string{},
+		}
+	} else {
+		routesTransition, err = manager.planRouteEvacuation(ctx, accountID, request.FallbackAccount)
+		if err != nil {
+			return UpdateResult{}, newCompensatedError(err)
+		}
 	}
-	effectiveFallback := routeTransition.fallback
+	effectiveFallback := routesTransition.fallback
 	needsFallback := (request.Enabled != nil && !*request.Enabled) ||
 		(stored.DefaultGroup && defaultState != nil && !*defaultState)
 	if effectiveFallback == "" && (strings.TrimSpace(request.FallbackAccount) != "" || needsFallback) {
@@ -326,17 +343,17 @@ func (manager *Manager) Update(ctx context.Context, request UpdateRequest) (resu
 			return UpdateResult{}, newCompensatedError(err)
 		}
 	}
-	operation.EvacuatedRoutes = routeTransition.journalRoutes()
+	operation.EvacuatedRoutes = routesTransition.journalRoutes()
 	if err := manager.advanceOperation(ctx, &operation, phaseRoutesPrepared, ""); err != nil {
 		return UpdateResult{}, newCompensatedError(err)
 	}
-	if err := routeTransition.Apply(ctx); err != nil {
+	if err := routesTransition.Apply(ctx); err != nil {
 		return UpdateResult{}, err
 	}
 	if err := manager.advanceOperation(ctx, &operation, phaseRoutesEvacuated, ""); err != nil {
 		rollbackContext, cancel := lifecycleRollbackContext(ctx)
 		defer cancel()
-		routeError := routeTransition.restoreTo(rollbackContext, accountID)
+		routeError := routesTransition.restoreTo(rollbackContext, accountID)
 		var snapshotError error
 		if routeError == nil {
 			_, snapshotError = manager.snapshots.PublishAuthSnapshot(rollbackContext, true)
@@ -347,10 +364,10 @@ func (manager *Manager) Update(ctx context.Context, request UpdateRequest) (resu
 		Account: stored.Account, Keys: rows,
 	})
 	if err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, controlplane.AccountUpdate{}, nil, nil, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, controlplane.AccountUpdate{}, nil, nil, secretPlan, routesTransition, err)
 	}
 	if err := manager.advanceOperation(ctx, &operation, phaseFilesPrepared, fileTransition.BackupPath()); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, controlplane.AccountUpdate{}, fileTransition, nil, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, controlplane.AccountUpdate{}, fileTransition, nil, secretPlan, routesTransition, err)
 	}
 	update, err := manager.store.ApplyAccountUpdate(ctx, controlplane.AccountUpdateRequest{
 		AccountID: accountID, NewAccountID: newAccountID, Email: email,
@@ -358,44 +375,44 @@ func (manager *Manager) Update(ctx context.Context, request UpdateRequest) (resu
 		FallbackAccount: effectiveFallback,
 	})
 	if err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, controlplane.AccountUpdate{}, fileTransition, nil, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, controlplane.AccountUpdate{}, fileTransition, nil, secretPlan, routesTransition, err)
 	}
 	if err := secretPlan.Apply(ctx); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routesTransition, err)
 	}
 	if err := manager.advanceOperation(ctx, &operation, phaseControlApplied, fileTransition.BackupPath()); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routesTransition, err)
 	}
 	if _, err := manager.projection.Render(ctx); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routeTransition, fmt.Errorf("render updated account: %w", err))
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routesTransition, fmt.Errorf("render updated account: %w", err))
 	}
 	if err := manager.advanceOperation(ctx, &operation, phaseProjectionRendered, fileTransition.BackupPath()); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, nil, secretPlan, routesTransition, err)
 	}
 	runtimeTransition, err := manager.runtime.PrepareUpdate(ctx, update.Before.Account, update.After.Account)
 	if err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routeTransition, fmt.Errorf("%w: %v", ErrRuntimeTransition, err))
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routesTransition, fmt.Errorf("%w: %v", ErrRuntimeTransition, err))
 	}
 	if err := manager.advanceOperation(ctx, &operation, phaseRuntimePrepared, fileTransition.BackupPath()); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routesTransition, err)
 	}
 	if err := runtimeTransition.Commit(ctx); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routeTransition, fmt.Errorf("commit updated account runtime: %w", err))
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routesTransition, fmt.Errorf("commit updated account runtime: %w", err))
 	}
 	if err := fileTransition.Commit(); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routeTransition, fmt.Errorf("commit updated account files: %w", err))
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routesTransition, fmt.Errorf("commit updated account files: %w", err))
 	}
 	if update.After.Account.GroupEnabled {
-		if err := routeTransition.restoreTo(ctx, newAccountID); err != nil {
-			return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routeTransition, err)
+		if err := routesTransition.restoreTo(ctx, newAccountID); err != nil {
+			return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routesTransition, err)
 		}
 	}
 	snapshot, err := manager.snapshots.PublishAuthSnapshot(ctx, true)
 	if err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routeTransition, fmt.Errorf("activate updated account snapshot: %w", err))
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routesTransition, fmt.Errorf("activate updated account snapshot: %w", err))
 	}
 	if err := manager.advanceOperation(ctx, &operation, phaseSnapshotActivated, fileTransition.BackupPath()); err != nil {
-		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routeTransition, err)
+		return UpdateResult{}, manager.rollbackUpdate(ctx, update, fileTransition, runtimeTransition, secretPlan, routesTransition, err)
 	}
 	renamedFrom := ""
 	if accountID != newAccountID {
@@ -403,7 +420,7 @@ func (manager *Manager) Update(ctx context.Context, request UpdateRequest) (resu
 	}
 	return UpdateResult{
 		Account: update.After.Account, RenamedFrom: renamedFrom,
-		ReroutedUsers: len(routeTransition.assignments) + len(update.Routes), Backup: fileTransition.BackupPath(),
+		ReroutedUsers: len(routesTransition.assignments) + len(update.Routes), Backup: fileTransition.BackupPath(),
 		SnapshotGeneration: snapshot.Generation,
 	}, nil
 }
@@ -661,6 +678,66 @@ func (manager *Manager) updateProxyPlan(
 		return nil, "", err
 	}
 	return plan, desired, nil
+}
+
+// validateUnavailableProxyRepair guards the only lifecycle path that may
+// rebuild a routed account without first moving its users. It exists to break
+// the deployment bootstrap deadlock where every account is ineligible because
+// its upstream proxy projection is missing and therefore no safe fallback can
+// be selected. The operation is deliberately limited to one ineligible
+// account, one new custom proxy value, and a runtime/config rebuild. As soon as
+// any other account is eligible, callers must use the ordinary evacuation and
+// drain path instead.
+func (manager *Manager) validateUnavailableProxyRepair(
+	ctx context.Context,
+	request UpdateRequest,
+	stored controlplane.Account,
+	newAccountID string,
+	email string,
+	proxyMode string,
+	desiredProxy string,
+) error {
+	reject := func(reason string) error {
+		return fmt.Errorf("%w: %s", ErrUnavailableProxyRepairRejected, reason)
+	}
+	if request.ProxyURL == nil || proxyMode != "custom" || desiredProxy == "" {
+		return reject("a new custom proxy URL is required")
+	}
+	if newAccountID != stored.ID || email != stored.Email || request.Enabled != nil ||
+		request.Default != nil || strings.TrimSpace(request.FallbackAccount) != "" {
+		return reject("only the proxy projection may change")
+	}
+	if manager.states == nil {
+		return reject("account state provider is unavailable")
+	}
+	routes, err := manager.store.ReadRoutes(ctx)
+	if err != nil {
+		return fmt.Errorf("inspect unavailable proxy repair routes: %w", err)
+	}
+	routed := false
+	for _, accountID := range routes {
+		if accountID == stored.ID {
+			routed = true
+			break
+		}
+	}
+	if !routed {
+		return reject("the account has no routed users and can use ordinary maintenance")
+	}
+	states, err := manager.states.AccountStates(ctx)
+	if err != nil {
+		return fmt.Errorf("inspect unavailable proxy repair states: %w", err)
+	}
+	source, found := states[stored.ID]
+	if !found || source.Eligible {
+		return reject("the source account is not proven ineligible")
+	}
+	for accountID, state := range states {
+		if accountID != stored.ID && state.Eligible && state.Headroom > 0 {
+			return reject("an eligible fallback is available")
+		}
+	}
+	return nil
 }
 
 func (manager *Manager) rollbackCreation(

@@ -677,6 +677,41 @@ func (server *Server) updateAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": message, "account": result})
 }
 
+func (server *Server) repairUnavailableAccountProxy(c *gin.Context) {
+	if server.accountLifecycle == nil {
+		writeError(c, http.StatusServiceUnavailable, "账号生命周期服务尚未就绪", "account_lifecycle_not_ready")
+		return
+	}
+	var body struct {
+		ID       string `json:"id" binding:"required"`
+		ProxyURL string `json:"proxy_url" binding:"required"`
+		Confirm  string `json:"confirm" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeError(c, http.StatusBadRequest, "代理恢复参数无效", "invalid_request")
+		return
+	}
+	accountID, err := controlplane.NormalizeAccountID(body.ID)
+	if err != nil || accountID != strings.TrimSpace(body.ID) ||
+		strings.TrimSpace(body.Confirm) != "repair-proxy:"+accountID {
+		writeError(c, http.StatusBadRequest, "代理恢复确认内容必须与 CPA 标识完全一致", "invalid_confirmation")
+		return
+	}
+	proxyURL := strings.TrimSpace(body.ProxyURL)
+	result, err := server.accountLifecycle.Update(c.Request.Context(), accountlifecycle.UpdateRequest{
+		AccountID: accountID, ProxyMode: "custom", ProxyURL: &proxyURL,
+		AllowUnavailableProxyRepair: true,
+	})
+	if err != nil {
+		server.writeAccountLifecycleError(c, "repair unavailable account proxy", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "不可用 CPA 的代理投影已恢复；后续账号维护将继续使用安全迁移与请求排空",
+		"account": result,
+	})
+}
+
 func (server *Server) clearAccountAuth(c *gin.Context) {
 	if server.accountLifecycle == nil {
 		writeError(c, http.StatusServiceUnavailable, "账号生命周期服务尚未就绪", "account_lifecycle_not_ready")
@@ -750,6 +785,8 @@ func (server *Server) writeAccountLifecycleError(c *gin.Context, operation strin
 		writeError(c, http.StatusServiceUnavailable, "账号安全迁移与恢复服务尚未就绪", "account_lifecycle_not_ready")
 	case errors.Is(err, accountlifecycle.ErrAccountDrainTimeout):
 		writeError(c, http.StatusConflict, "该 CPA 仍有进行中的 Codex 请求，账号未重建或删除，请稍后重试", "account_requests_active")
+	case errors.Is(err, accountlifecycle.ErrUnavailableProxyRepairRejected):
+		writeError(c, http.StatusConflict, "当前状态不满足受限代理恢复条件，请使用普通账号维护流程", "account_proxy_repair_unavailable")
 	default:
 		server.internalError(c, operation, err)
 	}

@@ -25,6 +25,7 @@ import {
 } from "../api/portal";
 import type { UsageBreakdown, UsageCombination, UsageMetrics } from "../api/generated";
 import { PortalClientConfigModal, type PortalClientConfigMode } from "./PortalClientConfigModal";
+import { PortalDailyUsageTrend } from "./PortalDailyUsageTrend";
 import { NativeTableViewport } from "./components/NativeTableViewport";
 import { formatTokenAmount, formatTokens } from "./formatters";
 
@@ -213,6 +214,8 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
           <span>当前没有可用账号；系统会在下次刷新时自动重试，也可以在下方手动选择。</span>
         </section>
       ) : null}
+
+      <PortalDailyUsageTrend onSessionExpired={onSessionExpired} />
 
       <section className="usage-account-section">
         <div className="usage-section-toolbar">

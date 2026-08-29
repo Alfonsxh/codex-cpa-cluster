@@ -178,6 +178,56 @@ body {
 .usage-route-notice { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 13px 16px; color: var(--warning); background: var(--warning-soft); border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--line)); border-radius: 10px; font-size: 11px; line-height: 1.5; }
 .usage-route-notice strong { flex: 0 0 auto; }
 .usage-route-notice span { color: var(--muted); }
+.usage-trend-card { flex: 0 0 auto; min-width: 0; margin-top: 14px; padding: 14px 16px 10px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.usage-trend-card.collapsed { padding-bottom: 14px; }
+.usage-trend-header { display: grid; min-width: 0; grid-template-columns: minmax(265px, .85fr) minmax(320px, 1.2fr) auto; align-items: center; gap: 18px; }
+.usage-trend-heading { min-width: 0; display: grid; gap: 10px; }
+.usage-trend-heading h2 { margin: 0; font-size: 17px; letter-spacing: -.025em; }
+.usage-trend-dimensions { display: inline-grid; width: max-content; max-width: 100%; grid-template-columns: minmax(82px, .78fr) minmax(138px, 1.22fr); gap: 4px; }
+.usage-trend-dimensions button,
+.usage-trend-windows button,
+.usage-trend-collapse { min-height: 32px; padding: 0 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; font-size: 10px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.usage-trend-dimensions button[aria-pressed="true"] { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent); }
+.usage-trend-summary { display: grid; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.usage-trend-summary > div { min-width: 0; padding: 1px 18px; border-left: 1px solid var(--line); }
+.usage-trend-summary span,
+.usage-trend-summary strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-trend-summary span { margin-bottom: 8px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.usage-trend-summary strong { font: 700 17px/1.1 var(--mono); }
+.usage-trend-actions { display: flex; min-width: max-content; align-items: center; justify-content: flex-end; gap: 10px; }
+.usage-trend-windows { display: inline-grid; grid-template-columns: repeat(3, 1fr); padding: 3px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 9px; }
+.usage-trend-windows button { min-width: 54px; min-height: 29px; padding: 0 9px; background: transparent; border: 0; }
+.usage-trend-windows button[aria-pressed="true"] { color: var(--ink); background: var(--surface); box-shadow: 0 1px 3px rgb(48 65 105 / 9%); }
+.usage-trend-collapse { display: inline-flex; align-items: center; gap: 7px; }
+.usage-trend-collapse span { color: var(--accent); font: 800 12px/1 var(--mono); }
+.usage-trend-current-window { min-width: 44px; font: 700 10px/1 var(--mono); text-align: center; }
+.usage-trend-dimensions button:focus-visible,
+.usage-trend-windows button:focus-visible,
+.usage-trend-collapse:focus-visible,
+.usage-trend-chart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.usage-trend-body { position: relative; min-width: 0; margin-top: 10px; border-top: 1px solid var(--line); }
+.usage-trend-legend { display: flex; min-height: 34px; align-items: center; justify-content: flex-end; gap: 8px 20px; padding: 8px 2px 2px; overflow: hidden; color: var(--muted); font: 650 9px/1.2 var(--mono); flex-wrap: wrap; }
+.usage-trend-legend span { display: inline-flex; min-width: 0; max-width: 180px; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-trend-legend i { width: 18px; height: 3px; flex: 0 0 auto; border-radius: 999px; }
+.usage-trend-partial { position: absolute; top: 38px; left: 4px; z-index: 1; margin: 0; color: var(--faint); font: 8px/1.3 var(--mono); }
+.usage-trend-chart { min-width: 0; border-radius: 8px; }
+.usage-trend-chart-canvas { width: 100%; height: 210px; }
+.usage-trend-state,
+.usage-trend-skeleton { min-height: 244px; margin-top: 10px; border: 1px dashed var(--line-strong); border-radius: 9px; background: var(--surface-2); }
+.usage-trend-state { display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--muted); font-size: 10px; }
+.usage-trend-state.error { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 38%, var(--line)); }
+.usage-trend-state button { min-height: 30px; padding: 0 11px; color: var(--danger); background: var(--surface); border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line)); border-radius: 7px; cursor: pointer; }
+.usage-trend-skeleton { display: grid; align-content: space-evenly; padding: 22px 48px; }
+.usage-trend-skeleton span { display: block; height: 1px; background: var(--line); }
+.usage-trend-skeleton span::after { display: block; width: 46%; height: 5px; content: ""; background: linear-gradient(90deg, transparent, var(--accent-soft), transparent); animation: usage-trend-skeleton 1.4s ease-in-out infinite alternate; }
+.usage-trend-tooltip { width: min(300px, calc(100vw - 40px)); }
+.usage-trend-tooltip .usage-trend-tooltip-request,
+.usage-trend-tooltip .usage-trend-tooltip-total { grid-template-columns: minmax(0, 1fr) auto; margin-top: 3px; padding-top: 6px; border-top: 1px solid #39455e; }
+.usage-trend-tooltip .usage-trend-tooltip-request b,
+.usage-trend-tooltip .usage-trend-tooltip-total b { grid-column: 1; }
+.usage-trend-tooltip .usage-trend-tooltip-request em,
+.usage-trend-tooltip .usage-trend-tooltip-total em { grid-column: 2; }
+@keyframes usage-trend-skeleton { from { transform: translateX(-10%); } to { transform: translateX(120%); } }
 .usage-account-section { display: flex; flex: 1 1 auto; min-height: 0; margin-top: 16px; flex-direction: column; }
 .usage-section-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
 .usage-section-toolbar h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
@@ -374,11 +424,14 @@ body {
   .usage-preview-stat-grid article { border-right: 0; border-bottom: 1px solid var(--line); }
   .usage-preview-stat-grid article:last-child { border-bottom: 0; }
   .usage-preview-toolbar { align-items: flex-start; flex-direction: column; }
+  .usage-trend-header { grid-template-columns: minmax(230px, .8fr) minmax(0, 1.2fr); }
+  .usage-trend-actions { grid-column: 1 / -1; justify-content: space-between; }
 }
 
 @media (max-width: 680px) {
   .usage-center-shell { width: min(100% - 20px, 1480px); padding: 10px 0 0; }
-  .usage-center-content { padding-bottom: 10px; }
+  .usage-center-content { overflow-x: hidden; overflow-y: auto; padding-bottom: 10px; scrollbar-gutter: stable; }
+  .usage-dashboard { flex: 0 0 auto; overflow: visible; }
   .usage-center-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; padding-bottom: 10px; }
   .usage-brand-block { display: grid; gap: 4px; }
   .usage-brand-logo { width: min(110px, 32vw); }
@@ -394,12 +447,32 @@ body {
   .usage-key-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding-left: 0; border-left: 0; }
   .usage-key-actions > * { min-width: 0; padding: 0 6px; }
   .usage-route-notice { align-items: flex-start; flex-direction: column; gap: 4px; }
-  .usage-account-section { margin-top: 10px; }
+  .usage-trend-card { margin-top: 10px; padding: 12px 10px 8px; }
+  .usage-trend-card.collapsed { padding-bottom: 12px; }
+  .usage-trend-header { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .usage-trend-heading { gap: 8px; }
+  .usage-trend-heading h2 { font-size: 16px; }
+  .usage-trend-dimensions { width: 100%; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); }
+  .usage-trend-dimensions button { min-width: 0; padding-inline: 7px; }
+  .usage-trend-summary > div { padding-inline: 9px; }
+  .usage-trend-summary > div:first-child { padding-left: 0; border-left: 0; }
+  .usage-trend-summary strong { font-size: 13px; }
+  .usage-trend-actions { grid-column: auto; }
+  .usage-trend-windows { min-width: 0; flex: 1 1 auto; }
+  .usage-trend-windows button { min-width: 0; }
+  .usage-trend-collapse { flex: 0 0 auto; }
+  .usage-trend-legend { min-height: 40px; justify-content: flex-start; gap: 7px 12px; }
+  .usage-trend-legend span { max-width: 46%; }
+  .usage-trend-partial { position: static; margin: 5px 0 0; }
+  .usage-trend-chart-canvas { height: 220px; }
+  .usage-trend-state,
+  .usage-trend-skeleton { min-height: 240px; }
+  .usage-account-section { flex: 0 0 auto; margin-top: 10px; }
   .usage-section-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; margin-bottom: 8px; }
   .usage-toolbar-actions { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
   .usage-window-switcher { width: 100%; }
   .usage-window-switcher button { min-width: 0; padding: 0 4px; }
-  .usage-table-wrap { overflow-x: hidden; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); }
+  .usage-table-wrap { flex: 0 0 auto; overflow-x: hidden; overflow-y: visible; background: var(--surface); border: 1px solid var(--line); }
   .usage-account-table,
   .usage-account-table tbody,
   .usage-account-table tr,

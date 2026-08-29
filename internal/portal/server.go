@@ -49,6 +49,9 @@ type SessionStore interface {
 type UsageReader interface {
 	UserAccounts(context.Context, string, int64, *int64) (usage.UserAccountSummary, error)
 	UserBreakdown(context.Context, string, string, int64, *int64) (usage.UserBreakdown, error)
+	UserDailyTrend(
+		context.Context, string, int, string, int64, usage.UserTrendDimension,
+	) (usage.UserDailyTrend, error)
 }
 
 // QuotaReader deliberately keeps the natural-week quota read separate from
@@ -183,6 +186,7 @@ func (server *Server) Register(router gin.IRouter) {
 	usageRoutes.GET("/me/accounts", server.readAccounts)
 	usageRoutes.GET("/me/route", server.readRoute)
 	usageRoutes.GET("/me/usage-breakdown", server.readUsageBreakdown)
+	usageRoutes.GET("/me/usage-trend", server.readUsageTrend)
 	usageRoutes.PUT("/me/password", server.limitBody(), server.changePassword)
 	usageRoutes.PUT("/me/group", server.limitBody(), server.changeRoute)
 	usageRoutes.POST("/me/key/rotate", server.limitBody(), server.rotateKey)
@@ -628,6 +632,59 @@ func (server *Server) readUsageBreakdown(c *gin.Context) {
 	})
 }
 
+func (server *Server) readUsageTrend(c *gin.Context) {
+	auth, ok := server.requireAuth(c, false)
+	if !ok {
+		return
+	}
+	if server.usage == nil {
+		writeError(c, http.StatusServiceUnavailable, "用量查询服务尚未就绪", "usage_not_ready")
+		return
+	}
+	if _, supplied := c.Request.URL.Query()["user"]; supplied {
+		writeError(c, http.StatusBadRequest, "个人趋势不接受用户参数", "invalid_request")
+		return
+	}
+	window := strings.ToLower(strings.TrimSpace(c.Query("window")))
+	if window == "" {
+		window = "30d"
+	}
+	windowDays, found := map[string]int{"7d": 7, "30d": 30, "90d": 90}[window]
+	if !found {
+		writeError(c, http.StatusBadRequest, "趋势统计范围无效", "invalid_request")
+		return
+	}
+	dimension := usage.UserTrendDimension(strings.ToLower(strings.TrimSpace(c.Query("dimension"))))
+	if dimension == "" {
+		dimension = usage.UserTrendTotal
+	}
+	if dimension != usage.UserTrendTotal && dimension != usage.UserTrendModelReasoning {
+		writeError(c, http.StatusBadRequest, "趋势统计维度无效", "invalid_request")
+		return
+	}
+	timezone, err := server.usageTimezone(c.Request.Context())
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error(), "invalid_request")
+		return
+	}
+	trend, err := server.usage.UserDailyTrend(
+		c.Request.Context(), auth.Session.User, windowDays, timezone, server.now().Unix(), dimension,
+	)
+	if err != nil {
+		server.internalError(c, "read portal daily usage trend", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"generated_at": server.now().Unix(), "window": window, "window_days": trend.WindowDays,
+		"window_start_at": trend.WindowStartAt, "window_end_at": trend.WindowEndAt,
+		"window_timezone": trend.Timezone, "dimension": trend.Dimension,
+		"definition":            "仅统计 Collector 已持久化的业务请求；按配置时区自然日聚合，加权 Token 使用事件写入时冻结的倍率",
+		"collection_started_at": trend.CollectionStartedAt,
+		"effective_start_at":    trend.EffectiveStartAt,
+		"days":                  trend.Days,
+	})
+}
+
 func (server *Server) changePassword(c *gin.Context) {
 	auth, ok := server.requireAuth(c, true)
 	if !ok {
@@ -863,11 +920,10 @@ func (server *Server) parseUsageWindow(ctx context.Context, raw string) (usageWi
 		value = "today"
 	}
 	if value == "today" {
-		settings, err := server.identity.ReadSettings(ctx)
+		timezone, err := server.usageTimezone(ctx)
 		if err != nil {
-			return usageWindow{}, fmt.Errorf("读取用量时区失败")
+			return usageWindow{}, err
 		}
-		timezone := stringSetting(settings["user_quota.timezone"], "Asia/Shanghai")
 		location, err := time.LoadLocation(timezone)
 		if err != nil {
 			return usageWindow{}, errors.New("用量时区配置无效")
@@ -885,6 +941,18 @@ func (server *Server) parseUsageWindow(ctx context.Context, raw string) (usageWi
 		return usageWindow{}, errors.New("统计范围无效")
 	}
 	return usageWindow{Name: seconds, Seconds: &seconds, StartAt: now.Unix() - seconds, EndAt: now.Unix()}, nil
+}
+
+func (server *Server) usageTimezone(ctx context.Context) (string, error) {
+	settings, err := server.identity.ReadSettings(ctx)
+	if err != nil {
+		return "", fmt.Errorf("读取用量时区失败")
+	}
+	timezone := stringSetting(settings["user_quota.timezone"], "Asia/Shanghai")
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return "", errors.New("用量时区配置无效")
+	}
+	return timezone, nil
 }
 
 type accountStatus struct {

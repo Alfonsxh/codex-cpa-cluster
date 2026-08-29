@@ -47,6 +47,16 @@ export const usageCodeSplitting = {
   includeDependenciesRecursively: true,
   groups: [
     {
+      name: "zrender-vendor",
+      test: /node_modules[\\/]zrender[\\/]/,
+      priority: 80
+    },
+    {
+      name: "echarts-vendor",
+      test: /node_modules[\\/]echarts[\\/]/,
+      priority: 75
+    },
+    {
       name: "react-vendor",
       test: /node_modules[\\/]((react)|(react-dom)|(scheduler))[\\/]/,
       priority: 70

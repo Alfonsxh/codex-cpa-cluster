@@ -731,6 +731,63 @@ test("使用中心客户端配置弹框直接展示必要内容", async ({ page,
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expectedConfig);
 });
 
+test("修改个人密码弹框统一边框、标签和输入框几何", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "dark");
+  await installUsageVisualBackend(page);
+  await page.goto("http://127.0.0.1:5194/usage/");
+
+  await page.getByRole("button", { name: "修改密码", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "修改个人密码" });
+  await expect(dialog).toBeVisible();
+  const fields = dialog.locator(".portal-password-form .ant-input-affix-wrapper");
+  const labels = dialog.locator(".portal-password-form .ant-form-item-label");
+  await expect(fields).toHaveCount(3);
+  await expect(labels).toHaveCount(3);
+
+  const desktopGeometry = await dialog.evaluate((element) => {
+    const boxes = [...element.querySelectorAll<HTMLElement>(".portal-password-form .ant-input-affix-wrapper")]
+      .map((field) => field.getBoundingClientRect());
+    const labelElements = [...element.querySelectorAll<HTMLElement>(".portal-password-form .ant-form-item-label")];
+    const labelBoxes = labelElements.map((label) => label.getBoundingClientRect());
+    const modal = element.querySelector<HTMLElement>(".ant-modal-content, .ant-modal-container");
+    const modalStyle = modal ? getComputedStyle(modal) : null;
+    return {
+      fieldLefts: boxes.map((box) => box.left),
+      fieldWidths: boxes.map((box) => box.width),
+      fieldHeights: boxes.map((box) => box.height),
+      labelRights: labelBoxes.map((box) => box.right),
+      labelAlignments: labelElements.map((label) => getComputedStyle(label).textAlign),
+      modalBorderWidth: modalStyle?.borderTopWidth,
+      modalBorderStyle: modalStyle?.borderTopStyle
+    };
+  });
+  expect(Math.max(...desktopGeometry.fieldLefts) - Math.min(...desktopGeometry.fieldLefts)).toBeLessThanOrEqual(0.5);
+  expect(Math.max(...desktopGeometry.fieldWidths) - Math.min(...desktopGeometry.fieldWidths)).toBeLessThanOrEqual(0.5);
+  expect(Math.max(...desktopGeometry.fieldHeights) - Math.min(...desktopGeometry.fieldHeights)).toBeLessThanOrEqual(0.5);
+  expect(Math.max(...desktopGeometry.labelRights) - Math.min(...desktopGeometry.labelRights)).toBeLessThanOrEqual(0.5);
+  expect(desktopGeometry.labelAlignments).toEqual(["right", "right", "right"]);
+  expect(desktopGeometry.modalBorderWidth).toBe("1px");
+  expect(desktopGeometry.modalBorderStyle).toBe("solid");
+  await expect(dialog).toHaveScreenshot("react-usage-password-dialog-desktop-dark.png");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileGeometry = await dialog.evaluate((element) => {
+    const boxes = [...element.querySelectorAll<HTMLElement>(".portal-password-form .ant-input-affix-wrapper")]
+      .map((field) => field.getBoundingClientRect());
+    const labelElements = [...element.querySelectorAll<HTMLElement>(".portal-password-form .ant-form-item-label")];
+    return {
+      fieldLefts: boxes.map((box) => box.left),
+      fieldWidths: boxes.map((box) => box.width),
+      labelAlignments: labelElements.map((label) => getComputedStyle(label).textAlign)
+    };
+  });
+  expect(Math.max(...mobileGeometry.fieldLefts) - Math.min(...mobileGeometry.fieldLefts)).toBeLessThanOrEqual(0.5);
+  expect(Math.max(...mobileGeometry.fieldWidths) - Math.min(...mobileGeometry.fieldWidths)).toBeLessThanOrEqual(0.5);
+  expect(mobileGeometry.labelAlignments).toEqual(["start", "start", "start"]);
+  await expect(dialog).toHaveScreenshot("react-usage-password-dialog-mobile-dark.png");
+});
+
 async function setTheme(page: Page, theme: "light" | "dark") {
   await page.addInitScript((value) => window.localStorage.setItem("cpa-ui-theme", value), theme);
 }

@@ -372,6 +372,61 @@ body {
 @media (min-width: 681px) { .usage-summary-row { height: 93px; } }
 .portal-form-stack { width: 100%; }
 .portal-form-stack .ant-typography { margin-bottom: 0; line-height: 1.7; }
+.portal-password-modal .ant-modal-content,
+.portal-password-modal .ant-modal-container {
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--line-strong) 78%, transparent);
+  box-shadow:
+    0 24px 72px rgb(8 12 22 / 24%),
+    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+}
+.portal-password-modal .ant-modal-header { padding-bottom: 2px; }
+.portal-password-modal .ant-modal-title { color: var(--ink); }
+.portal-password-form { width: 100%; }
+.portal-password-form .ant-form-item { margin-bottom: 18px; }
+.portal-password-form .ant-form-item-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+.portal-password-form .ant-form-item-label {
+  min-width: 0;
+  padding: 0;
+  overflow: visible;
+  text-align: right;
+  white-space: nowrap;
+}
+.portal-password-form .ant-form-item-label > label {
+  width: 100%;
+  height: 42px;
+  justify-content: flex-end;
+  color: var(--ink);
+}
+.portal-password-form .ant-form-item-control { min-width: 0; }
+.portal-password-form .ant-input-affix-wrapper {
+  width: 100%;
+  min-height: 42px;
+  padding-inline: 13px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 3%, transparent);
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.portal-password-form .ant-input-affix-wrapper:hover {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line-strong));
+}
+.portal-password-form .ant-input-affix-wrapper-focused {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.portal-password-form .ant-input-affix-wrapper-status-error,
+.portal-password-form .ant-input-affix-wrapper-status-error:hover {
+  border-color: var(--danger);
+}
+.portal-password-form .ant-form-item-explain { padding-top: 5px; }
 .usage-key-danger-zone { width: 100%; padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--danger-soft); border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--line)); border-radius: 10px; }
 .usage-key-danger-zone > div { min-width: 0; }
 .usage-key-danger-zone strong { color: var(--danger); font-size: 12px; }
@@ -504,5 +559,8 @@ body {
   .portal-config-step { grid-template-columns: minmax(0, 1fr); }
   .portal-config-step header,
   .portal-config-actions { align-items: stretch; flex-direction: column; }
+  .portal-password-form .ant-form-item-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .portal-password-form .ant-form-item-label { text-align: left; }
+  .portal-password-form .ant-form-item-label > label { height: auto; justify-content: flex-start; }
   .usage-key-danger-zone { align-items: stretch; flex-direction: column; }
 }

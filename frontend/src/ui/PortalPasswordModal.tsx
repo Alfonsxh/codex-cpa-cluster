@@ -57,8 +57,10 @@ export function PortalPasswordModal({
 
   return (
     <Modal
+      className="portal-password-modal"
       title={mandatory ? "首次登录必须修改密码" : "修改个人密码"}
       open={open}
+      width={620}
       closable={!mandatory}
       mask={{ closable: !mandatory }}
       keyboard={!mandatory}

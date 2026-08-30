@@ -116,7 +116,7 @@ export function PortalClientConfigModal({
 
   const copy = async (value: string, label = "已复制") => {
     try {
-      await navigator.clipboard.writeText(value);
+      await writeClipboardText(value);
       setCopied(label);
     } catch {
       setCopied("复制失败，请手动选择配置内容");
@@ -128,7 +128,7 @@ export function PortalClientConfigModal({
     const result = await copyAndImportConfig({
       value: config.value,
       externalLink: config.externalLink,
-      writeText: (value) => navigator.clipboard.writeText(value),
+      writeText: writeClipboardText,
       openLink: (link) => window.location.assign(link)
     });
     flushSync(() => setCopied(result.message));
@@ -336,6 +336,51 @@ export async function copyAndImportConfig({
     return { status: "opened" as const, message: "完整配置已复制，正在打开 CC Switch…" };
   } catch {
     return { status: "open_failed" as const, message: "配置已复制，但无法打开 CC Switch，请确认已安装" };
+  }
+}
+
+export async function writeClipboardText(
+  value: string,
+  writers: {
+    asyncWriter?: ((text: string) => Promise<void>) | null;
+    legacyWriter?: (text: string) => boolean;
+  } = {}
+) {
+  const asyncWriter = writers.asyncWriter === undefined
+    ? (typeof navigator !== "undefined" && navigator.clipboard?.writeText
+        ? navigator.clipboard.writeText.bind(navigator.clipboard)
+        : null)
+    : writers.asyncWriter;
+  if (asyncWriter) {
+    // A rejected Clipboard API call represents an explicit browser decision.
+    // Do not bypass it with execCommand; the fallback is only for HTTP origins
+    // where navigator.clipboard is unavailable altogether.
+    await asyncWriter(value);
+    return;
+  }
+  const legacyWriter = writers.legacyWriter ?? legacyClipboardWrite;
+  if (legacyWriter(value)) return;
+  throw new Error("clipboard unavailable");
+}
+
+function legacyClipboardWrite(value: string) {
+  if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") {
+    return false;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.inset = "0 auto auto -9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, value.length);
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
   }
 }
 

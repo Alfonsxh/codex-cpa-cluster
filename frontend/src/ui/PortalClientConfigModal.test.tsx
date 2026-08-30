@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { defaultPublicSiteConfiguration } from "../api/public-site";
-import { buildClientConfig, copyAndImportConfig } from "./PortalClientConfigModal";
+import { buildClientConfig, copyAndImportConfig, writeClipboardText } from "./PortalClientConfigModal";
 
 const input = {
   apiKey: "secret-api-key",
@@ -98,5 +98,37 @@ describe("copyAndImportConfig", () => {
       status: "open_failed",
       message: "配置已复制，但无法打开 CC Switch，请确认已安装"
     });
+  });
+});
+
+describe("writeClipboardText", () => {
+  it("uses the legacy copy path only when the Clipboard API is unavailable", async () => {
+    const legacyWriter = vi.fn(() => true);
+
+    await expect(writeClipboardText("full-secret-config", {
+      asyncWriter: null,
+      legacyWriter
+    })).resolves.toBeUndefined();
+
+    expect(legacyWriter).toHaveBeenCalledWith("full-secret-config");
+  });
+
+  it("does not bypass an explicit Clipboard API rejection", async () => {
+    const denied = new DOMException("denied", "NotAllowedError");
+    const legacyWriter = vi.fn(() => true);
+
+    await expect(writeClipboardText("full-secret-config", {
+      asyncWriter: vi.fn(async () => { throw denied; }),
+      legacyWriter
+    })).rejects.toBe(denied);
+
+    expect(legacyWriter).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when neither clipboard mechanism can copy", async () => {
+    await expect(writeClipboardText("full-secret-config", {
+      asyncWriter: null,
+      legacyWriter: vi.fn(() => false)
+    })).rejects.toThrow("clipboard unavailable");
   });
 });

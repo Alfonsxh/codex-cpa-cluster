@@ -84,9 +84,9 @@ export function PortalDailyUsageTrend({ onSessionExpired }: { onSessionExpired: 
           </div>
         </div>
 
-        <div className="usage-trend-summary" aria-label="趋势摘要">
+        <div className={`usage-trend-summary${dimension === "model_reasoning" ? " model-reasoning" : ""}`} aria-label="趋势摘要">
           {summary.items.map((item) => (
-            <div key={item.label}>
+            <div className={item.label === "主要组合" ? "primary-combination" : undefined} key={item.label}>
               <span>{item.label}</span>
               <strong title={item.title}>{query.isPending ? "—" : item.value}</strong>
             </div>
@@ -404,10 +404,7 @@ function renderTooltipRow(
   if (dimension === "total") {
     return `<span class="usage-trend-tooltip-row"><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(item.name)}</b><em>${escapeHTML(value)}</em></span>`;
   }
-  const separator = item.name.lastIndexOf(" · ");
-  const model = separator < 0 ? item.name : item.name.slice(0, separator);
-  const effort = separator < 0 ? "聚合" : item.name.slice(separator + 3);
-  return `<span class="usage-trend-tooltip-row usage-trend-tooltip-combination"><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(model)}<small>推理强度 · ${escapeHTML(effort)}</small></b><em>${escapeHTML(value)}</em></span>`;
+  return `<span class="usage-trend-tooltip-row usage-trend-tooltip-combination"><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(item.name)}</b><em>${escapeHTML(value)}</em></span>`;
 }
 
 function chartValue(value: CallbackDataParams["value"]): number | null {

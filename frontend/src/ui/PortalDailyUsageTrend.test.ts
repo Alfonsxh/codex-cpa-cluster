@@ -26,8 +26,8 @@ describe("PortalDailyUsageTrend", () => {
 
   it("caps the combined Tooltip surface at ten visible rows and folds the remainder into other", () => {
     const combinations = Array.from({ length: 12 }, (_, index) => ({
-      model: `model-${String(index + 1).padStart(2, "0")}`,
-      reasoning_effort: index % 2 ? "medium" : "high",
+      model: index === 11 ? "gpt-5.6-sol" : `model-${String(index + 1).padStart(2, "0")}`,
+      reasoning_effort: index === 11 ? "xhigh" : index % 2 ? "medium" : "high",
       request_count: 1,
       total_tokens: (index + 1) * 100,
       weighted_tokens: (index + 1) * 125
@@ -38,7 +38,8 @@ describe("PortalDailyUsageTrend", () => {
     const series = buildPortalTrendSeries(trend, "model_reasoning");
     expect(series).toHaveLength(10);
     expect(series.at(-1)?.name).toBe("其他组合");
-    expect(series[0]?.name).toBe("model-12 · medium");
+    expect(series[0]?.name).toBe("gpt-5.6-sol · xhigh");
+    expect(summarizePortalTrend(trend, "model_reasoning").items[1]?.value).toBe("gpt-5.6-sol · xhigh");
     expect(summarizePortalTrend(trend, "model_reasoning").items[2]?.value).toBe("12");
 
     const tooltip = renderPortalTrendTooltip(series.map((item, index) => ({
@@ -49,9 +50,10 @@ describe("PortalDailyUsageTrend", () => {
     })) as never, trend, "model_reasoning");
     expect(tooltip).toContain('data-layout="single-column"');
     expect(tooltip).toContain("其他组合");
-    expect(tooltip).toContain("推理强度 · medium");
+    expect(tooltip).toContain("gpt-5.6-sol · xhigh");
     expect(tooltip).toContain("Token");
     expect(tooltip).toContain("当日合计");
+    expect(tooltip).not.toContain("<small>");
     expect((tooltip.match(/<span/g) ?? [])).toHaveLength(11);
   });
 });

@@ -49,6 +49,10 @@ describe("buildClientConfig", () => {
     expect(result.value).toContain('experimental_bearer_token = "secret-api-key"');
     expect(result.title).toBe("完成 CC Switch 配置");
     expect(result.copyLabel).toBe("复制并导入");
+    expect(result.sections?.map((section) => section.title)).toEqual(["Codex 配置内容", "迁移旧会话"]);
+    expect(result.sections?.[0]?.copyLabel).toBeUndefined();
+    expect(result.sections?.[1]?.value).toContain("OAuth");
+    expect(result.sections?.[1]?.copyLabel).toBe("复制迁移指令");
     expect(result.notice).toBeUndefined();
   });
 });

@@ -86,7 +86,7 @@ for (const state of ["loading", "empty", "error"] as const) {
 }
 
 test("个人使用中心每日趋势按范围和组合维度独立请求并可收起", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1086, height: 900 });
   await setTheme(page, "light");
   const trendRequests: string[] = [];
   page.on("request", (request) => {
@@ -116,6 +116,13 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
     "/usage/me/usage-trend?window=7d&dimension=model_reasoning"
   );
   await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
+  const primaryCombination = page.locator(".usage-trend-summary .primary-combination strong");
+  await expect(primaryCombination).toHaveText("gpt-5.6-sol · xhigh");
+  expect(await primaryCombination.evaluate((element) => ({
+    clipped: element.scrollWidth > element.clientWidth,
+    overflow: getComputedStyle(element).overflow,
+    textOverflow: getComputedStyle(element).textOverflow
+  }))).toEqual({ clipped: false, overflow: "visible", textOverflow: "clip" });
 
   await chart.focus();
   const tooltip = page.locator(".usage-trend-tooltip[data-active=true]");
@@ -126,9 +133,26 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
     overflowY: getComputedStyle(element).overflowY,
     scrollable: element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth
   }))).toEqual({ overflowX: "hidden", overflowY: "hidden", scrollable: false });
+  const combinationRows = tooltip.locator(".usage-trend-tooltip-combination");
+  await expect(combinationRows.first()).toContainText("gpt-5.6-sol · xhigh");
+  await expect(combinationRows.first()).toContainText("Token");
+  await expect(combinationRows.locator("small")).toHaveCount(0);
+  expect(await combinationRows.evaluateAll((rows) => rows.every((row) => {
+    const labelElement = row.querySelector<HTMLElement>("b");
+    const valueElement = row.querySelector<HTMLElement>("em");
+    if (!labelElement || !valueElement) return false;
+    const rowRect = row.getBoundingClientRect();
+    const label = labelElement.getBoundingClientRect();
+    const value = valueElement.getBoundingClientRect();
+    return Boolean(Math.abs(label.top - value.top) <= 1
+      && labelElement.clientWidth >= labelElement.scrollWidth
+      && valueElement.clientWidth >= valueElement.scrollWidth
+      && value.right <= rowRect.right + .5);
+  }))).toBe(true);
   const tooltipRect = await tooltip.evaluate((element) => element.getBoundingClientRect());
   expect(tooltipRect.top).toBeGreaterThanOrEqual(0);
   expect(tooltipRect.bottom).toBeLessThanOrEqual(900);
+  await expect(tooltip).toHaveScreenshot("react-usage-trend-tooltip-model-reasoning.png");
   await page.getByRole("button", { name: /^收起/ }).click();
   await expect(chart).toHaveCount(0);
 });
@@ -671,11 +695,15 @@ test("使用中心客户端配置弹框直接展示必要内容", async ({ page 
   await page.getByRole("button", { name: "导入 CC Switch" }).click();
   const switchDialog = page.getByRole("dialog", { name: "完成 CC Switch 配置" });
   await expect(switchDialog).toBeVisible();
+  await expect(switchDialog.getByText("Codex 配置内容")).toBeVisible();
+  await expect(switchDialog.getByText("迁移旧会话")).toBeVisible();
+  await expect(switchDialog.getByRole("button", { name: "复制迁移指令" })).toBeVisible();
   await expect(switchDialog.getByText("操作文件")).toHaveCount(0);
   await expect(switchDialog.getByRole("button", { name: "仅复制图片配置" })).toHaveCount(0);
   await expect(switchDialog.locator(".portal-config-actions").getByRole("button")).toHaveCount(2);
   await expect(switchDialog.locator(".portal-config-actions").getByRole("button", { name: "关闭" })).toBeVisible();
   await expect(switchDialog.locator(".portal-config-actions").getByRole("button", { name: "复制并导入" })).toBeVisible();
+  await expect(switchDialog).toHaveScreenshot("react-usage-ccswitch-config-dialog-dark.png");
 });
 
 async function setTheme(page: Page, theme: "light" | "dark") {
@@ -846,10 +874,10 @@ function usageTrendFixture(window: string, dimension: string) {
   const end = Date.UTC(2026, 7, 29) / 1000;
   const start = end - (windowDays - 1) * 86_400;
   const combinationDefinitions = [
-    ["gpt-5.4", "high", 0.52],
-    ["gpt-5.4", "medium", 0.26],
-    ["gpt-5.4-mini", "high", 0.16],
-    ["gpt-5.4-mini", "medium", 0.06]
+    ["gpt-5.6-sol", "xhigh", 0.52],
+    ["gpt-5.6-terra", "medium", 0.26],
+    ["gpt-5.6-luna", "high", 0.16],
+    ["gpt-5.6-luna", "low", 0.06]
   ] as const;
   const days = Array.from({ length: windowDays }, (_, index) => {
     const totalTokens = 380_000 + index * 22_000 + (index % 5) * 35_000;

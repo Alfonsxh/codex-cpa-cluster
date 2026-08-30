@@ -29,7 +29,7 @@ type ClientConfigSection = {
   description: string;
   value: string;
   hint?: string;
-  copyLabel: string;
+  copyLabel?: string;
 };
 
 const historyPrompt = "由于登录方式已从 OAuth 变为 API Key，请将 Codex 之前的会话迁移到当前 API Key 的会话历史中。";
@@ -168,7 +168,7 @@ export function PortalClientConfigModal({
                   <div>
                     <header>
                       <span><strong>{section.title}</strong><code>{section.file}</code></span>
-                      <Button size="small" onClick={() => void copy(section.value, `${section.title}已复制`)}>{section.copyLabel}</Button>
+                      {section.copyLabel ? <Button size="small" onClick={() => void copy(section.value, `${section.title}已复制`)}>{section.copyLabel}</Button> : null}
                     </header>
                     <p>{section.description}</p>
                     <pre className="portal-config-preview"><code>{section.value}</code></pre>
@@ -305,6 +305,21 @@ export function buildClientConfig({
     title: "完成 CC Switch 配置",
     value: codex,
     copyLabel: "复制并导入",
+    sections: [
+      {
+        title: "Codex 配置内容",
+        file: "~/.codex/config.toml",
+        description: "“复制并导入”会先复制下方完整配置，再打开 CC Switch。",
+        value: codex
+      },
+      {
+        title: "迁移旧会话",
+        file: "Codex Agent",
+        description: "将下方指令交给 Codex Agent，把 OAuth 登录时期的会话迁移到当前 API Key 会话历史。",
+        value: historyPrompt,
+        copyLabel: "复制迁移指令"
+      }
+    ],
     externalLink: `ccswitch://v1/import?${params.toString()}`,
   };
 }

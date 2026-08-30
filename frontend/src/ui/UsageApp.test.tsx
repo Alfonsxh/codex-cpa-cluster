@@ -312,6 +312,9 @@ describe("UsageDashboard", () => {
 
     await user.click(screen.getByRole("button", { name: "导入 CC Switch" }));
     const switchDialog = await findModal("完成 CC Switch 配置");
+    expect(within(switchDialog).getByText("Codex 配置内容")).toBeInTheDocument();
+    expect(within(switchDialog).getByText("迁移旧会话")).toBeInTheDocument();
+    expect(within(switchDialog).getByRole("button", { name: "复制迁移指令" })).toBeInTheDocument();
     expect(within(switchDialog).getByRole("button", { name: /关\s*闭/ })).toBeInTheDocument();
     expect(within(switchDialog).getByRole("button", { name: "复制并导入" })).toBeInTheDocument();
     expect(within(switchDialog).queryByText("操作文件")).not.toBeInTheDocument();

@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	defaultCPAImage             = "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23"
-	cpaImageBannerProbeTimeout  = 15 * time.Second
-	cpaImageBannerMaximumOutput = 64 * 1024
+	DefaultCPAImageUpdateChannel = "docker.m.daocloud.io/eceasy/cli-proxy-api:latest"
+	cpaImageBannerProbeTimeout   = 15 * time.Second
+	cpaImageBannerMaximumOutput  = 64 * 1024
 )
 
 type imageRuntimeStore interface {
@@ -116,7 +116,7 @@ func (manager *Manager) CPAImageStatus(ctx context.Context) (CPAImageStatus, err
 	}
 	target := strings.TrimSpace(stringValue(settings["runtime.cliproxy_image"]))
 	if target == "" {
-		target = defaultCPAImage
+		target = DefaultCPAImageUpdateChannel
 	}
 	state := make(map[string]any)
 	if _, err := store.ReadRuntimeState(ctx, "cliproxy_image", &state); err != nil {
@@ -411,7 +411,7 @@ func (runtime *AccountRuntime) configuredCPAImage(ctx context.Context) (string, 
 	}
 	target := strings.TrimSpace(stringValue(settings["runtime.cliproxy_image"]))
 	if target == "" {
-		target = defaultCPAImage
+		target = DefaultCPAImageUpdateChannel
 	}
 	if target == "" || len(target) > 512 || strings.ContainsAny(target, "\r\n\t \x00") {
 		return "", errors.New("configured CPA image reference is invalid")

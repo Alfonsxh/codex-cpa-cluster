@@ -53,6 +53,20 @@ func TestAccountRuntimePullImageWritesCandidateOnly(t *testing.T) {
 	}
 }
 
+func TestAccountRuntimePullImageUsesLatestUpdateChannelByDefault(t *testing.T) {
+	runtime, store, client, _ := newCPAImageRuntime(t, nil)
+	store.settings = map[string]any{"accounts.listen_address": "127.0.0.1"}
+	client.imageIDs[DefaultCPAImageUpdateChannel] = fixtureNewImageID
+	var output strings.Builder
+
+	if _, err := runtime.PullImage(context.Background(), &output); err != nil {
+		t.Fatalf("PullImage with default update channel: %v", err)
+	}
+	if len(client.pullReferences) != 1 || client.pullReferences[0] != DefaultCPAImageUpdateChannel {
+		t.Fatalf("default pull references = %#v", client.pullReferences)
+	}
+}
+
 func TestAccountRuntimePullImageUsesSandboxedBannerProbeForMetadataPoorImage(t *testing.T) {
 	accounts := []controlplane.Account{{ID: "alpha", Port: 18318, GroupEnabled: true}}
 	runtime, store, client, projector := newCPAImageRuntime(t, accounts)

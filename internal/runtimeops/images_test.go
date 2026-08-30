@@ -2,12 +2,35 @@ package runtimeops
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	imagetypes "github.com/moby/moby/api/types/image"
 	dockerclient "github.com/moby/moby/client"
 )
+
+func TestCPAImageStatusUsesLatestUpdateChannelByDefault(t *testing.T) {
+	client := &fakeImageDocker{
+		fakeDockerClient: &fakeDockerClient{},
+		inspect:          dockerclient.ImageInspectResult{},
+		images:           dockerclient.ImageListResult{},
+	}
+	store := &fakeImageStore{settings: map[string]any{}, state: map[string]any{}}
+	manager, err := New(client, "fixture-project", store)
+	if err != nil {
+		t.Fatalf("New image runtime: %v", err)
+	}
+	status, err := manager.CPAImageStatus(context.Background())
+	if err != nil {
+		t.Fatalf("CPAImageStatus: %v", err)
+	}
+	if status.TargetImage != DefaultCPAImageUpdateChannel ||
+		status.UpdateChannel != DefaultCPAImageUpdateChannel ||
+		!strings.HasSuffix(status.UpdateChannel, ":latest") {
+		t.Fatalf("default CPA image status = %#v", status)
+	}
+}
 
 func TestCPAImageStatusMatchesTargetAndAccountContainers(t *testing.T) {
 	containers := runtimeFixtureContainers()

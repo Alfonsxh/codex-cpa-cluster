@@ -19,6 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -212,7 +213,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		integer("accounts.port_start", "新账号端口起点", 18319, 1024, 65535, "future"),
 		integer("accounts.port_end", "新账号端口终点", 18999, 1024, 65535, "future"),
 		simple("accounts.listen_address", "业务 CPA 监听地址", "ip", "127.0.0.1", "deployment"),
-		simple("runtime.cliproxy_image", "CLIProxyAPI 镜像", "image", "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23", "deployment"),
+		simple("runtime.cliproxy_image", "CLIProxyAPI 镜像", "image", runtimeops.DefaultCPAImageUpdateChannel, "deployment"),
 	)
 	definitions = append(definitions,
 		simple("delivery.release_metadata_image", "发布更新通道", "optional_image", "", "live"),

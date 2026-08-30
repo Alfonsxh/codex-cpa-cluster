@@ -31,7 +31,6 @@ const (
 	defaultAccountNetwork      = "cliproxy-backend"
 	defaultAccountInstance     = "cliproxy"
 	defaultAccountListen       = "127.0.0.1"
-	defaultAccountImage        = "docker.m.daocloud.io/eceasy/cli-proxy-api:v7.1.23"
 	defaultAccountProbeTimeout = 12 * time.Second
 	accountContainerPort       = "8317/tcp"
 	maximumOAuthSnapshotBytes  = 2 * 1024 * 1024
@@ -669,7 +668,7 @@ func (runtime *AccountRuntime) imageAndListenAddress(ctx context.Context) (strin
 	}
 	image = strings.TrimSpace(state.Applied.ResolvedReference)
 	if image == "" {
-		image, err = runtimeStringSetting(settings, "runtime.cliproxy_image", defaultAccountImage)
+		image, err = runtimeStringSetting(settings, "runtime.cliproxy_image", DefaultCPAImageUpdateChannel)
 		if err != nil {
 			return "", "", err
 		}

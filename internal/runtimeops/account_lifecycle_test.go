@@ -70,6 +70,25 @@ func TestAccountRuntimeCreatesExactMobySpecProbesAndRollsBackCandidate(t *testin
 	}
 }
 
+func TestAccountRuntimeUsesLatestUpdateChannelBeforeAnImageIsApplied(t *testing.T) {
+	runtime := newAccountRuntimeForTest(
+		t,
+		newRuntimeTestManager(t, &fakeAccountLifecycleClient{}),
+		newRuntimeRoot(t),
+		&recordingRoundTripper{status: http.StatusOK},
+	)
+	store := runtime.store.(*fakeAccountRuntimeStore)
+	store.imageState = map[string]any{}
+
+	image, listenAddress, err := runtime.imageAndListenAddress(context.Background())
+	if err != nil {
+		t.Fatalf("imageAndListenAddress: %v", err)
+	}
+	if image != DefaultCPAImageUpdateChannel || listenAddress != "127.0.0.1" {
+		t.Fatalf("image/listen = %q/%q", image, listenAddress)
+	}
+}
+
 func TestAccountRuntimeUpdateRollbackRecreatesPreviousContainer(t *testing.T) {
 	root := newRuntimeRoot(t, "alpha", "gamma")
 	client := &fakeAccountLifecycleClient{containers: []containertypes.Summary{

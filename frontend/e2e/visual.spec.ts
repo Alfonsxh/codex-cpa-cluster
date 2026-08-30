@@ -138,6 +138,14 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
   await expect(combinationRows.first()).toContainText("gpt-5.6-sol · xhigh");
   await expect(combinationRows.first()).toContainText("Token");
   await expect(combinationRows.locator("small")).toHaveCount(0);
+  const markerStyles = await combinationRows.locator("i").evaluateAll((markers) => markers.map((marker) => ({
+    color: getComputedStyle(marker).backgroundColor,
+    width: marker.getBoundingClientRect().width,
+    height: marker.getBoundingClientRect().height
+  })));
+  expect(markerStyles.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(markerStyles.map((marker) => marker.color)).size).toBeGreaterThan(1);
+  expect(markerStyles.every((marker) => marker.color !== "rgb(21, 27, 40)" && marker.width >= 8 && marker.height >= 8)).toBe(true);
   expect(await combinationRows.evaluateAll((rows) => rows.every((row) => {
     const labelElement = row.querySelector<HTMLElement>("b");
     const valueElement = row.querySelector<HTMLElement>("em");

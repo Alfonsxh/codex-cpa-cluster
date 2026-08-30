@@ -383,7 +383,11 @@ export function renderPortalTrendTooltip(
     .map((item) => ({
       name: String(item.seriesName ?? ""),
       value: chartValue(item.value),
-      color: typeof item.color === "string" ? item.color : usageChartColors[0]
+      // ECharts exposes itemStyle.color here. Trend points intentionally use
+      // the panel background as their fill and the series color as a border,
+      // so item.color would render every Tooltip marker almost black. Keep the
+      // marker tied to the same deterministic palette as the line instead.
+      color: trendSeriesColor(item.seriesIndex)
     }))
     .filter((item) => item.value !== null)
     .sort((left, right) => dimension === "total" ? 0 : (right.value ?? 0) - (left.value ?? 0) || left.name.localeCompare(right.name))
@@ -394,6 +398,11 @@ export function renderPortalTrendTooltip(
     ? `<span class="usage-trend-tooltip-request"><b>请求</b><em>${day.request_count.toLocaleString("en-US")}</em></span>`
     : `<span class="usage-trend-tooltip-total"><b>当日合计</b><em>${escapeHTML(`${formatTokenAmount(day.weighted_tokens)} Token`)}</em></span>`;
   return `<div class="overview-chart-tooltip usage-trend-tooltip" role="tooltip" data-active="true" data-layout="single-column"><strong>${escapeHTML(formatTrendDate(day.date))}</strong>${rows}${requestRow}</div>`;
+}
+
+function trendSeriesColor(seriesIndex: CallbackDataParams["seriesIndex"]) {
+  const index = Number(seriesIndex);
+  return usageChartColors[Number.isInteger(index) && index >= 0 ? index % usageChartColors.length : 0];
 }
 
 function renderTooltipRow(

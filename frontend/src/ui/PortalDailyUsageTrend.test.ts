@@ -45,7 +45,10 @@ describe("PortalDailyUsageTrend", () => {
     const tooltip = renderPortalTrendTooltip(series.map((item, index) => ({
       seriesName: item.name,
       value: item.values[0],
-      color: `#00000${index}`,
+      // ECharts reports the hollow point fill as item.color. Tooltip markers
+      // must use seriesIndex instead so they remain visibly color-coded.
+      color: "#151b28",
+      seriesIndex: index,
       dataIndex: 0
     })) as never, trend, "model_reasoning");
     expect(tooltip).toContain('data-layout="single-column"');
@@ -53,6 +56,9 @@ describe("PortalDailyUsageTrend", () => {
     expect(tooltip).toContain("gpt-5.6-sol · xhigh");
     expect(tooltip).toContain("Token");
     expect(tooltip).toContain("当日合计");
+    expect(tooltip).toContain("background:#6374d8");
+    expect(tooltip).toContain("background:#4b8ccf");
+    expect(tooltip).not.toContain("background:#151b28");
     expect(tooltip).not.toContain("<small>");
     expect((tooltip.match(/<span/g) ?? [])).toHaveLength(11);
   });

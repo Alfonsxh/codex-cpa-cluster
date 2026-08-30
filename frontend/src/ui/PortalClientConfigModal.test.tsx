@@ -117,6 +117,45 @@ describe("writeClipboardText", () => {
     expect(legacyWriter).toHaveBeenCalledWith("full-secret-config");
   });
 
+  it("writes the exact payload through the legacy copy event", async () => {
+    let clipboardValue = "";
+    const clipboardData = {
+      clearData: vi.fn(() => { clipboardValue = ""; }),
+      setData: vi.fn((_type: string, value: string) => { clipboardValue = value; }),
+      getData: vi.fn(() => clipboardValue)
+    };
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => {
+        const event = new Event("copy", { bubbles: true, cancelable: true });
+        Object.defineProperty(event, "clipboardData", { value: clipboardData });
+        document.dispatchEvent(event);
+        return true;
+      })
+    });
+
+    try {
+      await expect(writeClipboardText("full-secret-config", { asyncWriter: null })).resolves.toBeUndefined();
+      expect(clipboardValue).toBe("full-secret-config");
+      expect(clipboardData.setData).toHaveBeenCalledWith("text/plain", "full-secret-config");
+    } finally {
+      Reflect.deleteProperty(document, "execCommand");
+    }
+  });
+
+  it("rejects a legacy execCommand false positive when no copy event accepted the payload", async () => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => true)
+    });
+
+    try {
+      await expect(writeClipboardText("full-secret-config", { asyncWriter: null })).rejects.toThrow("clipboard unavailable");
+    } finally {
+      Reflect.deleteProperty(document, "execCommand");
+    }
+  });
+
   it("does not bypass an explicit Clipboard API rejection", async () => {
     const denied = new DOMException("denied", "NotAllowedError");
     const legacyWriter = vi.fn(() => true);

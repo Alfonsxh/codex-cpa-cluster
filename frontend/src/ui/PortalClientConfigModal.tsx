@@ -346,6 +346,9 @@ export async function copyAndImportConfig({
         : "复制失败：未打开 CC Switch，请允许剪贴板访问后重试"
     };
   }
+  // Give the browser/OS one paint boundary to commit a legacy copy event
+  // before handing focus to the external protocol handler.
+  await settleClipboardWrite();
   try {
     openLink(externalLink);
     return { status: "opened" as const, message: "完整配置已复制，正在打开 CC Switch…" };
@@ -382,21 +385,51 @@ function legacyClipboardWrite(value: string) {
   if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") {
     return false;
   }
+  const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const textarea = document.createElement("textarea");
   textarea.value = value;
   textarea.readOnly = true;
   textarea.setAttribute("aria-hidden", "true");
   textarea.style.position = "fixed";
-  textarea.style.inset = "0 auto auto -9999px";
-  textarea.style.opacity = "0";
+  textarea.style.inset = "0 auto auto 0";
+  textarea.style.width = "2px";
+  textarea.style.height = "2px";
+  textarea.style.padding = "0";
+  textarea.style.border = "0";
+  textarea.style.opacity = "0.01";
+  textarea.style.pointerEvents = "none";
   document.body.appendChild(textarea);
+  textarea.focus({ preventScroll: true });
   textarea.select();
   textarea.setSelectionRange(0, value.length);
+  let wroteCopyEvent = false;
+  const onCopy = (event: ClipboardEvent) => {
+    if (!event.clipboardData) return;
+    event.preventDefault();
+    event.clipboardData.clearData();
+    event.clipboardData.setData("text/plain", value);
+    wroteCopyEvent = event.clipboardData.getData("text/plain") === value;
+  };
+  document.addEventListener("copy", onCopy, { capture: true, once: true });
   try {
-    return document.execCommand("copy");
+    // execCommand may return true without changing the system clipboard. Only
+    // report success when the copy event accepted the exact payload as well.
+    return document.execCommand("copy") && wroteCopyEvent;
   } finally {
+    document.removeEventListener("copy", onCopy, true);
     textarea.remove();
+    previouslyFocused?.focus({ preventScroll: true });
   }
+}
+
+function settleClipboardWrite() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
 }
 
 function buildCodexConfig(provider: string, baseURL: string, model: string, apiKey: string) {

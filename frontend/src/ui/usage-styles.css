@@ -224,6 +224,7 @@ body {
 .usage-trend-skeleton { display: grid; align-content: space-evenly; padding: 22px 48px; }
 .usage-trend-skeleton span { display: block; height: 1px; background: var(--line); }
 .usage-trend-skeleton span::after { display: block; width: 46%; height: 5px; content: ""; background: linear-gradient(90deg, transparent, var(--accent-soft), transparent); animation: usage-trend-skeleton 1.4s ease-in-out infinite alternate; }
+.usage-trend-echarts-tooltip { max-width: min(382px, calc(100% - 16px)); }
 .usage-trend-tooltip { width: min(380px, calc(100vw - 40px)); }
 .usage-trend-tooltip .usage-trend-tooltip-request,
 .usage-trend-tooltip .usage-trend-tooltip-total { grid-template-columns: minmax(0, 1fr) auto; margin-top: 3px; padding-top: 6px; border-top: 1px solid #39455e; }

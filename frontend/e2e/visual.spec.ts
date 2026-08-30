@@ -125,6 +125,7 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
   }))).toEqual({ clipped: false, overflow: "visible", textOverflow: "clip" });
 
   await chart.focus();
+  const tooltipOuter = page.locator(".usage-trend-echarts-tooltip");
   const tooltip = page.locator(".usage-trend-tooltip[data-active=true]");
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toHaveAttribute("data-layout", "single-column");
@@ -149,6 +150,15 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
       && valueElement.clientWidth >= valueElement.scrollWidth
       && value.right <= rowRect.right + .5);
   }))).toBe(true);
+  expect(await tooltipOuter.evaluate((outer) => {
+    const outerRect = outer.getBoundingClientRect();
+    const inner = outer.querySelector<HTMLElement>(".usage-trend-tooltip");
+    const values = [...outer.querySelectorAll<HTMLElement>(".usage-trend-tooltip-row em, .usage-trend-tooltip-total em")];
+    if (!inner) return false;
+    const innerRect = inner.getBoundingClientRect();
+    return innerRect.right <= outerRect.right + .5
+      && values.every((value) => value.getBoundingClientRect().right <= outerRect.right + .5);
+  })).toBe(true);
   const tooltipRect = await tooltip.evaluate((element) => element.getBoundingClientRect());
   expect(tooltipRect.top).toBeGreaterThanOrEqual(0);
   expect(tooltipRect.bottom).toBeLessThanOrEqual(900);
@@ -676,8 +686,9 @@ test("使用中心仅按需读取 API Key，关闭立即清除，刷新后只展
   await expect(page.locator("body")).not.toContainText(newKey);
 });
 
-test("使用中心客户端配置弹框直接展示必要内容", async ({ page }) => {
+test("使用中心客户端配置弹框直接展示必要内容", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:5194" });
   await setTheme(page, "dark");
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
@@ -702,8 +713,14 @@ test("使用中心客户端配置弹框直接展示必要内容", async ({ page 
   await expect(switchDialog.getByRole("button", { name: "仅复制图片配置" })).toHaveCount(0);
   await expect(switchDialog.locator(".portal-config-actions").getByRole("button")).toHaveCount(2);
   await expect(switchDialog.locator(".portal-config-actions").getByRole("button", { name: "关闭" })).toBeVisible();
-  await expect(switchDialog.locator(".portal-config-actions").getByRole("button", { name: "复制并导入" })).toBeVisible();
+  const copyAndImport = switchDialog.locator(".portal-config-actions").getByRole("button", { name: "复制并导入" });
+  await expect(copyAndImport).toBeVisible();
   await expect(switchDialog).toHaveScreenshot("react-usage-ccswitch-config-dialog-dark.png");
+  const expectedConfig = await switchDialog.locator(".portal-config-preview").first().innerText();
+  await page.evaluate(() => navigator.clipboard.writeText("CPA_CLIPBOARD_SENTINEL"));
+  await copyAndImport.click();
+  await expect(switchDialog.getByRole("status")).toHaveText("完整配置已复制，正在打开 CC Switch…");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expectedConfig);
 });
 
 async function setTheme(page: Page, theme: "light" | "dark") {

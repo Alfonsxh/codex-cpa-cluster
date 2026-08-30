@@ -22,7 +22,7 @@ import {
   type PortalUsageTrendDimension,
   type PortalUsageTrendWindow
 } from "../api/portal";
-import { formatTokens } from "./formatters";
+import { formatTokenAmount, formatTokens } from "./formatters";
 import { usageChartColors } from "./components/UsageChart";
 import { useTheme } from "./ThemeProvider";
 
@@ -47,7 +47,7 @@ const directCombinationLimit = 9;
 export function PortalDailyUsageTrend({ onSessionExpired }: { onSessionExpired: () => void }) {
   const [window, setWindow] = useState<PortalUsageTrendWindow>("30d");
   const [dimension, setDimension] = useState<PortalUsageTrendDimension>("total");
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const query = useQuery({
     queryKey: portalUsageTrendQueryKey(window, dimension),
     queryFn: ({ signal }) => readPortalUsageTrend(window, dimension, signal),
@@ -121,11 +121,6 @@ export function PortalDailyUsageTrend({ onSessionExpired }: { onSessionExpired: 
           ) : null}
           {query.data && hasData ? (
             <>
-              <div className="usage-trend-legend" aria-label="趋势图例">
-                {series.map((item, index) => (
-                  <span key={item.name}><i style={{ background: usageChartColors[index % usageChartColors.length] }} />{item.name}</span>
-                ))}
-              </div>
               {partial ? <p className="usage-trend-partial">浅色缺口表示该自然日尚未采集或只采集了部分时段。</p> : null}
               <PortalTrendChart trend={query.data} series={series} dimension={dimension} />
             </>
@@ -177,6 +172,7 @@ function PortalTrendChart({
         trigger: "axis",
         triggerOn: "mousemove|click|mousewheel",
         confine: true,
+        appendTo: "body",
         enterable: false,
         renderMode: "html",
         className: "usage-chart-echarts-tooltip usage-trend-echarts-tooltip",
@@ -184,7 +180,7 @@ function PortalTrendChart({
         borderColor: "#39455e",
         borderWidth: 1,
         padding: 0,
-        extraCssText: "max-height:none;overflow:hidden;border-radius:9px;box-shadow:0 12px 28px rgb(8 12 22 / 28%);",
+        extraCssText: "z-index:10000;max-height:none;overflow:hidden;border-radius:9px;box-shadow:0 12px 28px rgb(8 12 22 / 28%);",
         axisPointer: { type: "line", lineStyle: { color: axisColor, type: "dashed", width: 1 } },
         formatter: (parameters) => renderPortalTrendTooltip(parameters, trend, dimension)
       },
@@ -392,12 +388,26 @@ export function renderPortalTrendTooltip(
     .filter((item) => item.value !== null)
     .sort((left, right) => dimension === "total" ? 0 : (right.value ?? 0) - (left.value ?? 0) || left.name.localeCompare(right.name))
     .slice(0, 10)
-    .map((item) => `<span><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(item.name)}</b><em>${escapeHTML(formatTokens(item.value ?? 0))}</em></span>`)
+    .map((item) => renderTooltipRow(item, dimension))
     .join("");
   const requestRow = dimension === "total"
     ? `<span class="usage-trend-tooltip-request"><b>请求</b><em>${day.request_count.toLocaleString("en-US")}</em></span>`
-    : `<span class="usage-trend-tooltip-total"><b>合计</b><em>${escapeHTML(formatTokens(day.weighted_tokens))}</em></span>`;
+    : `<span class="usage-trend-tooltip-total"><b>当日合计</b><em>${escapeHTML(`${formatTokenAmount(day.weighted_tokens)} Token`)}</em></span>`;
   return `<div class="overview-chart-tooltip usage-trend-tooltip" role="tooltip" data-active="true" data-layout="single-column"><strong>${escapeHTML(formatTrendDate(day.date))}</strong>${rows}${requestRow}</div>`;
+}
+
+function renderTooltipRow(
+  item: { name: string; value: number | null; color: string },
+  dimension: PortalUsageTrendDimension
+) {
+  const value = `${formatTokenAmount(item.value ?? 0)} Token`;
+  if (dimension === "total") {
+    return `<span class="usage-trend-tooltip-row"><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(item.name)}</b><em>${escapeHTML(value)}</em></span>`;
+  }
+  const separator = item.name.lastIndexOf(" · ");
+  const model = separator < 0 ? item.name : item.name.slice(0, separator);
+  const effort = separator < 0 ? "聚合" : item.name.slice(separator + 3);
+  return `<span class="usage-trend-tooltip-row usage-trend-tooltip-combination"><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(model)}<small>推理强度 · ${escapeHTML(effort)}</small></b><em>${escapeHTML(value)}</em></span>`;
 }
 
 function chartValue(value: CallbackDataParams["value"]): number | null {

@@ -97,20 +97,19 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
   await page.goto("http://127.0.0.1:5194/usage/");
 
   const chart = page.getByRole("img", { name: /个人每日 Token 用量趋势/ });
+  await expect(chart).toHaveCount(0);
+  await expect.poll(() => trendRequests).toEqual([]);
+  await expect(page.getByText("30天", { exact: true })).toBeVisible();
+  const collapsedAccountTop = await page.getByText("账号明细", { exact: true }).evaluate((element) => element.getBoundingClientRect().top);
+
+  await page.getByRole("button", { name: /^展开/ }).click();
   await expect(chart).toBeVisible();
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
   const expandedAccountTop = await page.getByText("账号明细", { exact: true }).evaluate((element) => element.getBoundingClientRect().top);
-
-  await page.getByRole("button", { name: /^收起/ }).click();
-  await expect(chart).toHaveCount(0);
-  await expect(page.getByText("30天", { exact: true })).toBeVisible();
-  const collapsedAccountTop = await page.getByText("账号明细", { exact: true }).evaluate((element) => element.getBoundingClientRect().top);
   expect(collapsedAccountTop).toBeLessThan(expandedAccountTop - 120);
-
-  await page.getByRole("button", { name: /^展开/ }).click();
-  await expect(chart).toBeVisible();
+  await expect(page.getByLabel("趋势图例")).toHaveCount(0);
   await page.getByRole("button", { name: "7天", exact: true }).click();
   await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
   await expect.poll(() => trendRequests).toContain(
@@ -127,6 +126,11 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
     overflowY: getComputedStyle(element).overflowY,
     scrollable: element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth
   }))).toEqual({ overflowX: "hidden", overflowY: "hidden", scrollable: false });
+  const tooltipRect = await tooltip.evaluate((element) => element.getBoundingClientRect());
+  expect(tooltipRect.top).toBeGreaterThanOrEqual(0);
+  expect(tooltipRect.bottom).toBeLessThanOrEqual(900);
+  await page.getByRole("button", { name: /^收起/ }).click();
+  await expect(chart).toHaveCount(0);
 });
 
 test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
@@ -135,7 +139,6 @@ test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
-  await page.getByRole("button", { name: /^收起/ }).click();
   await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toHaveCount(0);
   await expect(page.getByText("账号明细", { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot("react-usage-trend-collapsed-desktop-light.png", { fullPage: false });
@@ -147,6 +150,7 @@ test("个人使用中心模型与推理强度组合趋势视觉基准", async ({
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
+  await page.getByRole("button", { name: /^展开/ }).click();
   await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
   await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeVisible();
@@ -163,19 +167,19 @@ test("个人使用中心移动端可滚动到账号明细", async ({ page }) => 
   const content = page.locator(".usage-center-content");
   const accountSection = page.locator(".usage-account-section");
   const accountTable = page.locator(".usage-table-wrap");
-  const accountHeading = page.getByText("账号明细", { exact: true });
+  const lastAccount = accountTable.locator(".usage-summary-row").last();
   const headerTop = await header.evaluate((element) => element.getBoundingClientRect().top);
 
   await expect(accountSection).toBeAttached();
   expect(await accountSection.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(400);
   expect(await accountTable.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
-  await accountHeading.scrollIntoViewIfNeeded();
+  await lastAccount.scrollIntoViewIfNeeded();
 
   expect(await content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   expect(await header.evaluate((element) => element.getBoundingClientRect().top)).toBe(headerTop);
-  const accountHeadingRect = await accountHeading.evaluate((element) => element.getBoundingClientRect());
-  expect(accountHeadingRect.top).toBeGreaterThanOrEqual(0);
-  expect(accountHeadingRect.bottom).toBeLessThanOrEqual(844);
+  const accountRect = await lastAccount.evaluate((element) => element.getBoundingClientRect());
+  expect(accountRect.top).toBeGreaterThanOrEqual(0);
+  expect(accountRect.bottom).toBeLessThanOrEqual(844);
   await expect(accountTable).toBeVisible();
 });
 
@@ -618,16 +622,17 @@ test("使用中心仅按需读取 API Key，关闭立即清除，刷新后只展
   await expect(page.getByRole("button", { name: "管理 API Key" })).toBeVisible();
   expect(revealRequests).toBe(0);
   await page.getByRole("button", { name: "管理 API Key" }).click();
-  await expect(page.getByRole("dialog", { name: "管理 API Key" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "查看 API Key" })).toBeVisible();
+  const keyDialog = page.getByRole("dialog", { name: "管理 API Key" });
+  await expect(keyDialog).toBeVisible();
+  await expect(keyDialog.getByRole("button", { name: "查看 API Key" })).toBeVisible();
   expect(revealRequests).toBe(0);
   await expect(page.locator("body")).not.toContainText(oldKey);
 
-  await page.getByRole("button", { name: "查看 API Key" }).click();
+  await keyDialog.getByRole("button", { name: "查看 API Key" }).click();
   const keyInput = page.getByLabel("API Key", { exact: true });
   await expect(keyInput).toHaveValue(oldKey);
   expect(revealRequests).toBe(1);
-  await page.getByRole("button", { name: "关闭并清除" }).click();
+  await keyDialog.locator(".ant-modal-footer").getByRole("button", { name: "关闭" }).click();
   await expect(keyInput).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText(oldKey);
 
@@ -642,9 +647,35 @@ test("使用中心仅按需读取 API Key，关闭立即清除，刷新后只展
     return storage.some((entry) => Object.values(entry).some((value) => value === oldValue || value === newValue));
   }, [oldKey, newKey])).toBe(false);
 
-  await page.getByRole("button", { name: "关闭并清除" }).click();
+  await keyDialog.locator(".ant-modal-footer").getByRole("button", { name: "关闭" }).click();
   await expect(keyInput).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText(newKey);
+});
+
+test("使用中心客户端配置弹框直接展示必要内容", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "dark");
+  await installUsageVisualBackend(page);
+  await page.goto("http://127.0.0.1:5194/usage/");
+
+  await page.getByRole("button", { name: "配置 Codex" }).click();
+  const codexDialog = page.getByRole("dialog", { name: "配置 Codex" });
+  await expect(codexDialog).toBeVisible();
+  await expect(codexDialog.getByText("选择要完成的 Codex 任务")).toHaveCount(0);
+  await expect(codexDialog.getByText("Codex 配置内容")).toBeVisible();
+  await expect(codexDialog.getByText("迁移旧会话")).toBeVisible();
+  await expect(codexDialog.getByRole("button", { name: "复制配置" })).toBeVisible();
+  await expect(codexDialog.getByRole("button", { name: "复制迁移指令" })).toBeVisible();
+  await codexDialog.locator(".portal-config-actions").getByRole("button", { name: "关闭" }).click();
+
+  await page.getByRole("button", { name: "导入 CC Switch" }).click();
+  const switchDialog = page.getByRole("dialog", { name: "完成 CC Switch 配置" });
+  await expect(switchDialog).toBeVisible();
+  await expect(switchDialog.getByText("操作文件")).toHaveCount(0);
+  await expect(switchDialog.getByRole("button", { name: "仅复制图片配置" })).toHaveCount(0);
+  await expect(switchDialog.locator(".portal-config-actions").getByRole("button")).toHaveCount(2);
+  await expect(switchDialog.locator(".portal-config-actions").getByRole("button", { name: "关闭" })).toBeVisible();
+  await expect(switchDialog.locator(".portal-config-actions").getByRole("button", { name: "复制并导入" })).toBeVisible();
 });
 
 async function setTheme(page: Page, theme: "light" | "dark") {
@@ -896,6 +927,10 @@ async function installUsageVisualBackend(page: Page, state: "normal" | "loading"
       const payload = usageAccountsFixture();
       if (state === "empty") payload.accounts = [];
       await fulfillJSON(route, payload);
+      return;
+    }
+    if (path === "/usage/me/key") {
+      await fulfillJSON(route, { api_key: "visual-api-key", generated_at: 1_787_500_800 }, { "Cache-Control": "no-store" });
       return;
     }
     if (path === "/usage/me/usage-trend") {

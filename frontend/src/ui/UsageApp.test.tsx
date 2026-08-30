@@ -254,6 +254,18 @@ describe("UsageDashboard", () => {
     expect((await screen.findAllByText("CPA 1")).length).toBeGreaterThan(0);
     expect(screen.getByText("个人用量")).toBeInTheDocument();
     expect(screen.getByText("加权已用 3 M / 20 M")).toBeInTheDocument();
+    const quotaHelp = screen.getByRole("button", { name: "查看个人周额度 Token 说明" });
+    await user.hover(quotaHelp);
+    const quotaTooltip = await screen.findByRole("tooltip");
+    expect(within(quotaTooltip).getByText("加权已用")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("3 M Token")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("未加权已用")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("2.4 M Token")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("总额度")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("20 M Token")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("剩余额度")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("17 M Token")).toBeInTheDocument();
+    await user.unhover(quotaHelp);
     for (const heading of ["序号", "当前账号", "CPA 账号", "账号周额度", "活跃用户", "账号状态", "我的请求", "我的 Token", "最后使用"]) {
       expect(screen.getByRole("columnheader", { name: new RegExp(heading) })).toBeInTheDocument();
     }
@@ -267,18 +279,18 @@ describe("UsageDashboard", () => {
 
     await user.click(screen.getByRole("button", { name: "管理 API Key" }));
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
-    const unopenedKeyModal = screen.getByRole("dialog", { name: "管理 API Key" });
+    const unopenedKeyModal = await findModal("管理 API Key");
     await user.click(within(unopenedKeyModal).getByRole("button", { name: "查看 API Key" }));
     const keyInput = await screen.findByLabelText("API Key");
     expect(keyInput).toHaveValue("old-secret-api-key-1234");
     expect(fetchMock).toHaveBeenCalledWith("/usage/me/key", expect.objectContaining({ cache: "no-store" }));
     const keyModal = keyInput.closest(".ant-modal");
     if (!keyModal) throw new Error("API Key 弹框未渲染");
-    await user.click(within(keyModal as HTMLElement).getByRole("button", { name: "关闭并清除" }));
+    await user.click(within(keyModal as HTMLElement).getByRole("button", { name: /关\s*闭/ }));
     expect(keyInput).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue("old-secret-api-key-1234")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "管理 API Key" }));
-    await user.click(within(screen.getByRole("dialog", { name: "管理 API Key" })).getByRole("button", { name: "刷新 API Key" }));
+    await user.click(within(await findModal("管理 API Key")).getByRole("button", { name: "刷新 API Key" }));
     await user.click(screen.getByRole("button", { name: "确认刷新并使旧 Key 失效" }));
     expect(await screen.findByLabelText("API Key")).toHaveValue("new-secret-api-key-9876");
     expect(storageSpy).not.toHaveBeenCalled();
@@ -287,15 +299,35 @@ describe("UsageDashboard", () => {
       cache: "no-store",
       body: JSON.stringify({ confirm: true })
     })));
+
+    await user.click(within(await findModal("管理 API Key")).getByRole("button", { name: /关\s*闭/ }));
+    await user.click(screen.getByRole("button", { name: "配置 Codex" }));
+    const codexDialog = await findModal("配置 Codex");
+    expect(within(codexDialog).queryByText("选择要完成的 Codex 任务")).not.toBeInTheDocument();
+    expect(within(codexDialog).getByText("Codex 配置内容")).toBeInTheDocument();
+    expect(within(codexDialog).getByText("迁移旧会话")).toBeInTheDocument();
+    expect(within(codexDialog).getByRole("button", { name: "复制配置" })).toBeInTheDocument();
+    expect(within(codexDialog).getByRole("button", { name: "复制迁移指令" })).toBeInTheDocument();
+    await user.click(within(codexDialog).getByRole("button", { name: /关\s*闭/ }));
+
+    await user.click(screen.getByRole("button", { name: "导入 CC Switch" }));
+    const switchDialog = await findModal("完成 CC Switch 配置");
+    expect(within(switchDialog).getByRole("button", { name: /关\s*闭/ })).toBeInTheDocument();
+    expect(within(switchDialog).getByRole("button", { name: "复制并导入" })).toBeInTheDocument();
+    expect(within(switchDialog).queryByText("操作文件")).not.toBeInTheDocument();
+    expect(within(switchDialog).queryByRole("button", { name: "仅复制图片配置" })).not.toBeInTheDocument();
   }, 15_000);
 
-  it("loads only the selected daily trend range and combined dimension, then preserves cached state while collapsed", async () => {
+  it("keeps the daily trend collapsed by default, loads only the selected range, and preserves cached state", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => portalReadResponse(String(input)));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
 
     expect(await screen.findByRole("heading", { name: "每日用量趋势" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
+    expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: /^展开/ }));
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toEqual([
       "/usage/me/usage-trend?window=30d&dimension=total"
     ]));
@@ -316,6 +348,7 @@ describe("UsageDashboard", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("user="))).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
 
+    expect(screen.queryByLabelText("趋势图例")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^收起/ }));
     expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
     expect(screen.getByText("7天")).toBeInTheDocument();
@@ -337,6 +370,13 @@ function renderPortal(element: React.ReactNode) {
       </ConfigProvider>
     </QueryClientProvider>
   );
+}
+
+async function findModal(title: string) {
+  const heading = await screen.findByText(title, { selector: ".ant-modal-title" });
+  const modal = heading.closest(".ant-modal");
+  if (!modal) throw new Error(`${title} 弹框未渲染`);
+  return modal as HTMLElement;
 }
 
 function portalReadResponse(path: string) {

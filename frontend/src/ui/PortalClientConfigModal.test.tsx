@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { defaultPublicSiteConfiguration } from "../api/public-site";
-import { buildClientConfig } from "./PortalClientConfigModal";
+import { buildClientConfig, copyAndImportConfig } from "./PortalClientConfigModal";
 
 const input = {
   apiKey: "secret-api-key",
@@ -24,6 +24,8 @@ describe("buildClientConfig", () => {
     expect(result.value).toContain('base_url = "https://cpa.example.com/v1"');
     expect(result.value).toContain('experimental_bearer_token = "secret-api-key"');
     expect(result.value).toContain('name = "CPA Provider · alice"');
+    expect(result.sections?.map((section) => section.title)).toEqual(["Codex 配置内容", "迁移旧会话"]);
+    expect(result.sections?.[1].value).toContain("OAuth");
   });
 
   it("keeps Claude Code isolated to its launcher and secret env file", () => {
@@ -45,6 +47,56 @@ describe("buildClientConfig", () => {
     expect(result.externalLink).not.toContain("secret-api-key");
     expect(result.externalLink).toContain("apiKey=PASTE_API_KEY_AFTER_IMPORT");
     expect(result.value).toContain('experimental_bearer_token = "secret-api-key"');
-    expect(result.notice).toContain("不会把真实 API Key 放入 URL");
+    expect(result.title).toBe("完成 CC Switch 配置");
+    expect(result.copyLabel).toBe("复制并导入");
+    expect(result.notice).toBeUndefined();
+  });
+});
+
+describe("copyAndImportConfig", () => {
+  it("copies the complete config before opening the CC Switch link", async () => {
+    const events: string[] = [];
+    const result = await copyAndImportConfig({
+      value: "full-secret-config",
+      externalLink: "ccswitch://v1/import?resource=provider",
+      writeText: vi.fn(async (value) => { events.push(`copy:${value}`); }),
+      openLink: vi.fn((link) => { events.push(`open:${link}`); })
+    });
+
+    expect(events).toEqual([
+      "copy:full-secret-config",
+      "open:ccswitch://v1/import?resource=provider"
+    ]);
+    expect(result.status).toBe("opened");
+  });
+
+  it("does not open CC Switch when clipboard permission is denied", async () => {
+    const openLink = vi.fn();
+    const result = await copyAndImportConfig({
+      value: "full-secret-config",
+      externalLink: "ccswitch://v1/import?resource=provider",
+      writeText: vi.fn(async () => { throw new DOMException("denied", "NotAllowedError"); }),
+      openLink
+    });
+
+    expect(openLink).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      status: "copy_failed",
+      message: "复制失败：剪贴板权限被拒绝，未打开 CC Switch"
+    });
+  });
+
+  it("reports an unavailable CC Switch after the clipboard copy succeeds", async () => {
+    const result = await copyAndImportConfig({
+      value: "full-secret-config",
+      externalLink: "ccswitch://v1/import?resource=provider",
+      writeText: vi.fn(async () => undefined),
+      openLink: vi.fn(() => { throw new Error("no handler"); })
+    });
+
+    expect(result).toEqual({
+      status: "open_failed",
+      message: "配置已复制，但无法打开 CC Switch，请确认已安装"
+    });
   });
 });

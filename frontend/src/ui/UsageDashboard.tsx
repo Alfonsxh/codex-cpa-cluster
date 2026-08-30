@@ -1,7 +1,7 @@
 import { Alert, App as AntApp, Button, Form, Input, Modal, Skeleton, Space, Tooltip } from "antd";
 import { CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { ApiError } from "../api/client";
@@ -283,10 +283,8 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
         </Space>
       </Modal>
 
-      <Modal title="管理 API Key" open={keyOpen} footer={<Button onClick={closeKey}>关闭并清除</Button>} onCancel={closeKey} destroyOnHidden>
+      <Modal title="管理 API Key" open={keyOpen} footer={<Button onClick={closeKey}>关闭</Button>} onCancel={closeKey} destroyOnHidden>
         <Space orientation="vertical" size={16} className="portal-form-stack">
-          <Alert type="info" showIcon title="查看、复制与刷新集中在这里" description="打开管理弹框不会读取完整 Key；只有点击查看后才按需读取。" />
-          <Alert type="warning" showIcon title="API Key 只保留在当前弹框内存中" description="关闭弹框后立即清除；页面不会把它写入查询缓存、URL 或浏览器存储。" />
           {keyLoading ? <Skeleton.Input active block /> : null}
           {keyError ? <Alert type="error" showIcon title="API Key 读取失败" description={keyError} /> : null}
           {!keyLoading && !keyValue ? <Button type="primary" onClick={() => void revealKey()}>查看 API Key</Button> : null}
@@ -339,6 +337,15 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
   const weekly = quota?.weekly_quota;
   const percent = weekly?.unlimited ? 0 : clampPercent(weekly?.used_percent ?? 0);
   const remaining = weekly?.unlimited ? null : Math.max(0, 100 - percent);
+  const quotaTooltip = weekly ? (
+    <div className="usage-quota-tooltip">
+      <strong>个人周额度</strong>
+      <span><b>加权已用</b><em>{formatQuotaToken(weekly.weighted_used_tokens)}</em></span>
+      <span><b>未加权已用</b><em>{formatQuotaToken(weekly.raw_used_tokens)}</em></span>
+      <span><b>总额度</b><em>{weekly.unlimited ? "不限额" : formatQuotaToken(weekly.limit_tokens ?? 0)}</em></span>
+      <span><b>剩余额度</b><em>{weekly.unlimited ? "不限额" : formatQuotaToken(weekly.remaining_tokens ?? 0)}</em></span>
+    </div>
+  ) : null;
   return (
     <div className="usage-personal-overview" aria-labelledby="personal-usage-label">
       <div className="usage-personal-overview-head"><span id="personal-usage-label">个人用量</span><small>{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
@@ -353,13 +360,10 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
           <progress className="usage-quota-track" max="100" value={percent} aria-label={weekly?.unlimited ? "个人周额度不限额" : `个人周额度已使用 ${formatPercent(percent)}`} />
           <div className="usage-personal-quota-detail">
             <span>{weekly ? weekly.unlimited ? `加权已用 ${formatTokens(weekly.weighted_used_tokens)}` : `加权已用 ${formatTokens(weekly.weighted_used_tokens)} / ${formatTokens(weekly.limit_tokens ?? 0)}` : "用量正在读取…"}{weekly ? <UsageHelp
-              label="说明加权 Token"
-              title={`个人周额度按推理强度倍率折算：已用 ${formatNumber(weekly.weighted_used_tokens)} 加权 Token${weekly.unlimited ? "，当前不限额" : `，额度上限 ${formatNumber(weekly.limit_tokens ?? 0)} 加权 Token`}`}
+              label="查看个人周额度 Token 说明"
+              title={quotaTooltip}
             /> : null}</span>
-            <span>{weekly ? `未加权累计 ${formatTokens(weekly.raw_used_tokens)}` : "未加权用量正在读取…"}{weekly ? <UsageHelp
-              label="说明未加权 Token"
-              title={`原始请求累计 ${formatNumber(weekly.raw_used_tokens)} Token，不应用个人周额度的推理强度倍率。`}
-            /> : null}</span>
+            <span>{weekly ? `未加权累计 ${formatTokens(weekly.raw_used_tokens)}` : "未加权用量正在读取…"}</span>
             <time>{weekly ? `${formatTimestamp(weekly.week_end_at)} 重置` : "—"}</time>
           </div>
         </div>
@@ -475,7 +479,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function UsageHelp({ label, title }: { label: string; title: string }) {
+function UsageHelp({ label, title }: { label: string; title: ReactNode }) {
   return (
     <Tooltip title={title} trigger={["hover", "focus"]} placement="top">
       <button className="usage-help-button" type="button" aria-label={label}>
@@ -483,6 +487,10 @@ function UsageHelp({ label, title }: { label: string; title: string }) {
       </button>
     </Tooltip>
   );
+}
+
+function formatQuotaToken(value: number) {
+  return `${formatTokenAmount(value)} Token`;
 }
 
 function ModelBreakdown({ data }: { data: UsageBreakdown }) {

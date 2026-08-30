@@ -49,7 +49,9 @@ describe("PortalDailyUsageTrend", () => {
     })) as never, trend, "model_reasoning");
     expect(tooltip).toContain('data-layout="single-column"');
     expect(tooltip).toContain("其他组合");
-    expect(tooltip).toContain("合计");
+    expect(tooltip).toContain("推理强度 · medium");
+    expect(tooltip).toContain("Token");
+    expect(tooltip).toContain("当日合计");
     expect((tooltip.match(/<span/g) ?? [])).toHaveLength(11);
   });
 });

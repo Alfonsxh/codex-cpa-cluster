@@ -10,19 +10,17 @@ import {
   type PublicSiteConfiguration
 } from "../api/public-site";
 
-export type PortalClientConfigMode = "codex" | "claude" | "ccswitch" | "history";
-type CodexTask = "choose" | "config" | "history";
+export type PortalClientConfigMode = "codex" | "claude" | "ccswitch";
 
 type ClientConfig = {
   title: string;
-  file: string;
-  steps: string[];
+  file?: string;
+  steps?: string[];
   notice?: string;
   value: string;
   sections?: ClientConfigSection[];
   copyLabel?: string;
   externalLink?: string;
-  externalLabel?: string;
 };
 
 type ClientConfigSection = {
@@ -56,26 +54,16 @@ export function PortalClientConfigModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
-  const [codexTask, setCodexTask] = useState<CodexTask>("choose");
   const request = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setCopied("");
     setError("");
-    if (mode === "codex") setCodexTask("choose");
   }, [mode, open]);
 
   useEffect(() => {
     if (!open) return;
-    const requiresKey = mode !== "history" && (mode !== "codex" || codexTask === "config");
-    if (!requiresKey) {
-      request.current?.abort();
-      request.current = null;
-      setAPIKey("");
-      setLoading(false);
-      return;
-    }
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -101,7 +89,7 @@ export function PortalClientConfigModal({
       setLoading(false);
     });
     return () => controller.abort();
-  }, [codexTask, mode, onSessionExpired, open]);
+  }, [mode, onSessionExpired, open]);
 
   const config = useMemo(() => buildClientConfig({
     mode,
@@ -122,7 +110,6 @@ export function PortalClientConfigModal({
       setError("");
       setCopied("");
       setLoading(false);
-      setCodexTask("choose");
     });
     onClose();
   };
@@ -136,52 +123,28 @@ export function PortalClientConfigModal({
     }
   };
 
-  const showingHistory = mode === "history" || (mode === "codex" && codexTask === "history");
-  const title = showingHistory ? "迁移 Codex OAuth 历史会话" : mode === "codex" ? "配置 Codex" : config.title;
+  const copyAndImport = async () => {
+    if (!config.externalLink) return;
+    const result = await copyAndImportConfig({
+      value: config.value,
+      externalLink: config.externalLink,
+      writeText: (value) => navigator.clipboard.writeText(value),
+      openLink: (link) => window.location.assign(link)
+    });
+    flushSync(() => setCopied(result.message));
+  };
+
   return (
     <Modal
       className="portal-client-config-modal"
-      title={title}
+      title={config.title}
       open={open}
       width={mode === "claude" || mode === "ccswitch" ? 960 : 760}
       footer={null}
       onCancel={close}
       destroyOnHidden
     >
-      {mode === "codex" && codexTask === "choose" ? (
-        <Space orientation="vertical" size={16} className="portal-config-stack">
-          <Alert type="info" showIcon title="选择要完成的 Codex 任务" description="只有生成含 Key 的配置时才会读取 API Key；迁移旧会话只提供可复制指令。" />
-          <div className="portal-codex-task-grid">
-            <button type="button" onClick={() => setCodexTask("config")}>
-              <strong>生成 Codex 配置</strong>
-              <span>按需读取当前 API Key，生成 Responses Provider 配置。</span>
-            </button>
-            <button type="button" onClick={() => setCodexTask("history")}>
-              <strong>迁移旧会话</strong>
-              <span>复制迁移指令交给 Codex Agent，不读取任何 API Key。</span>
-            </button>
-          </div>
-          <div className="portal-config-actions"><span /><Button onClick={close}>关闭</Button></div>
-        </Space>
-      ) : showingHistory ? (
-        <Space orientation="vertical" size={16} className="portal-config-stack">
-          <Alert
-            type="info"
-            showIcon
-            title="把提示交给 Codex Agent"
-            description="提示不包含 API Key、OAuth Token 或 auth.json 内容。"
-          />
-          <Typography.Text strong>可复制的 Agent 提示</Typography.Text>
-          <pre className="portal-config-preview"><code>{historyPrompt}</code></pre>
-          <ConfigActions
-            copied={copied}
-            onClose={mode === "codex" ? () => setCodexTask("choose") : close}
-            onCopy={() => void copy(historyPrompt, "迁移指令已复制")}
-            copyLabel="复制迁移指令"
-            closeLabel={mode === "codex" ? "返回" : "关闭"}
-          />
-        </Space>
-      ) : loading ? (
+      {loading ? (
         <Skeleton active paragraph={{ rows: 8 }} />
       ) : error ? (
         <Space orientation="vertical" size={14} className="portal-config-stack">
@@ -190,11 +153,13 @@ export function PortalClientConfigModal({
         </Space>
       ) : apiKey ? (
         <Space orientation="vertical" size={16} className="portal-config-stack">
-          {config.notice ? <Alert type="warning" showIcon title="配置包含完整 API Key" description={config.notice} /> : null}
-          <div className="portal-config-guide">
-            <div><Typography.Text type="secondary">操作文件</Typography.Text><code>{config.file}</code></div>
-            <div><Typography.Text type="secondary">操作步骤</Typography.Text><ol>{config.steps.map((step) => <li key={step}>{step}</li>)}</ol></div>
-          </div>
+          {mode === "claude" && config.notice ? <Alert type="warning" showIcon title="配置包含完整 API Key" description={config.notice} /> : null}
+          {mode === "claude" ? (
+            <div className="portal-config-guide">
+              <div><Typography.Text type="secondary">操作文件</Typography.Text><code>{config.file}</code></div>
+              <div><Typography.Text type="secondary">操作步骤</Typography.Text><ol>{config.steps?.map((step) => <li key={step}>{step}</li>)}</ol></div>
+            </div>
+          ) : null}
           {config.sections?.length ? (
             <div className="portal-config-workflow">
               {config.sections.map((section, index) => (
@@ -215,17 +180,9 @@ export function PortalClientConfigModal({
           ) : <pre className="portal-config-preview"><code>{config.value}</code></pre>}
           <ConfigActions
             copied={copied}
-            onClose={mode === "codex" ? () => {
-              request.current?.abort();
-              request.current = null;
-              setAPIKey("");
-              setCodexTask("choose");
-            } : close}
-            onCopy={() => void copy(config.value, "配置已复制")}
-            copyLabel={config.copyLabel ?? "复制配置"}
-            externalLink={config.externalLink}
-            externalLabel={config.externalLabel}
-            closeLabel={mode === "codex" ? "返回" : "关闭"}
+            onClose={close}
+            onCopy={mode === "codex" ? undefined : mode === "ccswitch" ? () => void copyAndImport() : () => void copy(config.value, "配置已复制")}
+            copyLabel={mode === "ccswitch" ? "复制并导入" : config.copyLabel ?? "复制配置"}
           />
         </Space>
       ) : null}
@@ -238,16 +195,12 @@ function ConfigActions({
   onClose,
   onCopy,
   copyLabel,
-  externalLink,
-  externalLabel,
   closeLabel = "关闭"
 }: {
   copied: string;
   onClose: () => void;
-  onCopy: () => void;
+  onCopy?: () => void;
   copyLabel: string;
-  externalLink?: string;
-  externalLabel?: string;
   closeLabel?: string;
 }) {
   return (
@@ -255,16 +208,7 @@ function ConfigActions({
       <Typography.Text type={copied.startsWith("复制失败") ? "danger" : "secondary"} role="status">{copied}</Typography.Text>
       <Space wrap>
         <Button onClick={onClose}>{closeLabel}</Button>
-        <Button type={externalLink ? "default" : "primary"} onClick={onCopy}>{copyLabel}</Button>
-        {externalLink ? (
-          <Button
-            type="primary"
-            href={externalLink}
-            onClick={() => void navigator.clipboard.writeText(document.querySelector(".portal-config-preview code")?.textContent ?? "")}
-          >
-            {externalLabel ?? "继续"}
-          </Button>
-        ) : null}
+        {onCopy ? <Button type="primary" onClick={onCopy}>{copyLabel}</Button> : null}
       </Space>
     </div>
   );
@@ -293,11 +237,25 @@ export function buildClientConfig({
   const codex = buildCodexConfig(provider, baseURL, model, apiKey);
   if (mode === "codex") {
     return {
-      title: "Codex 配置",
-      file: "~/.codex/config.toml",
-      steps: ["打开或创建上述文件", "合并下方配置并保存", "重新启动 Codex"],
-      notice: "以下配置已包含你的完整 API Key。仅在可信设备保存，不要粘贴到聊天、Issue 或 Git 仓库。",
-      value: codex
+      title: "配置 Codex",
+      value: codex,
+      sections: [
+        {
+          title: "Codex 配置内容",
+          file: "~/.codex/config.toml",
+          description: "将下方内容合并到 Codex 配置文件，保存后重新启动 Codex。",
+          value: codex,
+          hint: "配置包含当前 API Key，仅在自己的可信设备保存。",
+          copyLabel: "复制配置"
+        },
+        {
+          title: "迁移旧会话",
+          file: "Codex Agent",
+          description: "将下方指令交给 Codex Agent，把 OAuth 登录时期的会话迁移到当前 API Key 会话历史。",
+          value: historyPrompt,
+          copyLabel: "复制迁移指令"
+        }
+      ]
     };
   }
   const launcher = buildClaudeLauncher(environment, origin, model);
@@ -344,20 +302,41 @@ export function buildClientConfig({
     notes: `${siteConfig.product_name} · ${currentGroup} · 导入链接不携带 API Key；请按使用中心提示粘贴完整 config.toml`
   });
   return {
-    title: "完成 CC Switch 图片配置",
-    file: "CC Switch → Codex → CPA Provider → 编辑 → config.toml",
-    steps: [
-      "点击“复制完整配置并继续导入”，在 CC Switch 中确认导入；导入链接只携带非敏感占位值，不携带真实 API Key",
-      "编辑刚导入的 CPA Provider，将已复制的内容完整替换到 config.toml",
-      "保存并切换到该 Provider；无需开启 CC Switch 本地路由",
-      "完全退出并重新启动 Codex，然后新建任务"
-    ],
+    title: "完成 CC Switch 配置",
     value: codex,
-    notice: "一键导入只带入地址、模型和非敏感占位值，不会把真实 API Key 放入 URL。继续导入时会将下方完整配置复制到剪贴板；请在 CC Switch 中粘贴覆盖 config.toml。配置含完整 API Key，仅在自己的设备使用。",
-    copyLabel: "仅复制图片配置",
+    copyLabel: "复制并导入",
     externalLink: `ccswitch://v1/import?${params.toString()}`,
-    externalLabel: "复制完整配置并继续导入"
   };
+}
+
+export async function copyAndImportConfig({
+  value,
+  externalLink,
+  writeText,
+  openLink
+}: {
+  value: string;
+  externalLink: string;
+  writeText: (value: string) => Promise<void>;
+  openLink: (link: string) => void;
+}) {
+  try {
+    await writeText(value);
+  } catch (error) {
+    const permissionDenied = error instanceof DOMException && error.name === "NotAllowedError";
+    return {
+      status: "copy_failed" as const,
+      message: permissionDenied
+        ? "复制失败：剪贴板权限被拒绝，未打开 CC Switch"
+        : "复制失败：未打开 CC Switch，请允许剪贴板访问后重试"
+    };
+  }
+  try {
+    openLink(externalLink);
+    return { status: "opened" as const, message: "完整配置已复制，正在打开 CC Switch…" };
+  } catch {
+    return { status: "open_failed" as const, message: "配置已复制，但无法打开 CC Switch，请确认已安装" };
+  }
 }
 
 function buildCodexConfig(provider: string, baseURL: string, model: string, apiKey: string) {

@@ -1811,7 +1811,7 @@ a { color: inherit; text-decoration: none; }
 .overview-legacy-chart.summary { min-height: 260px; }
 .usage-chart-canvas { width: 100%; }
 .overview-legacy-chart-loading { place-content: center; place-items: center; gap: 8px; color: var(--faint); font: 9px/1.3 var(--mono); cursor: wait; }
-.usage-chart-echarts-tooltip { max-width: min(360px, calc(100% - 16px)); overflow: hidden !important; }
+.usage-chart-echarts-tooltip { z-index: 10000 !important; max-width: min(360px, calc(100% - 16px)); overflow: hidden !important; }
 .overview-chart-tooltip { display: grid; width: min(260px, calc(100vw - 40px)); align-content: start; gap: 4px; overflow: hidden; padding: 10px 12px; color: #edf1fb; background: #171d2b; border-radius: 9px; pointer-events: none; }
 .overview-chart-tooltip[data-list="true"] { width: min(340px, calc(100vw - 40px)); }
 .overview-chart-tooltip > strong { grid-column: 1 / -1; margin-bottom: 2px; color: #aab4ca; font: 9px/1.25 var(--mono); }

@@ -1,6 +1,6 @@
 # 快速开始
 
-本分支只提供 Go 服务与 React 前端，不提供第二套运行时或旧安装器。正式 Test/Production 部署只接受已经初始化且数据完整的目标目录。
+本分支只提供 Go 服务与 React 前端，不保留旧安装器。全新单机目标使用 `cpac` 初始化；底层 `deploy-target.sh` 继续只接受已经初始化且数据完整的目标目录。
 
 ## 开发依赖
 
@@ -37,7 +37,18 @@ make test-down
 
 该环境使用仓库 fixture 和本机回环端口，验证 Key 拒绝、模型请求、Responses SSE、损坏快照、上游故障和蓝绿排空，不接触真实目标数据。
 
-## 已有 Test 目标部署
+## 全新目标安装
+
+目标需预先安装 Docker Engine、Docker Compose v2，并配置好域名的 DNS/TLS 入口。安装 `cpac` 后只需执行：
+
+```sh
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/raw/refs/heads/main/scripts/install-cpac.sh | sudo sh
+sudo cpac deploy
+```
+
+首次执行会提示域名并写入 `/etc/cpac/config.env`；无交互环境使用 `sudo cpac deploy --domain qdata.example.com`。`cpac` 校验 GitHub Release、初始化空状态、启动服务并调用正式烟测。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+
+## 已有 Test 目标的底层部署
 
 目标至少必须存在：
 

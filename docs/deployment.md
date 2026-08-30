@@ -11,7 +11,19 @@
 
 Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入口启动，以便独立健康检查、重启和最小影响更新。
 
-## 目标前置条件
+## 全新目标
+
+全新单机目标使用 `cpac`，不要手工创建 SQLite、主密钥或快照：
+
+```sh
+sudo cpac deploy
+```
+
+`scripts/cpac` 校验 GitHub Release 的归档和机器可读发布环境，在与正式目标相同的文件系统中创建临时根目录，然后通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照和初始蓝槽文件。临时目标完整后才原子重命名为 `/opt/codex-cpa-cluster`。初始化工具拒绝任何已有权威文件，不能用于修复或覆盖既有目标。
+
+域名写入 `/etc/cpac/config.env`，但 `cpac` 不修改 DNS、Nginx、TLS 证书或外部代理。域名入口必须预先转发到 `127.0.0.1:18317`。
+
+## 底层目标前置条件
 
 目标目录必须已经存在，并至少包含：
 
@@ -27,7 +39,7 @@ state/edge/active-gateway.conf
 logs/gateway/
 ```
 
-`docker-compose.yml` 与 `release-manifest.json` 必须来自本次选择的同一个发布包。主密钥必须与控制库匹配，`active-gateway.conf` 必须只选择 `blue` 或 `green`，`logs/gateway/` 必须允许镜像内 UID `10001` 写入。部署工具不会初始化新目标、导入退役 JSON、替换 OAuth，或沿符号链接读写运行数据。
+`docker-compose.yml` 与 `release-manifest.json` 必须来自本次选择的同一个发布包。主密钥必须与控制库匹配，`active-gateway.conf` 必须只选择 `blue` 或 `green`，`logs/gateway/` 必须允许镜像内 UID `10001` 写入。底层 `deploy-target.sh` 不会初始化新目标、导入退役 JSON、替换 OAuth，或沿符号链接读写运行数据；首次初始化只由 `cpac` 在未发布的临时根目录调用 `cpa-bootstrap` 完成。
 
 ## 镜像发布
 

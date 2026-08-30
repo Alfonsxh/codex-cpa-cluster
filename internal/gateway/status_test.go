@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestAuthenticationReadyRequiresFreshNonEmptySnapshot(t *testing.T) {
+func TestAuthenticationReadyRequiresFreshValidSnapshot(t *testing.T) {
 	now := time.Unix(1000, 0)
 	engine := NewEngine()
 	if engine.AuthenticationReady(now) {
@@ -37,7 +37,11 @@ func TestAuthenticationReadyRequiresFreshNonEmptySnapshot(t *testing.T) {
 	if err := engine.LoadAuthSnapshot(bytes.NewReader(raw), now); err != nil {
 		t.Fatalf("load empty auth snapshot: %v", err)
 	}
-	if engine.AuthenticationReady(now) {
-		t.Fatal("empty API Key snapshot reported readiness")
+	if !engine.AuthenticationReady(now) {
+		t.Fatal("fresh intentionally empty API Key snapshot did not report readiness")
+	}
+	decision := engine.Authorize(now, "Bearer not-provisioned", false)
+	if decision.Status != 401 || decision.Allowed {
+		t.Fatalf("empty snapshot authorization = %#v", decision)
 	}
 }

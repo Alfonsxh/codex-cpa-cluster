@@ -8,7 +8,7 @@ Codex CPA Cluster 是单机 Docker Compose 部署的 Go 控制面与数据面。
 
 1. `/v1` 数据面不依赖 Admin 请求是否可用。
 2. Edge 始终持有宿主机端口，Gateway 蓝绿切换不重放或中断已经建立的 SSE。
-3. 两份 SQLite 和匹配的加密主密钥是既有目标的权威数据，部署不得重新初始化或覆盖。
+3. 两份 SQLite 和匹配的加密主密钥是既有目标的权威数据，升级不得重新初始化或覆盖；全新目标只允许在发布前的临时根目录初始化一次。
 4. 所有写进程必须持有运行时所有权和各自的 Generation Lease；失去 Lease 后继续写入会被拒绝。
 
 ## 运行拓扑
@@ -36,7 +36,7 @@ flowchart LR
 
 | 镜像 | 进程 | 责任 |
 |---|---|---|
-| `control` | Admin、Collector、Quota、Failover、Notifications、Log maintenance、Ownership | 控制面 API、SQLite、账号生命周期与后台任务 |
+| `control` | Admin、Bootstrap、Collector、Quota、Failover、Notifications、Log maintenance、Ownership | 控制面 API、一次性新目标初始化、SQLite、账号生命周期与后台任务 |
 | `web` | Go Web | React Admin、Portal、使用中心静态资源与细粒度 API 代理 |
 | `gateway` | 两个 Go Gateway | 外部 Key 鉴权、额度、账号路由、快照热加载和流式转发 |
 | `edge` | Go Edge | 稳定端口、Web/数据面分流和蓝绿槽选择 |
@@ -72,7 +72,7 @@ sequenceDiagram
   Note over E,G: slot changes affect only new requests
 ```
 
-`internal/gateway` 在鉴权快照损坏或过期时失败关闭；上游不可用返回受控 502。`internal/edge` 对非法槽位配置保留最后有效值。对应隔离验证由 `scripts/test-smoke.sh` 和 `scripts/test-faults.sh` 执行。
+`internal/gateway` 在鉴权快照损坏或过期时失败关闭；已加载的有效空快照允许全新控制面就绪，但所有未知 Key 仍返回 401。上游不可用返回受控 502。`internal/edge` 对非法槽位配置保留最后有效值。对应隔离验证由 `scripts/test-smoke.sh` 和 `scripts/test-faults.sh` 执行。
 
 ## 验证入口
 

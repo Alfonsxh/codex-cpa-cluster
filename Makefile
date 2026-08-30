@@ -15,11 +15,12 @@ TEST_PROJECT ?= codex-cpa-test
 TARGET_ENV ?= target.env
 FRONTEND_DEV_UPSTREAM ?= http://127.0.0.1:8318
 
-.PHONY: help verify generate-api check-generated-api frontend-dev frontend-dev-admin frontend-dev-usage frontend-dev-portal test-config test-build test-up test-smoke test-down test-faults target-config target-pull target-verify-images target-ownership-status target-activate target-up-core target-up-writers target-up-notifications target-smoke target-ps target-down lease-rehearsal worker-lease-rehearsal privacy-check package images publish publish-harbor publish-dockerhub publish-ghcr publish-all release-check release deploy
+.PHONY: help verify cpac-test generate-api check-generated-api frontend-dev frontend-dev-admin frontend-dev-usage frontend-dev-portal test-config test-build test-up test-smoke test-down test-faults target-config target-pull target-verify-images target-ownership-status target-activate target-up-core target-up-writers target-up-notifications target-smoke target-ps target-down lease-rehearsal worker-lease-rehearsal privacy-check package images publish publish-harbor publish-dockerhub publish-ghcr publish-all release-check release deploy
 
 help:
 	@printf '%s\n' \
 	  'make verify' \
+	  'make cpac-test' \
 	  'make generate-api' \
 	  'make check-generated-api' \
 	  'make frontend-dev [FRONTEND_DEV_UPSTREAM=http://test-host:18317]  # Admin，读写代理' \
@@ -49,6 +50,9 @@ help:
 
 verify:
 	sh scripts/verify.sh
+
+cpac-test:
+	sh scripts/test-cpac.sh
 
 generate-api:
 	sh scripts/generate-api.sh

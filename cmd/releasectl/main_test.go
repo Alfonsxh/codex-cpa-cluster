@@ -34,6 +34,43 @@ func TestChecksumWritesAtomicPortableLines(t *testing.T) {
 	}
 }
 
+func TestWriteDeployEnvironmentProducesStrictMachineReadableContract(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "release.env")
+	descriptor := releaseDescriptor{
+		SchemaVersion:  1,
+		ReleaseVersion: "v2.0.0",
+		Revision:       strings.Repeat("a", 40),
+		ArchiveName:    "codex-cpa-cluster-v2.0.0.tar.gz",
+		Components: map[string]descriptorRecord{
+			"control": {Image: "ghcr.io/example/codex-cpa-control:sha256-" + strings.Repeat("a", 64)},
+			"web":     {Image: "ghcr.io/example/codex-cpa-web:sha256-" + strings.Repeat("b", 64)},
+			"gateway": {Image: "ghcr.io/example/codex-cpa-gateway:sha256-" + strings.Repeat("c", 64)},
+			"edge":    {Image: "ghcr.io/example/codex-cpa-edge:sha256-" + strings.Repeat("d", 64)},
+		},
+	}
+	if err := writeDeployEnvironment(output, descriptor); err != nil {
+		t.Fatalf("writeDeployEnvironment: %v", err)
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for _, expected := range []string{
+		"CPAC_RELEASE_VERSION=v2.0.0\n",
+		"CPAC_RELEASE_ARCHIVE=codex-cpa-cluster-v2.0.0.tar.gz\n",
+		"CPAC_CONTROL_IMAGE=ghcr.io/example/codex-cpa-control:sha256-",
+		"CPAC_EDGE_IMAGE=ghcr.io/example/codex-cpa-edge:sha256-",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("deploy environment missing %q:\n%s", expected, content)
+		}
+	}
+	if strings.ContainsAny(content, "'\"") {
+		t.Fatalf("deploy environment unexpectedly requires shell quoting:\n%s", content)
+	}
+}
+
 func TestArchiveVerificationRejectsTraversal(t *testing.T) {
 	archive := filepath.Join(t.TempDir(), "unsafe.tar.gz")
 	file, err := os.Create(archive)

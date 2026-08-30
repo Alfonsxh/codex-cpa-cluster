@@ -54,12 +54,12 @@ type descriptorRecord struct {
 var componentInputs = map[string][]string{
 	"control": {
 		".dockerignore", "Dockerfile", "go.mod", "go.sum",
-		"cmd/admin", "cmd/collector", "cmd/failover",
+		"cmd/admin", "cmd/bootstrap", "cmd/collector", "cmd/failover",
 		"cmd/log-maintenance", "cmd/notifications", "cmd/ownership", "cmd/quota",
 		"cmd/releasectl",
 		"internal/accountlifecycle", "internal/accountprojection", "internal/accountstatus",
 		"internal/admin", "internal/branding", "internal/collector", "internal/contract",
-		"internal/controlplane", "internal/failover",
+		"internal/bootstrap", "internal/controlplane", "internal/failover",
 		"internal/identity", "internal/logmaintenance", "internal/notifications",
 		"internal/ownership", "internal/portal", "internal/quota", "internal/runtimeops",
 		"internal/scheduler", "internal/usage",
@@ -124,7 +124,7 @@ func run(arguments []string, output io.Writer) error {
 
 func runManifest(arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("usage: cpa-releasectl manifest <digest|create|verify|get|descriptor>")
+		return errors.New("usage: cpa-releasectl manifest <digest|create|verify|get|descriptor|deploy-env>")
 	}
 	flags := flag.NewFlagSet("manifest "+arguments[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -193,9 +193,47 @@ func runManifest(arguments []string, output io.Writer) error {
 			return err
 		}
 		return writeJSONAtomic(*outputPath, descriptor, 0o644)
+	case "deploy-env":
+		if strings.TrimSpace(*outputPath) == "" {
+			return errors.New("--output is required")
+		}
+		descriptor, err := buildDescriptor(absRoot, *releaseVersion, *revision, *imagePrefix, *archiveName)
+		if err != nil {
+			return err
+		}
+		return writeDeployEnvironment(*outputPath, descriptor)
 	default:
 		return fmt.Errorf("unsupported manifest command: %s", arguments[0])
 	}
+}
+
+func writeDeployEnvironment(path string, descriptor releaseDescriptor) error {
+	values := []struct {
+		name  string
+		value string
+	}{
+		{"CPAC_RELEASE_VERSION", descriptor.ReleaseVersion},
+		{"CPAC_RELEASE_REVISION", descriptor.Revision},
+		{"CPAC_RELEASE_ARCHIVE", descriptor.ArchiveName},
+	}
+	for _, component := range []string{"control", "web", "gateway", "edge"} {
+		record, found := descriptor.Components[component]
+		if !found {
+			return fmt.Errorf("release descriptor component is missing: %s", component)
+		}
+		values = append(values, struct {
+			name  string
+			value string
+		}{"CPAC_" + strings.ToUpper(component) + "_IMAGE", record.Image})
+	}
+	lines := make([]string, 0, len(values))
+	for _, value := range values {
+		if value.value == "" || strings.ContainsAny(value.value, "\r\n\t ='\"") {
+			return fmt.Errorf("release deployment value is not shell-safe: %s", value.name)
+		}
+		lines = append(lines, value.name+"="+value.value)
+	}
+	return writeBytesAtomic(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
 
 func includedFiles(root string, inputs []string) ([]string, error) {

@@ -1,5 +1,15 @@
 # 升级与切换
 
+## 日常升级
+
+已经通过 `cpac` 安装的目标直接执行：
+
+```sh
+sudo cpac deploy
+```
+
+命令自动复用 `/etc/cpac/config.env` 中的域名，获取最新 GitHub Release，校验 SHA-256，在 `/var/backups/cpac/` 创建 root-only 备份，然后调用正式蓝绿部署动作。固定版本排障可使用 `sudo cpac deploy --version v2.0.0`。
+
 ## 前置条件
 
 升级只面向已经初始化的目标，必须同时存在：

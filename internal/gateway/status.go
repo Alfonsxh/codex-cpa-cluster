@@ -24,13 +24,15 @@ type Status struct {
 	Quota QuotaSnapshotStatus `json:"quota"`
 }
 
-// AuthenticationReady reports whether a newly started Gateway has loaded at
-// least one current API Key route. Deployment uses this stronger signal before
-// moving new traffic; the public liveness endpoint intentionally remains
-// independent so an already-running slot can fail closed without being killed.
+// AuthenticationReady reports whether a newly started Gateway has loaded a
+// current, structurally valid API Key snapshot. An intentionally empty
+// snapshot is ready for a new installation: requests still fail closed with
+// 401 until the operator provisions users, but Admin/Web can start normally.
+// The public liveness endpoint remains independent so a running slot can fail
+// closed on stale state without being killed.
 func (engine *Engine) AuthenticationReady(now time.Time) bool {
 	auth := engine.auth.Load()
-	if auth == nil || auth.generation == "" || auth.recordCount <= 0 || auth.loadedAt <= 0 {
+	if auth == nil || auth.generation == "" || auth.loadedAt <= 0 {
 		return false
 	}
 	age := now.Unix() - auth.loadedAt

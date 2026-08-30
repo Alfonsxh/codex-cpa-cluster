@@ -1,0 +1,81 @@
+package bootstrap
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/gateway"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+)
+
+func TestInitializeCreatesEmptyTargetState(t *testing.T) {
+	root := t.TempDir()
+	result, err := Initialize(context.Background(), Config{
+		Root: root,
+		Now:  func() time.Time { return time.Unix(1_700_000_000, 0) },
+		ManagementKeyProvider: func() (string, error) {
+			return "bootstrap-management-key", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if result.ManagementKey != "bootstrap-management-key" ||
+		len(result.AuthSnapshotGeneration) != 32 || len(result.QuotaGeneration) != 32 {
+		t.Fatalf("bootstrap result = %#v", result)
+	}
+	store, err := controlplane.OpenExisting(context.Background(), root, controlplane.Options{})
+	if err != nil {
+		t.Fatalf("open bootstrapped control plane: %v", err)
+	}
+	defer store.Close()
+	if err := store.InitializeExisting(context.Background()); err != nil {
+		t.Fatalf("initialize bootstrapped control plane: %v", err)
+	}
+	managementKey, found, err := store.ReadSecret(context.Background(), managementSecretName)
+	if err != nil || !found || managementKey != result.ManagementKey {
+		t.Fatalf("stored management key = %q, %v, %v", managementKey, found, err)
+	}
+	writer, err := usage.OpenWriterPath(filepath.Join(root, usage.DatabaseRelativePath), nil)
+	if err != nil {
+		t.Fatalf("open bootstrapped usage database: %v", err)
+	}
+	_ = writer.Close()
+	authRaw, err := os.ReadFile(filepath.Join(root, "state/gateway/auth-snapshot.json"))
+	if err != nil {
+		t.Fatalf("read auth snapshot: %v", err)
+	}
+	auth, err := gateway.ParseAuthSnapshot(bytes.NewReader(authRaw))
+	if err != nil || len(auth.Records) != 0 {
+		t.Fatalf("empty auth snapshot = %#v, %v", auth, err)
+	}
+	active, err := os.ReadFile(filepath.Join(root, "state/edge/active-gateway.conf"))
+	if err != nil || string(active) != "set $active_gateway_backend gateway-blue:8317;\n" {
+		t.Fatalf("active Gateway slot = %q, %v", string(active), err)
+	}
+}
+
+func TestInitializeRefusesExistingAuthority(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "state", "usage.sqlite3")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Initialize(context.Background(), Config{Root: root})
+	if err == nil || !strings.Contains(err.Error(), "refusing to bootstrap existing") {
+		t.Fatalf("existing authority error = %v", err)
+	}
+	raw, readError := os.ReadFile(path)
+	if readError != nil || string(raw) != "existing" {
+		t.Fatalf("existing authority changed = %q, %v", string(raw), readError)
+	}
+}

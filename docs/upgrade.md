@@ -2,13 +2,13 @@
 
 ## 日常升级
 
-已经通过 `cpac` 安装的目标直接执行：
+已经初始化的目标直接执行：
 
 ```sh
-sudo cpac deploy
+sudo /home/cpac/deploy.sh
 ```
 
-命令自动复用 `/etc/cpac/config.env` 中的域名，获取最新 GitHub Release，校验 SHA-256，在 `/var/backups/cpac/` 创建 root-only 备份，然后调用正式蓝绿部署动作。固定版本排障可使用 `sudo cpac deploy --version v2.0.0`。
+命令自动复用 `/etc/cpac/config.env` 中的域名，获取最新 GitHub Release，校验并按需更新自身，在 `/home/cpac/backups/` 创建 root-only 备份，然后执行正式蓝绿部署。固定版本排障可使用 `sudo /home/cpac/deploy.sh deploy --version v2.0.0`。
 
 ## 前置条件
 
@@ -40,7 +40,7 @@ make package VERSION=v2.0.0
 ## Test 顺序
 
 1. 记录升级前数据库 `quick_check`、Schema、关键行数、活动槽和真实请求结果。
-2. 生成两份 SQLite、匹配主密钥、OAuth 和账号配置的可恢复备份。
+2. 由统一脚本通过 SQLite Backup API 生成两份 `quick_check=ok` 的一致性数据库副本，并与匹配主密钥、OAuth 和账号配置一起生成可恢复备份；归档不得混入运行中的 WAL/SHM 文件。
 3. 将同一发布包的 `docker-compose.yml` 与 `release-manifest.json` 放入 Test 目标目录，再使用仓库外 Test `target.env` 执行 `config`、`pull` 和 `verify-images`；只接受发布描述中的源码摘要标签，并拒绝不匹配的 Compose 副本、符号链接运行目录、缺失活动槽或不可判定的 Compose Hash。
 4. 确认既有 Writer 已停止后，完成受控所有权激活。
 5. 执行 `up-core`：更新非活动 Gateway、切换新请求、等待旧槽排空，再更新旧槽；随后执行 `up-writers` 和 `smoke`。通知另行批准。
@@ -48,12 +48,12 @@ make package VERSION=v2.0.0
 7. 对比升级前后数据库事实，确认用量只增不减且 API Key/路由未被重建。
 
 ```sh
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh pull
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh verify-images
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh activate
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-core
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-writers
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh smoke
+make target-pull TARGET_ENV=/absolute/path/to/test.env
+make target-verify-images TARGET_ENV=/absolute/path/to/test.env
+make target-activate TARGET_ENV=/absolute/path/to/test.env
+make target-up-core TARGET_ENV=/absolute/path/to/test.env
+make target-up-writers TARGET_ENV=/absolute/path/to/test.env
+make target-smoke TARGET_ENV=/absolute/path/to/test.env
 ```
 
 ## 最小影响原则

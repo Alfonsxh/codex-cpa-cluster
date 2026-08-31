@@ -24,6 +24,8 @@ state/edge/
 4. 同一批次复制匹配主密钥、OAuth、账号配置和 Gateway/Edge 状态。
 5. 将备份保存到不同故障域，并限制为操作者可读。
 
+统一的 `/home/cpac/deploy.sh` 在每次升级前自动执行上述数据库一致性步骤：使用 SQLite Backup API 生成两份独立副本，要求副本 `quick_check=ok`，不把运行中的 WAL/SHM 文件放入归档，再与同批主密钥、OAuth 和运行配置一起保存到 `/home/cpac/backups/`。这份升级前备份不替代异地灾备。
+
 账号重命名、删除和 OAuth 清理产生的可恢复目录位于 `backups/accounts/`，由 `internal/accountlifecycle` 管理；它们不是两份 SQLite 的完整灾备替代品。
 
 ## 备份验收
@@ -41,7 +43,7 @@ state/edge/
 1. 停止目标的全部 Go Control Writer 和账号生命周期写操作。
 2. 恢复两份 SQLite、匹配主密钥、OAuth、账号配置与槽位/快照文件。
 3. 恢复正确所有者和最小权限，不从备份启动未知脚本或二进制。
-4. 使用与 Schema 兼容的不可变镜像执行 `scripts/deploy-target.sh config` 和 `verify-images`。
+4. 使用与 Schema 兼容的不可变镜像执行 `make target-config` 和 `make target-verify-images`。
 5. 激活唯一 Go 所有者，再依次启动核心服务与 Writer。
 6. 执行目标烟测、数据库检查、浏览器检查和真实 API Key 的 Responses/SSE 验收。
 

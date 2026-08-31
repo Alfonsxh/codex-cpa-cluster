@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/codex-cpa-deploy-contract.XXXXXX")
+TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/codex-cpa-runtime-deploy-contract.XXXXXX")
 TEST_ROOT=$(CDPATH= cd -- "$TEST_ROOT" && pwd -P)
 trap 'rm -rf -- "$TEST_ROOT"' EXIT HUP INT TERM
 
@@ -26,6 +26,34 @@ image_id=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 old_image_id=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 
 case " $* " in
+  *cpa-bootstrap*--root*)
+    bootstrap_root=
+    expect_root=false
+    for argument in "$@"; do
+      if [ "$expect_root" = true ]; then
+        bootstrap_root=$argument
+        expect_root=false
+      elif [ "$argument" = --root ]; then
+        expect_root=true
+      fi
+    done
+    [ -n "$bootstrap_root" ] || exit 2
+    mkdir -p \
+      "$bootstrap_root/state/gateway" \
+      "$bootstrap_root/state/edge" \
+      "$bootstrap_root/secrets" \
+      "$bootstrap_root/logs/gateway" \
+      "$bootstrap_root/auth" \
+      "$bootstrap_root/configs" \
+      "$bootstrap_root/management"
+    : >"$bootstrap_root/state/control-plane.sqlite3"
+    : >"$bootstrap_root/state/usage.sqlite3"
+    printf '%032d' 0 >"$bootstrap_root/secrets/control-plane.key"
+    printf '%s\n' 'set $active_gateway_backend gateway-blue:8317;' \
+      >"$bootstrap_root/state/edge/active-gateway.conf"
+    printf '%s\n' generated-admin-management-key
+    exit 0
+    ;;
   *" manifest get "*)
     printf '%s\n' "$digest"
     exit 0
@@ -120,6 +148,9 @@ if [ "${1:-}" = inspect ]; then
       ;;
     *".NetworkSettings.Networks"*)
       printf '%s\n' '{"codex-cpa_control":{},"codex-cpa_ingress":{},"cliproxy-backend":{}}'
+      ;;
+    *"8317/tcp"*)
+      printf '%s\n' '127.0.0.1 18317'
       ;;
     *"8319/tcp"*)
       printf '%s\n' '127.0.0.1 18316'
@@ -252,11 +283,11 @@ run_action() {
     FAKE_DOCKER_LOG="$COMMAND_LOG" \
     FAKE_DOCKER_SCENARIO="$scenario" \
     CPA_ENV_FILE="$ENV_FILE" \
-    sh "$ROOT_DIR/scripts/deploy-target.sh" "$action"
+    sh "$ROOT_DIR/scripts/deploy.sh" __target "$action"
 }
 
 if grep -Eq '^[[:space:]]+depends_on:' "$ROOT_DIR/docker-compose.yml"; then
-  echo "formal target Compose must leave dependency ordering to deploy-target.sh" >&2
+  echo "formal target Compose must leave dependency ordering to deploy.sh" >&2
   exit 1
 fi
 
@@ -399,5 +430,198 @@ grep -E 'compose .*--profile external-effects config --hash notifications$' \
     echo "notification rollout did not calculate its hash with its profile enabled" >&2
     exit 1
   }
+
+RELEASE_VERSION=v9.9.9
+RELEASE_SERVER="$TEST_ROOT/release-server"
+RELEASE_CONTENT="$TEST_ROOT/release-content"
+OPERATOR_ROOT="$TEST_ROOT/operator"
+OPERATOR_CONFIG="$TEST_ROOT/etc/cpac/config.env"
+mkdir -p \
+  "$RELEASE_SERVER" \
+  "$RELEASE_CONTENT" \
+  "$OPERATOR_ROOT" \
+  "$TEST_ROOT/nginx/available" \
+  "$TEST_ROOT/nginx/enabled" \
+  "$TEST_ROOT/certificates/qdata.example.com" \
+  "$TEST_ROOT/acme"
+cp "$ROOT_DIR/scripts/deploy.sh" "$OPERATOR_ROOT/deploy.sh"
+chmod 0755 "$OPERATOR_ROOT/deploy.sh"
+cp "$ROOT_DIR/docker-compose.yml" "$RELEASE_CONTENT/docker-compose.yml"
+printf '%s\n' '{}' >"$RELEASE_CONTENT/release-manifest.json"
+tar -czf "$RELEASE_SERVER/codex-cpa-cluster-$RELEASE_VERSION.tar.gz" \
+  -C "$RELEASE_CONTENT" docker-compose.yml release-manifest.json
+cat >"$RELEASE_SERVER/release-$RELEASE_VERSION.env" <<EOF
+CPAC_RELEASE_VERSION=$RELEASE_VERSION
+CPAC_RELEASE_REVISION=9999999999999999999999999999999999999999
+CPAC_RELEASE_ARCHIVE=codex-cpa-cluster-$RELEASE_VERSION.tar.gz
+CPAC_CONTROL_IMAGE=registry.example.test/codex-cpa-control:sha256-$DIGEST
+CPAC_WEB_IMAGE=registry.example.test/codex-cpa-web:sha256-$DIGEST
+CPAC_GATEWAY_IMAGE=registry.example.test/codex-cpa-gateway:sha256-$DIGEST
+CPAC_EDGE_IMAGE=registry.example.test/codex-cpa-edge:sha256-$DIGEST
+EOF
+cp "$ROOT_DIR/scripts/deploy.sh" "$RELEASE_SERVER/deploy.sh"
+printf '%s\n' '# verified self-update fixture' >>"$RELEASE_SERVER/deploy.sh"
+chmod 0755 "$RELEASE_SERVER/deploy.sh"
+(
+  cd "$RELEASE_SERVER"
+  sha256sum \
+    "codex-cpa-cluster-$RELEASE_VERSION.tar.gz" \
+    "release-$RELEASE_VERSION.env" \
+    deploy.sh >SHA256SUMS
+)
+printf '%s\n' certificate >"$TEST_ROOT/certificates/qdata.example.com/fullchain.pem"
+printf '%s\n' private-key >"$TEST_ROOT/certificates/qdata.example.com/privkey.pem"
+
+cat >"$FAKE_BIN/curl" <<'FAKE_OPERATOR_CURL'
+#!/usr/bin/env sh
+set -eu
+output=
+url=
+write_format=
+expect_output=false
+expect_write=false
+for argument in "$@"; do
+  if [ "$expect_output" = true ]; then
+    output=$argument
+    expect_output=false
+  elif [ "$expect_write" = true ]; then
+    write_format=$argument
+    expect_write=false
+  else
+    case "$argument" in
+      -o) expect_output=true ;;
+      -w) expect_write=true ;;
+      http://*|https://*) url=$argument ;;
+    esac
+  fi
+done
+case "$url" in
+  */releases/latest)
+    [ "$output" = /dev/null ] || exit 2
+    printf 'https://github.example.test/releases/tag/%s' "$FAKE_RELEASE_VERSION"
+    ;;
+  */releases/download/*/*)
+    asset=${url##*/}
+    [ -n "$output" ] && [ "$output" != /dev/null ] || exit 2
+    cp "$FAKE_RELEASE_DIR/$asset" "$output"
+    ;;
+  */__internal/edge/slot)
+    printf '%s\n' blue
+    ;;
+  http://127.0.0.1:18317/v1/models)
+    printf '%s' 401
+    ;;
+  http://127.0.0.1:18317/__internal/snapshots)
+    printf '%s' 404
+    ;;
+  *)
+    case "$write_format" in
+      *http_code*) printf '%s' 200 ;;
+    esac
+    ;;
+esac
+FAKE_OPERATOR_CURL
+chmod 0755 "$FAKE_BIN/curl"
+
+for command in certbot flock getent nginx systemctl; do
+  cat >"$FAKE_BIN/$command" <<'FAKE_SUCCESS'
+#!/usr/bin/env sh
+exit 0
+FAKE_SUCCESS
+  chmod 0755 "$FAKE_BIN/$command"
+done
+cat >"$FAKE_BIN/readlink" <<'FAKE_READLINK'
+#!/usr/bin/env sh
+set -eu
+if [ "${1:-}" = -f ]; then
+  shift
+  [ "${1:-}" != -- ] || shift
+  target=$(/usr/bin/readlink "$1")
+  case "$target" in
+    /*) printf '%s\n' "$target" ;;
+    *) (CDPATH= cd -- "$(dirname -- "$1")" && CDPATH= cd -- "$(dirname -- "$target")" && printf '%s/%s\n' "$PWD" "$(basename -- "$target")") ;;
+  esac
+else
+  /usr/bin/readlink "$@"
+fi
+FAKE_READLINK
+chmod 0755 "$FAKE_BIN/readlink"
+
+run_operator_deploy() {
+  PATH="$FAKE_BIN:$PATH" \
+    FAKE_DOCKER_LOG="$COMMAND_LOG" \
+    FAKE_DOCKER_SCENARIO=ordinary \
+    FAKE_RELEASE_DIR="$RELEASE_SERVER" \
+    FAKE_RELEASE_VERSION="$RELEASE_VERSION" \
+    CPAC_ALLOW_NON_ROOT=true \
+    CPAC_STAGING_ROOT="$OPERATOR_ROOT" \
+    CPAC_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
+    CPAC_BACKUP_DIR="$OPERATOR_ROOT/backups" \
+    CPAC_CONFIG_FILE="$OPERATOR_CONFIG" \
+    CPAC_LOCK_FILE="$TEST_ROOT/cpa-deploy.lock" \
+    CPAC_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
+    CPAC_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
+    CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
+    CPAC_ACME_ROOT="$TEST_ROOT/acme" \
+    sh "$OPERATOR_ROOT/deploy.sh" deploy \
+      --domain qdata.example.com --version "$RELEASE_VERSION"
+}
+
+run_operator_deploy >/dev/null
+cmp -s "$OPERATOR_ROOT/deploy.sh" "$RELEASE_SERVER/deploy.sh" \
+  || { echo "deploy.sh did not update itself from the verified release asset" >&2; exit 1; }
+[ -f "$OPERATOR_ROOT/runtime/.deploy-initialized" ] \
+  || { echo "fresh deploy did not publish its version marker" >&2; exit 1; }
+[ -f "$TEST_ROOT/etc/cpac/bootstrap-admin.key" ] \
+  || { echo "fresh deploy did not preserve the pending admin key" >&2; exit 1; }
+[ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
+  || { echo "fresh deploy published a second target-side script directory" >&2; exit 1; }
+[ "$(cat "$OPERATOR_CONFIG")" = 'CPA_DOMAIN=qdata.example.com' ] \
+  || { echo "fresh deploy did not persist its domain" >&2; exit 1; }
+
+mv "$OPERATOR_ROOT/runtime/release-manifest.json" \
+  "$OPERATOR_ROOT/runtime/release-manifest.json.missing"
+if run_operator_deploy >"$OPERATOR_ROOT/missing-metadata.log" 2>&1; then
+  echo "upgrade accepted a target with missing release metadata" >&2
+  exit 1
+fi
+grep -Fq \
+  "升级前置文件缺失或不是普通文件：$OPERATOR_ROOT/runtime/release-manifest.json" \
+  "$OPERATOR_ROOT/missing-metadata.log" || {
+    echo "upgrade did not explain the missing release metadata" >&2
+    sed -n '1,120p' "$OPERATOR_ROOT/missing-metadata.log" >&2
+    exit 1
+  }
+mv "$OPERATOR_ROOT/runtime/release-manifest.json.missing" \
+  "$OPERATOR_ROOT/runtime/release-manifest.json"
+
+mkdir -p "$OPERATOR_ROOT/runtime/scripts"
+printf '%s\n' legacy >"$OPERATOR_ROOT/runtime/scripts/legacy.sh"
+run_operator_deploy >/dev/null
+[ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
+  || { echo "upgrade did not remove the legacy target-side script directory" >&2; exit 1; }
+backup_count=$(find "$OPERATOR_ROOT/backups" -type f -name '*.tar.gz' | wc -l | tr -d ' ')
+[ "$backup_count" -eq 1 ] || { echo "upgrade backup count = $backup_count" >&2; exit 1; }
+backup_file=$(find "$OPERATOR_ROOT/backups" -type f -name '*.tar.gz')
+for database in state/control-plane.sqlite3 state/usage.sqlite3; do
+  [ "$(tar -tzf "$backup_file" | grep -Fxc "$database")" -eq 1 ] || {
+    echo "upgrade backup does not contain exactly one consistent $database" >&2
+    exit 1
+  }
+done
+if tar -tzf "$backup_file" | grep -Eq '^state/(control-plane|usage)\.sqlite3-(wal|shm)$'; then
+  echo "upgrade backup contains live SQLite WAL/SHM files" >&2
+  exit 1
+fi
+backup_extract="$OPERATOR_ROOT/backup-extract"
+mkdir "$backup_extract"
+tar -xzf "$backup_file" -C "$backup_extract" \
+  state/control-plane.sqlite3 state/usage.sqlite3
+for database in state/control-plane.sqlite3 state/usage.sqlite3; do
+  [ "$(sqlite3 "$backup_extract/$database" 'PRAGMA quick_check;')" = ok ] || {
+    echo "backup quick_check failed: $database" >&2
+    exit 1
+  }
+done
 
 printf '%s\n' 'Go target deployment contract tests passed'

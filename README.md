@@ -20,7 +20,7 @@ Codex CPA Cluster 是 CLIProxyAPI 多账号服务的 Go 控制平面与数据面
 - 账号故障迁移支持 `off` 与 `active`，批量迁移采用原子路由更新。
 - Edge 固定主机端口，Gateway 蓝绿切换；已有 SSE 请求在原槽排空，新请求进入新槽。
 - 四个镜像使用源码摘要和不可变标签发布，目标机本地拉取并校验镜像标签。
-- `cpac` 可为全新单机目标一次性初始化 SQLite 和主密钥；后续 Production/Test 升级必须保留并复用这组权威状态。
+- 单一 `deploy.sh` 可初始化全新单机目标，也可在保留 SQLite、主密钥、OAuth 和 API Key 的前提下原地升级。
 
 ## 本地验证
 
@@ -50,35 +50,38 @@ make test-down
 
 ### 统一安装/升级入口
 
-目标机只需安装一次 `cpac`。安装器从最新 GitHub Release 下载 `cpac-linux-amd64`，并使用同一 Release 的 `SHA256SUMS` 校验后写入 `/usr/local/bin/cpac`：
+目标机只保留一个运维入口 `/home/cpac/deploy.sh`。首次使用时从最新 GitHub Release 下载它：
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/raw/refs/heads/main/scripts/install-cpac.sh | sudo sh
+sudo install -d -o root -g root -m 0755 /home/cpac
+sudo curl -fL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/deploy.sh \
+  -o /home/cpac/deploy.sh
+sudo chmod 0755 /home/cpac/deploy.sh
 ```
 
-之后安装和升级统一使用同一个命令：
+初始化和以后每次升级都使用同一个命令：
 
 ```sh
-sudo cpac deploy
+sudo /home/cpac/deploy.sh
 ```
 
-首次运行时，`cpac` 检测不到本机配置，会提示输入访问域名：
+首次运行时，脚本检测不到本机配置，会提示输入访问域名：
 
 ```text
-$ sudo cpac deploy
+$ sudo /home/cpac/deploy.sh
 请输入访问域名: qdata.example.com
 ```
 
-域名经过严格的 FQDN 格式校验和规范化后，以单一 `CPA_DOMAIN=<域名>` 配置写入 `/etc/cpac/config.env`。配置通过同目录临时文件原子替换，由 `root` 所有且权限为 `0600`，不会把任意用户输入作为 Shell 执行。后续再次执行 `sudo cpac deploy` 时自动读取该域名，不再重复询问，并根据本机状态自动选择“首次安装”或“原地升级”。无交互环境可显式传入域名：
+域名经过严格的 FQDN 格式校验和规范化后，以单一 `CPA_DOMAIN=<域名>` 配置写入 `/etc/cpac/config.env`。配置通过同目录临时文件原子替换，由 `root` 所有且权限为 `0600`，不会把任意用户输入作为 Shell 执行。后续执行自动读取域名并判断“首次初始化”或“原地升级”。无交互环境可显式传入域名：
 
 ```sh
-sudo cpac deploy --domain qdata.example.com
+sudo /home/cpac/deploy.sh deploy --domain qdata.example.com
 ```
 
-如果配置尚不存在、标准输入也不是终端，并且没有提供 `--domain`，命令必须失败并给出明确提示，不能猜测域名。已有部署不能通过普通 `--domain` 静默覆盖域名；改域名使用单独的 `cpac domain set <新域名>` 命令并要求交互确认，避免升级时误改线上入口。
+如果配置尚不存在、标准输入也不是终端，并且没有提供 `--domain`，脚本必须失败，不能猜测域名。已有部署不能通过普通 `--domain` 静默覆盖域名；改域名需执行 `sudo /home/cpac/deploy.sh domain set <新域名>` 并确认。
 
 ```text
-sudo cpac deploy
+sudo /home/cpac/deploy.sh
         |
         +-- 没有已记录域名? -- 是 --> 提示输入并安全保存
         |                         \--> 无交互且未传 --domain：失败
@@ -90,13 +93,13 @@ sudo cpac deploy
                                   \--> 失败则保留原版本并报告
 ```
 
-`cpac deploy` 从 GitHub Release 下载归档、发布环境和校验文件，在校验 SHA-256 后才使用不可变镜像。首次安装先在同文件系统的临时根目录创建两份 SQLite、主密钥、空 Gateway 快照和随机管理员凭据，完成后再原子发布为 `/opt/codex-cpa-cluster`；升级先生成 `/var/backups/cpac/` 备份，再执行 Gateway 蓝绿排空、Control/Web 更新和烟测。失败时保留当前槽并尝试恢复上一发布配置。
+脚本从同一 GitHub Release 下载自身、归档、发布环境和 `SHA256SUMS`，校验后才更新入口或使用不可变镜像。首次安装在 `/home/cpac/` 同一文件系统的临时目录创建两份 SQLite、主密钥、空 Gateway 快照和随机管理员凭据，再原子发布为 `/home/cpac/runtime`。升级先通过 SQLite Backup API 生成两份通过 `quick_check` 的一致性数据库副本，并与主密钥、OAuth 和运行配置一起写入 `/home/cpac/backups/` 的 root-only 归档，再执行 Gateway 蓝绿排空、Control/Web 更新和烟测；失败时恢复上一发布配置。
 
-首次安装没有固定的默认管理员密码。`cpac` 生成高强度随机管理凭据并写入加密控制面；交互部署会在烟测成功后显示一次，自动化部署则保留在 root-only 待领取文件中，操作者随后在交互终端执行 `sudo cpac admin-key claim`。升级既不显示也不重置已有凭据。
+首次安装没有固定的默认管理员密码。脚本通过 Control 镜像生成随机管理凭据并写入加密控制面；交互部署会在烟测成功后显示一次，自动化部署则保留在 root-only 待领取文件中，之后在交互终端执行 `sudo /home/cpac/deploy.sh admin-key claim`。升级不显示也不重置已有凭据。
 
-域名配置只描述本站入口，不自动修改 DNS、TLS 证书或仓库范围外的 Nginx/外部代理服务。它们必须在执行 `cpac deploy` 前已将域名转发到 Edge 的本机端口。
+脚本负责安装必要依赖、配置本站 Nginx 反向代理并申请或复用 Let's Encrypt 证书；DNS 必须预先指向目标机。它不修改仓库范围外的代理拓扑或 `/opt/cliproxyapi`。
 
-### 底层部署方式
+### 开发者底层入口
 
 1. 从 `.env.example` 生成仓库外的目标机私有 `target.env`；它是正式控制面部署参数的唯一来源，不提交目标地址或 Registry 凭据。
 2. 从同一发布包更新目标目录内的 `docker-compose.yml` 与 `release-manifest.json`，并确认两份 SQLite、匹配的主密钥、Gateway 快照、活动槽文件和可写日志目录已经存在；部署脚本拒绝符号链接运行目录和不匹配的 Compose 副本。
@@ -108,7 +111,7 @@ sudo cpac deploy
 make deploy TARGET_ENV=/absolute/path/to/target.env
 ```
 
-`cpac` 在目标机本地调用同一套 `scripts/deploy-target.sh` 动作；直接使用 `make deploy` 仍只适用于已经初始化的目标。CI 和发布脚本不会连接 Production；目标选择只来自操作者提供的环境文件和本地 Harness 配置。
+`make deploy` 调用同一个 `scripts/deploy.sh` 的内部目标动作，只适用于已经初始化的开发/Test 目标；它不是第二个目标机运维入口。CI 和发布脚本不会连接 Production，目标选择只来自操作者提供的环境文件和本地 Harness 配置。
 Edge 持有唯一公开端口，镜像或 Compose 配置变化时必须额外确认维护窗口；普通 Control、Web、Gateway 发布不会重建 Edge。
 
 ## 安全边界

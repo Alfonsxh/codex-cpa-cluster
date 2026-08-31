@@ -116,7 +116,7 @@ mkdir -p "$DIST_DIR"
 ARCHIVE="$DIST_DIR/codex-cpa-cluster-$VERSION.tar.gz"
 RELEASE_DESCRIPTOR="$DIST_DIR/release-$VERSION.json"
 RELEASE_ENV="$DIST_DIR/release-$VERSION.env"
-CPAC_ASSET="$DIST_DIR/cpac-linux-amd64"
+DEPLOY_ASSET="$DIST_DIR/deploy.sh"
 CHECKSUMS="$DIST_DIR/SHA256SUMS"
 sh "$ROOT_DIR/scripts/package-release.sh" "$ARCHIVE"
 go run "$ROOT_DIR/cmd/releasectl" manifest descriptor \
@@ -133,12 +133,12 @@ go run "$ROOT_DIR/cmd/releasectl" manifest deploy-env \
   --revision "$REVISION" \
   --image-prefix "$IMAGE_PREFIX" \
   --archive-name "$(basename -- "$ARCHIVE")"
-cp "$ROOT_DIR/scripts/cpac" "$CPAC_ASSET"
-chmod 0755 "$CPAC_ASSET"
+cp "$ROOT_DIR/scripts/deploy.sh" "$DEPLOY_ASSET"
+chmod 0755 "$DEPLOY_ASSET"
 
 go run "$ROOT_DIR/cmd/releasectl" checksum \
   --output "$CHECKSUMS" \
-  "$ARCHIVE" "$RELEASE_DESCRIPTOR" "$RELEASE_ENV" "$CPAC_ASSET"
+  "$ARCHIVE" "$RELEASE_DESCRIPTOR" "$RELEASE_ENV" "$DEPLOY_ASSET"
 
 if [ -z "$REMOTE_TAG_REVISION" ]; then
   git -C "$ROOT_DIR" push "$GIT_REMOTE" "refs/tags/$VERSION"
@@ -148,8 +148,8 @@ if [ "$RELEASE_STATE" = missing ]; then
   gh release create "$VERSION" \
     "$ARCHIVE#Deployment archive" \
     "$RELEASE_DESCRIPTOR#Release descriptor" \
-    "$RELEASE_ENV#cpac release environment" \
-    "$CPAC_ASSET#cpac Linux amd64" \
+    "$RELEASE_ENV#deployment environment" \
+    "$DEPLOY_ASSET#single installation and upgrade script" \
     "$CHECKSUMS#SHA-256 checksums" \
     --repo "$GH_REPO" \
     --verify-tag \
@@ -160,8 +160,8 @@ else
   gh release upload "$VERSION" \
     "$ARCHIVE#Deployment archive" \
     "$RELEASE_DESCRIPTOR#Release descriptor" \
-    "$RELEASE_ENV#cpac release environment" \
-    "$CPAC_ASSET#cpac Linux amd64" \
+    "$RELEASE_ENV#deployment environment" \
+    "$DEPLOY_ASSET#single installation and upgrade script" \
     "$CHECKSUMS#SHA-256 checksums" \
     --repo "$GH_REPO" \
     --clobber

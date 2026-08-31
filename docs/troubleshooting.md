@@ -3,10 +3,10 @@
 所有命令都必须使用当前操作者提供的 Test/Production 私有环境文件。先确认目标，再执行只读诊断；不要从旧归档或 Git 历史推断主机和目录。
 
 ```sh
-CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh config
-CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh ownership-status
-CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh ps
-CPA_ENV_FILE=/absolute/path/to/target.env sh scripts/deploy-target.sh smoke
+make target-config TARGET_ENV=/absolute/path/to/target.env
+make target-ownership-status TARGET_ENV=/absolute/path/to/target.env
+make target-ps TARGET_ENV=/absolute/path/to/target.env
+make target-smoke TARGET_ENV=/absolute/path/to/target.env
 ```
 
 查看 Go 服务日志：
@@ -28,7 +28,7 @@ docker compose --env-file /absolute/path/to/target.env -f docker-compose.yml \
 3. `web` 连接 Control 网络，Admin 健康。
 4. `state/edge/active-gateway.conf` 只选择 `blue` 或 `green` 对应配置。
 
-`deploy-target.sh up-core` 会逐个启动并校验精确容器/服务标签、网络与端口；不要用手工连接未知容器作为长期修复。
+`deploy.sh` 的内部 `up-core` 动作会逐个启动并校验精确容器/服务标签、网络与端口；不要用手工连接未知容器作为长期修复。
 
 ## Gateway 返回 401、503 或 502
 

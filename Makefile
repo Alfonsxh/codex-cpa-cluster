@@ -15,12 +15,12 @@ TEST_PROJECT ?= codex-cpa-test
 TARGET_ENV ?= target.env
 FRONTEND_DEV_UPSTREAM ?= http://127.0.0.1:8318
 
-.PHONY: help verify cpac-test generate-api check-generated-api frontend-dev frontend-dev-admin frontend-dev-usage frontend-dev-portal test-config test-build test-up test-smoke test-down test-faults target-config target-pull target-verify-images target-ownership-status target-activate target-up-core target-up-writers target-up-notifications target-smoke target-ps target-down lease-rehearsal worker-lease-rehearsal privacy-check package images publish publish-harbor publish-dockerhub publish-ghcr publish-all release-check release deploy
+.PHONY: help verify deploy-test generate-api check-generated-api frontend-dev frontend-dev-admin frontend-dev-usage frontend-dev-portal test-config test-build test-up test-smoke test-down test-faults target-config target-pull target-verify-images target-ownership-status target-activate target-up-core target-up-writers target-up-notifications target-smoke target-ps target-down lease-rehearsal worker-lease-rehearsal privacy-check package images publish publish-harbor publish-dockerhub publish-ghcr publish-all release-check release deploy
 
 help:
 	@printf '%s\n' \
 	  'make verify' \
-	  'make cpac-test' \
+	  'make deploy-test' \
 	  'make generate-api' \
 	  'make check-generated-api' \
 	  'make frontend-dev [FRONTEND_DEV_UPSTREAM=http://test-host:18317]  # Admin，读写代理' \
@@ -51,8 +51,8 @@ help:
 verify:
 	sh scripts/verify.sh
 
-cpac-test:
-	sh scripts/test-cpac.sh
+deploy-test:
+	sh scripts/test-deploy.sh
 
 generate-api:
 	sh scripts/generate-api.sh
@@ -93,37 +93,37 @@ test-faults:
 	sh scripts/test-faults.sh
 
 target-config:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh config
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target config
 
 target-pull:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh pull
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target pull
 
 target-verify-images:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh verify-images
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target verify-images
 
 target-ownership-status:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh ownership-status
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target ownership-status
 
 target-activate:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh activate
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target activate
 
 target-up-core:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-core
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target up-core
 
 target-up-writers:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-writers
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target up-writers
 
 target-up-notifications:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-notifications
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target up-notifications
 
 target-smoke:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh smoke
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target smoke
 
 target-ps:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh ps
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target ps
 
 target-down:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh down
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target down
 
 lease-rehearsal:
 	go test -count=1 -run '^TestWriterLeaseGenerationTransferFencesStaleOwner$$' ./internal/ownership
@@ -183,10 +183,10 @@ release:
 	  sh scripts/local-release.sh publish
 
 deploy:
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh config
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh pull
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh verify-images
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh activate
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-core
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh up-writers
-	CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy-target.sh smoke
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target config
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target pull
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target verify-images
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target activate
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target up-core
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target up-writers
+	CPA_RELEASE_ROOT="$(CURDIR)" CPA_ENV_FILE="$(TARGET_ENV)" sh scripts/deploy.sh __target smoke

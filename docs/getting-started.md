@@ -1,6 +1,6 @@
 # 快速开始
 
-本分支只提供 Go 服务与 React 前端，不保留旧安装器。全新单机目标使用 `cpac` 初始化；底层 `deploy-target.sh` 继续只接受已经初始化且数据完整的目标目录。
+本分支只提供 Go 服务、React 前端和一个统一的 `scripts/deploy.sh`。目标机不安装额外 CLI；同一个脚本负责首次初始化、升级和必要的管理子命令。
 
 ## 开发依赖
 
@@ -39,14 +39,17 @@ make test-down
 
 ## 全新目标安装
 
-目标需预先安装 Docker Engine、Docker Compose v2，并配置好域名的 DNS/TLS 入口。安装 `cpac` 后只需执行：
+域名 DNS 需预先指向目标机。下载唯一部署脚本后执行：
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/raw/refs/heads/main/scripts/install-cpac.sh | sudo sh
-sudo cpac deploy
+sudo install -d -o root -g root -m 0755 /home/cpac
+sudo curl -fL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/deploy.sh \
+  -o /home/cpac/deploy.sh
+sudo chmod 0755 /home/cpac/deploy.sh
+sudo /home/cpac/deploy.sh
 ```
 
-首次执行会提示域名并写入 `/etc/cpac/config.env`；无交互环境使用 `sudo cpac deploy --domain qdata.example.com`。`cpac` 校验 GitHub Release、初始化空状态、启动服务并调用正式烟测。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+首次执行会提示域名并写入 `/etc/cpac/config.env`；无交互环境使用 `sudo /home/cpac/deploy.sh deploy --domain qdata.example.com`。脚本安装必要依赖、配置 Nginx/TLS、校验 GitHub Release、初始化空状态、启动服务并调用正式烟测。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
 
 ## 已有 Test 目标的底层部署
 
@@ -67,13 +70,13 @@ logs/gateway/
 从同一个发布包更新目标内的 `docker-compose.yml` 与 `release-manifest.json`，再从 `.env.example` 生成仓库外私有环境文件，填入同一发布描述中的四个 `:sha256-<源码摘要>` 镜像和实际目标参数。示例中的目录、首次接管和 Edge 维护确认故意留空；不得把示例文件本身当作切换授权。正式控制面配置只来自该环境文件，然后执行：
 
 ```sh
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh config
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh pull
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh verify-images
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh activate
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-core
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh up-writers
-CPA_ENV_FILE=/absolute/path/to/test.env sh scripts/deploy-target.sh smoke
+make target-config TARGET_ENV=/absolute/path/to/test.env
+make target-pull TARGET_ENV=/absolute/path/to/test.env
+make target-verify-images TARGET_ENV=/absolute/path/to/test.env
+make target-activate TARGET_ENV=/absolute/path/to/test.env
+make target-up-core TARGET_ENV=/absolute/path/to/test.env
+make target-up-writers TARGET_ENV=/absolute/path/to/test.env
+make target-smoke TARGET_ENV=/absolute/path/to/test.env
 ```
 
 通知会产生外部消息，必须单独获批后执行 `up-notifications`。目标烟测只证明 Go 拓扑与静态路径；上线前仍要使用真实 API Key 验证非流式 Responses 和 SSE，并完成浏览器验收。

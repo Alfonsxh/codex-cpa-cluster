@@ -194,8 +194,8 @@ func TestAdminOverviewUsageUsesBoundedFineGrainedTrendQuery(t *testing.T) {
 		trendResult: usage.TokenTrend{
 			GeneratedAt: 1_000, WindowStartAt: -2_600, WindowSeconds: 3_600,
 			BucketSeconds: 60, Buckets: []int64{-2_640, -2_580},
-			Accounts: []usage.TokenSeries{{Name: "alpha", Values: []int64{321, 0}, Total: 321}},
-			Users:    []usage.TokenSeries{{Name: "alice@example.com", Values: []int64{321, 0}, Total: 321}},
+			Accounts: []usage.TokenSeries{{Name: "alpha", Values: []int64{321, 0}, Total: 321, WeightedValues: []int64{400, 0}, WeightedTotal: 400}},
+			Users:    []usage.TokenSeries{{Name: "alice@example.com", Values: []int64{321, 0}, Total: 321, WeightedValues: []int64{400, 0}, WeightedTotal: 400}},
 		},
 		collectorResult: usage.CollectorStatus{Status: "healthy"},
 	}
@@ -211,6 +211,7 @@ func TestAdminOverviewUsageUsesBoundedFineGrainedTrendQuery(t *testing.T) {
 		!strings.Contains(response.Body.String(), `"selected_account":"alpha"`) ||
 		!strings.Contains(response.Body.String(), `"selected_user":"alice@example.com"`) ||
 		!strings.Contains(response.Body.String(), `"total":321`) ||
+		!strings.Contains(response.Body.String(), `"weighted_total":400`) ||
 		!strings.Contains(response.Body.String(), `"status":"healthy"`) {
 		t.Fatalf("overview usage = %d %s, reader=%#v", response.Code, response.Body.String(), reader)
 	}

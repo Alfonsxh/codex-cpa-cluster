@@ -12,12 +12,17 @@ import (
 )
 
 type TokenSeries struct {
-	Name    string  `json:"name"`
-	Values  []int64 `json:"values"`
-	Current int64   `json:"current"`
-	Average int64   `json:"average"`
-	Maximum int64   `json:"maximum"`
-	Total   int64   `json:"total"`
+	Name            string  `json:"name"`
+	Values          []int64 `json:"values"`
+	Current         int64   `json:"current"`
+	Average         int64   `json:"average"`
+	Maximum         int64   `json:"maximum"`
+	Total           int64   `json:"total"`
+	WeightedValues  []int64 `json:"weighted_values"`
+	WeightedCurrent int64   `json:"weighted_current"`
+	WeightedAverage int64   `json:"weighted_average"`
+	WeightedMaximum int64   `json:"weighted_maximum"`
+	WeightedTotal   int64   `json:"weighted_total"`
 }
 
 type TokenTrend struct {
@@ -37,10 +42,15 @@ type PublicAccountUsage struct {
 }
 
 type tokenSeriesRow struct {
-	Name     string `db:"series_name"`
-	BucketAt int64  `db:"bucket_at"`
-	Tokens   int64  `db:"total_tokens"`
+	Name           string `db:"series_name"`
+	BucketAt       int64  `db:"bucket_at"`
+	Tokens         int64  `db:"total_tokens"`
+	WeightedTokens int64  `db:"weighted_tokens"`
 }
+
+const effectiveWeightedTokensSQL = `CASE
+	WHEN weight_policy_version = 'legacy-v1' AND weighted_tokens = 0 AND total_tokens > 0
+	THEN total_tokens ELSE weighted_tokens END`
 
 func (store *Store) TokenTimeSeries(
 	ctx context.Context,
@@ -139,7 +149,8 @@ func (store *Store) TokenTimeSeries(
 		query := `
 			SELECT account AS series_name,
 			       CAST(occurred_at / ? AS INTEGER) * ? AS bucket_at,
-			       SUM(total_tokens) AS total_tokens
+			       SUM(total_tokens) AS total_tokens,
+			       SUM(` + effectiveWeightedTokensSQL + `) AS weighted_tokens
 			  FROM usage_events
 			 WHERE account IN (SELECT CAST(value AS TEXT) FROM json_each(?))
 			   AND user_email IN (SELECT CAST(value AS TEXT) FROM json_each(?))
@@ -155,17 +166,19 @@ func (store *Store) TokenTimeSeries(
 	selectedForSeries := selected
 	if len(selectedForSeries) == 0 && len(users) > 0 {
 		rows := make([]struct {
-			User   string `db:"user_email"`
-			Tokens int64  `db:"total_tokens"`
+			User           string `db:"user_email"`
+			Tokens         int64  `db:"total_tokens"`
+			WeightedTokens int64  `db:"weighted_tokens"`
 		}, 0, userLimit)
 		query := `
-			SELECT user_email, SUM(total_tokens) AS total_tokens
+			SELECT user_email, SUM(total_tokens) AS total_tokens,
+			       SUM(` + effectiveWeightedTokensSQL + `) AS weighted_tokens
 			  FROM usage_events
 			 WHERE account IN (SELECT CAST(value AS TEXT) FROM json_each(?))
 			   AND user_email IN (SELECT CAST(value AS TEXT) FROM json_each(?))
 			   AND ` + rangeSQL + `
 			 GROUP BY user_email
-			 ORDER BY total_tokens DESC, user_email
+			 ORDER BY weighted_tokens DESC, total_tokens DESC, user_email
 			 LIMIT ?`
 		arguments := []any{string(accountsJSON), string(usersJSON)}
 		arguments = append(arguments, rangeArguments...)
@@ -187,7 +200,8 @@ func (store *Store) TokenTimeSeries(
 		query := `
 			SELECT user_email AS series_name,
 			       CAST(occurred_at / ? AS INTEGER) * ? AS bucket_at,
-			       SUM(total_tokens) AS total_tokens
+			       SUM(total_tokens) AS total_tokens,
+			       SUM(` + effectiveWeightedTokensSQL + `) AS weighted_tokens
 			  FROM usage_events
 			 WHERE account IN (SELECT CAST(value AS TEXT) FROM json_each(?))
 			   AND user_email IN (SELECT CAST(value AS TEXT) FROM json_each(?))
@@ -276,42 +290,58 @@ func buildTokenSeries(
 	bucketSeconds int64,
 	averageStartAt map[string]int64,
 ) []TokenSeries {
-	values := make(map[string]map[int64]int64, len(names))
+	type bucketTokens struct {
+		raw      int64
+		weighted int64
+	}
+	values := make(map[string]map[int64]bucketTokens, len(names))
 	for _, name := range names {
-		values[name] = make(map[int64]int64)
+		values[name] = make(map[int64]bucketTokens)
 	}
 	for _, row := range rows {
 		if _, found := values[row.Name]; found {
-			values[row.Name][row.BucketAt] = row.Tokens
+			values[row.Name][row.BucketAt] = bucketTokens{raw: row.Tokens, weighted: row.WeightedTokens}
 		}
 	}
 	result := make([]TokenSeries, 0, len(names))
 	for _, name := range names {
-		series := TokenSeries{Name: name, Values: make([]int64, len(buckets))}
+		series := TokenSeries{
+			Name: name, Values: make([]int64, len(buckets)), WeightedValues: make([]int64, len(buckets)),
+		}
 		for index, bucket := range buckets {
-			series.Values[index] = values[name][bucket]
+			series.Values[index] = values[name][bucket].raw
+			series.WeightedValues[index] = values[name][bucket].weighted
 			series.Total += series.Values[index]
+			series.WeightedTotal += series.WeightedValues[index]
 			series.Maximum = max(series.Maximum, series.Values[index])
+			series.WeightedMaximum = max(series.WeightedMaximum, series.WeightedValues[index])
 		}
 		averageValues := series.Values
+		weightedAverageValues := series.WeightedValues
 		if startAt, found := averageStartAt[name]; found {
 			startBucket := (startAt / bucketSeconds) * bucketSeconds
 			for index, bucket := range buckets {
 				if bucket >= startBucket {
 					averageValues = series.Values[index:]
+					weightedAverageValues = series.WeightedValues[index:]
 					break
 				}
 			}
 		}
 		if len(series.Values) > 0 {
 			series.Current = series.Values[len(series.Values)-1]
+			series.WeightedCurrent = series.WeightedValues[len(series.WeightedValues)-1]
 		}
 		if len(averageValues) > 0 {
-			var averageTotal int64
+			var averageTotal, weightedAverageTotal int64
 			for _, value := range averageValues {
 				averageTotal += value
 			}
+			for _, value := range weightedAverageValues {
+				weightedAverageTotal += value
+			}
 			series.Average = int64(math.Round(float64(averageTotal) / float64(len(averageValues))))
+			series.WeightedAverage = int64(math.Round(float64(weightedAverageTotal) / float64(len(weightedAverageValues))))
 		}
 		result = append(result, series)
 	}

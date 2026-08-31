@@ -3565,7 +3565,18 @@ components:
     TokenSeries:
       type: object
       additionalProperties: false
-      required: [name, values, current, average, maximum, total]
+      required:
+        - name
+        - values
+        - current
+        - average
+        - maximum
+        - total
+        - weighted_values
+        - weighted_current
+        - weighted_average
+        - weighted_maximum
+        - weighted_total
       properties:
         name: { type: string }
         values:
@@ -3575,6 +3586,13 @@ components:
         average: { type: integer, format: int64 }
         maximum: { type: integer, format: int64 }
         total: { type: integer, format: int64 }
+        weighted_values:
+          type: array
+          items: { type: integer, format: int64 }
+        weighted_current: { type: integer, format: int64 }
+        weighted_average: { type: integer, format: int64 }
+        weighted_maximum: { type: integer, format: int64 }
+        weighted_total: { type: integer, format: int64 }
     CollectorStatus:
       type: object
       additionalProperties: false

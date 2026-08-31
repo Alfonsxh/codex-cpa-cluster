@@ -32,11 +32,14 @@ describe("OverviewPage legacy dashboard contract", () => {
       bucket_seconds: 900,
       buckets: [1_799_996_400, 1_799_997_300],
       accounts: Array.from({ length: 15 }, (_, index) => index === 0
-        ? { name: "alpha", values: [100, 200], current: 200, average: 150, maximum: 200, total: 300 }
+        ? tokenSeries("alpha", [100, 200], [125, 250])
         : index === 1
-          ? { name: "cpa-02", values: [2_000_000, 0], current: 0, average: 1_000_000, maximum: 2_000_000, total: 2_000_000 }
-        : { name: `cpa-${String(index + 1).padStart(2, "0")}`, values: [0, 0], current: 0, average: 0, maximum: 0, total: 0 }),
-      users: [{ name: "alice@example.com", values: [100, 200], current: 200, average: 150, maximum: 200, total: 300 }],
+          ? tokenSeries("cpa-02", [2_000_000, 0], [2_500_000, 0])
+          : tokenSeries(`cpa-${String(index + 1).padStart(2, "0")}`, [0, 0], [0, 0])),
+      users: [
+        tokenSeries("alice@example.com", [100, 200], [300, 300]),
+        tokenSeries("bob@example.com", [200, 200], [250, 250])
+      ],
       selected_account: null,
       selected_user: null,
       selected_accounts: [],
@@ -62,7 +65,10 @@ describe("OverviewPage legacy dashboard contract", () => {
     const catalog = {
       generated_at: 1_800_000_000,
       accounts: usage.accounts.map((account) => ({ id: account.name, operational_status: { label: "可用", tone: "success" } })),
-      users: [{ email: "alice@example.com", status: "active" }]
+      users: [
+        { email: "alice@example.com", status: "active" },
+        { email: "bob@example.com", status: "active" }
+      ]
     };
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
       const path = String(input);
@@ -93,9 +99,9 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(within(metrics).getByText("7/8")).toBeInTheDocument();
     expect(within(metrics).getByText("74")).toBeInTheDocument();
 
-    expect(await screen.findByRole("heading", { name: "所有账号 Token 使用量" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "CPA 账号 Token 使用趋势" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "用户 Token 使用趋势" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "所有账号未加权 Token 使用量" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "CPA 账号未加权 Token 使用趋势" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "用户加权 Token 使用趋势" })).toBeInTheDocument();
     expect(screen.getAllByText("alpha")).not.toHaveLength(0);
     expect(screen.getAllByText("alice@example.com")).not.toHaveLength(0);
     expect(screen.getByText("重启 alpha")).toBeInTheDocument();
@@ -108,8 +114,15 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/catalog")).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/release"))).toBe(false);
 
-    expect(await screen.findByRole("img", { name: /所有账号 Token 使用趋势/ })).toBeInTheDocument();
-    expect(await screen.findByRole("img", { name: /分项 Token 使用趋势：alpha/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /所有账号未加权 Token 使用趋势/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /分项未加权 Token 使用趋势：alpha/ })).toBeInTheDocument();
+
+    const userTable = screen.getByLabelText("用户用量明细表格");
+    const userRows = within(userTable).getAllByRole("row");
+    expect(userRows[1]).toHaveTextContent("alice@example.com");
+    expect(userRows[2]).toHaveTextContent("bob@example.com");
+    expect(within(userRows[1]).getAllByText("加权")).toHaveLength(4);
+    expect(within(userRows[1]).getAllByText("未加权")).toHaveLength(4);
 
     await user.click(screen.getByRole("button", { name: "6 小时" }));
     expect(await waitForRequest(fetchMock, "/admin/api/overview/usage?window=21600&user_limit=10")).toBe(true);
@@ -131,10 +144,28 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(customRequest.searchParams.get("user_limit")).toBe("10");
     expect(screen.queryByRole("button", { name: "自定义" })).not.toBeInTheDocument();
 
-    await user.click(screen.getAllByRole("button", { name: /范围内总量，当前降序/ })[0]);
-    expect(screen.getAllByRole("button", { name: /范围内总量，当前升序/ })).not.toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: /范围内总量（按加权），当前降序/ }));
+    expect(screen.getByRole("button", { name: /范围内总量（按加权），当前升序/ })).toBeInTheDocument();
   });
 });
+
+function tokenSeries(name: string, values: number[], weightedValues: number[]) {
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const weightedTotal = weightedValues.reduce((sum, value) => sum + value, 0);
+  return {
+    name,
+    values,
+    current: values.at(-1) ?? 0,
+    average: values.length ? Math.round(total / values.length) : 0,
+    maximum: Math.max(...values, 0),
+    total,
+    weighted_values: weightedValues,
+    weighted_current: weightedValues.at(-1) ?? 0,
+    weighted_average: weightedValues.length ? Math.round(weightedTotal / weightedValues.length) : 0,
+    weighted_maximum: Math.max(...weightedValues, 0),
+    weighted_total: weightedTotal
+  };
+}
 
 async function waitForRequest(fetchMock: ReturnType<typeof vi.fn>, expected: string) {
   for (let attempt = 0; attempt < 20; attempt += 1) {

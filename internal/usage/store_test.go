@@ -217,9 +217,9 @@ func TestReadOnlyStoreBuildsBoundedTokenTrendsAndPublicUsage(t *testing.T) {
 	}
 	if trend.GeneratedAt != 6299 || trend.WindowStartAt != 5500 || trend.WindowSeconds != 800 ||
 		len(trend.Buckets) != 3 || len(trend.Accounts) != 2 || len(trend.Users) != 1 ||
-		trend.Accounts[0].Name != "alpha" || trend.Accounts[0].Total != 150 ||
-		trend.Accounts[1].Name != "beta" || trend.Accounts[1].Total != 80 ||
-		trend.Users[0].Name != "alice@example.com" || trend.Users[0].Total != 230 {
+		trend.Accounts[0].Name != "alpha" || trend.Accounts[0].Total != 150 || trend.Accounts[0].WeightedTotal != 200 ||
+		trend.Accounts[1].Name != "beta" || trend.Accounts[1].Total != 80 || trend.Accounts[1].WeightedTotal != 80 ||
+		trend.Users[0].Name != "alice@example.com" || trend.Users[0].Total != 230 || trend.Users[0].WeightedTotal != 280 {
 		t.Fatalf("token trend = %#v", trend)
 	}
 	periodTrend, err := store.TokenTimeSeries(
@@ -237,8 +237,9 @@ func TestReadOnlyStoreBuildsBoundedTokenTrendsAndPublicUsage(t *testing.T) {
 		t.Fatalf("TokenTimeSeries by account period: %v", err)
 	}
 	if len(periodTrend.Accounts) != 2 || periodTrend.Accounts[0].Total != 50 ||
-		periodTrend.Accounts[0].Average != 50 || periodTrend.Accounts[1].Total != 80 ||
-		len(periodTrend.Users) != 1 || periodTrend.Users[0].Total != 130 {
+		periodTrend.Accounts[0].Average != 50 || periodTrend.Accounts[0].WeightedTotal != 75 ||
+		periodTrend.Accounts[1].Total != 80 || periodTrend.Accounts[1].WeightedTotal != 80 ||
+		len(periodTrend.Users) != 1 || periodTrend.Users[0].Total != 130 || periodTrend.Users[0].WeightedTotal != 155 {
 		t.Fatalf("period token trend = %#v", periodTrend)
 	}
 	public, err := store.PublicGatewayUsage(ctx, []string{"alpha", "beta"}, 6000, 7001)
@@ -248,6 +249,52 @@ func TestReadOnlyStoreBuildsBoundedTokenTrendsAndPublicUsage(t *testing.T) {
 	if public["alpha"].ActiveKeys != 2 || public["alpha"].RequestCount != 5 ||
 		public["beta"].ActiveKeys != 1 || public["beta"].RequestCount != 1 {
 		t.Fatalf("public gateway usage = %#v", public)
+	}
+}
+
+func TestTokenTimeSeriesRanksUsersByWeightedTokens(t *testing.T) {
+	path := createUsageFixture(t, 10)
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open usage ranking fixture: %v", err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO usage_events(
+			account, user_email, occurred_at, total_tokens, weighted_tokens, weight_policy_version
+		) VALUES
+			('alpha', 'raw-leader@example.com', 6001, 200, 200, 'v2'),
+			('alpha', 'weighted-leader@example.com', 6002, 100, 500, 'v2')`); err != nil {
+		database.Close()
+		t.Fatalf("write usage ranking fixture: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close usage ranking fixture: %v", err)
+	}
+
+	store, err := OpenReadOnlyPath(path, func() time.Time { return time.Unix(7000, 0) })
+	if err != nil {
+		t.Fatalf("OpenReadOnlyPath: %v", err)
+	}
+	defer store.Close()
+	trend, err := store.TokenTimeSeries(
+		context.Background(),
+		[]string{"alpha"},
+		[]string{"raw-leader@example.com", "weighted-leader@example.com"},
+		nil,
+		5500,
+		6300,
+		300,
+		10,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("TokenTimeSeries: %v", err)
+	}
+	if len(trend.Users) != 2 || trend.Users[0].Name != "weighted-leader@example.com" ||
+		trend.Users[0].Total != 100 || trend.Users[0].WeightedTotal != 500 ||
+		trend.Users[1].Name != "raw-leader@example.com" || trend.Users[1].Total != 200 ||
+		trend.Users[1].WeightedTotal != 200 {
+		t.Fatalf("weighted user ranking = %#v", trend.Users)
 	}
 }
 

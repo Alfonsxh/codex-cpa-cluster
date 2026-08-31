@@ -41,6 +41,8 @@ type SortState = {
   direction: "asc" | "desc";
 };
 
+type SeriesTokenMode = "unweighted" | "weighted-and-unweighted";
+
 const standardWindows: Array<{ value: Exclude<OverviewUsageWindow, "custom">; label: string }> = [
   { value: "3600", label: "1 小时" },
   { value: "21600", label: "6 小时" },
@@ -428,10 +430,10 @@ function UsageDashboard({
       <article className="overview-legacy-panel overview-legacy-usage-panel">
         <header className="overview-legacy-panel-header overview-legacy-summary-header">
           <div>
-            <h4>所有账号 Token 使用量</h4>
+            <h4>所有账号未加权 Token 使用量</h4>
             <small>{scope} · {windowLabel} · 聚合间隔 {interval}</small>
           </div>
-          <dl className="overview-legacy-summary-metrics" aria-label="账号 Token 使用量汇总值">
+          <dl className="overview-legacy-summary-metrics" aria-label="账号未加权 Token 使用量汇总值">
             <div><dt>范围内总量</dt><dd>{formatTokens(aggregate.total)}</dd></div>
             <div><dt>平均值</dt><dd>{formatTokens(aggregate.average)}</dd></div>
             <div><dt>最大值</dt><dd>{formatTokens(aggregate.maximum)}</dd></div>
@@ -442,16 +444,16 @@ function UsageDashboard({
           series={[aggregate]}
           summary
           includeDateLabels={includeDateLabels}
-          ariaLabel={`所有账号 Token 使用趋势：全部账号合计 ${formatTokens(aggregate.total)}`}
+          ariaLabel={`所有账号未加权 Token 使用趋势：全部账号合计 ${formatTokens(aggregate.total)}`}
         />
         <footer className="overview-legacy-summary-footer">
           <span><i style={{ background: chartColors[0] }} />全部账号合计</span>
-          <span>单位：Token / {interval}</span>
+          <span>单位：未加权 Token / {interval}</span>
         </footer>
       </article>
 
       <SeriesPanel
-        title="CPA 账号 Token 使用趋势"
+        title="CPA 账号未加权 Token 使用趋势"
         subtitle={`${windowLabel} · 聚合间隔 ${interval}`}
         subjectLabel="CPA"
         buckets={payload.buckets}
@@ -459,16 +461,18 @@ function UsageDashboard({
         includeDateLabels={includeDateLabels}
         emptyText="所选范围内没有账号 Token 数据"
         statuses={accountStatuses}
+        tokenMode="unweighted"
       />
       <SeriesPanel
-        title="用户 Token 使用趋势"
-        subtitle={`${windowLabel} · 聚合间隔 ${interval} · Top ${payload.user_limit}`}
+        title="用户加权 Token 使用趋势"
+        subtitle={`${windowLabel} · 聚合间隔 ${interval} · Top ${payload.user_limit} · 表格同时列出加权/未加权`}
         subjectLabel="用户"
         buckets={payload.buckets}
         series={payload.users}
         includeDateLabels={includeDateLabels}
         emptyText="所选范围内没有用户 Token 数据"
         statuses={userStatuses}
+        tokenMode="weighted-and-unweighted"
       />
     </>
   );
@@ -482,7 +486,8 @@ function SeriesPanel({
   series,
   includeDateLabels,
   emptyText,
-  statuses
+  statuses,
+  tokenMode
 }: {
   title: string;
   subtitle: string;
@@ -492,24 +497,26 @@ function SeriesPanel({
   includeDateLabels: boolean;
   emptyText: string;
   statuses: Map<string, SeriesStatus>;
+  tokenMode: SeriesTokenMode;
 }) {
+  const chartSeries = tokenMode === "weighted-and-unweighted" ? series.map(asWeightedSeries) : series;
   return (
     <article className="overview-legacy-panel overview-legacy-usage-panel">
       <header className="overview-legacy-panel-header">
         <div><h4>{title}</h4><small>{subtitle}</small></div>
-        <span>单位：Token / 聚合间隔</span>
+        <span>单位：{tokenMode === "unweighted" ? "未加权 Token" : "加权 Token"} / 聚合间隔</span>
       </header>
       {series.length ? (
         <UsageChartLoader
           buckets={buckets}
-          series={series}
+          series={chartSeries}
           includeDateLabels={includeDateLabels}
-          ariaLabel={`分项 Token 使用趋势：${series.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，")}`}
+          ariaLabel={`分项${tokenMode === "unweighted" ? "未加权" : "加权"} Token 使用趋势：${chartSeries.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，")}`}
         />
       ) : (
         <div className="overview-legacy-chart-empty"><strong>暂无趋势</strong><span>{emptyText}</span></div>
       )}
-      <SeriesTable subjectLabel={subjectLabel} series={series} emptyText={emptyText} statuses={statuses} />
+      <SeriesTable subjectLabel={subjectLabel} series={series} emptyText={emptyText} statuses={statuses} tokenMode={tokenMode} />
     </article>
   );
 }
@@ -538,22 +545,23 @@ function UsageChartLoader({ buckets, series, summary = false, includeDateLabels,
   );
 }
 
-function SeriesTable({ subjectLabel, series, emptyText, statuses }: {
+function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode }: {
   subjectLabel: "CPA" | "用户";
   series: TokenSeries[];
   emptyText: string;
   statuses: Map<string, SeriesStatus>;
+  tokenMode: SeriesTokenMode;
 }) {
   const [sort, setSort] = useState<SortState>({ key: "total", direction: "desc" });
   const sorted = useMemo(() => [...series].sort((left, right) => {
-    const leftValue = sort.key === "status" ? seriesStatusRank(seriesStatus(left, statuses)) : left[sort.key as Exclude<SeriesSortKey, "status">];
-    const rightValue = sort.key === "status" ? seriesStatusRank(seriesStatus(right, statuses)) : right[sort.key as Exclude<SeriesSortKey, "status">];
+    const leftValue = seriesSortValue(left, sort.key, statuses, tokenMode);
+    const rightValue = seriesSortValue(right, sort.key, statuses, tokenMode);
     const comparison = typeof leftValue === "number" && typeof rightValue === "number"
       ? leftValue - rightValue
       : String(leftValue).localeCompare(String(rightValue), "zh-CN");
     const directed = sort.direction === "asc" ? comparison : -comparison;
     return directed || left.name.localeCompare(right.name, "zh-CN");
-  }), [series, sort, statuses]);
+  }), [series, sort, statuses, tokenMode]);
   const updateSort = (key: SeriesSortKey) => setSort((current) => ({
     key,
     direction: current.key === key
@@ -572,23 +580,23 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses }: {
               sortKey="current"
               sort={sort}
               onSort={updateSort}
-              help="所选时间范围内，最新聚合间隔的 Token 使用值；该间隔可能尚未结束。"
+              help={`${tokenMode === "unweighted" ? "未加权 Token" : "按加权 Token 排序，并同时展示加权和未加权 Token"}；取所选时间范围内最新聚合间隔，该间隔可能尚未结束。`}
             />
             <SeriesTableHeader
               label="平均值"
               sortKey="average"
               sort={sort}
               onSort={updateSort}
-              help="所选时间范围内各聚合间隔的平均 Token 使用值；没有请求的间隔按 0 计算。"
+              help={`${tokenMode === "unweighted" ? "未加权 Token" : "按加权 Token 排序，并同时展示加权和未加权 Token"}；取所选时间范围内各聚合间隔平均值，没有请求的间隔按 0 计算。`}
             />
             <SeriesTableHeader
               label="最大值"
               sortKey="maximum"
               sort={sort}
               onSort={updateSort}
-              help="所选时间范围内，单个聚合间隔的最高 Token 使用值。"
+              help={`${tokenMode === "unweighted" ? "未加权 Token" : "按加权 Token 排序，并同时展示加权和未加权 Token"}；取所选时间范围内单个聚合间隔的最高值。`}
             />
-            <SeriesTableHeader label="范围内总量" sortKey="total" sort={sort} onSort={updateSort} />
+            <SeriesTableHeader label={`范围内总量（${tokenMode === "unweighted" ? "未加权" : "按加权"}）`} sortKey="total" sort={sort} onSort={updateSort} />
           </tr>
         </thead>
         <tbody>
@@ -599,10 +607,10 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses }: {
               <tr key={item.name}>
                 <td><span className="overview-series-name"><i style={{ background: chartColors[colorIndex % chartColors.length] }} /><strong>{item.name}</strong></span></td>
                 <td><span className={`overview-status-chip ${status.tone}`}>{status.label}</span></td>
-                <td><TokenValue value={item.current} /></td>
-                <td><TokenValue value={item.average} /></td>
-                <td><TokenValue value={item.maximum} /></td>
-                <td className="usage-monitor-total"><TokenValue value={item.total} /></td>
+                <td><SeriesTokenValue series={item} metric="current" tokenMode={tokenMode} /></td>
+                <td><SeriesTokenValue series={item} metric="average" tokenMode={tokenMode} /></td>
+                <td><SeriesTokenValue series={item} metric="maximum" tokenMode={tokenMode} /></td>
+                <td className="usage-monitor-total"><SeriesTokenValue series={item} metric="total" tokenMode={tokenMode} /></td>
               </tr>
             );
           }) : (
@@ -677,6 +685,21 @@ function TokenValue({ value }: { value: number }) {
   );
 }
 
+function SeriesTokenValue({ series, metric, tokenMode }: {
+  series: TokenSeries;
+  metric: Exclude<SeriesSortKey, "name" | "status">;
+  tokenMode: SeriesTokenMode;
+}) {
+  const unweighted = series[metric];
+  if (tokenMode === "unweighted") return <TokenValue value={unweighted} />;
+  return (
+    <div className="overview-user-token-pair">
+      <div><small>加权</small><TokenValue value={weightedMetric(series, metric)} /></div>
+      <div><small>未加权</small><TokenValue value={unweighted} /></div>
+    </div>
+  );
+}
+
 function legacyTokenParts(value: number) {
   const normalized = Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
   let divisor = 1;
@@ -737,8 +760,42 @@ function aggregateTokenSeries(buckets: number[], series: TokenSeries[]): TokenSe
     current: values.at(-1) ?? 0,
     average: values.length ? Math.round(total / values.length) : 0,
     maximum: Math.max(...values, 0),
-    total
+    total,
+    weighted_values: values,
+    weighted_current: values.at(-1) ?? 0,
+    weighted_average: values.length ? Math.round(total / values.length) : 0,
+    weighted_maximum: Math.max(...values, 0),
+    weighted_total: total
   };
+}
+
+function asWeightedSeries(series: TokenSeries): TokenSeries {
+  return {
+    ...series,
+    values: series.weighted_values ?? series.values,
+    current: series.weighted_current ?? series.current,
+    average: series.weighted_average ?? series.average,
+    maximum: series.weighted_maximum ?? series.maximum,
+    total: series.weighted_total ?? series.total
+  };
+}
+
+function seriesSortValue(
+  series: TokenSeries,
+  key: SeriesSortKey,
+  statuses: Map<string, SeriesStatus>,
+  tokenMode: SeriesTokenMode
+) {
+  if (key === "status") return seriesStatusRank(seriesStatus(series, statuses));
+  if (key === "name") return series.name;
+  return tokenMode === "weighted-and-unweighted" ? weightedMetric(series, key) : series[key];
+}
+
+function weightedMetric(series: TokenSeries, metric: Exclude<SeriesSortKey, "name" | "status">) {
+  if (metric === "current") return series.weighted_current ?? series.current;
+  if (metric === "average") return series.weighted_average ?? series.average;
+  if (metric === "maximum") return series.weighted_maximum ?? series.maximum;
+  return series.weighted_total ?? series.total;
 }
 
 function mergeOptions(current: string[], incoming: string[]) {

@@ -3299,12 +3299,17 @@ type TeamUserUsage struct {
 
 // TokenSeries defines model for TokenSeries.
 type TokenSeries struct {
-	Average int64   `json:"average"`
-	Current int64   `json:"current"`
-	Maximum int64   `json:"maximum"`
-	Name    string  `json:"name"`
-	Total   int64   `json:"total"`
-	Values  []int64 `json:"values"`
+	Average         int64   `json:"average"`
+	Current         int64   `json:"current"`
+	Maximum         int64   `json:"maximum"`
+	Name            string  `json:"name"`
+	Total           int64   `json:"total"`
+	Values          []int64 `json:"values"`
+	WeightedAverage int64   `json:"weighted_average"`
+	WeightedCurrent int64   `json:"weighted_current"`
+	WeightedMaximum int64   `json:"weighted_maximum"`
+	WeightedTotal   int64   `json:"weighted_total"`
+	WeightedValues  []int64 `json:"weighted_values"`
 }
 
 // UpdateUserQuotaRequest defines model for UpdateUserQuotaRequest.

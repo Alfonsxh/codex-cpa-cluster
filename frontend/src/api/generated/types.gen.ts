@@ -1025,6 +1025,11 @@ export type TokenSeries = {
     average: number;
     maximum: number;
     total: number;
+    weighted_values: Array<number>;
+    weighted_current: number;
+    weighted_average: number;
+    weighted_maximum: number;
+    weighted_total: number;
 };
 
 export type CollectorStatus = {

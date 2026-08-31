@@ -12,7 +12,7 @@ CPAC_ALLOW_NON_ROOT=true sh "$ROOT_DIR/scripts/cpac" domain set QData.Example.CO
   echo "cpac did not normalize and persist the domain" >&2
   exit 1
 }
-mode=$(stat -f '%Lp' "$CONFIG_FILE" 2>/dev/null || stat -c '%a' "$CONFIG_FILE")
+mode=$(stat -c '%a' "$CONFIG_FILE" 2>/dev/null || stat -f '%Lp' "$CONFIG_FILE")
 [ "$mode" = 600 ] || { echo "cpac config mode = $mode" >&2; exit 1; }
 
 if CPAC_ALLOW_NON_ROOT=true sh "$ROOT_DIR/scripts/cpac" domain set invalid \

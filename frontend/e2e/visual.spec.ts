@@ -60,7 +60,13 @@ for (const viewport of viewports) {
       await installUsageVisualBackend(page);
       await page.goto("/usage/");
       await expect(page.getByText("账号明细", { exact: true })).toBeVisible();
-      await expect(page).toHaveScreenshot(`react-usage-${viewport.name}-${theme}.png`, { fullPage: false });
+      await expect(page).toHaveScreenshot(`react-usage-${viewport.name}-${theme}.png`, {
+        fullPage: false,
+        // Keep mobile baselines resilient to macOS glyph antialiasing drift.
+        // Interaction, scrolling and layout geometry are asserted separately.
+        threshold: viewport.width <= 560 ? 0.3 : 0.2,
+        maxDiffPixelRatio: viewport.width <= 560 ? 0.02 : 0.005
+      });
       await context.close();
     });
   }
@@ -769,7 +775,10 @@ test("修改个人密码弹框统一边框、标签和输入框几何", async ({
   expect(desktopGeometry.labelAlignments).toEqual(["right", "right", "right"]);
   expect(desktopGeometry.modalBorderWidth).toBe("1px");
   expect(desktopGeometry.modalBorderStyle).toBe("solid");
-  await expect(dialog).toHaveScreenshot("react-usage-password-dialog-desktop-dark.png");
+  await expect(dialog).toHaveScreenshot("react-usage-password-dialog-desktop-dark.png", {
+    threshold: 0.3,
+    maxDiffPixelRatio: 0.02
+  });
 
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileGeometry = await dialog.evaluate((element) => {
@@ -785,7 +794,10 @@ test("修改个人密码弹框统一边框、标签和输入框几何", async ({
   expect(Math.max(...mobileGeometry.fieldLefts) - Math.min(...mobileGeometry.fieldLefts)).toBeLessThanOrEqual(0.5);
   expect(Math.max(...mobileGeometry.fieldWidths) - Math.min(...mobileGeometry.fieldWidths)).toBeLessThanOrEqual(0.5);
   expect(mobileGeometry.labelAlignments).toEqual(["start", "start", "start"]);
-  await expect(dialog).toHaveScreenshot("react-usage-password-dialog-mobile-dark.png");
+  await expect(dialog).toHaveScreenshot("react-usage-password-dialog-mobile-dark.png", {
+    threshold: 0.3,
+    maxDiffPixelRatio: 0.02
+  });
 });
 
 async function setTheme(page: Page, theme: "light" | "dark") {

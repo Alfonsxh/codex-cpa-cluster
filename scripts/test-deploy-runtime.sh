@@ -45,7 +45,7 @@ case " $* " in
       "$bootstrap_root/logs/gateway" \
       "$bootstrap_root/auth" \
       "$bootstrap_root/configs" \
-      "$bootstrap_root/management"
+      "$bootstrap_root/management/config/static"
     : >"$bootstrap_root/state/control-plane.sqlite3"
     : >"$bootstrap_root/state/usage.sqlite3"
     printf '%032d' 0 >"$bootstrap_root/secrets/control-plane.key"
@@ -240,6 +240,9 @@ new_fixture() {
     "$DEPLOY_ROOT/state/gateway" \
     "$DEPLOY_ROOT/state/edge" \
     "$DEPLOY_ROOT/secrets" \
+    "$DEPLOY_ROOT/auth" \
+    "$DEPLOY_ROOT/configs" \
+    "$DEPLOY_ROOT/management/config/static" \
     "$DEPLOY_ROOT/logs/gateway"
   : >"$DEPLOY_ROOT/state/control-plane.sqlite3"
   : >"$DEPLOY_ROOT/state/usage.sqlite3"
@@ -567,11 +570,56 @@ run_operator_deploy() {
       --domain qdata.example.com --version "$RELEASE_VERSION"
 }
 
-run_operator_deploy >/dev/null
+INSTALL_OUTPUT="$OPERATOR_ROOT/install-output.log"
+run_operator_deploy >"$INSTALL_OUTPUT"
+for expected_output in \
+  "== CPAC 安装与升级 ==" \
+  "检查系统环境" \
+  "拉取组件镜像" \
+  "管理员登录: https://qdata.example.com/admin/" \
+  "首次管理员凭据已安全保留"
+do
+  grep -Fq "$expected_output" "$INSTALL_OUTPUT" || {
+    echo "operator deploy output is missing: $expected_output" >&2
+    sed -n '1,240p' "$INSTALL_OUTPUT" >&2
+    exit 1
+  }
+done
+if grep -Fq "Go target images verified" "$INSTALL_OUTPUT"; then
+  echo "successful operator deploy leaked captured target command output" >&2
+  exit 1
+fi
+escape_character=$(printf '\033')
+if grep -q "$escape_character" "$INSTALL_OUTPUT"; then
+  echo "non-terminal operator deploy emitted ANSI color" >&2
+  exit 1
+fi
+cp "$RELEASE_SERVER/SHA256SUMS" "$RELEASE_SERVER/SHA256SUMS.valid"
+while IFS= read -r checksum_line; do
+  case "$checksum_line" in
+    *"  deploy.sh") printf '%064d  deploy.sh\n' 0 ;;
+    *) printf '%s\n' "$checksum_line" ;;
+  esac
+done <"$RELEASE_SERVER/SHA256SUMS.valid" >"$RELEASE_SERVER/SHA256SUMS"
+if run_operator_deploy >"$OPERATOR_ROOT/checksum-failure.log" 2>&1; then
+  echo "operator deploy accepted a release with an invalid checksum" >&2
+  exit 1
+fi
+for expected_failure in "校验发布文件 失败" "发布文件 SHA256 校验失败"; do
+  grep -Fq "$expected_failure" "$OPERATOR_ROOT/checksum-failure.log" || {
+    echo "captured failure output is missing: $expected_failure" >&2
+    sed -n '1,240p' "$OPERATOR_ROOT/checksum-failure.log" >&2
+    exit 1
+  }
+done
+mv "$RELEASE_SERVER/SHA256SUMS.valid" "$RELEASE_SERVER/SHA256SUMS"
 cmp -s "$OPERATOR_ROOT/deploy.sh" "$RELEASE_SERVER/deploy.sh" \
   || { echo "deploy.sh did not update itself from the verified release asset" >&2; exit 1; }
 [ -f "$OPERATOR_ROOT/runtime/.deploy-initialized" ] \
   || { echo "fresh deploy did not publish its version marker" >&2; exit 1; }
+[ -d "$OPERATOR_ROOT/runtime/management/config/static" ] \
+  && [ ! -L "$OPERATOR_ROOT/runtime/management/config/static" ] \
+  || { echo "fresh deploy did not create the account management static directory" >&2; exit 1; }
 [ -f "$TEST_ROOT/etc/cpac/bootstrap-admin.key" ] \
   || { echo "fresh deploy did not preserve the pending admin key" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
@@ -595,9 +643,34 @@ grep -Fq \
 mv "$OPERATOR_ROOT/runtime/release-manifest.json.missing" \
   "$OPERATOR_ROOT/runtime/release-manifest.json"
 
+rm -rf -- "$OPERATOR_ROOT/runtime/management/config"
+mkdir "$OPERATOR_ROOT/unsafe-management-static"
+ln -s "$OPERATOR_ROOT/unsafe-management-static" \
+  "$OPERATOR_ROOT/runtime/management/config"
+if run_operator_deploy >"$OPERATOR_ROOT/unsafe-layout.log" 2>&1; then
+  echo "upgrade accepted a symbolic-link account runtime layout" >&2
+  exit 1
+fi
+grep -Fq \
+  "账号运行目录必须是普通目录且不能是符号链接：$OPERATOR_ROOT/runtime/management/config" \
+  "$OPERATOR_ROOT/unsafe-layout.log" || {
+    echo "upgrade did not explain the unsafe account runtime layout" >&2
+    sed -n '1,120p' "$OPERATOR_ROOT/unsafe-layout.log" >&2
+    exit 1
+  }
+if [ -d "$OPERATOR_ROOT/backups" ] \
+  && find "$OPERATOR_ROOT/backups" -type f -name '*.tar.gz' | grep -q .; then
+  echo "unsafe account runtime layout was backed up or mutated before rejection" >&2
+  exit 1
+fi
+rm -- "$OPERATOR_ROOT/runtime/management/config"
+
 mkdir -p "$OPERATOR_ROOT/runtime/scripts"
 printf '%s\n' legacy >"$OPERATOR_ROOT/runtime/scripts/legacy.sh"
 run_operator_deploy >/dev/null
+[ -d "$OPERATOR_ROOT/runtime/management/config/static" ] \
+  && [ ! -L "$OPERATOR_ROOT/runtime/management/config/static" ] \
+  || { echo "upgrade did not repair the missing account management static directory" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
   || { echo "upgrade did not remove the legacy target-side script directory" >&2; exit 1; }
 backup_count=$(find "$OPERATOR_ROOT/backups" -type f -name '*.tar.gz' | wc -l | tr -d ' ')

@@ -137,24 +137,49 @@ func prepareDirectories(root string) error {
 		{"auth", 0o700, -1},
 		{"configs", 0o700, -1},
 		{"management", 0o700, -1},
+		{"management/config", 0o700, -1},
+		{"management/config/static", 0o700, -1},
 		{"logs", 0o700, -1},
 		{"logs/gateway", 0o770, 65534},
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return fmt.Errorf("create bootstrap root: %w", err)
+	if err := prepareDirectory(root, 0o700, -1); err != nil {
+		return fmt.Errorf("prepare bootstrap root: %w", err)
 	}
 	for _, directory := range directories {
 		path := filepath.Join(root, directory.relative)
-		if err := os.MkdirAll(path, directory.mode); err != nil {
-			return fmt.Errorf("create bootstrap directory %s: %w", path, err)
+		if err := prepareDirectory(path, directory.mode, directory.gid); err != nil {
+			return fmt.Errorf("prepare bootstrap directory %s: %w", path, err)
 		}
-		if err := os.Chmod(path, directory.mode); err != nil {
-			return fmt.Errorf("secure bootstrap directory %s: %w", path, err)
+	}
+	return nil
+}
+
+// prepareDirectory creates exactly one path component and refuses links or
+// non-directories. Callers pass parents before children so an existing link
+// can never be traversed by MkdirAll while constructing the runtime layout.
+func prepareDirectory(path string, mode os.FileMode, gid int) error {
+	information, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.Mkdir(path, mode); err != nil {
+			return fmt.Errorf("create directory: %w", err)
 		}
-		if os.Geteuid() == 0 && directory.gid >= 0 {
-			if err := os.Chown(path, -1, directory.gid); err != nil {
-				return fmt.Errorf("assign bootstrap directory group %s: %w", path, err)
-			}
+		information, err = os.Lstat(path)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect directory: %w", err)
+	}
+	if information.Mode()&os.ModeSymlink != 0 {
+		return errors.New("directory must not be a symbolic link")
+	}
+	if !information.IsDir() {
+		return errors.New("path must be a directory")
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		return fmt.Errorf("secure directory: %w", err)
+	}
+	if os.Geteuid() == 0 && gid >= 0 {
+		if err := os.Chown(path, -1, gid); err != nil {
+			return fmt.Errorf("assign directory group: %w", err)
 		}
 	}
 	return nil

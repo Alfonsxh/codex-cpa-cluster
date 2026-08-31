@@ -19,7 +19,9 @@ Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入
 sudo /home/cpac/deploy.sh
 ```
 
-`scripts/deploy.sh` 校验 GitHub Release 中的脚本、归档和机器可读发布环境，在 `/home/cpac/` 同一文件系统创建临时根目录，然后通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照和初始蓝槽文件。临时目标完整后才原子重命名为 `/home/cpac/runtime`。初始化工具拒绝任何已有权威文件，不能用于修复或覆盖既有目标。
+`scripts/deploy.sh` 校验 GitHub Release 中的脚本、归档和机器可读发布环境，在 `/home/cpac/` 同一文件系统创建临时根目录，然后通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/cpac/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。
+
+交互执行使用分阶段终端界面：成功阶段隐藏底层命令噪声，失败阶段展开完整诊断；最终完成卡片必须显示 `https://<域名>/admin/` 管理员登录地址。`NO_COLOR=1` 仅关闭 ANSI 颜色，不改变步骤、错误或安全语义。
 
 域名写入 `/etc/cpac/config.env`。脚本配置 Nginx 到 `127.0.0.1:18317` 并申请或复用 Let's Encrypt 证书；DNS 必须预先指向目标机。外部代理拓扑仍不在本仓库职责内。
 

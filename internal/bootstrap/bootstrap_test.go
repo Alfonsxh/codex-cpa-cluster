@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,16 @@ func TestInitializeCreatesEmptyTargetState(t *testing.T) {
 	if err != nil || string(active) != "set $active_gateway_backend gateway-blue:8317;\n" {
 		t.Fatalf("active Gateway slot = %q, %v", string(active), err)
 	}
+	for _, relative := range []string{"management", "management/config", "management/config/static"} {
+		path := filepath.Join(root, relative)
+		information, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("inspect bootstrap runtime directory %s: %v", relative, err)
+		}
+		if !information.IsDir() || information.Mode()&os.ModeSymlink != 0 || information.Mode().Perm() != 0o700 {
+			t.Fatalf("bootstrap runtime directory %s mode = %v", relative, information.Mode())
+		}
+	}
 }
 
 func TestInitializeRefusesExistingAuthority(t *testing.T) {
@@ -77,5 +88,34 @@ func TestInitializeRefusesExistingAuthority(t *testing.T) {
 	raw, readError := os.ReadFile(path)
 	if readError != nil || string(raw) != "existing" {
 		t.Fatalf("existing authority changed = %q, %v", string(raw), readError)
+	}
+}
+
+func TestInitializeRefusesSymbolicLinkRuntimeLayout(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	management := filepath.Join(root, "management")
+	if err := os.Symlink(outside, management); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Initialize(context.Background(), Config{Root: root})
+	if err == nil || !strings.Contains(err.Error(), "must not be a symbolic link") {
+		t.Fatalf("symbolic link runtime layout error = %v", err)
+	}
+	information, statError := os.Lstat(management)
+	if statError != nil {
+		t.Fatalf("inspect management link: %v", statError)
+	}
+	if information.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("management link changed: mode=%v", information.Mode())
+	}
+	for _, relative := range []string{
+		"state/control-plane.sqlite3",
+		"state/usage.sqlite3",
+		"secrets/control-plane.key",
+	} {
+		if _, statError := os.Lstat(filepath.Join(root, relative)); !errors.Is(statError, os.ErrNotExist) {
+			t.Fatalf("bootstrap created authority after unsafe layout: %s (%v)", relative, statError)
+		}
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/bootstrap"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/containerd/errdefs"
 	"github.com/go-resty/resty/v2"
@@ -23,6 +24,44 @@ import (
 	networktypes "github.com/moby/moby/api/types/network"
 	dockerclient "github.com/moby/moby/client"
 )
+
+func TestAccountRuntimeAcceptsBootstrapManagementLayout(t *testing.T) {
+	root := t.TempDir()
+	if _, err := bootstrap.Initialize(context.Background(), bootstrap.Config{
+		Root: root,
+		ManagementKeyProvider: func() (string, error) {
+			return "bootstrap-management-key", nil
+		},
+	}); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	writeRuntimeTestFile(t, filepath.Join(root, "configs", "alpha.yaml"), "host: \"\"\nport: 8317\n")
+	for _, directory := range []string{filepath.Join(root, "auth", "alpha"), filepath.Join(root, "logs", "alpha")} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatalf("create account runtime directory: %v", err)
+		}
+	}
+	runtime := newAccountRuntimeForTest(
+		t,
+		newRuntimeTestManager(t, &fakeAccountLifecycleClient{}),
+		root,
+		&recordingRoundTripper{status: http.StatusOK},
+	)
+	options, err := runtime.createOptions(context.Background(), controlplane.Account{ID: "alpha", Port: 18320})
+	if err != nil {
+		t.Fatalf("createOptions with bootstrapped layout: %v", err)
+	}
+	expected := filepath.Join(root, "management", "config", "static")
+	found := false
+	for _, mounted := range options.HostConfig.Mounts {
+		if mounted.Source == expected && mounted.Target == "/CLIProxyAPI/configs/static" && mounted.ReadOnly {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("bootstrapped management static mount missing: %#v", options.HostConfig.Mounts)
+	}
+}
 
 func TestAccountRuntimeCreatesExactMobySpecProbesAndRollsBackCandidate(t *testing.T) {
 	root := newRuntimeRoot(t, "gamma")

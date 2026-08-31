@@ -93,7 +93,9 @@ sudo /home/cpac/deploy.sh
                                   \--> 失败则保留原版本并报告
 ```
 
-脚本从同一 GitHub Release 下载自身、归档、发布环境和 `SHA256SUMS`，校验后才更新入口或使用不可变镜像。首次安装在 `/home/cpac/` 同一文件系统的临时目录创建两份 SQLite、主密钥、空 Gateway 快照和随机管理员凭据，再原子发布为 `/home/cpac/runtime`。升级先通过 SQLite Backup API 生成两份通过 `quick_check` 的一致性数据库副本，并与主密钥、OAuth 和运行配置一起写入 `/home/cpac/backups/` 的 root-only 归档，再执行 Gateway 蓝绿排空、Control/Web 更新和烟测；失败时恢复上一发布配置。
+脚本从同一 GitHub Release 下载自身、归档、发布环境和 `SHA256SUMS`，校验后才更新入口或使用不可变镜像。首次安装在 `/home/cpac/` 同一文件系统的临时目录创建两份 SQLite、主密钥、空 Gateway 快照、账号容器所需的 `management/config/static` 目录和随机管理员凭据，再原子发布为 `/home/cpac/runtime`。升级先通过 SQLite Backup API 生成两份通过 `quick_check` 的一致性数据库副本，并与主密钥、OAuth 和运行配置一起写入 `/home/cpac/backups/` 的 root-only 归档，再安全补齐可能缺失的空账号运行目录并执行 Gateway 蓝绿排空、Control/Web 更新和烟测；任一层为符号链接或非目录时失败关闭，部署失败时恢复上一发布配置。
+
+交互终端按阶段显示安装进度，成功时收起 `curl`、Docker、Nginx 等底层命令输出，失败时原样展开对应阶段的诊断日志。完成卡片会明确显示站点地址、管理员登录地址 `https://<域名>/admin/` 和运行目录；首次管理员管理密钥紧随其后且只显示一次。自动化日志可设置标准环境变量 `NO_COLOR=1` 禁用颜色。
 
 首次安装没有固定的默认管理员密码。脚本通过 Control 镜像生成随机管理凭据并写入加密控制面；交互部署会在烟测成功后显示一次，自动化部署则保留在 root-only 待领取文件中，之后在交互终端执行 `sudo /home/cpac/deploy.sh admin-key claim`。升级不显示也不重置已有凭据。
 

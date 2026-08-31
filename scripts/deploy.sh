@@ -13,10 +13,122 @@ NGINX_AVAILABLE_DIRECTORY=${CPAC_NGINX_AVAILABLE_DIRECTORY:-/etc/nginx/sites-ava
 NGINX_ENABLED_DIRECTORY=${CPAC_NGINX_ENABLED_DIRECTORY:-/etc/nginx/sites-enabled}
 CERTIFICATE_ROOT=${CPAC_CERTIFICATE_ROOT:-/etc/letsencrypt/live}
 
+UI_STEP_NUMBER=0
+UI_IS_TERMINAL=false
+UI_RESET=
+UI_BOLD=
+UI_DIM=
+UI_CYAN=
+UI_GREEN=
+UI_RED=
+UI_YELLOW=
+
+ui_initialize() {
+  if [ -t 1 ]; then
+    UI_IS_TERMINAL=true
+  fi
+  if [ "$UI_IS_TERMINAL" = true ] \
+    && [ "${TERM:-dumb}" != dumb ] \
+    && [ -z "${NO_COLOR+x}" ]; then
+    UI_RESET=$(printf '\033[0m')
+    UI_BOLD=$(printf '\033[1m')
+    UI_DIM=$(printf '\033[2m')
+    UI_CYAN=$(printf '\033[36m')
+    UI_GREEN=$(printf '\033[32m')
+    UI_RED=$(printf '\033[31m')
+    UI_YELLOW=$(printf '\033[33m')
+  fi
+}
+
+ui_banner() {
+  if [ "$UI_IS_TERMINAL" = true ]; then
+    printf '\n%s%s╭──────────────────────────────────────────────╮%s\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
+    printf '%s%s│  CPAC  ·  安装 / 升级 / HTTPS / 健康检查      │%s\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
+    printf '%s%s╰──────────────────────────────────────────────╯%s\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
+  else
+    printf '\n== CPAC 安装与升级 ==\n'
+  fi
+}
+
+ui_step() {
+  UI_STEP_NUMBER=$((UI_STEP_NUMBER + 1))
+  if [ "$UI_IS_TERMINAL" = true ]; then
+    printf '\n%s◆  %02d%s  %s%s%s\n' \
+      "$UI_CYAN" "$UI_STEP_NUMBER" "$UI_RESET" "$UI_BOLD" "$*" "$UI_RESET"
+  else
+    printf '\n[%02d] %s\n' "$UI_STEP_NUMBER" "$*"
+  fi
+}
+
+ui_done() {
+  if [ "$UI_IS_TERMINAL" = true ]; then
+    printf '   %s✓%s  %s\n' "$UI_GREEN" "$UI_RESET" "$*"
+  else
+    printf '     OK  %s\n' "$*"
+  fi
+}
+
+ui_note() {
+  if [ "$UI_IS_TERMINAL" = true ]; then
+    printf '   %s→%s  %s\n' "$UI_DIM" "$UI_RESET" "$*"
+  else
+    printf '         %s\n' "$*"
+  fi
+}
+
+ui_error() {
+  if [ "$UI_IS_TERMINAL" = true ]; then
+    printf '%s✗%s  %s\n' "$UI_RED" "$UI_RESET" "$*" >&2
+  else
+    printf 'ERROR  %s\n' "$*" >&2
+  fi
+}
+
+ui_run() {
+  ui_title=$1
+  shift
+  ui_step "$ui_title"
+  ui_log=$(mktemp "${TMPDIR:-/var/tmp}/cpac-command.XXXXXX") || {
+    ui_error "无法创建阶段日志"
+    return 1
+  }
+  if ( "$@" ) >"$ui_log" 2>&1; then
+    rm -f -- "$ui_log"
+    ui_done "$ui_title"
+    return 0
+  else
+    ui_status=$?
+  fi
+  ui_error "$ui_title 失败"
+  cat "$ui_log" >&2
+  rm -f -- "$ui_log"
+  return "$ui_status"
+}
+
+ui_complete() {
+  ui_version=$1
+  ui_domain=$2
+  ui_root=$3
+  if [ "$UI_IS_TERMINAL" = true ]; then
+    printf '\n%s%s╭─ 部署完成 ───────────────────────────────────%s\n' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
+    printf '%s%s│%s  版本    %s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_version"
+    printf '%s%s│%s  地址    https://%s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
+    printf '%s%s│%s  管理员登录  https://%s/admin/\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
+    printf '%s%s│%s  目录    %s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_root"
+    printf '%s%s╰──────────────────────────────────────────────%s\n' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
+  else
+    printf '\nCPA 部署完成\n'
+    printf '  版本: %s\n  地址: https://%s\n  管理员登录: https://%s/admin/\n  目录: %s\n' \
+      "$ui_version" "$ui_domain" "$ui_domain" "$ui_root"
+  fi
+}
+
 die() {
-  printf '%s\n' "$*" >&2
+  ui_error "$*"
   exit 1
 }
+
+ui_initialize
 
 require_root() {
   if [ "$(id -u)" -ne 0 ] && [ "${CPAC_ALLOW_NON_ROOT:-false}" != true ]; then
@@ -128,17 +240,18 @@ install_prerequisites() {
   command -v sqlite3 >/dev/null 2>&1 || set -- "$@" sqlite3
   if [ "$#" -gt 0 ]; then
     command -v apt-get >/dev/null 2>&1 || die "缺少依赖且系统没有 apt-get：$*"
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    apt-get update || die "更新系统软件索引失败"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
+      || die "安装系统依赖失败：$*"
   fi
   for command in awk certbot cmp cp curl docker flock getent grep install mktemp nginx \
     readlink sed sha256sum sqlite3 systemctl tar; do
     require_command "$command"
   done
-  systemctl enable --now docker nginx >/dev/null
+  systemctl enable --now docker nginx || die "启动 Docker 或 Nginx 失败"
   if ! docker compose version >/dev/null 2>&1; then
     command -v apt-get >/dev/null 2>&1 || die "缺少 Docker Compose v2 且系统没有 apt-get"
-    apt-get update
+    apt-get update || die "更新 Docker Compose 软件索引失败"
     DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-v2 \
       || DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin \
       || die "无法安装 Docker Compose v2"
@@ -154,11 +267,12 @@ download_release() {
     selected_version=$requested_version
   else
     latest_url=$(curl -fsSL --retry 3 -o /dev/null -w '%{url_effective}' \
-      "https://github.com/$repository/releases/latest")
+      "https://github.com/$repository/releases/latest") \
+      || die "查询最新发布版本失败"
     selected_version=${latest_url##*/}
   fi
   validate_version "$selected_version" || die "无效发布版本：$selected_version"
-  mkdir -p -- "$output_directory"
+  mkdir -p -- "$output_directory" || die "创建发布下载目录失败"
   base_url="https://github.com/$repository/releases/download/$selected_version"
   for asset in \
     "codex-cpa-cluster-$selected_version.tar.gz" \
@@ -166,10 +280,12 @@ download_release() {
     deploy.sh \
     SHA256SUMS
   do
-    curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
-      "$base_url/$asset" -o "$output_directory/$asset"
+    curl -fsSL --retry 3 --connect-timeout 15 --max-time 300 \
+      "$base_url/$asset" -o "$output_directory/$asset" \
+      || die "下载发布文件失败：$asset"
   done
-  printf '%s\n' "$selected_version" >"$output_directory/VERSION"
+  printf '%s\n' "$selected_version" >"$output_directory/VERSION" \
+    || die "记录发布版本失败"
 }
 
 verify_release() {
@@ -181,16 +297,20 @@ verify_release() {
   done
   (
     cd "$directory"
-    sha256sum -c --ignore-missing SHA256SUMS
-  )
+    sha256sum -c --status --ignore-missing SHA256SUMS
+  ) || die "发布文件 SHA256 校验失败"
   sh -n "$directory/deploy.sh" || die "发布中的 deploy.sh 语法无效"
 }
 
 extract_release() {
   archive=$1
   output_directory=$2
-  entries=$(mktemp "${TMPDIR:-/var/tmp}/cpa-archive.XXXXXX")
-  tar -tzf "$archive" >"$entries"
+  entries=$(mktemp "${TMPDIR:-/var/tmp}/cpa-archive.XXXXXX") \
+    || die "创建发布包检查文件失败"
+  if ! tar -tzf "$archive" >"$entries"; then
+    rm -f -- "$entries"
+    die "读取发布包目录失败"
+  fi
   while IFS= read -r entry; do
     normalized=${entry#./}
     case "$normalized" in
@@ -201,8 +321,9 @@ extract_release() {
     esac
   done <"$entries"
   rm -f -- "$entries"
-  mkdir -p -- "$output_directory"
-  tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$output_directory"
+  mkdir -p -- "$output_directory" || die "创建发布解压目录失败"
+  tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$output_directory" \
+    || die "解压发布包失败"
 }
 
 replace_release_file() {
@@ -324,6 +445,35 @@ validate_upgrade_target() {
   done
 }
 
+validate_optional_account_runtime_layout() {
+  root=$1
+  for relative in management management/config management/config/static; do
+    path="$root/$relative"
+    if [ -L "$path" ] || { [ -e "$path" ] && [ ! -d "$path" ]; }; then
+      die "账号运行目录必须是普通目录且不能是符号链接：$path"
+    fi
+    if [ -d "$path" ]; then
+      canonical_path=$(CDPATH= cd -- "$path" && pwd -P) \
+        || die "无法解析账号运行目录：$path"
+      [ "$canonical_path" = "$path" ] \
+        || die "账号运行目录不能经过符号链接：$path"
+    fi
+  done
+}
+
+ensure_account_runtime_layout() {
+  root=$1
+  validate_optional_account_runtime_layout "$root"
+  for relative in management management/config management/config/static; do
+    path="$root/$relative"
+    if [ ! -d "$path" ]; then
+      mkdir -- "$path" || die "创建账号运行目录失败：$path"
+    fi
+    chmod 0700 "$path" || die "设置账号运行目录权限失败：$path"
+  done
+  validate_optional_account_runtime_layout "$root"
+}
+
 backup_target() {
   root=$1
   backup_directory=${CPAC_BACKUP_DIR:-$DEFAULT_BACKUP_ROOT}
@@ -391,7 +541,9 @@ claim_admin_key() {
   pending="$(dirname -- "$config_file")/bootstrap-admin.key"
   [ -f "$pending" ] && [ ! -L "$pending" ] || die "没有待领取的首次管理员凭据"
   [ -t 1 ] || die "管理员凭据只能在交互终端领取：sudo $SCRIPT_PATH admin-key claim"
-  printf '首次管理员管理密钥（仅显示一次）：\n%s\n' "$(cat "$pending")"
+  printf '\n%s%s首次管理员管理密钥%s  %s仅显示一次，请立即保存%s\n' \
+    "$UI_BOLD" "$UI_YELLOW" "$UI_RESET" "$UI_DIM" "$UI_RESET"
+  printf '%s\n' "$(cat "$pending")"
   rm -f -- "$pending"
 }
 
@@ -490,7 +642,10 @@ EOF
     die "写入 Nginx 站点失败"
   fi
   ln -sfn "$site_file" "$enabled_file"
-  if ! nginx -t || ! systemctl reload nginx; then
+  nginx_log=$(mktemp "${TMPDIR:-/var/tmp}/cpac-nginx.XXXXXX")
+  if ! nginx -t >"$nginx_log" 2>&1 \
+    || ! systemctl reload nginx >>"$nginx_log" 2>&1; then
+    cat "$nginx_log" >&2
     if [ "$had_site" = true ]; then
       mv -f -- "$site_backup" "$site_file"
       site_backup=
@@ -499,8 +654,10 @@ EOF
     fi
     [ "$had_enabled" = true ] || rm -f -- "$enabled_file"
     nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    rm -f -- "$nginx_log"
     die "Nginx 配置验证或重载失败，已恢复原站点"
   fi
+  rm -f -- "$nginx_log"
   [ -z "$site_backup" ] || rm -f -- "$site_backup"
 }
 
@@ -523,7 +680,7 @@ configure_nginx_tls() {
     write_nginx_site http "$domain"
     resolve_certbot_email
     certbot certonly --webroot --webroot-path "$ACME_ROOT" \
-      --domain "$domain" --email "$certbot_email" --agree-tos --non-interactive
+      --domain "$domain" --email "$certbot_email" --agree-tos --non-interactive --quiet
   fi
   [ -s "$certificate_directory/fullchain.pem" ] && [ -s "$certificate_directory/privkey.pem" ] \
     || die "TLS 证书不存在：$domain"
@@ -551,6 +708,19 @@ run_target_action() {
   action=$2
   CPA_RELEASE_ROOT="$deploy_root" CPA_ENV_FILE="$deploy_root/target.env" \
     sh "$SCRIPT_PATH" __target "$action"
+}
+
+target_action_label() {
+  case "$1" in
+    config) printf '%s\n' "检查部署配置" ;;
+    pull) printf '%s\n' "拉取组件镜像" ;;
+    verify-images) printf '%s\n' "验证镜像身份" ;;
+    activate) printf '%s\n' "激活运行时所有权" ;;
+    up-core) printf '%s\n' "启动核心服务" ;;
+    up-writers) printf '%s\n' "启动后台任务" ;;
+    smoke) printf '%s\n' "执行本机健康检查" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
 }
 
 write_initialized_marker() {
@@ -595,8 +765,17 @@ run_deploy() {
   require_root deploy
   case "$deploy_root" in /*) ;; *) die "CPAC_DEPLOY_ROOT 必须是绝对路径" ;; esac
   [ "$deploy_root" != / ] || die "CPAC_DEPLOY_ROOT 不能是文件系统根目录"
+  ui_banner
   domain=$(resolve_deploy_domain "$config_file" "$explicit_domain")
-  install_prerequisites
+  if [ -e "$deploy_root" ]; then
+    deploy_mode=升级
+  else
+    deploy_mode=首次安装
+  fi
+  ui_note "模式  $deploy_mode"
+  ui_note "域名  https://$domain"
+  ui_note "目录  $deploy_root"
+  ui_run "检查系统环境" install_prerequisites
 
   lock_file=${CPAC_LOCK_FILE:-/var/lock/cpa-deploy.lock}
   mkdir -p -- "$(dirname -- "$lock_file")"
@@ -639,33 +818,42 @@ run_deploy() {
   trap 'exit 1' HUP INT TERM
   download_directory="$work_directory/download"
   extract_directory="$work_directory/release"
-  download_release "$repository" "$version" "$download_directory"
+  ui_run "下载发布文件" download_release "$repository" "$version" "$download_directory"
   selected_version=$(cat "$download_directory/VERSION")
-  verify_release "$download_directory" "$selected_version"
+  ui_note "版本  $selected_version"
+  ui_run "校验发布文件" verify_release "$download_directory" "$selected_version"
 
+  ui_step "同步统一部署脚本"
   if update_operator_script "$download_directory/deploy.sh"; then
+    ui_done "部署脚本已更新，继续执行"
     cleanup_files
     trap - EXIT HUP INT TERM
     exec 9>&-
     exec "$SCRIPT_PATH" deploy --domain "$domain" --version "$selected_version" --config "$config_file"
   fi
+  ui_done "部署脚本已是当前版本"
 
   archive="$download_directory/codex-cpa-cluster-$selected_version.tar.gz"
   release_file="$download_directory/release-$selected_version.env"
-  extract_release "$archive" "$extract_directory"
+  ui_run "解压发布元数据" extract_release "$archive" "$extract_directory"
   [ -f "$extract_directory/docker-compose.yml" ] \
     && [ -f "$extract_directory/release-manifest.json" ] \
     || die "发布包缺少部署元数据"
 
+  ui_step "配置 Nginx 与 HTTPS"
   configure_nginx_tls "$domain"
+  ui_done "Nginx 与 HTTPS 已就绪"
   fresh=false
   backup=
   if [ -e "$deploy_root" ]; then
+    ui_step "备份并准备现有环境"
     [ -d "$deploy_root" ] && [ ! -L "$deploy_root" ] \
       || die "部署根目录必须是普通目录：$deploy_root"
     target_initialized "$deploy_root" || die "部署根目录存在但状态不完整，拒绝覆盖：$deploy_root"
     validate_upgrade_target "$deploy_root"
+    validate_optional_account_runtime_layout "$deploy_root"
     backup=$(backup_target "$deploy_root")
+    ensure_account_runtime_layout "$deploy_root"
     mkdir -p "$rollback_directory"
     chmod 0700 "$rollback_directory"
     for relative in target.env docker-compose.yml release-manifest.json; do
@@ -674,7 +862,10 @@ run_deploy() {
     upgrade_pending=true
     install_release_metadata "$extract_directory" "$deploy_root"
     write_target_env "$release_file" "$selected_version" "$deploy_root/target.env" "$deploy_root"
+    ui_done "现有环境备份完成"
+    ui_note "备份  $backup"
   else
+    ui_step "初始化全新运行环境"
     fresh=true
     parent=$(dirname -- "$deploy_root")
     mkdir -p -- "$parent"
@@ -684,7 +875,8 @@ run_deploy() {
     install_release_metadata "$extract_directory" "$install_root"
     write_target_env "$release_file" "$selected_version" "$install_root/target.env" "$deploy_root"
     control_image=$(release_value "$release_file" CPAC_CONTROL_IMAGE)
-    docker pull "$control_image"
+    ui_note "首次拉取镜像可能需要几分钟"
+    docker pull --quiet "$control_image" >/dev/null
     config_directory=$(dirname -- "$config_file")
     pending_key="$config_directory/bootstrap-admin.key"
     [ ! -e "$pending_key" ] || die "已有待领取管理员凭据，拒绝覆盖：$pending_key"
@@ -697,6 +889,7 @@ run_deploy() {
       rm -f -- "$temporary_key"
       die "首次状态初始化失败"
     fi
+    ensure_account_runtime_layout "$install_root"
     key_lines=$(awk 'NF { count++; value=$0 } END { if (count == 1) print value; else exit 1 }' "$temporary_key") \
       || { rm -f -- "$temporary_key"; die "首次管理员凭据输出无效"; }
     [ "${#key_lines}" -ge 12 ] && [ "${#key_lines}" -le 128 ] \
@@ -705,6 +898,7 @@ run_deploy() {
     mv -- "$temporary_key" "$pending_key"
     mv -- "$install_root" "$deploy_root"
     install_root=
+    ui_done "全新运行环境初始化完成"
   fi
 
   if ! docker network inspect cliproxy-backend >/dev/null 2>&1; then
@@ -712,19 +906,22 @@ run_deploy() {
   fi
   deployment_failed=false
   for action in config pull verify-images activate up-core up-writers smoke; do
-    if ! run_target_action "$deploy_root" "$action"; then
-      printf '部署阶段失败：%s\n' "$action" >&2
+    action_label=$(target_action_label "$action")
+    if ! ui_run "$action_label" run_target_action "$deploy_root" "$action"; then
+      ui_error "部署阶段失败：$action"
       deployment_failed=true
       break
     fi
   done
   if [ "$deployment_failed" = true ]; then
     if [ "$fresh" = false ]; then
-      printf '%s\n' "部署失败，正在恢复上一发布配置：$backup" >&2
+      ui_error "部署失败，正在恢复上一发布配置：$backup"
       restore_release_metadata || die "部署失败且原发布元数据恢复失败；备份位于 $backup"
       rollback_ok=true
       for action in pull verify-images activate up-core up-writers smoke; do
-        run_target_action "$deploy_root" "$action" || rollback_ok=false
+        action_label=$(target_action_label "$action")
+        ui_run "回滚：$action_label" run_target_action "$deploy_root" "$action" \
+          || rollback_ok=false
       done
       [ "$rollback_ok" = true ] || die "部署和自动回滚均失败；备份位于 $backup"
       upgrade_pending=false
@@ -736,21 +933,23 @@ run_deploy() {
   upgrade_pending=false
   write_initialized_marker "$deploy_root" "$selected_version"
   prune_legacy_release_payload "$deploy_root"
+  ui_step "验证公网 HTTPS"
   external_status=$(curl --connect-timeout 10 --max-time 30 -sS -o /dev/null \
     -w '%{http_code}' "https://$domain/__health" || true)
   [ "$external_status" = 200 ] \
     || die "容器部署已完成，但 https://$domain/__health 返回 ${external_status:-连接失败}"
-  printf 'CPA 部署完成：version=%s domain=%s root=%s\n' "$selected_version" "$domain" "$deploy_root"
-  [ -z "$backup" ] || printf '升级前备份：%s\n' "$backup"
+  ui_done "公网 HTTPS 健康检查通过"
+  ui_complete "$selected_version" "$domain" "$deploy_root"
+  [ -z "$backup" ] || ui_note "升级前备份  $backup"
   pending_key="$(dirname -- "$config_file")/bootstrap-admin.key"
   if [ -f "$pending_key" ]; then
     if [ -t 1 ]; then
       claim_admin_key "$config_file"
     else
-      printf '首次管理员凭据已安全保留；请在交互终端执行：sudo %s admin-key claim\n' "$SCRIPT_PATH"
+      ui_note "首次管理员凭据已安全保留；请在交互终端执行：sudo $SCRIPT_PATH admin-key claim"
     fi
   fi
-  printf '以后安装和升级都执行：sudo %s\n' "$SCRIPT_PATH"
+  ui_note "以后安装和升级都执行：sudo $SCRIPT_PATH"
 }
 
 run_domain_set() {
@@ -935,6 +1134,11 @@ for required_directory in \
   "$CPA_DEPLOY_ROOT/state/gateway" \
   "$CPA_DEPLOY_ROOT/state/edge" \
   "$CPA_DEPLOY_ROOT/secrets" \
+  "$CPA_DEPLOY_ROOT/auth" \
+  "$CPA_DEPLOY_ROOT/configs" \
+  "$CPA_DEPLOY_ROOT/management" \
+  "$CPA_DEPLOY_ROOT/management/config" \
+  "$CPA_DEPLOY_ROOT/management/config/static" \
   "$CPA_DEPLOY_ROOT/logs" \
   "$CPA_DEPLOY_ROOT/logs/gateway"
 do
@@ -1077,7 +1281,7 @@ pull_images() {
   do
     component=${pair%%|*}
     image=${pair#*|}
-    docker pull "$image"
+    docker pull --quiet "$image" >/dev/null
     validate_tagged_image "$image" "$component"
   done
   # Only execute releasectl from Control after its non-executing image labels

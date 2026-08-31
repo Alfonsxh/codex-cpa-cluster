@@ -41,6 +41,7 @@ type ConfigurationRuntimeApplier struct {
 	}
 	Projection         ConfigurationAccountProjector
 	Runtime            ConfigurationRuntime
+	ControlRuntime     ConfigurationRuntime
 	AccountEnvironment ConfigurationAccountEnvironmentProjector
 }
 
@@ -68,7 +69,7 @@ func (applier *ConfigurationRuntimeApplier) ApplyConfiguration(
 	if accountsChanged && (applier.Accounts == nil || applier.Projection == nil || applier.Runtime == nil) {
 		return errors.New("account configuration runtime is unavailable")
 	}
-	if (collectorChanged || quotaChanged) && applier.Runtime == nil {
+	if (collectorChanged || quotaChanged) && applier.ControlRuntime == nil {
 		return errors.New("collector configuration runtime is unavailable")
 	}
 
@@ -96,7 +97,7 @@ func (applier *ConfigurationRuntimeApplier) ApplyConfiguration(
 		}
 	}
 	if collectorChanged || quotaChanged {
-		if err := applier.Runtime.RestartConfigurationTarget(ctx, "usage-collector"); err != nil {
+		if err := applier.ControlRuntime.RestartConfigurationTarget(ctx, "usage-collector"); err != nil {
 			return fmt.Errorf("restart usage collector: %w", err)
 		}
 	}

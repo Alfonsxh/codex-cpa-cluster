@@ -87,6 +87,56 @@ describe("ConfigurationPage", () => {
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1));
   });
 
+  it("keeps apply failures visible in the confirmation dialog and lets the operator close it", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path !== "/admin/api/settings/configuration") throw new Error(`unexpected request: ${path}`);
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({
+          error: { message: "配置应用失败，已尝试恢复原配置", type: "request_error", code: "configuration_apply_failed" }
+        }), { status: 502, headers: { "Content-Type": "application/json" } });
+      }
+      return jsonResponse(configurationFixture());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
+
+    const retry = await screen.findByLabelText("请求重试次数");
+    await user.clear(retry);
+    await user.type(retry, "3");
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+    await user.click(screen.getByRole("button", { name: "保存并应用" }));
+
+    expect(await screen.findByText("配置应用失败，已尝试恢复原配置")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "保存 1 项配置？" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "保存 1 项配置？" })).not.toBeInTheDocument());
+  });
+
+  it("removes static setting descriptions and places the WeCom switch before the webhook editor", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path === "/admin/api/settings/configuration") return jsonResponse(configurationFixture());
+      throw new Error(`unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
+
+    await screen.findByLabelText("请求重试次数");
+    expect(screen.queryByText("统一作用于所有业务 CPA。")).not.toBeInTheDocument();
+    expect(screen.queryByText("单次上游请求失败后的重试次数。")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /企业微信通知/ }));
+    const enabled = screen.getByLabelText("启用企业微信通知");
+    const webhook = screen.getByText("企业微信群 Webhook");
+    expect(enabled.compareDocumentPosition(webhook) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("loads the destructive all-user impact only when User Quota is opened and refreshes it after reset", async () => {
     let quotaReads = 0;
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -182,7 +232,7 @@ function configurationFixture(): ConfigurationCatalog {
   return {
     version: 1,
     generated_at: 1_800_000_000,
-    field_count: 5,
+    field_count: 6,
     groups: [
       {
         name: "CPA 请求",
@@ -267,6 +317,22 @@ function configurationFixture(): ConfigurationCatalog {
             unit: "Token",
             min: 1,
             max: 1_000_000_000_000
+          }
+        ]
+      },
+      {
+        name: "企业微信通知",
+        description: "企业微信通知配置。",
+        fields: [
+          {
+            key: "notification.enabled",
+            label: "启用企业微信通知",
+            description: "启用定时通知。",
+            type: "boolean",
+            value: false,
+            default: false,
+            apply_mode: "live",
+            editable: true
           }
         ]
       }

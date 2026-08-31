@@ -178,7 +178,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		fallback float64
 	}{
 		{"none", 1}, {"minimal", 1}, {"low", 1}, {"medium", 1}, {"high", 1},
-		{"xhigh", 1}, {"max", 2}, {"ultra", 1}, {"auto", 1}, {"unknown", 1},
+		{"xhigh", 1}, {"max", 2}, {"ultra", 3}, {"auto", 1}, {"unknown", 1},
 	} {
 		definitions = append(definitions, number(
 			"user_quota.reasoning_multiplier."+effort.name,
@@ -324,7 +324,9 @@ func (server *Server) updateConfiguration(c *gin.Context) {
 		}
 		applyRollbackError := server.applyConfiguration(context.WithoutCancel(ctx), rollback)
 		server.logger.Error("configuration apply failed and rollback was attempted",
-			zapError(err), zapError(storeRollbackError), zapError(applyRollbackError))
+			zapError("apply_error_class", err),
+			zapError("store_rollback_error_class", storeRollbackError),
+			zapError("apply_rollback_error_class", applyRollbackError))
 		writeError(c, http.StatusBadGateway, "配置应用失败，已尝试恢复原配置", "configuration_apply_failed")
 		return
 	}
@@ -774,11 +776,22 @@ func numberLabel(value float64) string {
 
 // zapError keeps configuration rollback logging concise without letting any
 // submitted value or encrypted proxy URL enter the structured log.
-func zapError(err error) zap.Field {
+func zapError(field string, err error) zap.Field {
 	if err == nil {
 		return zap.Skip()
 	}
-	return zap.String("error_type", fmt.Sprintf("%T", err))
+	classification := fmt.Sprintf("%T", err)
+	switch {
+	case errors.Is(err, runtimeops.ErrRuntimeTarget):
+		classification = "runtime_target"
+	case errors.Is(err, runtimeops.ErrRuntimeConflict):
+		classification = "runtime_conflict"
+	case errors.Is(err, runtimeops.ErrRuntimeReadOnly):
+		classification = "runtime_read_only"
+	case errors.Is(err, runtimeops.ErrUnsafeDockerHost):
+		classification = "unsafe_docker_host"
+	}
+	return zap.String(field, classification)
 }
 
 var _ sync.Locker = (*sync.Mutex)(nil)

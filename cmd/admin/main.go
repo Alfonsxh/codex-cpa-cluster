@@ -34,22 +34,23 @@ import (
 const envPrefix = "CLIPROXY_ADMIN"
 
 type appConfig struct {
-	Address             string
-	Root                string
-	LogLevel            string
-	SessionTTL          time.Duration
-	PortalSessionTTL    time.Duration
-	SecureCookies       bool
-	ShutdownTimeout     time.Duration
-	GatewayProbes       []string
-	SnapshotTimeout     time.Duration
-	AccountDrainTimeout time.Duration
-	RuntimeOwner        string
-	LeaseTTL            time.Duration
-	ComposeProject      string
-	DockerNetwork       string
-	InstanceName        string
-	RuntimeReadOnly     bool
+	Address               string
+	Root                  string
+	LogLevel              string
+	SessionTTL            time.Duration
+	PortalSessionTTL      time.Duration
+	SecureCookies         bool
+	ShutdownTimeout       time.Duration
+	GatewayProbes         []string
+	SnapshotTimeout       time.Duration
+	AccountDrainTimeout   time.Duration
+	RuntimeOwner          string
+	LeaseTTL              time.Duration
+	ComposeProject        string
+	ControlComposeProject string
+	DockerNetwork         string
+	InstanceName          string
+	RuntimeReadOnly       bool
 }
 
 func main() {
@@ -86,22 +87,23 @@ func newCommand() *cobra.Command {
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return run(appConfig{
-				Address:             settings.GetString("address"),
-				Root:                settings.GetString("root"),
-				LogLevel:            settings.GetString("log-level"),
-				SessionTTL:          settings.GetDuration("session-ttl"),
-				PortalSessionTTL:    settings.GetDuration("portal-session-ttl"),
-				SecureCookies:       settings.GetBool("secure-cookies"),
-				ShutdownTimeout:     settings.GetDuration("shutdown-timeout"),
-				GatewayProbes:       settings.GetStringSlice("gateway-probe-url"),
-				SnapshotTimeout:     settings.GetDuration("snapshot-timeout"),
-				AccountDrainTimeout: settings.GetDuration("account-drain-timeout"),
-				RuntimeOwner:        settings.GetString("runtime-owner"),
-				LeaseTTL:            settings.GetDuration("lease-ttl"),
-				ComposeProject:      settings.GetString("compose-project"),
-				DockerNetwork:       settings.GetString("docker-network-name"),
-				InstanceName:        settings.GetString("instance-name"),
-				RuntimeReadOnly:     settings.GetBool("runtime-read-only"),
+				Address:               settings.GetString("address"),
+				Root:                  settings.GetString("root"),
+				LogLevel:              settings.GetString("log-level"),
+				SessionTTL:            settings.GetDuration("session-ttl"),
+				PortalSessionTTL:      settings.GetDuration("portal-session-ttl"),
+				SecureCookies:         settings.GetBool("secure-cookies"),
+				ShutdownTimeout:       settings.GetDuration("shutdown-timeout"),
+				GatewayProbes:         settings.GetStringSlice("gateway-probe-url"),
+				SnapshotTimeout:       settings.GetDuration("snapshot-timeout"),
+				AccountDrainTimeout:   settings.GetDuration("account-drain-timeout"),
+				RuntimeOwner:          settings.GetString("runtime-owner"),
+				LeaseTTL:              settings.GetDuration("lease-ttl"),
+				ComposeProject:        settings.GetString("compose-project"),
+				ControlComposeProject: settings.GetString("control-compose-project"),
+				DockerNetwork:         settings.GetString("docker-network-name"),
+				InstanceName:          settings.GetString("instance-name"),
+				RuntimeReadOnly:       settings.GetBool("runtime-read-only"),
 			})
 		},
 	}
@@ -120,6 +122,7 @@ func newCommand() *cobra.Command {
 	flags.String("runtime-owner", "codex-cpa", "explicitly activated runtime ownership label")
 	flags.Duration("lease-ttl", 30*time.Second, "runtime and Admin ownership lease lifetime")
 	flags.String("compose-project", "cliproxy-multi", "exact Docker Compose project label used by runtime operations")
+	flags.String("control-compose-project", "codex-cpa", "exact control-plane Docker Compose project label used by configuration reloads")
 	flags.String("docker-network-name", "cliproxy-backend", "exact Docker network used by business CPA containers")
 	flags.String("instance-name", "cliproxy", "container name prefix used by business CPA containers")
 	flags.Bool("runtime-read-only", false, "allow Docker status and log reads but disable all runtime mutations")
@@ -133,6 +136,9 @@ func newCommand() *cobra.Command {
 		panic(err)
 	}
 	if err := settings.BindEnv("compose-project", "CLIPROXY_ADMIN_COMPOSE_PROJECT", "COMPOSE_PROJECT_NAME"); err != nil {
+		panic(err)
+	}
+	if err := settings.BindEnv("control-compose-project", "CLIPROXY_ADMIN_CONTROL_COMPOSE_PROJECT"); err != nil {
 		panic(err)
 	}
 	if err := settings.BindEnv("docker-network-name", "CLIPROXY_ADMIN_DOCKER_NETWORK_NAME", "DOCKER_NETWORK_NAME"); err != nil {
@@ -167,7 +173,10 @@ func run(config appConfig) error {
 		return errors.New("account drain timeout must be positive")
 	}
 	if strings.TrimSpace(config.ComposeProject) == "" {
-		return errors.New("Docker Compose project is required")
+		return errors.New("account Docker Compose project is required")
+	}
+	if strings.TrimSpace(config.ControlComposeProject) == "" {
+		return errors.New("control Docker Compose project is required")
 	}
 	if strings.TrimSpace(config.DockerNetwork) == "" || strings.TrimSpace(config.InstanceName) == "" {
 		return errors.New("Docker network and instance names are required")
@@ -254,6 +263,7 @@ func runOwnedAdmin(
 		Store: store, Snapshots: snapshotPublisher, Lock: identityOperationLock,
 	}
 	var runtimeManager *runtimeops.Manager
+	var controlRuntimeManager *runtimeops.Manager
 	var runtimeJobs *runtimeops.JobManager
 	openRuntime := runtimeops.Open
 	if config.RuntimeReadOnly {
@@ -264,6 +274,16 @@ func runOwnedAdmin(
 		logger.Warn("Docker runtime operations remain disabled", zap.Error(runtimeError))
 	} else {
 		defer runtimeManager.Close()
+	}
+	if config.ControlComposeProject == config.ComposeProject {
+		controlRuntimeManager = runtimeManager
+	} else {
+		controlRuntimeManager, runtimeError = openRuntime(config.ControlComposeProject, store)
+		if runtimeError != nil {
+			logger.Warn("control Docker runtime operations remain disabled", zap.Error(runtimeError))
+		} else {
+			defer controlRuntimeManager.Close()
+		}
 	}
 	runtimeObserver, err := accountstatus.New(accountstatus.Config{Root: config.Root, Secrets: store})
 	if err != nil {
@@ -378,6 +398,9 @@ func runOwnedAdmin(
 	}
 	if runtimeManager != nil && !config.RuntimeReadOnly {
 		configurationApplier.Runtime = configurationRuntimeAdapter{manager: runtimeManager}
+	}
+	if controlRuntimeManager != nil && !config.RuntimeReadOnly {
+		configurationApplier.ControlRuntime = configurationRuntimeAdapter{manager: controlRuntimeManager}
 	}
 	adminServer, err := adminapi.New(adminapi.Config{
 		Root:                 config.Root,

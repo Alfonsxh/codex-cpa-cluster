@@ -83,6 +83,7 @@ services:
       - --runtime-owner=${CPA_RUNTIME_OWNER:-codex-cpa}
       - --gateway-probe-url=http://edge:8319
       - --compose-project=${CPA_ACCOUNT_COMPOSE_PROJECT:?CPA_ACCOUNT_COMPOSE_PROJECT is required}
+      - --control-compose-project=${CPA_COMPOSE_PROJECT_NAME:-codex-cpa}
       - --docker-network-name=${CPA_UPSTREAM_NETWORK:?CPA_UPSTREAM_NETWORK is required}
       - --instance-name=${CPA_ACCOUNT_INSTANCE_NAME:?CPA_ACCOUNT_INSTANCE_NAME is required}
     expose:

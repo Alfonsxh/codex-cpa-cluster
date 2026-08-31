@@ -87,6 +87,7 @@ import {
 } from "./components/CustomUsageRangeModal";
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
+import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
 import { WideSelect } from "./components/WideSelect";
 import { formatTokenAmount } from "./formatters";
 
@@ -1706,15 +1707,16 @@ function AccountEditorModal({
               name="proxy_mode"
               render={({ field, fieldState }) => (
                 <Form.Item label="出口代理" validateStatus={fieldState.error ? "error" : undefined} help={fieldState.error?.message}>
-                  <select
-                    {...field}
-                    className="account-editor-select"
-                    aria-label="出口代理"
-                  >
-                    <option value="inherit">继承控制面默认代理</option>
-                    <option value="custom">使用账号自定义代理</option>
-                    <option value="direct">强制直连</option>
-                  </select>
+                  <LegacyEnhancedSelect
+                    label="出口代理"
+                    value={field.value}
+                    options={[
+                      { value: "inherit", label: "继承控制面默认代理" },
+                      { value: "custom", label: "使用账号自定义代理" },
+                      { value: "direct", label: "强制直连" }
+                    ]}
+                    onChange={field.onChange}
+                  />
                 </Form.Item>
               )}
             />
@@ -1849,9 +1851,7 @@ function AccountPolicyModal({
         {requiresFallback ? (
           <label className="field">
             <span>现有用户切换到</span>
-            <select aria-label="现有用户切换到" value={fallback} onChange={(event) => setFallback(event.target.value)}>
-              {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
+            <LegacyEnhancedSelect label="现有用户切换到" value={fallback} options={options} onChange={setFallback} />
           </label>
         ) : null}
         <LegacyFormError error={error} />
@@ -2139,13 +2139,17 @@ function QuotaResetModal({
             <p className="quota-reset-targets">将刷新：{details.windows.map((window) => window.label || "周限额").join("、") || "当前没有可重置的周限额"}</p>
             <label className="field">
               <span>选择要使用的重置额度</span>
-              <select aria-label="选择要使用的重置额度" value={creditID} onChange={(event) => setCreditID(event.target.value)} autoFocus required>
-                {details.credits.map((credit, index) => (
-                  <option key={credit.id} value={credit.id}>
-                    {credit.title || "Full reset"}{details.credits.length > 1 ? ` #${index + 1}` : ""} · {credit.expires_at ? `${formatFullTimestamp(credit.expires_at)} 到期` : "长期有效"}
-                  </option>
-                ))}
-              </select>
+              <LegacyEnhancedSelect
+                label="选择要使用的重置额度"
+                value={creditID}
+                options={details.credits.map((credit, index) => ({
+                  value: credit.id,
+                  label: `${credit.title || "Full reset"}${details.credits.length > 1 ? ` #${index + 1}` : ""} · ${credit.expires_at ? `${formatFullTimestamp(credit.expires_at)} 到期` : "长期有效"}`
+                }))}
+                autoFocus
+                required
+                onChange={setCreditID}
+              />
             </label>
             <p className="field-help">日期表示该次 Full reset 的到期时间。提交前系统会重新读取额度状态；如果所选额度已使用或过期，本次操作会自动停止。</p>
           </>
@@ -2275,9 +2279,7 @@ function AccountDestructiveModal({
             render={({ field }) => (
               <label className="field">
                 <span>用户切换到</span>
-                <select {...field} aria-label="用户切换到">
-                  {fallbackOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <LegacyEnhancedSelect label="用户切换到" value={field.value} options={fallbackOptions} onChange={field.onChange} />
               </label>
             )}
           />

@@ -73,7 +73,8 @@ describe("TeamsPage frozen legacy contract", () => {
     expect(screen.getByText("1 个团队")).toBeInTheDocument();
     expect(screen.queryByText("平台研发")).not.toBeInTheDocument();
     await userDriver.clear(screen.getByRole("searchbox", { name: "搜索团队名称或说明" }));
-    await userDriver.selectOptions(screen.getByRole("combobox", { name: "团队状态" }), "empty");
+    await userDriver.click(screen.getByRole("button", { name: "团队状态：全部团队" }));
+    await userDriver.click(screen.getByRole("option", { name: "空团队" }));
     expect(screen.getByText("1 个团队")).toBeInTheDocument();
     expect(screen.getByText("无说明")).toBeInTheDocument();
 
@@ -144,7 +145,7 @@ describe("TeamsPage frozen legacy contract", () => {
     expect(within(dialog).queryByText("已选择 1 位用户")).not.toBeInTheDocument();
 
     await userDriver.click(within(dialog).getByRole("button", { name: "成员范围：当前团队成员" }));
-    await userDriver.click(within(dialog).getByRole("option", { name: "未分组用户" }));
+    await userDriver.click(screen.getByRole("option", { name: "未分组用户" }));
     await waitFor(() => {
       const urls = fetchMock.mock.calls.map(([input]) => String(input));
       expect(urls.some((url) => url.includes("team_id=unassigned"))).toBe(true);

@@ -35,8 +35,24 @@ describe("LegacyEnhancedSelect", () => {
     render(<SelectHarness />);
 
     const trigger = screen.getByRole("button", { name: "团队：全部团队" });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      x: 120,
+      y: 700,
+      top: 700,
+      right: 320,
+      bottom: 740,
+      left: 120,
+      width: 200,
+      height: 40,
+      toJSON: () => undefined
+    });
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const menu = screen.getByRole("listbox", { name: "团队" });
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu).toHaveClass("enhanced-select-menu-portal");
+    expect(menu.style.bottom).not.toBe("");
+    expect(menu.style.width).toBe("200px");
     expect(screen.getByRole("option", { name: "全部团队" })).toHaveFocus();
 
     await user.keyboard("{ArrowDown}{Enter}");

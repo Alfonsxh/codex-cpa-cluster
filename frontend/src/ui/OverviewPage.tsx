@@ -28,6 +28,7 @@ import {
   type CustomUsageRange
 } from "./components/CustomUsageRangeModal";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
+import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
 import { LegacyUsageMultiSelect } from "./components/LegacyUsageMultiSelect";
 import { NativeTableViewport } from "./components/NativeTableViewport";
 import { formatTokens } from "./formatters";
@@ -295,28 +296,28 @@ export function OverviewPage() {
             />
             <label className="overview-legacy-filter usage-variable-select">
               <span>用户范围</span>
-              <select
-                aria-label="用户范围"
-                value={userLimit}
-                onChange={(event) => setUserLimit(Number(event.currentTarget.value))}
-              >
-                {[10, 20, 50].map((value) => <option key={value} value={value}>Top {value}</option>)}
-              </select>
+              <LegacyEnhancedSelect
+                label="用户范围"
+                value={String(userLimit)}
+                options={[10, 20, 50].map((value) => ({ value: String(value), label: `Top ${value}` }))}
+                onChange={(nextValue) => setUserLimit(Number(nextValue))}
+              />
             </label>
             <div className="overview-legacy-refresh-cluster usage-refresh-cluster">
               <label className="overview-legacy-filter usage-variable-select usage-refresh-control">
                 <span>自动刷新</span>
-                <select
-                  aria-label="自动刷新"
-                  value={refreshSeconds}
-                  onChange={(event) => setRefreshSeconds(Number(event.currentTarget.value))}
-                >
-                  <option value={0}>关闭</option>
-                  <option value={10}>10 秒</option>
-                  <option value={30}>30 秒</option>
-                  <option value={60}>1 分钟</option>
-                  <option value={300}>5 分钟</option>
-                </select>
+                <LegacyEnhancedSelect
+                  label="自动刷新"
+                  value={String(refreshSeconds)}
+                  options={[
+                    { value: "0", label: "关闭" },
+                    { value: "10", label: "10 秒" },
+                    { value: "30", label: "30 秒" },
+                    { value: "60", label: "1 分钟" },
+                    { value: "300", label: "5 分钟" }
+                  ]}
+                  onChange={(nextValue) => setRefreshSeconds(Number(nextValue))}
+                />
               </label>
               <button
                 type="button"

@@ -50,6 +50,9 @@ func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
 	if err := validateConfiguration(defaults); err != nil {
 		t.Fatalf("default configuration is invalid: %v", err)
 	}
+	if defaults["user_quota.reasoning_multiplier.ultra"] != float64(3) {
+		t.Fatalf("ultra reasoning multiplier default = %#v, want 3", defaults["user_quota.reasoning_multiplier.ultra"])
+	}
 }
 
 func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testing.T) {
@@ -272,14 +275,16 @@ func TestConfigurationUpdateMigratesObserveAndLegacyProxyOutOfSettings(t *testin
 
 func TestConfigurationRuntimeApplierUsesExactTargetsAndSingleCollectorRestart(t *testing.T) {
 	projection := &recordingConfigurationProjection{}
-	runtime := &recordingConfigurationRuntime{}
+	accountRuntime := &recordingConfigurationRuntime{}
+	controlRuntime := &recordingConfigurationRuntime{}
 	deployment := &recordingDeploymentProjection{}
 	applier := &ConfigurationRuntimeApplier{
 		Accounts: configurationAccounts{accounts: []controlplane.Account{
 			{ID: "beta", GroupEnabled: false}, {ID: "alpha", GroupEnabled: true},
 		}},
 		Projection:         projection,
-		Runtime:            runtime,
+		Runtime:            accountRuntime,
+		ControlRuntime:     controlRuntime,
 		AccountEnvironment: deployment,
 	}
 	change := ConfigurationChange{
@@ -290,14 +295,18 @@ func TestConfigurationRuntimeApplierUsesExactTargetsAndSingleCollectorRestart(t 
 		t.Fatalf("ApplyConfiguration: %v", err)
 	}
 	if projection.calls != 1 || deployment.calls != 1 ||
-		!reflect.DeepEqual(runtime.targets, []string{"alpha", "usage-collector"}) {
-		t.Fatalf("configuration side effects = projection %d, deployment %d, targets %#v",
-			projection.calls, deployment.calls, runtime.targets)
+		!reflect.DeepEqual(accountRuntime.targets, []string{"alpha"}) ||
+		!reflect.DeepEqual(controlRuntime.targets, []string{"usage-collector"}) {
+		t.Fatalf("configuration side effects = projection %d, deployment %d, account targets %#v, control targets %#v",
+			projection.calls, deployment.calls, accountRuntime.targets, controlRuntime.targets)
 	}
 
 	missingRuntime := &ConfigurationRuntimeApplier{AccountEnvironment: deployment}
 	if err := missingRuntime.ApplyConfiguration(context.Background(), ConfigurationChange{Modes: []string{"accounts"}}); err == nil {
 		t.Fatal("account apply unexpectedly accepted missing runtime dependencies")
+	}
+	if err := missingRuntime.ApplyConfiguration(context.Background(), ConfigurationChange{Modes: []string{"quota"}}); err == nil {
+		t.Fatal("quota apply unexpectedly accepted missing control runtime")
 	}
 }
 

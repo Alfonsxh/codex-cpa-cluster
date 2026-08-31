@@ -760,7 +760,7 @@ describe("AccountsPage", () => {
     expect(await screen.findByText("删除业务 CPA")).toBeInTheDocument();
     expect(screen.getByText("DESTRUCTIVE ACTION")).toBeInTheDocument();
     expect(screen.queryByText("同时停用该 CPA 仍然独占的 Key")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("用户切换到")).toHaveValue("beta");
+    expect(screen.getByRole("button", { name: "用户切换到：beta" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("输入 CPA 标识以确认"), "alpha");
     const deleteDialog = screen.getAllByRole("dialog").at(-1)!;
     await user.click(within(deleteDialog).getByRole("button", { name: "确认删除" }));

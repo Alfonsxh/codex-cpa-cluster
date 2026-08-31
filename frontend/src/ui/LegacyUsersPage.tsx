@@ -581,19 +581,16 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
             <div className="pagination-actions">
               <label className="pagination-size">
                 <span>每页</span>
-                <select
-                  aria-label="每页条数"
-                  value={pageSize}
-                  onChange={(event) => {
-                    setPageSize(Number(event.target.value));
+                <LegacyEnhancedSelect
+                  label="每页条数"
+                  value={String(pageSize)}
+                  options={[25, 50, 100].map((value) => ({ value: String(value), label: String(value) }))}
+                  onChange={(nextValue) => {
+                    setPageSize(Number(nextValue));
                     setPage(1);
                     setExpandedUsers([]);
                   }}
-                >
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                </select>
+                />
                 <span>条</span>
               </label>
               <nav className="pagination-controls" aria-label="用户列表页码">
@@ -1568,13 +1565,12 @@ function UserAssignmentModal({
       <div className="legacy-user-form-body">
         <label className="field">
           <span>统计团队</span>
-          <select
-            aria-label="统计团队"
+          <LegacyEnhancedSelect
+            label="统计团队"
             value={assignment?.targetTeamID ?? ""}
-            onChange={(event) => onChange(event.target.value || null)}
-          >
-            {teams.map((team) => <option key={team.value} value={team.value === "unassigned" ? "" : team.value}>{team.label}</option>)}
-          </select>
+            options={teams.map((team) => ({ value: team.value === "unassigned" ? "" : team.value, label: team.label }))}
+            onChange={(nextValue) => onChange(nextValue || null)}
+          />
           <small>每位用户只能属于一个团队，用于团队用量统计。</small>
         </label>
         <div className="inline-notice">保存后，团队报表会按当前成员动态汇总所选范围内的 Token；历史事件本身不会改写。</div>
@@ -1650,9 +1646,12 @@ function CreateUserModal({
         </label>
         <label className="field add-user-team-field">
           <span>所属团队</span>
-          <select aria-label="所属团队" value={teamID} onChange={(event) => setTeamID(event.target.value)}>
-            {teams.map((team) => <option key={team.value} value={team.value === "unassigned" ? "" : team.value}>{team.label}</option>)}
-          </select>
+          <LegacyEnhancedSelect
+            label="所属团队"
+            value={teamID}
+            options={teams.map((team) => ({ value: team.value === "unassigned" ? "" : team.value, label: team.label }))}
+            onChange={setTeamID}
+          />
           <small>可选；团队仅用于用量统计，不影响 CPA 自动分配。</small>
         </label>
         <div className="inline-notice">系统会创建统一 API Key，并为用户设置系统默认初始密码。API Key 只显示一次；用户首次登录必须修改默认密码。</div>

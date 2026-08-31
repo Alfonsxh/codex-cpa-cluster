@@ -194,14 +194,19 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
-            <label className="organization-status-filter">
+            <div className="organization-status-filter">
               <span className="visually-hidden">团队状态</span>
-              <select aria-label="团队状态" value={status} onChange={(event) => setStatus(event.target.value as TeamStatus)}>
-                <option value="all">全部团队</option>
-                <option value="active">有成员</option>
-                <option value="empty">空团队</option>
-              </select>
-            </label>
+              <LegacyEnhancedSelect
+                label="团队状态"
+                value={status}
+                options={[
+                  { value: "all", label: "全部团队" },
+                  { value: "active", label: "有成员" },
+                  { value: "empty", label: "空团队" }
+                ]}
+                onChange={setStatus}
+              />
+            </div>
           </div>
           <div>
             <span>{formatNumber(visibleTeams.length)} 个团队</span>

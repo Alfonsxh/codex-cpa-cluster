@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/gateway"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/snapshotfile"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
-	"github.com/google/renameio/v2"
 	"github.com/google/uuid"
 )
 
@@ -206,7 +206,7 @@ func (publisher *SnapshotPublisher) write(path string, payload []byte) error {
 	if err := publisher.chown(directory); err != nil {
 		return err
 	}
-	if err := renameio.WriteFile(path, payload, 0o640); err != nil {
+	if err := snapshotfile.Write(path, payload, 0o640, publisher.snapshotGID()); err != nil {
 		return fmt.Errorf("publish quota snapshot atomically: %w", err)
 	}
 	return publisher.secureExisting(path)
@@ -223,14 +223,21 @@ func (publisher *SnapshotPublisher) chown(path string) error {
 	if os.Geteuid() != 0 {
 		return nil
 	}
-	gid := publisher.SnapshotGID
-	if gid <= 0 {
-		gid = defaultQuotaSnapshotGID
-	}
-	if err := os.Chown(path, -1, gid); err != nil {
+	if err := os.Chown(path, -1, publisher.snapshotGID()); err != nil {
 		return fmt.Errorf("assign quota snapshot group: %w", err)
 	}
 	return nil
+}
+
+func (publisher *SnapshotPublisher) snapshotGID() int {
+	gid := publisher.SnapshotGID
+	if gid <= 0 {
+		if os.Geteuid() != 0 {
+			return os.Getgid()
+		}
+		return defaultQuotaSnapshotGID
+	}
+	return gid
 }
 
 func truncateText(value string, limit int) string {

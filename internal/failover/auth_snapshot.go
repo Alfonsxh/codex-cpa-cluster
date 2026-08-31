@@ -19,7 +19,7 @@ import (
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/gateway"
-	"github.com/google/renameio/v2"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/snapshotfile"
 	"github.com/google/uuid"
 )
 
@@ -263,16 +263,13 @@ func (publisher *AuthSnapshotPublisher) writeSnapshot(path string, payload []byt
 	if err := os.Chmod(directory, 0o750); err != nil {
 		return fmt.Errorf("secure auth snapshot directory: %w", err)
 	}
-	gid := publisher.SnapshotGID
-	if gid <= 0 {
-		gid = defaultSnapshotGID
-	}
+	gid := publisher.snapshotGID()
 	if os.Geteuid() == 0 {
 		if err := os.Chown(directory, -1, gid); err != nil {
 			return fmt.Errorf("assign auth snapshot directory group: %w", err)
 		}
 	}
-	if err := renameio.WriteFile(path, payload, 0o640); err != nil {
+	if err := snapshotfile.Write(path, payload, 0o640, gid); err != nil {
 		return fmt.Errorf("publish auth snapshot atomically: %w", err)
 	}
 	if err := os.Chmod(path, 0o640); err != nil {
@@ -284,6 +281,16 @@ func (publisher *AuthSnapshotPublisher) writeSnapshot(path string, payload []byt
 		}
 	}
 	return nil
+}
+
+func (publisher *AuthSnapshotPublisher) snapshotGID() int {
+	if publisher.SnapshotGID > 0 {
+		return publisher.SnapshotGID
+	}
+	if os.Geteuid() != 0 {
+		return os.Getgid()
+	}
+	return defaultSnapshotGID
 }
 
 func (publisher *AuthSnapshotPublisher) waitForGeneration(ctx context.Context, generation string) error {

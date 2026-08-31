@@ -109,6 +109,47 @@ func TestAccountRuntimeCreatesExactMobySpecProbesAndRollsBackCandidate(t *testin
 	}
 }
 
+func TestAccountRuntimeCreatesFirstAccountOnlyAfterClosedUnauthenticatedProbe(t *testing.T) {
+	root := newRuntimeRoot(t, "gamma")
+	client := &fakeAccountLifecycleClient{}
+	manager := newRuntimeTestManager(t, client)
+	probe := &recordingRoundTripper{status: http.StatusUnauthorized}
+	runtime := newAccountRuntimeForTest(t, manager, root, probe)
+	runtime.store.(*fakeAccountRuntimeStore).keys = map[string]controlplane.InternalKey{}
+
+	transition, err := runtime.PrepareCreate(context.Background(), controlplane.Account{
+		ID: "gamma", Port: 18320, GroupEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("PrepareCreate without users: %v", err)
+	}
+	if probe.authorization != "" || probe.url != "http://cliproxy-gamma:8317/v1/models" {
+		t.Fatalf("bootstrap probe = auth %q url %q", probe.authorization, probe.url)
+	}
+	if err := transition.Rollback(context.Background()); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+}
+
+func TestAccountRuntimeRejectsUnexpectedOpenFirstAccountEndpoint(t *testing.T) {
+	root := newRuntimeRoot(t, "gamma")
+	client := &fakeAccountLifecycleClient{}
+	manager := newRuntimeTestManager(t, client)
+	runtime := newAccountRuntimeForTest(
+		t, manager, root, &recordingRoundTripper{status: http.StatusOK},
+	)
+	runtime.store.(*fakeAccountRuntimeStore).keys = map[string]controlplane.InternalKey{}
+
+	if _, err := runtime.PrepareCreate(context.Background(), controlplane.Account{
+		ID: "gamma", Port: 18320, GroupEnabled: true,
+	}); err == nil || !strings.Contains(err.Error(), "expected 401") {
+		t.Fatalf("PrepareCreate with open bootstrap endpoint = %v", err)
+	}
+	if len(client.removed) != 1 || client.removed[0] != "created-1" {
+		t.Fatalf("unexpectedly open candidate removals = %#v", client.removed)
+	}
+}
+
 func TestAccountRuntimeUsesLatestUpdateChannelBeforeAnImageIsApplied(t *testing.T) {
 	runtime := newAccountRuntimeForTest(
 		t,

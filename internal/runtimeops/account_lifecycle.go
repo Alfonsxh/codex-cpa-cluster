@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -695,8 +696,16 @@ func (runtime *AccountRuntime) probeAccount(ctx context.Context, accountID strin
 		}
 	}
 	sort.Strings(users)
+	expectedStatus := http.StatusOK
+	probeKey := ""
 	if len(users) == 0 {
-		return errors.New("cannot verify account runtime without an active internal probe Key")
+		// A fresh control plane has no users or internal Keys yet, and its
+		// generated business-CPA configuration therefore has api-keys: [].
+		// An exact 401 proves both that the candidate is serving HTTP and that
+		// the empty-user bootstrap state remains closed to unauthenticated use.
+		expectedStatus = http.StatusUnauthorized
+	} else {
+		probeKey = keys[users[0]].Key
 	}
 	probeContext, cancel := context.WithTimeout(ctx, runtime.probeTimeout)
 	defer cancel()
@@ -706,24 +715,29 @@ func (runtime *AccountRuntime) probeAccount(ctx context.Context, accountID strin
 	var lastStatus int
 	var lastError error
 	for {
-		response, requestError := runtime.http.R().
+		request := runtime.http.R().
 			SetContext(probeContext).
-			SetHeader("Authorization", "Bearer "+keys[users[0]].Key).
-			SetDoNotParseResponse(true).
-			Get(endpoint)
+			SetDoNotParseResponse(true)
+		if probeKey != "" {
+			request.SetHeader("Authorization", "Bearer "+probeKey)
+		}
+		response, requestError := request.Get(endpoint)
 		if response != nil {
 			lastStatus = response.StatusCode()
 			if response.RawBody() != nil {
 				_ = response.RawBody().Close()
 			}
 		}
-		if requestError == nil && lastStatus == 200 {
+		if requestError == nil && lastStatus == expectedStatus {
 			return nil
 		}
 		lastError = requestError
 		select {
 		case <-probeContext.Done():
-			return fmt.Errorf("account %s model probe failed with status %d: %w", accountID, lastStatus, errors.Join(lastError, probeContext.Err()))
+			return fmt.Errorf(
+				"account %s model probe failed with status %d, expected %d: %w",
+				accountID, lastStatus, expectedStatus, errors.Join(lastError, probeContext.Err()),
+			)
 		case <-ticker.C:
 		}
 	}

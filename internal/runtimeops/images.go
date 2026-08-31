@@ -484,19 +484,12 @@ func (runtime *AccountRuntime) probeImageAccount(ctx context.Context, accountID 
 			break
 		}
 	}
-	if !hasActiveKey {
-		container, found, findError := runtime.findAccountContainer(ctx, accountID)
-		if findError != nil {
-			return findError
-		}
-		if !found || container.State != "running" {
-			return fmt.Errorf("account %s is not running after image replacement", accountID)
-		}
-		_, _ = fmt.Fprintf(output, "%s 已运行；当前没有活跃用户内部 Key，跳过模型列表验证\n", accountID)
-		return nil
-	}
 	if err := runtime.probeAccount(ctx, accountID); err != nil {
 		return err
+	}
+	if !hasActiveKey {
+		_, _ = fmt.Fprintf(output, "%s 验证通过：未认证访问保持关闭\n", accountID)
+		return nil
 	}
 	_, _ = fmt.Fprintf(output, "%s 验证通过：MODELS\n", accountID)
 	return nil

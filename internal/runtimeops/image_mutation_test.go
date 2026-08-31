@@ -214,6 +214,40 @@ func TestAccountRuntimeUpdatesOneImageWithImmutableReference(t *testing.T) {
 	assertRunningImage(t, client, "alpha", fixtureNewImageID)
 }
 
+func TestAccountRuntimeUpdatesImageWithoutKeysOnlyAfterClosedUnauthenticatedProbe(t *testing.T) {
+	accounts := []controlplane.Account{{ID: "alpha", Port: 18318, GroupEnabled: true}}
+	runtime, store, client, projector := newCPAImageRuntime(t, accounts)
+	store.keys = map[string]controlplane.InternalKey{}
+	client.zeroKeyProbeStatus = http.StatusUnauthorized
+	var output strings.Builder
+
+	if _, err := runtime.UpdateImage(context.Background(), "alpha", &output); err != nil {
+		t.Fatalf("UpdateImage without Keys: %v", err)
+	}
+	if projector.calls != 1 ||
+		!strings.Contains(output.String(), "未认证访问保持关闭") {
+		t.Fatalf("zero-Key image verification: projector=%d output=%q", projector.calls, output.String())
+	}
+	assertRunningImage(t, client, "alpha", fixtureNewImageID)
+}
+
+func TestAccountRuntimeRejectsUnexpectedlyOpenImageWithoutKeys(t *testing.T) {
+	accounts := []controlplane.Account{{ID: "alpha", Port: 18318, GroupEnabled: true}}
+	runtime, store, client, projector := newCPAImageRuntime(t, accounts)
+	store.keys = map[string]controlplane.InternalKey{}
+	client.zeroKeyProbeStatus = http.StatusOK
+	before := cloneStringMap(store.state)
+
+	_, err := runtime.UpdateImage(context.Background(), "alpha", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "expected 401") {
+		t.Fatalf("UpdateImage with open zero-Key endpoint = %v", err)
+	}
+	if projector.calls != 0 || !mapsEqual(before, store.state) {
+		t.Fatalf("open zero-Key update committed state: projector=%d state=%#v", projector.calls, store.state)
+	}
+	assertRunningImage(t, client, "alpha", oldImageID("alpha"))
+}
+
 func TestAccountRuntimeUpdateAllSkipsDisabledAndStoppedAccounts(t *testing.T) {
 	accounts := []controlplane.Account{
 		{ID: "alpha", Port: 18318, GroupEnabled: true},
@@ -399,6 +433,7 @@ type fakeCPAImageClient struct {
 	createImages           []string
 	pullReferences         []string
 	failTargetProbeAccount string
+	zeroKeyProbeStatus     int
 	runtime                *AccountRuntime
 	probeStore             *imageMutationStore
 	inspectResult          *dockerclient.ImageInspectResult
@@ -489,6 +524,9 @@ func (client *fakeCPAImageClient) ContainerCreate(
 func (client *fakeCPAImageClient) RoundTrip(request *http.Request) (*http.Response, error) {
 	account := strings.TrimSuffix(strings.TrimPrefix(request.URL.Host, "cliproxy-"), ":8317")
 	status := http.StatusOK
+	if client.probeStore != nil && len(client.probeStore.keys) == 0 && client.zeroKeyProbeStatus != 0 {
+		status = client.zeroKeyProbeStatus
+	}
 	if account == client.failTargetProbeAccount {
 		for _, candidate := range client.containers {
 			if candidate.Labels[composeServiceLabel] == "cliproxy-"+account && candidate.ImageID == fixtureNewImageID {

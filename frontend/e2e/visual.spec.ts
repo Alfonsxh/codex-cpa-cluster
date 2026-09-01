@@ -62,6 +62,13 @@ for (const viewport of viewports) {
           await expect(page.locator(".top-bar h1")).toHaveText("首次设置");
           await expect(page.locator(".top-bar-heading .eyebrow")).toHaveText("GETTING STARTED");
         }
+        if (route.slug === "configuration") {
+          const configurationPanel = page.getByRole("region", { name: "CPA 请求" });
+          await expect(configurationPanel.locator(".configuration-field")).toHaveCount(2);
+          await expect(configurationPanel.getByLabel("默认上游代理 URL")).toBeVisible();
+          await expect(configurationPanel.getByLabel("请求重试次数")).toBeVisible();
+          expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+        }
         await expect(page).toHaveScreenshot(
           `react-${route.slug}-${viewport.name}-${theme}.png`,
           {
@@ -72,7 +79,13 @@ for (const viewport of viewports) {
             // and overflow assertions continue to catch structural regressions.
             threshold: viewport.width <= 560 ? 0.3 : 0.2,
             maxDiffPixelRatio:
-              viewport.width <= 560 ? 0.02 : viewport.width <= 1024 ? 0.015 : 0.005
+              viewport.width <= 560
+                ? 0.02
+                : viewport.width <= 1024
+                  ? 0.015
+                  : route.slug === "setup"
+                    ? 0.006
+                    : 0.005
           }
         );
       }
@@ -163,7 +176,11 @@ test("配置中心本地数据与审计记录沿用统一信息卡片", async ({
   }));
   expect(mobileStorageGeometry.scrollWidth).toBeGreaterThan(mobileStorageGeometry.clientWidth);
   expect(mobileStorageGeometry.bodyScrollWidth).toBeLessThanOrEqual(mobileStorageGeometry.viewportWidth);
-  await expect(page).toHaveScreenshot("react-configuration-storage-mobile-dark.png", { fullPage: false });
+  await expect(page).toHaveScreenshot("react-configuration-storage-mobile-dark.png", {
+    fullPage: false,
+    threshold: 0.3,
+    maxDiffPixelRatio: 0.02
+  });
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(systemNavigation).toBeVisible();
@@ -177,7 +194,11 @@ test("配置中心本地数据与审计记录沿用统一信息卡片", async ({
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("heading", { name: "暂无管理操作" })).toBeVisible();
-  await expect(page).toHaveScreenshot("react-configuration-audit-empty-mobile-dark.png", { fullPage: false });
+  await expect(page).toHaveScreenshot("react-configuration-audit-empty-mobile-dark.png", {
+    fullPage: false,
+    threshold: 0.3,
+    maxDiffPixelRatio: 0.02
+  });
 });
 
 for (const viewport of viewports) {

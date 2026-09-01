@@ -72,7 +72,7 @@ $ sudo /home/cpac/deploy.sh
 请输入访问域名: qdata.example.com
 ```
 
-域名经过严格的 FQDN 格式校验和规范化后，以单一 `CPA_DOMAIN=<域名>` 配置写入 `/etc/cpac/config.env`。配置通过同目录临时文件原子替换，由 `root` 所有且权限为 `0600`，不会把任意用户输入作为 Shell 执行。后续执行自动读取域名并判断“首次初始化”或“原地升级”。无交互环境可显式传入域名：
+域名经过严格的 FQDN 格式校验和规范化后，以单一 `CPA_DOMAIN=<域名>` 配置写入 `/home/cpac/config.env`。配置通过同目录临时文件原子替换，由 `root` 所有且权限为 `0600`，不会把任意用户输入作为 Shell 执行。后续执行自动读取域名并判断“首次初始化”或“原地升级”。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会在下一次使用默认入口时校验、迁移到 `/home/cpac/` 并删除旧文件；新旧配置不一致时失败关闭。无交互环境可显式传入域名：
 
 ```sh
 sudo /home/cpac/deploy.sh deploy --domain qdata.example.com
@@ -92,6 +92,29 @@ sudo /home/cpac/deploy.sh
         \-- 已有部署状态 --------> 备份、拉取、蓝绿升级、烟测
                                   \--> 失败则保留原版本并报告
 ```
+
+目标机内所有 CPA 持久文件统一放在 `/home/cpac/`：
+
+```text
+/home/cpac/
+├── deploy.sh
+├── config.env
+├── bootstrap-admin.key          # 仅在首次凭据待领取时存在
+├── backups/                     # 首次安装时可不存在
+└── runtime/
+    ├── .deploy-initialized
+    ├── target.env
+    ├── docker-compose.yml
+    ├── release-manifest.json
+    ├── secrets/control-plane.key
+    ├── state/
+    ├── auth/
+    ├── configs/
+    ├── management/config/static/
+    └── logs/gateway/
+```
+
+Nginx、Let's Encrypt、Docker 数据和进程锁仍遵循宿主机系统目录；它们不是第二套 CPA 业务状态。
 
 脚本从同一 GitHub Release 下载自身、归档、发布环境和 `SHA256SUMS`，校验后才更新入口或使用不可变镜像。首次安装在 `/home/cpac/` 同一文件系统的临时目录创建两份 SQLite、主密钥、空 Gateway 快照、账号容器所需的 `management/config/static` 目录和随机管理员凭据，再原子发布为 `/home/cpac/runtime`。升级先通过 SQLite Backup API 生成两份通过 `quick_check` 的一致性数据库副本，并与主密钥、OAuth 和运行配置一起写入 `/home/cpac/backups/` 的 root-only 归档，再安全补齐可能缺失的空账号运行目录并执行 Gateway 蓝绿排空、Control/Web 更新和烟测；任一层为符号链接或非目录时失败关闭，部署失败时恢复上一发布配置。
 

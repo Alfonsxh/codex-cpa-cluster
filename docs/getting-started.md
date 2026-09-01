@@ -49,7 +49,7 @@ sudo chmod 0755 /home/cpac/deploy.sh
 sudo /home/cpac/deploy.sh
 ```
 
-首次执行会提示域名并写入 `/etc/cpac/config.env`；无交互环境使用 `sudo /home/cpac/deploy.sh deploy --domain qdata.example.com`。脚本安装必要依赖、配置 Nginx/TLS、校验 GitHub Release、初始化空状态、启动服务并调用正式烟测。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+首次执行会提示域名并写入 `/home/cpac/config.env`；无交互环境使用 `sudo /home/cpac/deploy.sh deploy --domain qdata.example.com`。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。脚本安装必要依赖、配置 Nginx/TLS、校验 GitHub Release、初始化空状态、启动服务并调用正式烟测。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
 
 ### 首次管理员设置
 

@@ -8,7 +8,7 @@
 sudo /home/cpac/deploy.sh
 ```
 
-命令自动复用 `/etc/cpac/config.env` 中的域名，获取最新 GitHub Release，校验并按需更新自身，在 `/home/cpac/backups/` 创建 root-only 备份，然后执行正式蓝绿部署。固定版本排障可使用 `sudo /home/cpac/deploy.sh deploy --version v2.0.0`。
+命令自动复用 `/home/cpac/config.env` 中的域名，获取最新 GitHub Release，校验并按需更新自身，在 `/home/cpac/backups/` 创建 root-only 备份，然后执行正式蓝绿部署。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会先安全迁移到 `/home/cpac/`。固定版本排障可使用 `sudo /home/cpac/deploy.sh deploy --version v2.0.0`。
 
 ## 前置条件
 

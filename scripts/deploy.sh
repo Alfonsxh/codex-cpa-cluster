@@ -6,7 +6,8 @@ SCRIPT_PATH="$SCRIPT_DIRECTORY/$(basename -- "$0")"
 STAGING_ROOT=${CPAC_STAGING_ROOT:-$SCRIPT_DIRECTORY}
 DEFAULT_DEPLOY_ROOT=${CPAC_DEPLOY_ROOT:-$STAGING_ROOT/runtime}
 DEFAULT_BACKUP_ROOT=${CPAC_BACKUP_DIR:-$STAGING_ROOT/backups}
-DEFAULT_CONFIG_FILE=${CPAC_CONFIG_FILE:-/etc/cpac/config.env}
+DEFAULT_CONFIG_FILE=${CPAC_CONFIG_FILE:-$STAGING_ROOT/config.env}
+LEGACY_CONFIG_FILE=${CPAC_LEGACY_CONFIG_FILE:-/etc/cpac/config.env}
 DEFAULT_REPOSITORY=${CPAC_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}
 ACME_ROOT=${CPAC_ACME_ROOT:-/var/www/letsencrypt}
 NGINX_AVAILABLE_DIRECTORY=${CPAC_NGINX_AVAILABLE_DIRECTORY:-/etc/nginx/sites-available}
@@ -176,7 +177,6 @@ write_config() {
   config_directory=$(dirname -- "$config_file")
   [ ! -L "$config_directory" ] || die "配置目录不能是符号链接：$config_directory"
   mkdir -p -- "$config_directory"
-  chmod 0700 "$config_directory"
   config_tmp=$(mktemp "$config_directory/.config.XXXXXX")
   if ! printf 'CPA_DOMAIN=%s\n' "$domain" >"$config_tmp" \
     || ! chmod 0600 "$config_tmp" \
@@ -184,6 +184,89 @@ write_config() {
     rm -f -- "$config_tmp"
     die "写入域名配置失败：$config_file"
   fi
+}
+
+move_pending_admin_key() {
+  pending_source=$1
+  pending_destination=$2
+  [ -f "$pending_source" ] && [ ! -L "$pending_source" ] \
+    || die "旧管理员凭据必须是普通非符号链接文件：$pending_source"
+  pending_value=$(awk 'NF { count++; value=$0 } END { if (count == 1) print value; else exit 1 }' "$pending_source") \
+    || die "旧管理员凭据内容无效"
+  [ "${#pending_value}" -ge 12 ] && [ "${#pending_value}" -le 128 ] \
+    || die "旧管理员凭据长度无效"
+  [ "$pending_source" != "$pending_destination" ] || return 0
+  if [ -e "$pending_destination" ] || [ -L "$pending_destination" ]; then
+    [ -f "$pending_destination" ] && [ ! -L "$pending_destination" ] \
+      || die "管理员凭据必须是普通非符号链接文件：$pending_destination"
+    cmp -s "$pending_source" "$pending_destination" \
+      || die "新旧管理员凭据不一致，拒绝自动迁移"
+  else
+    pending_directory=$(dirname -- "$pending_destination")
+    [ ! -L "$pending_directory" ] || die "配置目录不能是符号链接：$pending_directory"
+    mkdir -p -- "$pending_directory"
+    pending_temporary=$(mktemp "$pending_directory/.bootstrap-admin.XXXXXX")
+    if ! cp -- "$pending_source" "$pending_temporary" \
+      || ! chmod 0600 "$pending_temporary" \
+      || ! cmp -s "$pending_source" "$pending_temporary" \
+      || ! mv -f -- "$pending_temporary" "$pending_destination"; then
+      rm -f -- "$pending_temporary"
+      die "迁移首次管理员凭据失败"
+    fi
+  fi
+  rm -f -- "$pending_source"
+}
+
+migrate_legacy_operator_state() {
+  migration_destination=$1
+  standard_destination="$STAGING_ROOT/config.env"
+  [ "$LEGACY_CONFIG_FILE" != "$standard_destination" ] || return 0
+  case "$migration_destination" in
+    "$standard_destination") ;;
+    "$LEGACY_CONFIG_FILE") migration_destination=$standard_destination ;;
+    *) return 0 ;;
+  esac
+
+  migration_legacy_directory=$(dirname -- "$LEGACY_CONFIG_FILE")
+  migration_destination_directory=$(dirname -- "$migration_destination")
+  migration_legacy_pending="$migration_legacy_directory/bootstrap-admin.key"
+  migration_destination_pending="$migration_destination_directory/bootstrap-admin.key"
+  migration_legacy_domain=
+  migration_destination_domain=
+  migration_changed=false
+
+  if [ -e "$LEGACY_CONFIG_FILE" ] || [ -L "$LEGACY_CONFIG_FILE" ] \
+    || [ -e "$migration_legacy_pending" ] || [ -L "$migration_legacy_pending" ]; then
+    [ ! -L "$migration_legacy_directory" ] \
+      || die "旧配置目录不能是符号链接：$migration_legacy_directory"
+  fi
+  if [ -e "$LEGACY_CONFIG_FILE" ] || [ -L "$LEGACY_CONFIG_FILE" ]; then
+    migration_legacy_domain=$(config_domain "$LEGACY_CONFIG_FILE")
+  fi
+  if [ -e "$migration_destination" ] || [ -L "$migration_destination" ]; then
+    migration_destination_domain=$(config_domain "$migration_destination")
+  fi
+  if [ -n "$migration_legacy_domain" ] && [ -n "$migration_destination_domain" ] \
+    && [ "$migration_legacy_domain" != "$migration_destination_domain" ]; then
+    die "新旧域名配置不一致，拒绝自动迁移"
+  fi
+  if [ -n "$migration_legacy_domain" ] && [ -z "$migration_destination_domain" ]; then
+    write_config "$migration_destination" "$migration_legacy_domain"
+    migration_destination_domain=$migration_legacy_domain
+    migration_changed=true
+  fi
+  if [ -e "$migration_legacy_pending" ] || [ -L "$migration_legacy_pending" ]; then
+    move_pending_admin_key "$migration_legacy_pending" "$migration_destination_pending"
+    migration_changed=true
+  fi
+  if [ -n "$migration_legacy_domain" ]; then
+    rm -f -- "$LEGACY_CONFIG_FILE"
+    migration_changed=true
+  fi
+  rmdir -- "$migration_legacy_directory" 2>/dev/null || true
+  [ "$migration_changed" != true ] \
+    || ui_note "已迁移安装配置到 $migration_destination"
+  config_file=$migration_destination
 }
 
 resolve_deploy_domain() {
@@ -766,6 +849,7 @@ run_deploy() {
   case "$deploy_root" in /*) ;; *) die "CPAC_DEPLOY_ROOT 必须是绝对路径" ;; esac
   [ "$deploy_root" != / ] || die "CPAC_DEPLOY_ROOT 不能是文件系统根目录"
   ui_banner
+  migrate_legacy_operator_state "$config_file"
   domain=$(resolve_deploy_domain "$config_file" "$explicit_domain")
   if [ -e "$deploy_root" ]; then
     deploy_mode=升级
@@ -966,6 +1050,7 @@ run_domain_set() {
       *) die "未知 domain set 参数：$1" ;;
     esac
   done
+  migrate_legacy_operator_state "$config_file"
   domain=$(normalize_domain "$requested") || die "域名格式无效：$requested"
   current=
   [ ! -e "$config_file" ] || current=$(config_domain "$config_file")
@@ -1013,6 +1098,7 @@ case "$ENTRY_COMMAND" in
     shift
     [ "$#" -eq 0 ] || die "admin-key claim 不接受额外参数"
     require_root admin-key claim
+    migrate_legacy_operator_state "$DEFAULT_CONFIG_FILE"
     claim_admin_key "$DEFAULT_CONFIG_FILE"
     exit 0
     ;;

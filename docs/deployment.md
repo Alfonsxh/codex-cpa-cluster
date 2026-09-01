@@ -23,7 +23,7 @@ sudo /home/cpac/deploy.sh
 
 交互执行使用分阶段终端界面：成功阶段隐藏底层命令噪声，失败阶段展开完整诊断；最终完成卡片必须显示 `https://<域名>/admin/` 管理员登录地址。`NO_COLOR=1` 仅关闭 ANSI 颜色，不改变步骤、错误或安全语义。
 
-域名写入 `/etc/cpac/config.env`。脚本配置 Nginx 到 `127.0.0.1:18317` 并申请或复用 Let's Encrypt 证书；DNS 必须预先指向目标机。外部代理拓扑仍不在本仓库职责内。
+域名写入 `/home/cpac/config.env`，待领取的首次管理员凭据临时写入 `/home/cpac/bootstrap-admin.key`。旧版本位于 `/etc/cpac/` 的两个文件会先经过一致性校验，再迁移到统一目录并删除旧副本；任何冲突都会停止部署。脚本配置 Nginx 到 `127.0.0.1:18317` 并申请或复用 Let's Encrypt 证书；DNS 必须预先指向目标机。外部代理拓扑仍不在本仓库职责内。
 
 ## 底层目标前置条件
 

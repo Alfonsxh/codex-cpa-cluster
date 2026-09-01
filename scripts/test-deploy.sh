@@ -4,10 +4,19 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cpa-deploy-contract.XXXXXX")
 trap 'rm -rf -- "$TEST_ROOT"' EXIT HUP INT TERM
-CONFIG_FILE="$TEST_ROOT/etc/cpac/config.env"
+OPERATOR_ROOT="$TEST_ROOT/home/cpac"
+CONFIG_FILE="$OPERATOR_ROOT/config.env"
+LEGACY_CONFIG_FILE="$TEST_ROOT/etc/cpac/config.env"
+mkdir -p "$OPERATOR_ROOT"
 
-CPAC_ALLOW_NON_ROOT=true sh "$ROOT_DIR/scripts/deploy.sh" domain set QData.Example.COM. \
-  --yes --config "$CONFIG_FILE" >/dev/null
+run_operator_script() {
+  CPAC_ALLOW_NON_ROOT=true \
+    CPAC_STAGING_ROOT="$OPERATOR_ROOT" \
+    CPAC_LEGACY_CONFIG_FILE="$LEGACY_CONFIG_FILE" \
+    sh "$ROOT_DIR/scripts/deploy.sh" "$@"
+}
+
+run_operator_script domain set QData.Example.COM. --yes >/dev/null
 [ "$(cat "$CONFIG_FILE")" = "CPA_DOMAIN=qdata.example.com" ] || {
   echo "deploy.sh did not normalize and persist the domain" >&2
   exit 1
@@ -15,8 +24,7 @@ CPAC_ALLOW_NON_ROOT=true sh "$ROOT_DIR/scripts/deploy.sh" domain set QData.Examp
 mode=$(stat -c '%a' "$CONFIG_FILE" 2>/dev/null || stat -f '%Lp' "$CONFIG_FILE")
 [ "$mode" = 600 ] || { echo "deploy.sh config mode = $mode" >&2; exit 1; }
 
-if CPAC_ALLOW_NON_ROOT=true sh "$ROOT_DIR/scripts/deploy.sh" domain set invalid \
-  --yes --config "$CONFIG_FILE" >/dev/null 2>&1; then
+if run_operator_script domain set invalid --yes >/dev/null 2>&1; then
   echo "deploy.sh accepted an invalid FQDN" >&2
   exit 1
 fi
@@ -26,18 +34,62 @@ fi
 }
 
 MISSING_CONFIG="$TEST_ROOT/missing/config.env"
-if CPAC_ALLOW_NON_ROOT=true \
-  CPAC_DEPLOY_ROOT="$TEST_ROOT/deploy" \
-  sh "$ROOT_DIR/scripts/deploy.sh" deploy --config "$MISSING_CONFIG" </dev/null >/dev/null 2>&1; then
+if CPAC_DEPLOY_ROOT="$TEST_ROOT/deploy" \
+  run_operator_script deploy --config "$MISSING_CONFIG" </dev/null >/dev/null 2>&1; then
   echo "non-interactive first deploy accepted a missing domain" >&2
   exit 1
 fi
 
-PENDING="$TEST_ROOT/etc/cpac/bootstrap-admin.key"
+rm -f -- "$CONFIG_FILE"
+mkdir -p "$(dirname -- "$LEGACY_CONFIG_FILE")"
+printf '%s\n' 'CPA_DOMAIN=legacy.example.com' >"$LEGACY_CONFIG_FILE"
+chmod 0600 "$LEGACY_CONFIG_FILE"
+LEGACY_PENDING="$(dirname -- "$LEGACY_CONFIG_FILE")/bootstrap-admin.key"
+printf '%s\n' 'pending-secret-must-remain' >"$LEGACY_PENDING"
+chmod 0600 "$LEGACY_PENDING"
+run_operator_script domain set Legacy.Example.COM. --yes --config "$LEGACY_CONFIG_FILE" >/dev/null
+[ "$(cat "$CONFIG_FILE")" = "CPA_DOMAIN=legacy.example.com" ] \
+  || { echo "legacy domain config was not migrated" >&2; exit 1; }
+PENDING="$OPERATOR_ROOT/bootstrap-admin.key"
+[ "$(cat "$PENDING")" = 'pending-secret-must-remain' ] \
+  || { echo "legacy pending admin key was not migrated" >&2; exit 1; }
+[ ! -e "$LEGACY_CONFIG_FILE" ] && [ ! -e "$LEGACY_PENDING" ] \
+  || { echo "legacy operator state remained after migration" >&2; exit 1; }
+[ ! -e "$(dirname -- "$LEGACY_CONFIG_FILE")" ] \
+  || { echo "empty legacy config directory remained after migration" >&2; exit 1; }
+
+mkdir -p "$(dirname -- "$LEGACY_CONFIG_FILE")"
+printf '%s\n' 'CPA_DOMAIN=conflict.example.com' >"$LEGACY_CONFIG_FILE"
+chmod 0600 "$LEGACY_CONFIG_FILE"
+if run_operator_script domain set legacy.example.com --yes >/dev/null 2>&1; then
+  echo "deploy.sh accepted conflicting old and new domain configs" >&2
+  exit 1
+fi
+[ "$(cat "$CONFIG_FILE")" = 'CPA_DOMAIN=legacy.example.com' ] \
+  && [ "$(cat "$LEGACY_CONFIG_FILE")" = 'CPA_DOMAIN=conflict.example.com' ] \
+  || { echo "conflicting migration mutated operator config" >&2; exit 1; }
+rm -f -- "$LEGACY_CONFIG_FILE"
+rmdir -- "$(dirname -- "$LEGACY_CONFIG_FILE")"
+
+mkdir -p "$(dirname -- "$LEGACY_CONFIG_FILE")"
+printf '%s\n' 'CPA_DOMAIN=legacy.example.com' >"$LEGACY_CONFIG_FILE"
+chmod 0600 "$LEGACY_CONFIG_FILE"
+LEGACY_PENDING="$(dirname -- "$LEGACY_CONFIG_FILE")/bootstrap-admin.key"
+printf '%s\n' 'different-pending-secret' >"$LEGACY_PENDING"
+chmod 0600 "$LEGACY_PENDING"
+if run_operator_script domain set legacy.example.com --yes >/dev/null 2>&1; then
+  echo "deploy.sh accepted conflicting old and new pending admin keys" >&2
+  exit 1
+fi
+[ "$(cat "$PENDING")" = 'pending-secret-must-remain' ] \
+  && [ "$(cat "$LEGACY_PENDING")" = 'different-pending-secret' ] \
+  || { echo "conflicting pending key migration mutated credentials" >&2; exit 1; }
+rm -f -- "$LEGACY_CONFIG_FILE" "$LEGACY_PENDING"
+rmdir -- "$(dirname -- "$LEGACY_CONFIG_FILE")"
+
 printf '%s\n' 'pending-secret-must-remain' >"$PENDING"
 chmod 0600 "$PENDING"
-if CPAC_CONFIG_FILE="$CONFIG_FILE" CPAC_ALLOW_NON_ROOT=true \
-  sh "$ROOT_DIR/scripts/deploy.sh" admin-key claim </dev/null >/dev/null 2>&1; then
+if run_operator_script admin-key claim </dev/null >/dev/null 2>&1; then
   echo "non-interactive admin-key claim unexpectedly succeeded" >&2
   exit 1
 fi

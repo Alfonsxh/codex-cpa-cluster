@@ -438,7 +438,7 @@ RELEASE_VERSION=v9.9.9
 RELEASE_SERVER="$TEST_ROOT/release-server"
 RELEASE_CONTENT="$TEST_ROOT/release-content"
 OPERATOR_ROOT="$TEST_ROOT/operator"
-OPERATOR_CONFIG="$TEST_ROOT/etc/cpac/config.env"
+OPERATOR_CONFIG="$OPERATOR_ROOT/config.env"
 mkdir -p \
   "$RELEASE_SERVER" \
   "$RELEASE_CONTENT" \
@@ -560,7 +560,7 @@ run_operator_deploy() {
     CPAC_STAGING_ROOT="$OPERATOR_ROOT" \
     CPAC_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
     CPAC_BACKUP_DIR="$OPERATOR_ROOT/backups" \
-    CPAC_CONFIG_FILE="$OPERATOR_CONFIG" \
+    CPAC_LEGACY_CONFIG_FILE="$TEST_ROOT/etc/cpac/config.env" \
     CPAC_LOCK_FILE="$TEST_ROOT/cpa-deploy.lock" \
     CPAC_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
     CPAC_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
@@ -620,8 +620,10 @@ cmp -s "$OPERATOR_ROOT/deploy.sh" "$RELEASE_SERVER/deploy.sh" \
 [ -d "$OPERATOR_ROOT/runtime/management/config/static" ] \
   && [ ! -L "$OPERATOR_ROOT/runtime/management/config/static" ] \
   || { echo "fresh deploy did not create the account management static directory" >&2; exit 1; }
-[ -f "$TEST_ROOT/etc/cpac/bootstrap-admin.key" ] \
+[ -f "$OPERATOR_ROOT/bootstrap-admin.key" ] \
   || { echo "fresh deploy did not preserve the pending admin key" >&2; exit 1; }
+[ ! -e "$TEST_ROOT/etc/cpac" ] \
+  || { echo "fresh deploy created the removed external operator config directory" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
   || { echo "fresh deploy published a second target-side script directory" >&2; exit 1; }
 [ "$(cat "$OPERATOR_CONFIG")" = 'CPA_DOMAIN=qdata.example.com' ] \

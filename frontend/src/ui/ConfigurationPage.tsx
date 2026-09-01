@@ -449,8 +449,8 @@ export function ConfigurationPage({
           ) : null}
           {selection.kind === "system" && selection.section === "access" ? <AccessPanel managementKeyConfigured={general.data.security.management_key_configured} initialPasswordConfigured={general.data.security.initial_password_configured} onInitialPassword={() => setInitialPasswordOpen(true)} onManagementKey={() => setManagementKeyOpen(true)} /> : null}
           {selection.kind === "system" && selection.section === "backups" ? <BackupsPanel count={workspace.data.backups.count} latest={workspace.data.backups.latest} /> : null}
-          {selection.kind === "system" && selection.section === "storage" ? <StoragePanel rows={workspace.data.storage} /> : null}
-          {selection.kind === "system" && selection.section === "audit" ? <AuditPanel rows={workspace.data.recent_audit} /> : null}
+          {selection.kind === "system" && selection.section === "storage" ? <StoragePanel rows={workspace.data.storage} onRefresh={() => refreshWorkspace(true)} /> : null}
+          {selection.kind === "system" && selection.section === "audit" ? <AuditPanel rows={workspace.data.recent_audit} onRefresh={() => refreshWorkspace(true)} /> : null}
         </div>
       </div>
 
@@ -577,8 +577,90 @@ function AccessPanel({ managementKeyConfigured, initialPasswordConfigured, onIni
   return <section className="settings-secondary-panel"><div className="settings-panel-meta"><span className={`status-chip ${managementKeyConfigured ? "success" : "danger"}`}>{managementKeyConfigured ? "管理密钥已配置" : "管理密钥未配置"}</span></div><div className="settings-panel-body"><div className="settings-panel-callout"><strong>用户初始密码</strong><span>{initialPasswordConfigured ? "已配置" : "未配置"}</span></div></div><footer><div className="button-group"><button className="button button-secondary" type="button" onClick={onInitialPassword}>设置用户初始密码</button>{" "}<button className="button button-secondary" type="button" disabled={!managementKeyConfigured} onClick={onManagementKey}>更换管理密钥</button></div></footer></section>;
 }
 function BackupsPanel({ count, latest }: { count: number; latest: string }) { return <section className="settings-secondary-panel"><div className="settings-panel-meta"><strong>{count} 个归档</strong></div><div className="settings-panel-body"><div className="settings-panel-callout"><strong>最近归档</strong><span className="settings-path">{latest || "暂无归档"}</span></div></div></section>; }
-function StoragePanel({ rows }: { rows: Array<{ label: string; path: string; exists: boolean; mode: string }> }) { return <section className="settings-secondary-panel"><div className="panel table-panel settings-table-panel"><NativeTableViewport className="table-wrap" aria-label="存储状态表格"><table className="storage-table"><thead><tr><th className="table-index-column">序号</th><th>数据</th><th>本地路径</th><th>状态</th><th>权限</th></tr></thead><tbody>{rows.map((item, index) => <tr key={item.path}><td className="table-index-cell">{index + 1}</td><td><span className="table-primary">{item.label}</span></td><td><span className="settings-path">{item.path}</span></td><td><span className={`status-chip ${item.exists ? "success" : "neutral"}`}>{item.exists ? "已创建" : "尚未创建"}</span></td><td><span className="settings-path">{item.mode}</span></td></tr>)}</tbody></table></NativeTableViewport></div></section>; }
-function AuditPanel({ rows }: { rows: Array<{ timestamp: number; action: string; target: string; outcome: string }> }) { return <section className="settings-secondary-panel"><div className="panel table-panel settings-table-panel"><NativeTableViewport className="table-wrap" aria-label="管理审计表格"><table className="audit-table"><thead><tr><th className="table-index-column">序号</th><th>时间</th><th>动作</th><th>目标</th><th>结果</th></tr></thead><tbody>{rows.length ? rows.map((item, index) => <tr key={`${item.timestamp}-${index}`}><td className="table-index-cell">{index + 1}</td><td>{formatTime(item.timestamp)}</td><td><span className="settings-path">{item.action}</span></td><td>{item.target}</td><td><span className={`status-chip ${item.outcome === "accepted" ? "success" : "neutral"}`}>{item.outcome || "unknown"}</span></td></tr>) : <tr className="settings-table-empty"><td colSpan={5}>暂无管理操作</td></tr>}</tbody></table></NativeTableViewport></div></section>; }
+function StoragePanel({ rows, onRefresh }: { rows: Array<{ label: string; path: string; exists: boolean; mode: string }>; onRefresh: () => Promise<void> }) {
+  const createdCount = rows.filter((item) => item.exists).length;
+  return (
+    <section className="settings-secondary-panel settings-data-panel" aria-labelledby="settings-storage-title">
+      <SettingsDataPanelHeader
+        id="settings-storage-title"
+        eyebrow="TARGET STORAGE"
+        title="持久化数据"
+        description="检查控制面状态、密钥和审计文件在当前部署根目录中的存放状态。"
+        summary={`${createdCount}/${rows.length}`}
+        summaryLabel="已创建"
+      />
+      {rows.length ? (
+        <div className="settings-table-panel">
+          <NativeTableViewport className="table-wrap settings-table-viewport" aria-label="存储状态表格">
+            <table className="storage-table">
+              <thead><tr><th className="table-index-column">序号</th><th>数据</th><th>本地路径</th><th>状态</th><th>权限</th></tr></thead>
+              <tbody>{rows.map((item, index) => (
+                <tr key={item.path}>
+                  <td className="table-index-cell">{index + 1}</td>
+                  <td><span className="table-primary">{item.label}</span></td>
+                  <td><span className="settings-path">{item.path}</span></td>
+                  <td><span className={`status-chip ${item.exists ? "success" : "neutral"}`}>{item.exists ? "已创建" : "尚未创建"}</span></td>
+                  <td className="settings-mode-cell"><span className="settings-path">{item.mode}</span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </NativeTableViewport>
+        </div>
+      ) : (
+        <SettingsPanelEmptyState icon="▦" title="未发现本地数据项" description="刷新后仍为空时，请确认当前版本是否提供存储状态。" actionLabel="刷新本地数据" onAction={onRefresh} />
+      )}
+    </section>
+  );
+}
+
+function AuditPanel({ rows, onRefresh }: { rows: Array<{ timestamp: number; action: string; target: string; outcome: string }>; onRefresh: () => Promise<void> }) {
+  return (
+    <section className="settings-secondary-panel settings-data-panel" aria-labelledby="settings-audit-title">
+      <SettingsDataPanelHeader
+        id="settings-audit-title"
+        eyebrow="ADMIN ACTIVITY"
+        title="最近管理操作"
+        description="核对配置与维护动作的时间、目标和执行结果。"
+        summary={String(rows.length)}
+        summaryLabel="条记录"
+      />
+      {rows.length ? (
+        <div className="settings-table-panel">
+          <NativeTableViewport className="table-wrap settings-table-viewport" aria-label="管理审计表格">
+            <table className="audit-table">
+              <thead><tr><th className="table-index-column">序号</th><th>时间</th><th>动作</th><th>目标</th><th>结果</th></tr></thead>
+              <tbody>{rows.map((item, index) => (
+                <tr key={`${item.timestamp}-${index}`}>
+                  <td className="table-index-cell">{index + 1}</td>
+                  <td className="settings-time-cell">{formatTime(item.timestamp)}</td>
+                  <td><span className="settings-path">{item.action}</span></td>
+                  <td>{item.target}</td>
+                  <td><span className={`status-chip ${item.outcome === "accepted" ? "success" : "neutral"}`}>{item.outcome || "unknown"}</span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </NativeTableViewport>
+        </div>
+      ) : (
+        <SettingsPanelEmptyState
+          icon="◎"
+          title="暂无管理操作"
+          description="新的配置和维护操作会显示在这里。"
+          actionLabel="刷新审计记录"
+          onAction={onRefresh}
+        />
+      )}
+    </section>
+  );
+}
+
+function SettingsDataPanelHeader({ id, eyebrow, title, description, summary, summaryLabel }: { id: string; eyebrow: string; title: string; description: string; summary: string; summaryLabel: string }) {
+  return <header className="settings-data-panel-header"><div className="settings-data-panel-copy"><span>{eyebrow}</span><h2 id={id}>{title}</h2><p>{description}</p></div><div className="settings-data-panel-summary" aria-label={`${title}：${summary} ${summaryLabel}`}><strong>{summary}</strong><span>{summaryLabel}</span></div></header>;
+}
+
+function SettingsPanelEmptyState({ icon, title, description, actionLabel, onAction }: { icon: string; title: string; description: string; actionLabel?: string; onAction?: () => Promise<void> }) {
+  return <div className="settings-panel-empty"><div className="settings-panel-empty-icon" aria-hidden="true">{icon}</div><h3>{title}</h3><p>{description}</p>{actionLabel && onAction ? <button className="button button-secondary" type="button" onClick={() => { void onAction().catch(() => undefined); }}>{actionLabel}</button> : null}</div>;
+}
 
 function flattenConfiguration(catalog?: ConfigurationCatalog): EditorField[] { return catalog?.groups.flatMap((group) => group.fields.map((field) => ({ ...field, group: group.name }))) ?? []; }
 function configurationDraft(catalog: ConfigurationCatalog): Draft { return Object.fromEntries(flattenConfiguration(catalog).map((field) => [field.key, draftValueFromConfiguration(field.value, field.type)])); }

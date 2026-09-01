@@ -45,6 +45,71 @@ for (const viewport of viewports) {
   }
 }
 
+test("配置中心本地数据与审计记录沿用统一信息卡片", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-08-28T05:42:00.000Z"));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "dark");
+  await page.route("**/admin/api/settings/workspace", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.storage = [
+      { label: "控制面数据库", path: "state/control-plane.sqlite3", exists: true, mode: "600" },
+      { label: "用户用量数据库", path: "state/usage.sqlite3", exists: true, mode: "600" },
+      { label: "控制面加密主密钥", path: "secrets/control-plane.key", exists: true, mode: "600" },
+      { label: "管理操作审计", path: "logs/admin/audit.jsonl", exists: false, mode: "—" }
+    ];
+    payload.recent_audit = [];
+    await route.fulfill({ response, json: payload });
+  });
+  await login(page, "/admin/configuration", "保存配置");
+
+  const systemNavigation = page.getByRole("navigation", { name: "系统管理" });
+  const storageButton = systemNavigation.getByRole("button", { name: /本地数据/ });
+  await storageButton.click();
+  await expect(storageButton).toHaveAttribute("aria-current", "page");
+  await expect(page.locator(".configuration-navigation .active")).toHaveCount(0);
+  await expect(systemNavigation.locator(".active")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "持久化数据" })).toBeVisible();
+  await expect(page.getByText("用户用量数据库", { exact: true })).toBeVisible();
+  const storageRows = page.getByLabel("存储状态表格").getByRole("row");
+  await expect(storageRows).toHaveCount(5);
+  const storageGeometry = await page.getByLabel("存储状态表格").evaluate((element) => {
+    const viewport = element.getBoundingClientRect();
+    const table = element.querySelector("table")?.getBoundingClientRect();
+    const lastRow = element.querySelector("tbody tr:last-child")?.getBoundingClientRect();
+    return { viewportHeight: viewport.height, tableHeight: table?.height ?? 0, lastRowBottom: lastRow?.bottom ?? 0, viewportBottom: viewport.bottom };
+  });
+  expect(storageGeometry.tableHeight).toBeGreaterThan(200);
+  expect(storageGeometry.viewportHeight).toBeGreaterThan(200);
+  expect(storageGeometry.lastRowBottom).toBeLessThanOrEqual(storageGeometry.viewportBottom + 1);
+  await expect(page).toHaveScreenshot("react-configuration-storage-desktop-dark.png", { fullPage: false });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileStorageGeometry = await page.getByLabel("存储状态表格").evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    bodyScrollWidth: document.body.scrollWidth,
+    viewportWidth: window.innerWidth
+  }));
+  expect(mobileStorageGeometry.scrollWidth).toBeGreaterThan(mobileStorageGeometry.clientWidth);
+  expect(mobileStorageGeometry.bodyScrollWidth).toBeLessThanOrEqual(mobileStorageGeometry.viewportWidth);
+  await expect(page).toHaveScreenshot("react-configuration-storage-mobile-dark.png", { fullPage: false });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(systemNavigation).toBeVisible();
+
+  const auditButton = systemNavigation.getByRole("button", { name: /审计记录/ });
+  await auditButton.click();
+  await expect(auditButton).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "暂无管理操作" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "刷新审计记录" })).toBeVisible();
+  await expect(page).toHaveScreenshot("react-configuration-audit-empty-desktop-dark.png", { fullPage: false });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("heading", { name: "暂无管理操作" })).toBeVisible();
+  await expect(page).toHaveScreenshot("react-configuration-audit-empty-mobile-dark.png", { fullPage: false });
+});
+
 for (const viewport of viewports) {
   for (const theme of ["light", "dark"] as const) {
     test(`React 使用中心 ${viewport.name} ${theme} 视觉基准`, async ({ browser }) => {

@@ -3158,27 +3158,57 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
 .settings-panel-callout strong { font-size: 10px; }
 .settings-panel-callout span { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .settings-secondary-panel > footer { display: flex; justify-content: flex-end; padding: 14px 22px; background: var(--surface-2); border-top: 1px solid var(--line); }
-.settings-table-panel { border: 0; border-radius: 0; }
-.settings-table-panel table { width: 100%; min-width: 0; table-layout: fixed; }
+.settings-data-panel { display: grid; align-content: start; }
+.settings-data-panel-header { display: flex; min-height: 92px; align-items: center; justify-content: space-between; gap: 24px; padding: 17px 20px; border-bottom: 1px solid var(--line); }
+.settings-data-panel-copy { display: grid; min-width: 0; gap: 5px; }
+.settings-data-panel-copy > span { color: var(--accent); font: 700 8px/1.2 var(--mono); letter-spacing: .12em; }
+.settings-data-panel-copy h2 { margin: 0; color: var(--ink); font-size: 15px; letter-spacing: -.02em; }
+.settings-data-panel-copy p { max-width: 68ch; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.settings-data-panel-summary { min-width: 92px; padding: 10px 12px; display: grid; flex: none; justify-items: end; gap: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; }
+.settings-data-panel-summary strong { color: var(--ink); font: 700 16px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+.settings-data-panel-summary span { color: var(--faint); font-size: 8px; }
+.settings-table-panel { min-width: 0; overflow: hidden; }
+.settings-table-viewport { max-width: 100%; overflow-x: auto; }
+.settings-table-panel table { width: 100%; min-width: 720px; table-layout: fixed; border-collapse: collapse; }
+.settings-table-panel th,
+.settings-table-panel td { padding: 14px 16px; color: var(--ink); border-bottom: 1px solid var(--line); vertical-align: middle; }
+.settings-table-panel th { color: var(--faint); background: var(--surface-2); font-size: 9px; font-weight: 700; letter-spacing: .08em; text-align: center; text-transform: uppercase; }
+.settings-table-panel td { font-size: 11px; line-height: 1.45; }
+.settings-table-panel tbody tr { transition: background .14s ease; }
+.settings-table-panel tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 48%, transparent); }
+.settings-table-panel tbody tr:last-child td { border-bottom: 0; }
 .settings-table-panel th:nth-child(1) { width: 8%; }
 .settings-table-panel th:nth-child(2) { width: 22%; }
 .settings-table-panel th:nth-child(3) { width: auto; }
 .settings-table-panel th:nth-child(4) { width: 16%; }
 .settings-table-panel th:nth-child(5) { width: 14%; }
-.settings-table-panel td:nth-child(1), .settings-table-panel td:nth-child(4), .settings-table-panel td:nth-child(5) { text-align: center; }
+.settings-table-panel th:nth-child(2),
+.settings-table-panel th:nth-child(3),
+.settings-table-panel td:nth-child(2),
+.settings-table-panel td:nth-child(3) { text-align: left; }
+.settings-table-panel td:nth-child(1),
+.settings-table-panel td:nth-child(4),
+.settings-table-panel td:nth-child(5) { text-align: center; }
+.settings-table-panel .table-index-cell { color: var(--faint); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.settings-table-panel .table-primary { display: block; color: var(--ink); font-size: 11px; font-weight: 650; }
 .storage-table th:nth-child(2) { width: 24%; }
 .storage-table th:nth-child(3) { width: 38%; }
-.storage-table td:nth-child(5) { text-align: right; }
+.storage-table th:nth-child(5), .storage-table td:nth-child(5) { text-align: right; }
 .storage-table td:nth-child(3) { overflow-wrap: anywhere; white-space: normal; }
 .audit-table th:nth-child(2) { width: 22%; }
 .audit-table th:nth-child(3) { width: 25%; }
 .audit-table th:nth-child(4) { width: auto; }
 .audit-table th:nth-child(5) { width: 15%; }
-.audit-table td:nth-child(2), .audit-table td:nth-child(5) { text-align: center; }
+.audit-table th:nth-child(2), .audit-table td:nth-child(2) { text-align: left; }
+.audit-table th:nth-child(5), .audit-table td:nth-child(5) { text-align: center; }
 .audit-table td:nth-child(3), .audit-table td:nth-child(4) { text-align: left; overflow-wrap: anywhere; white-space: normal; }
-.settings-table-empty td { height: 160px; color: var(--faint); text-align: center !important; }
+.settings-mode-cell, .settings-time-cell { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.settings-panel-empty { min-height: 260px; padding: 44px 24px; display: grid; place-content: center; justify-items: center; color: var(--ink); text-align: center; }
+.settings-panel-empty-icon { width: 46px; height: 46px; margin-bottom: 15px; display: grid; color: var(--accent); background: var(--accent-soft); border-radius: 14px; place-items: center; font: 18px/1 var(--mono); }
+.settings-panel-empty h3 { margin: 0; font-size: 16px; }
+.settings-panel-empty p { max-width: 420px; margin: 8px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .settings-path, .table-primary, .table-secondary { overflow: hidden; text-overflow: ellipsis; }
-.settings-path { color: var(--muted); font: 10px/1.45 var(--mono); overflow-wrap: anywhere; }
+.settings-path { color: var(--muted); font: 9px/1.45 var(--mono); overflow-wrap: anywhere; }
 .notification-status-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 0 0 18px; }
 .notification-status-list > span { display: grid; gap: 5px; padding: 11px 12px; color: var(--faint); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; font-size: 9px; }
 .notification-status-list strong { overflow: hidden; color: var(--ink); font: 600 10px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
@@ -3230,4 +3260,6 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
 
 @media (max-width: 620px) {
   .page-content.legacy-settings-page { padding: 16px 15px 24px; }
+  .settings-data-panel-header { align-items: flex-start; flex-direction: column; gap: 12px; padding: 16px; }
+  .settings-data-panel-summary { width: 100%; grid-template-columns: auto auto; align-items: baseline; justify-content: space-between; justify-items: auto; }
 }

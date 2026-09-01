@@ -193,9 +193,15 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" onManagementKeyRotated={rotated} />);
 
-    await user.click(await screen.findByRole("button", { name: /本地数据/ }));
+    const storageButton = await screen.findByRole("button", { name: /本地数据/ });
+    await user.click(storageButton);
+    expect(storageButton).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { name: "持久化数据" })).toBeInTheDocument();
     expect(screen.getByText("state/control-plane.sqlite3")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /审计记录/ }));
+    const auditButton = screen.getByRole("button", { name: /审计记录/ });
+    await user.click(auditButton);
+    expect(auditButton).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { name: "最近管理操作" })).toBeInTheDocument();
     expect(screen.getByText("configuration.update")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /访问凭据/ }));
     await user.click(screen.getByRole("button", { name: "更换管理密钥" }));
@@ -206,6 +212,36 @@ describe("ConfigurationPage", () => {
     await waitFor(() => expect(rotated).toHaveBeenCalledWith("管理密钥已更新，请重新登录"));
     const request = fetchMock.mock.calls.find(([path]) => String(path) === "/admin/api/settings/management-key");
     expect(JSON.parse(String(request?.[1]?.body))).toEqual({ new_key: "replacement-key-2026", confirmation: "replacement-key-2026" });
+  });
+
+  it("presents an informative and recoverable audit empty state", async () => {
+    let workspaceReads = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === "/admin/api/settings/workspace") {
+        workspaceReads += 1;
+        return jsonResponse({
+          storage: [{ label: "控制面数据库", path: "state/control-plane.sqlite3", exists: true, mode: "600" }],
+          backups: { count: 1, latest: "backups/accounts/fixture" },
+          recent_audit: []
+        });
+      }
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path === "/admin/api/settings/configuration") return jsonResponse(configurationFixture());
+      throw new Error(`unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
+
+    await user.click(await screen.findByRole("button", { name: /审计记录/ }));
+    expect(screen.getByRole("heading", { name: "最近管理操作" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "暂无管理操作" })).toBeInTheDocument();
+    expect(screen.getByText("新的配置和维护操作会显示在这里。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "刷新审计记录" }));
+
+    await waitFor(() => expect(workspaceReads).toBe(2));
   });
 
   it("shows a recoverable empty state when the configuration catalog has no groups", async () => {

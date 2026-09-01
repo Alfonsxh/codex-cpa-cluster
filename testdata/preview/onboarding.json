@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "generated_at": 1787895720,
+  "required_complete": true,
+  "deferred": false,
+  "required": { "complete": 5, "total": 5 },
+  "recommended": { "complete": 6, "skipped": 0, "total": 6 },
+  "skipped_recommended": [],
+  "steps": [
+    { "id": "email_domains", "kind": "required", "status": "complete", "title": "组织与访问", "description": "配置允许创建和登录用户的邮箱域名。", "action_path": "/configuration?group=品牌与身份&key=identity.allowed_email_domains", "blockers": [] },
+    { "id": "initial_password", "kind": "required", "status": "complete", "title": "用户初始密码", "description": "新用户首次登录使用，登录后必须立即修改。", "action_path": "/configuration?section=access", "blockers": [] },
+    { "id": "first_account", "kind": "required", "status": "complete", "title": "创建第一个 CPA", "description": "创建业务 CPA 容器并完成首次运行探针。", "action_path": "/accounts?create=1", "blockers": [] },
+    { "id": "account_authorization", "kind": "required", "status": "complete", "title": "OAuth 与运行状态", "description": "至少一个 CPA 已授权且容器正在运行。", "action_path": "/accounts?auth=pending", "blockers": [] },
+    { "id": "first_user", "kind": "required", "status": "complete", "title": "创建第一个用户", "description": "生成只显示一次的统一 API Key，并交付初始密码。", "action_path": "/users?create=1", "blockers": [] },
+    { "id": "public_base_url", "kind": "recommended", "status": "complete", "title": "公开访问地址", "description": "用于通知和客户端配置导出。", "action_path": "/configuration?group=品牌与身份&key=branding.public_base_url", "blockers": [] },
+    { "id": "quota_timezone", "kind": "recommended", "status": "complete", "title": "用户额度时区", "description": "决定自然周额度和今日用量的日期边界。", "action_path": "/configuration?group=用户额度&key=user_quota.timezone", "blockers": [] },
+    { "id": "weekly_quota", "kind": "recommended", "status": "complete", "title": "默认周额度", "description": "为新用户设置组织级默认 Token 上限。", "action_path": "/configuration?group=用户额度&key=user_quota.default_weekly_tokens", "blockers": [] },
+    { "id": "notifications", "kind": "recommended", "status": "complete", "title": "企业微信通知", "description": "配置额度报告和异常提醒 Webhook。", "action_path": "/configuration?group=企业微信通知", "blockers": [] },
+    { "id": "branding", "kind": "recommended", "status": "complete", "title": "品牌信息", "description": "按需设置产品名称、环境说明和 Logo。", "action_path": "/configuration?group=品牌与身份", "blockers": [] },
+    { "id": "proxy", "kind": "recommended", "status": "complete", "title": "默认上游代理", "description": "仅在访问上游必须经过代理时配置。", "action_path": "/configuration?group=CPA%20请求&key=cpa.proxy_url", "blockers": [] }
+  ]
+}

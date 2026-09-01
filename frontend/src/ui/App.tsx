@@ -6,6 +6,7 @@ import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ApiError, subscribeUnauthorized } from "../api/client";
 import { readReleaseStatus, type ReleaseStatus } from "../api/overview";
+import { onboardingQueryKey, readOnboarding } from "../api/onboarding";
 import { logout, readSession, sessionQueryKey } from "../api/session";
 import { AdminToolbarContext } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
@@ -18,6 +19,7 @@ const TeamsPage = lazy(() => import("./TeamsPage").then((module) => ({ default: 
 const UsersPage = lazy(() => import("./UsersPage").then((module) => ({ default: module.UsersPage })));
 const ConfigurationPage = lazy(() => import("./ConfigurationPage").then((module) => ({ default: module.ConfigurationPage })));
 const RuntimePage = lazy(() => import("./RuntimePage").then((module) => ({ default: module.RuntimePage })));
+const OnboardingPage = lazy(() => import("./OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 
 export function App() {
   const queryClient = useQueryClient();
@@ -71,19 +73,57 @@ export function App() {
       onLogout={() => logoutMutation.mutate()}
     >
       <Suspense fallback={<PageLoading />}>
-        <Routes>
-          <Route path="/overview" element={<OverviewPage />} />
-          <Route path="/accounts" element={<AccountsPage csrfToken={session.data.csrf_token ?? ""} />} />
-          <Route path="/users" element={<UsersPage csrfToken={session.data.csrf_token ?? ""} />} />
-          <Route path="/teams" element={<TeamsPage csrfToken={session.data.csrf_token ?? ""} />} />
-          <Route path="/notifications" element={<Navigate to="/configuration" replace />} />
-          <Route path="/runtime" element={<RuntimePage csrfToken={session.data.csrf_token ?? ""} />} />
-          <Route path="/configuration" element={<ConfigurationPage csrfToken={session.data.csrf_token ?? ""} onManagementKeyRotated={(message) => expireSession(message)} />} />
-          <Route path="/settings" element={<Navigate to="/configuration" replace />} />
-          <Route path="*" element={<Navigate to="/overview" replace />} />
-        </Routes>
+        <AuthenticatedRoutes
+          csrfToken={session.data.csrf_token ?? ""}
+          onManagementKeyRotated={(message) => expireSession(message)}
+        />
       </Suspense>
     </AdminShell>
+  );
+}
+
+function AuthenticatedRoutes({
+  csrfToken,
+  onManagementKeyRotated
+}: {
+  csrfToken: string;
+  onManagementKeyRotated: (message: string) => void;
+}) {
+  const location = useLocation();
+  const onboarding = useQuery({
+    queryKey: onboardingQueryKey,
+    queryFn: ({ signal }) => readOnboarding(signal),
+    staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false
+  });
+  const autoRedirected = useRef(false);
+  useEffect(() => {
+    if (location.pathname.startsWith("/setup")) autoRedirected.current = true;
+  }, [location.pathname]);
+  if (
+    onboarding.data
+    && !onboarding.data.required_complete
+    && !onboarding.data.deferred
+    && !location.pathname.startsWith("/setup")
+    && !autoRedirected.current
+  ) {
+    autoRedirected.current = true;
+    return <Navigate to="/setup" replace />;
+  }
+  return (
+    <Routes>
+      <Route path="/setup" element={<OnboardingPage csrfToken={csrfToken} />} />
+      <Route path="/overview" element={<OverviewPage />} />
+      <Route path="/accounts" element={<AccountsPage csrfToken={csrfToken} />} />
+      <Route path="/users" element={<UsersPage csrfToken={csrfToken} />} />
+      <Route path="/teams" element={<TeamsPage csrfToken={csrfToken} />} />
+      <Route path="/notifications" element={<Navigate to="/configuration" replace />} />
+      <Route path="/runtime" element={<RuntimePage csrfToken={csrfToken} />} />
+      <Route path="/configuration" element={<ConfigurationPage csrfToken={csrfToken} onManagementKeyRotated={onManagementKeyRotated} />} />
+      <Route path="/settings" element={<Navigate to="/configuration" replace />} />
+      <Route path="*" element={<Navigate to="/overview" replace />} />
+    </Routes>
   );
 }
 
@@ -102,6 +142,7 @@ const adminNavigation = [
 ] as const;
 
 function currentAdminPage(pathname: string): AdminPage {
+  if (pathname.startsWith("/setup")) return { eyebrow: "GETTING STARTED", title: "首次设置" };
   if (pathname.startsWith("/configuration") || pathname.startsWith("/settings") || pathname.startsWith("/notifications")) {
     return { eyebrow: "CONTROL PLANE SETTINGS", title: "系统设置" };
   }
@@ -113,6 +154,7 @@ function currentAdminPage(pathname: string): AdminPage {
 }
 
 function currentNavigationPath(pathname: string) {
+  if (pathname.startsWith("/setup")) return "";
   if (pathname.startsWith("/configuration") || pathname.startsWith("/settings") || pathname.startsWith("/notifications")) {
     return "/configuration";
   }
@@ -168,6 +210,7 @@ export function AdminShell({
   }, [selectedPath]);
   useEffect(() => setRefreshLabel("等待刷新"), [selectedPath]);
   useEffect(() => setPageDetail(null), [selectedPath]);
+  const visiblePageDetail = selectedPath === "/configuration" ? pageDetail : null;
   const refreshActivePage = async () => {
     if (manualRefreshing) return;
     setManualRefreshing(true);
@@ -240,11 +283,11 @@ export function AdminShell({
           <div className="top-bar-heading">
             <h1>
               <span>{page.title}</span>
-              {pageDetail ? <span className="page-heading-path"><span className="page-heading-separator" aria-hidden="true">/</span><span>{pageDetail.title}</span></span> : null}
+              {visiblePageDetail ? <span className="page-heading-path"><span className="page-heading-separator" aria-hidden="true">/</span><span>{visiblePageDetail.title}</span></span> : null}
             </h1>
             <span className="eyebrow">
               <span>{page.eyebrow}</span>
-              {pageDetail ? <span className="page-heading-path"><span className="page-heading-separator" aria-hidden="true">/</span><span>{pageDetail.eyebrow}</span></span> : null}
+              {visiblePageDetail ? <span className="page-heading-path"><span className="page-heading-separator" aria-hidden="true">/</span><span>{visiblePageDetail.eyebrow}</span></span> : null}
             </span>
           </div>
           <div className="top-bar-actions">

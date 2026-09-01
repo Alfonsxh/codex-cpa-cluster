@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import {
@@ -98,6 +99,8 @@ export function ConfigurationPage({
   const [webhookClearOpen, setWebhookClearOpen] = useState(false);
   const [quotaResetOpen, setQuotaResetOpen] = useState(false);
   const workspaceContentRef = useRef<HTMLDivElement>(null);
+  const [searchParams] = useSearchParams();
+  const handledDeepLink = useRef("");
 
   const catalog = useQuery({
     queryKey: configurationQueryKey,
@@ -156,6 +159,27 @@ export function ConfigurationPage({
         : { kind: "configuration", group: catalog.data.groups[0]?.name ?? "" };
     });
   }, [catalog.data]);
+
+  useEffect(() => {
+    if (!catalog.data) return;
+    const signature = searchParams.toString();
+    if (!signature || handledDeepLink.current === signature) return;
+    const section = searchParams.get("section");
+    const group = searchParams.get("group");
+    const key = searchParams.get("key") ?? "";
+    if (section && ["access", "backups", "storage", "audit"].includes(section)) {
+      setSelection({ kind: "system", section: section as SystemSection });
+      setSearch("");
+      handledDeepLink.current = signature;
+      return;
+    }
+    if (group && catalog.data.groups.some((item) => item.name === group)) {
+      setSelection({ kind: "configuration", group });
+      setFocusKey(key);
+      setSearch("");
+      handledDeepLink.current = signature;
+    }
+  }, [catalog.data, searchParams]);
 
   useEffect(() => {
     if (selection.kind === "system") {

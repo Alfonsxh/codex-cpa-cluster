@@ -7,6 +7,12 @@ import { describe, expect, it, vi } from "vitest";
 import { UsersPage } from "./UsersPage";
 
 describe("UsersPage legacy parity", () => {
+  it("opens the create dialog from the first-run deep link", async () => {
+    vi.stubGlobal("fetch", userFetchMock());
+    renderUsers("/users?create=1");
+    expect(await screen.findByRole("dialog", { name: /添加用户/ })).toBeInTheDocument();
+  });
+
   it("loads the paginated eleven-column catalog and defers user and team detail until expansion", async () => {
     const fetchMock = userFetchMock();
     vi.stubGlobal("fetch", fetchMock);
@@ -130,10 +136,10 @@ describe("UsersPage legacy parity", () => {
   });
 });
 
-function renderUsers() {
+function renderUsers(entry = "/admin/users") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={["/admin/users"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <QueryClientProvider client={queryClient}>
         <UsersPage csrfToken="csrf-test" />
       </QueryClientProvider>

@@ -1,12 +1,29 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ConfigurationCatalog } from "../api/configuration";
 import { ConfigurationPage } from "./ConfigurationPage";
 
 describe("ConfigurationPage", () => {
+  it("opens the deep-linked access section used by first-run guidance", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path === "/admin/api/settings/configuration") return jsonResponse(configurationFixture());
+      throw new Error(`unexpected request: ${path}`);
+    }));
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration?section=access");
+
+    const access = within(await screen.findByRole("navigation", { name: "系统管理" }))
+      .getByRole("button", { name: /访问凭据/ });
+    await waitFor(() => expect(access).toHaveAttribute("aria-current", "page"));
+    expect(screen.getByRole("button", { name: "设置用户初始密码" })).toBeInTheDocument();
+  });
+
   it("loads only the complete fine-grained catalog, masks secrets, searches and saves changed live fields", async () => {
     let current = configurationFixture();
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -389,11 +406,15 @@ function withUpdatedValues(catalog: ConfigurationCatalog, values: Record<string,
   };
 }
 
-function renderConfiguration(element: React.ReactNode) {
+function renderConfiguration(element: React.ReactNode, entry = "/configuration") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
-  return render(<QueryClientProvider client={queryClient}>{element}</QueryClientProvider>);
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <QueryClientProvider client={queryClient}>{element}</QueryClientProvider>
+    </MemoryRouter>
+  );
 }
 
 function jsonResponse(payload: unknown) {

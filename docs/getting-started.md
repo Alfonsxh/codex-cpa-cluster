@@ -51,6 +51,14 @@ sudo /home/cpac/deploy.sh
 
 首次执行会提示域名并写入 `/etc/cpac/config.env`；无交互环境使用 `sudo /home/cpac/deploy.sh deploy --domain qdata.example.com`。脚本安装必要依赖、配置 Nginx/TLS、校验 GitHub Release、初始化空状态、启动服务并调用正式烟测。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
 
+### 首次管理员设置
+
+使用部署完成时只显示一次的管理密钥登录 `https://<域名>/admin/`。全新控制面会自动进入 `/admin/setup`，完成状态全部由后端依据 SQLite、加密 Secret 状态、OAuth 和容器运行状态实时计算，不使用浏览器存储充当事实来源。
+
+必需流程为：允许的邮箱域名、用户初始密码、首个 CPA、该 CPA 的 OAuth 与运行检查、首个用户。必需项不能标记为跳过，但可以选择“稍后继续”，之后从运行总览恢复。公开访问地址、额度时区、默认周额度、通知、品牌和上游代理属于推荐项，可以逐项或全部跳过，并可随时恢复。
+
+引导接口异常不会阻断账号、用户、配置中心等既有管理页面；接口只返回配置状态、数量和阻塞原因，不返回密码、Key、Webhook、OAuth 或代理 Secret。用户初始密码仍通过只写 Modal 设置，关闭后不会进入 Local Storage 或 Session Storage。
+
 ## 已有 Test 目标的底层部署
 
 目标至少必须存在：

@@ -21,6 +21,7 @@ import {
   type TokenSeries
 } from "../api/overview";
 import { listRuntimeJobs, runtimeJobsQueryKey, type RuntimeJob } from "../api/runtime";
+import { onboardingQueryKey, readOnboarding } from "../api/onboarding";
 import { useAdminToolbar } from "./AdminToolbarContext";
 import {
   CustomUsageRangeModal,
@@ -32,6 +33,7 @@ import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
 import { LegacyUsageMultiSelect } from "./components/LegacyUsageMultiSelect";
 import { NativeTableViewport } from "./components/NativeTableViewport";
 import { formatTokens } from "./formatters";
+import { OnboardingCard } from "./OnboardingCard";
 
 const { Text } = Typography;
 
@@ -139,6 +141,13 @@ export function OverviewPage() {
     retry: false,
     refetchOnWindowFocus: false
   });
+  const onboarding = useQuery({
+    queryKey: onboardingQueryKey,
+    queryFn: ({ signal }) => readOnboarding(signal),
+    staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false
+  });
 
   useEffect(() => {
     setRefreshAction(async () => {
@@ -213,6 +222,10 @@ export function OverviewPage() {
   const summary = overview.data.summary;
   return (
     <section className="page-content overview-legacy-page">
+      {onboarding.data && (
+        !onboarding.data.required_complete
+        || onboarding.data.recommended.complete + onboarding.data.recommended.skipped < onboarding.data.recommended.total
+      ) ? <OnboardingCard status={onboarding.data} /> : null}
       {summary.incomplete_key_matrices > 0 ? (
         <Alert
           className="page-alert"

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { AccountsPage } from "./AccountsPage";
@@ -171,6 +172,13 @@ const accountImagesWithUpdate = {
 };
 
 describe("AccountsPage", () => {
+  it("opens the create dialog from the first-run deep link", async () => {
+    vi.stubGlobal("fetch", accountPageFetchMock(catalog));
+    renderPage("/accounts?create=1");
+    expect(await screen.findByText("添加业务 CPA")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("renders the legacy four-layer account expansion and loads detail only on demand", async () => {
     const fetchMock = accountPageFetchMock(catalog);
     vi.stubGlobal("fetch", fetchMock);
@@ -471,9 +479,11 @@ describe("AccountsPage", () => {
     queryClient.setQueryData(["teams"], { teams: [{ id: "preserved" }] });
     const user = userEvent.setup();
     render(
-      <QueryClientProvider client={queryClient}>
-        <AccountsPage csrfToken="csrf-test" />
-      </QueryClientProvider>
+      <MemoryRouter initialEntries={["/accounts"]}>
+        <QueryClientProvider client={queryClient}>
+          <AccountsPage csrfToken="csrf-test" />
+        </QueryClientProvider>
+      </MemoryRouter>
     );
 
     expect(await screen.findByText("alpha", { selector: ".account-name-cell .table-primary" })).toBeInTheDocument();
@@ -925,14 +935,16 @@ describe("AccountsPage", () => {
   }, 10_000);
 });
 
-function renderPage() {
+function renderPage(entry = "/accounts") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <AccountsPage csrfToken="csrf-test" />
-    </QueryClientProvider>
+    <MemoryRouter initialEntries={[entry]}>
+      <QueryClientProvider client={queryClient}>
+        <AccountsPage csrfToken="csrf-test" />
+      </QueryClientProvider>
+    </MemoryRouter>
   );
 }
 

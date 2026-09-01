@@ -10,6 +10,7 @@ tags:
   - name: health
   - name: admin-session
   - name: admin-overview
+  - name: admin-onboarding
   - name: admin-accounts
   - name: admin-runtime
   - name: admin-users
@@ -122,6 +123,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OverviewStatusPayload"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/onboarding:
+    get:
+      operationId: getAdminOnboarding
+      tags: [admin-onboarding]
+      security:
+        - adminSession: []
+      responses:
+        "200":
+          description: Secret-free first-run and recommended-configuration status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingStatus"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/onboarding/preferences:
+    put:
+      operationId: updateAdminOnboardingPreferences
+      tags: [admin-onboarding]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingPreferencesRequest"
+      responses:
+        "200":
+          description: Updated onboarding status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingStatus"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /admin/api/accounts:
@@ -2043,6 +2082,73 @@ components:
           type: array
           items:
             type: string
+    OnboardingStep:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, title, description, action_path, blockers]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [required, recommended] }
+        status: { type: string, enum: [complete, incomplete, blocked, skipped, unavailable] }
+        title: { type: string }
+        description: { type: string }
+        action_path: { type: string }
+        blockers:
+          type: array
+          items: { type: string }
+    OnboardingRequiredProgress:
+      type: object
+      additionalProperties: false
+      required: [complete, total]
+      properties:
+        complete: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+    OnboardingRecommendedProgress:
+      type: object
+      additionalProperties: false
+      required: [complete, skipped, total]
+      properties:
+        complete: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+    OnboardingStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - generated_at
+        - required_complete
+        - deferred
+        - required
+        - recommended
+        - skipped_recommended
+        - steps
+      properties:
+        version: { type: integer, minimum: 1 }
+        generated_at: { type: integer, format: int64 }
+        required_complete: { type: boolean }
+        deferred: { type: boolean }
+        required: { $ref: "#/components/schemas/OnboardingRequiredProgress" }
+        recommended: { $ref: "#/components/schemas/OnboardingRecommendedProgress" }
+        skipped_recommended:
+          type: array
+          items: { type: string }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/OnboardingStep" }
+    OnboardingPreferencesRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm, deferred, skipped_recommended]
+      properties:
+        confirm: { type: string, const: save }
+        deferred: { type: boolean }
+        skipped_recommended:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [public_base_url, quota_timezone, weekly_quota, notifications, branding, proxy]
     AccountState:
       type: object
       additionalProperties: false

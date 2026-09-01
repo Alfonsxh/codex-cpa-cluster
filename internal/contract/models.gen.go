@@ -640,6 +640,96 @@ func (e NotificationWebhookRequestConfirm) Valid() bool {
 	}
 }
 
+// Defines values for OnboardingPreferencesRequestConfirm.
+const (
+	OnboardingPreferencesRequestConfirmSave OnboardingPreferencesRequestConfirm = "save"
+)
+
+// Valid indicates whether the value is a known member of the OnboardingPreferencesRequestConfirm enum.
+func (e OnboardingPreferencesRequestConfirm) Valid() bool {
+	switch e {
+	case OnboardingPreferencesRequestConfirmSave:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OnboardingPreferencesRequestSkippedRecommended.
+const (
+	Branding      OnboardingPreferencesRequestSkippedRecommended = "branding"
+	Notifications OnboardingPreferencesRequestSkippedRecommended = "notifications"
+	Proxy         OnboardingPreferencesRequestSkippedRecommended = "proxy"
+	PublicBaseUrl OnboardingPreferencesRequestSkippedRecommended = "public_base_url"
+	QuotaTimezone OnboardingPreferencesRequestSkippedRecommended = "quota_timezone"
+	WeeklyQuota   OnboardingPreferencesRequestSkippedRecommended = "weekly_quota"
+)
+
+// Valid indicates whether the value is a known member of the OnboardingPreferencesRequestSkippedRecommended enum.
+func (e OnboardingPreferencesRequestSkippedRecommended) Valid() bool {
+	switch e {
+	case Branding:
+		return true
+	case Notifications:
+		return true
+	case Proxy:
+		return true
+	case PublicBaseUrl:
+		return true
+	case QuotaTimezone:
+		return true
+	case WeeklyQuota:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OnboardingStepKind.
+const (
+	Recommended OnboardingStepKind = "recommended"
+	Required    OnboardingStepKind = "required"
+)
+
+// Valid indicates whether the value is a known member of the OnboardingStepKind enum.
+func (e OnboardingStepKind) Valid() bool {
+	switch e {
+	case Recommended:
+		return true
+	case Required:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OnboardingStepStatus.
+const (
+	OnboardingStepStatusBlocked     OnboardingStepStatus = "blocked"
+	OnboardingStepStatusComplete    OnboardingStepStatus = "complete"
+	OnboardingStepStatusIncomplete  OnboardingStepStatus = "incomplete"
+	OnboardingStepStatusSkipped     OnboardingStepStatus = "skipped"
+	OnboardingStepStatusUnavailable OnboardingStepStatus = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the OnboardingStepStatus enum.
+func (e OnboardingStepStatus) Valid() bool {
+	switch e {
+	case OnboardingStepStatusBlocked:
+		return true
+	case OnboardingStepStatusComplete:
+		return true
+	case OnboardingStepStatusIncomplete:
+		return true
+	case OnboardingStepStatusSkipped:
+		return true
+	case OnboardingStepStatusUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OperationImpactAction.
 const (
 	OperationImpactActionStop OperationImpactAction = "stop"
@@ -837,19 +927,19 @@ func (e PortalUsageTrendWindowDays) Valid() bool {
 
 // Defines values for PortalUsageTrendDayCollectionState.
 const (
-	Complete    PortalUsageTrendDayCollectionState = "complete"
-	Partial     PortalUsageTrendDayCollectionState = "partial"
-	Uncollected PortalUsageTrendDayCollectionState = "uncollected"
+	PortalUsageTrendDayCollectionStateComplete    PortalUsageTrendDayCollectionState = "complete"
+	PortalUsageTrendDayCollectionStatePartial     PortalUsageTrendDayCollectionState = "partial"
+	PortalUsageTrendDayCollectionStateUncollected PortalUsageTrendDayCollectionState = "uncollected"
 )
 
 // Valid indicates whether the value is a known member of the PortalUsageTrendDayCollectionState enum.
 func (e PortalUsageTrendDayCollectionState) Valid() bool {
 	switch e {
-	case Complete:
+	case PortalUsageTrendDayCollectionStateComplete:
 		return true
-	case Partial:
+	case PortalUsageTrendDayCollectionStatePartial:
 		return true
-	case Uncollected:
+	case PortalUsageTrendDayCollectionStateUncollected:
 		return true
 	default:
 		return false
@@ -2435,6 +2525,61 @@ type NotificationWebhookResponse struct {
 	Notifications NotificationStatus `json:"notifications"`
 }
 
+// OnboardingPreferencesRequest defines model for OnboardingPreferencesRequest.
+type OnboardingPreferencesRequest struct {
+	Confirm            OnboardingPreferencesRequestConfirm              `json:"confirm"`
+	Deferred           bool                                             `json:"deferred"`
+	SkippedRecommended []OnboardingPreferencesRequestSkippedRecommended `json:"skipped_recommended"`
+}
+
+// OnboardingPreferencesRequestConfirm defines model for OnboardingPreferencesRequest.Confirm.
+type OnboardingPreferencesRequestConfirm string
+
+// OnboardingPreferencesRequestSkippedRecommended defines model for OnboardingPreferencesRequest.SkippedRecommended.
+type OnboardingPreferencesRequestSkippedRecommended string
+
+// OnboardingRecommendedProgress defines model for OnboardingRecommendedProgress.
+type OnboardingRecommendedProgress struct {
+	Complete int `json:"complete"`
+	Skipped  int `json:"skipped"`
+	Total    int `json:"total"`
+}
+
+// OnboardingRequiredProgress defines model for OnboardingRequiredProgress.
+type OnboardingRequiredProgress struct {
+	Complete int `json:"complete"`
+	Total    int `json:"total"`
+}
+
+// OnboardingStatus defines model for OnboardingStatus.
+type OnboardingStatus struct {
+	Deferred           bool                          `json:"deferred"`
+	GeneratedAt        int64                         `json:"generated_at"`
+	Recommended        OnboardingRecommendedProgress `json:"recommended"`
+	Required           OnboardingRequiredProgress    `json:"required"`
+	RequiredComplete   bool                          `json:"required_complete"`
+	SkippedRecommended []string                      `json:"skipped_recommended"`
+	Steps              []OnboardingStep              `json:"steps"`
+	Version            int                           `json:"version"`
+}
+
+// OnboardingStep defines model for OnboardingStep.
+type OnboardingStep struct {
+	ActionPath  string               `json:"action_path"`
+	Blockers    []string             `json:"blockers"`
+	Description string               `json:"description"`
+	Id          string               `json:"id"`
+	Kind        OnboardingStepKind   `json:"kind"`
+	Status      OnboardingStepStatus `json:"status"`
+	Title       string               `json:"title"`
+}
+
+// OnboardingStepKind defines model for OnboardingStep.Kind.
+type OnboardingStepKind string
+
+// OnboardingStepStatus defines model for OnboardingStep.Status.
+type OnboardingStepStatus string
+
 // OperationImpact defines model for OperationImpact.
 type OperationImpact struct {
 	Action      OperationImpactAction     `json:"action"`
@@ -3875,6 +4020,11 @@ type TestAdminNotificationParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// UpdateAdminOnboardingPreferencesParams defines parameters for UpdateAdminOnboardingPreferences.
+type UpdateAdminOnboardingPreferencesParams struct {
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // CreateLegacyAdminRuntimeJobParams defines parameters for CreateLegacyAdminRuntimeJob.
 type CreateLegacyAdminRuntimeJobParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
@@ -4178,6 +4328,9 @@ type CancelLegacyAdminRuntimeJobJSONRequestBody = LegacyRuntimeJobCancelRequest
 
 // RotateAdminUserKeyJSONRequestBody defines body for RotateAdminUserKey for application/json ContentType.
 type RotateAdminUserKeyJSONRequestBody = UserKeyActionRequest
+
+// UpdateAdminOnboardingPreferencesJSONRequestBody defines body for UpdateAdminOnboardingPreferences for application/json ContentType.
+type UpdateAdminOnboardingPreferencesJSONRequestBody = OnboardingPreferencesRequest
 
 // CreateLegacyAdminRuntimeJobJSONRequestBody defines body for CreateLegacyAdminRuntimeJob for application/json ContentType.
 type CreateLegacyAdminRuntimeJobJSONRequestBody = LegacyRuntimeJobRequest

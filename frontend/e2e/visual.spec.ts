@@ -6,7 +6,8 @@ const routes = [
   { slug: "users", path: "/admin/users", ready: "添加用户", title: "用户管理" },
   { slug: "teams", path: "/admin/teams", ready: "创建团队", title: "团队管理" },
   { slug: "runtime", path: "/admin/runtime", ready: "容器服务", title: "运行维护" },
-  { slug: "configuration", path: "/admin/configuration", ready: "保存配置", title: "系统设置" }
+  { slug: "configuration", path: "/admin/configuration", ready: "保存配置", title: "系统设置" },
+  { slug: "setup", path: "/admin/setup", ready: "让第一个用户安全开始使用", title: "首次设置" }
 ] as const;
 
 const viewports = [
@@ -26,7 +27,41 @@ for (const viewport of viewports) {
 
       for (const route of routes) {
         await openRoute(page, route);
-        if (viewport.width <= 560) await expectActiveNavigationVisible(page);
+        if (viewport.width <= 560 && route.slug !== "setup") await expectActiveNavigationVisible(page);
+        if (route.slug === "setup" && viewport.width <= 560) {
+          const setupSteps = page.locator(".onboarding-steps");
+          const lastStep = page.getByRole("navigation", { name: "推荐设置" }).getByRole("button").last();
+          await lastStep.scrollIntoViewIfNeeded();
+          const stepReachability = await setupSteps.evaluate((element) => {
+            const last = element.querySelector<HTMLElement>(".onboarding-step-group:last-child button:last-child");
+            const viewport = element.getBoundingClientRect();
+            const target = last?.getBoundingClientRect();
+            return {
+              scrolled: element.scrollLeft > 0,
+              targetVisible: Boolean(target && target.left >= viewport.left && target.right <= viewport.right)
+            };
+          });
+          expect(stepReachability).toEqual({ scrolled: true, targetVisible: true });
+          await setupSteps.evaluate((element) => element.scrollTo({ left: 0 }));
+          const geometry = await page.evaluate(() => {
+            const hero = document.querySelector<HTMLElement>(".onboarding-hero");
+            return {
+              viewport: window.innerWidth,
+              body: document.body.scrollWidth,
+              main: document.querySelector<HTMLElement>(".main-surface")?.scrollWidth ?? 0,
+              shellWidth: document.querySelector<HTMLElement>(".onboarding-shell")?.getBoundingClientRect().width ?? 0,
+              heroRight: hero?.getBoundingClientRect().right ?? 0
+            };
+          });
+          expect(geometry.body).toBeLessThanOrEqual(geometry.viewport);
+          expect(geometry.main).toBeLessThanOrEqual(geometry.viewport);
+          expect(geometry.shellWidth).toBeLessThanOrEqual(geometry.viewport - 24);
+          expect(geometry.heroRight).toBeLessThanOrEqual(geometry.viewport - 12);
+        }
+        if (route.slug === "setup") {
+          await expect(page.locator(".top-bar h1")).toHaveText("首次设置");
+          await expect(page.locator(".top-bar-heading .eyebrow")).toHaveText("GETTING STARTED");
+        }
         await expect(page).toHaveScreenshot(
           `react-${route.slug}-${viewport.name}-${theme}.png`,
           {
@@ -44,6 +79,41 @@ for (const viewport of viewports) {
     });
   }
 }
+
+test("首次管理登录在必需项未完成时进入引导，状态接口失败时不阻塞管理中心", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "light");
+  await page.route("**/admin/api/onboarding", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.required_complete = false;
+    payload.deferred = false;
+    payload.required = { complete: 0, total: 5 };
+    payload.steps = payload.steps.map((step: { kind: string; status: string }, index: number) => ({
+      ...step,
+      status: step.kind === "required" ? (index < 3 ? "incomplete" : "blocked") : "incomplete"
+    }));
+    await route.fulfill({ response, json: payload });
+  });
+  await login(page, "/admin/overview");
+  await expect(page).toHaveURL(/\/admin\/setup/);
+  await expect(page.getByRole("heading", { name: "让第一个用户安全开始使用" })).toBeVisible();
+  await page.getByRole("navigation", { name: "必须完成" }).getByRole("button", { name: /首个 CPA/ }).click();
+  await page.getByRole("button", { name: /前往设置/ }).click();
+  await expect(page).toHaveURL(/\/admin\/accounts/);
+  await expect(page.getByText("添加业务 CPA", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "取消" }).click();
+
+  await page.unroute("**/admin/api/onboarding");
+  await page.route("**/admin/api/onboarding", (route) => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code: "status_unavailable", message: "状态检查暂不可用" } })
+  }));
+  await page.goto("/admin/accounts");
+  await expect(page).toHaveURL(/\/admin\/accounts/);
+  await expect(page.getByText("更新通道", { exact: false }).first()).toBeVisible();
+});
 
 test("配置中心本地数据与审计记录沿用统一信息卡片", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-08-28T05:42:00.000Z"));

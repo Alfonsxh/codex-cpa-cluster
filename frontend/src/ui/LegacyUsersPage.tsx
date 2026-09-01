@@ -14,7 +14,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import {
@@ -138,6 +138,7 @@ const usageWindowOptions: Array<{ value: UsageWindow; label: string }> = [
 
 export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
@@ -163,6 +164,7 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
   const [restoreQuotaUsers, setRestoreQuotaUsers] = useState<string[] | null>(null);
   const [teamUsageOpen, setTeamUsageOpen] = useState(false);
   const lifecycleSubmitRef = useRef(false);
+  const handledDeepLink = useRef("");
   const debouncedSearch = useDebouncedValue(searchDraft.trim(), 250);
 
   useEffect(() => {
@@ -292,6 +294,15 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
       await refreshAfterMutation();
     }
   });
+  useEffect(() => {
+    const signature = searchParams.toString();
+    if (!signature || handledDeepLink.current === signature) return;
+    if (searchParams.get("create") !== "1") return;
+    handledDeepLink.current = signature;
+    createMutation.reset();
+    setCreateOpen(true);
+    setSearchParams({}, { replace: true });
+  }, [createMutation, searchParams, setSearchParams]);
   const lifecycleMutation = useMutation({
     mutationFn: async (action: LifecycleAction) => {
       if (action.kind === "rotate") {

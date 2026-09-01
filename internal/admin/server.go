@@ -369,6 +369,8 @@ func (server *Server) registerRoutes() {
 	authenticated.GET("/overview/catalog", server.readOverviewCatalog)
 	authenticated.GET("/overview/status", server.readOverviewStatus)
 	authenticated.GET("/overview/usage", server.readOverviewUsage)
+	authenticated.GET("/onboarding", server.readOnboarding)
+	authenticated.PUT("/onboarding/preferences", server.limitBody(defaultBodyLimit), server.updateOnboardingPreferences)
 	authenticated.GET("/images/cliproxy", server.readCPAImageStatus)
 	authenticated.GET("/release", server.readReleaseStatus)
 	authenticated.GET("/settings/general", server.readGeneralSettings)

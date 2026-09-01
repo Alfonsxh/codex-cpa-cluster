@@ -94,6 +94,44 @@ export type OverviewStatusPayload = {
     warnings: Array<string>;
 };
 
+export type OnboardingStep = {
+    id: string;
+    kind: 'required' | 'recommended';
+    status: 'complete' | 'incomplete' | 'blocked' | 'skipped' | 'unavailable';
+    title: string;
+    description: string;
+    action_path: string;
+    blockers: Array<string>;
+};
+
+export type OnboardingRequiredProgress = {
+    complete: number;
+    total: number;
+};
+
+export type OnboardingRecommendedProgress = {
+    complete: number;
+    skipped: number;
+    total: number;
+};
+
+export type OnboardingStatus = {
+    version: number;
+    generated_at: number;
+    required_complete: boolean;
+    deferred: boolean;
+    required: OnboardingRequiredProgress;
+    recommended: OnboardingRecommendedProgress;
+    skipped_recommended: Array<string>;
+    steps: Array<OnboardingStep>;
+};
+
+export type OnboardingPreferencesRequest = {
+    confirm: 'save';
+    deferred: boolean;
+    skipped_recommended: Array<'public_base_url' | 'quota_timezone' | 'weekly_quota' | 'notifications' | 'branding' | 'proxy'>;
+};
+
 export type AccountState = {
     account: string;
     eligible: boolean;
@@ -1782,6 +1820,59 @@ export type GetAdminOverviewStatusResponses = {
 };
 
 export type GetAdminOverviewStatusResponse = GetAdminOverviewStatusResponses[keyof GetAdminOverviewStatusResponses];
+
+export type GetAdminOnboardingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/api/onboarding';
+};
+
+export type GetAdminOnboardingErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type GetAdminOnboardingError = GetAdminOnboardingErrors[keyof GetAdminOnboardingErrors];
+
+export type GetAdminOnboardingResponses = {
+    /**
+     * Secret-free first-run and recommended-configuration status
+     */
+    200: OnboardingStatus;
+};
+
+export type GetAdminOnboardingResponse = GetAdminOnboardingResponses[keyof GetAdminOnboardingResponses];
+
+export type UpdateAdminOnboardingPreferencesData = {
+    body: OnboardingPreferencesRequest;
+    headers: {
+        'X-CSRF-Token': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/admin/api/onboarding/preferences';
+};
+
+export type UpdateAdminOnboardingPreferencesErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type UpdateAdminOnboardingPreferencesError = UpdateAdminOnboardingPreferencesErrors[keyof UpdateAdminOnboardingPreferencesErrors];
+
+export type UpdateAdminOnboardingPreferencesResponses = {
+    /**
+     * Updated onboarding status
+     */
+    200: OnboardingStatus;
+};
+
+export type UpdateAdminOnboardingPreferencesResponse = UpdateAdminOnboardingPreferencesResponses[keyof UpdateAdminOnboardingPreferencesResponses];
 
 export type ListAdminAccountsData = {
     body?: never;

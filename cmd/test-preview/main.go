@@ -79,6 +79,7 @@ func newPreviewServer(fixtureDirectory string, portalAssetDirectory string) (*pr
 		"images.json",
 		"jobs.json",
 		"notification-settings.json",
+		"onboarding.json",
 		"overview-catalog.json",
 		"overview-status.json",
 		"overview-summary.json",
@@ -240,6 +241,8 @@ func fixtureForRequest(request *http.Request) string {
 			return "overview-usage-30d.json"
 		}
 		return "overview-usage.json"
+	case "/admin/api/onboarding":
+		return "onboarding.json"
 	case "/admin/api/accounts":
 		return "accounts.json"
 	case "/admin/api/accounts/usage-breakdown":

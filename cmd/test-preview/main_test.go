@@ -28,6 +28,7 @@ func TestPreviewServesSettingsAndPortalAssetsWithGoOnly(t *testing.T) {
 	}
 
 	for _, path := range []string{
+		"/admin/api/onboarding",
 		"/admin/api/settings/general",
 		"/admin/api/settings/notifications",
 		"/admin/api/settings/workspace",

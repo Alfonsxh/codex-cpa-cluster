@@ -21,6 +21,7 @@ import {
   type TableColumnsType
 } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -150,17 +151,23 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
   const reportedCatalogError = useRef<unknown>(null);
+  const handledDeepLink = useRef("");
+  const [searchParams, setSearchParams] = useSearchParams();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [lastResult, setLastResult] = useState<RebalanceResponse | null>(null);
   const [search, setSearch] = useState("");
   const [runtimeFilter, setRuntimeFilter] = useState<AccountRuntimeFilter>("all");
-  const [authFilter, setAuthFilter] = useState<AccountAuthFilter>("all");
+  const [authFilter, setAuthFilter] = useState<AccountAuthFilter>(() => (
+    searchParams.get("auth") === "pending" ? "pending" : "all"
+  ));
   const [usageWindow, setUsageWindow] = useState<AccountUsageWindow>("today");
   const [accountSort, setAccountSort] = useState<AccountSortState>({ field: "quota", direction: "asc" });
   const [customUsageRange, setCustomUsageRange] = useState<CustomUsageRange | null>(null);
   const [customUsageRangeOpen, setCustomUsageRangeOpen] = useState(false);
   const [expandedAccountIDs, setExpandedAccountIDs] = useState<string[]>([]);
-  const [editorAccount, setEditorAccount] = useState<Account | "create" | null>(null);
+  const [editorAccount, setEditorAccount] = useState<Account | "create" | null>(() => (
+    searchParams.get("create") === "1" ? "create" : null
+  ));
   const [pendingAccountUpdate, setPendingAccountUpdate] = useState<PendingAccountUpdate | null>(null);
   const [policyAccount, setPolicyAccount] = useState<Account | null>(null);
   const [destructiveAction, setDestructiveAction] = useState<DestructiveAction | null>(null);
@@ -448,6 +455,21 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
     oauthPreflight.reset();
     oauthPreflight.mutate(account);
   }, [oauthMutation, oauthPreflight]);
+  useEffect(() => {
+    const signature = searchParams.toString();
+    if (!signature || handledDeepLink.current === signature) return;
+    if (searchParams.get("create") === "1") {
+      handledDeepLink.current = signature;
+      openEditor("create");
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    if (searchParams.get("auth") === "pending") {
+      handledDeepLink.current = signature;
+      setAuthFilter("pending");
+      setSearchParams({}, { replace: true });
+    }
+  }, [openEditor, searchParams, setSearchParams]);
   const closeOAuth = useCallback(() => {
     setOAuthAccount(null);
     oauthMutation.reset();

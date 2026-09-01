@@ -8,7 +8,7 @@ import {
 import { Alert, Button, Input, Progress, Result, Skeleton, Tag } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { saveConfiguration } from "../api/configuration";
 import {
@@ -39,6 +39,7 @@ const recommendationLabels: Record<string, string> = {
 };
 
 export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -72,9 +73,9 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     return () => setRefreshAction(null);
   }, [onboarding, setRefreshAction]);
   useEffect(() => {
-    if (!onboarding.data || selectedID || !selected) return;
+    if (!location.pathname.startsWith("/setup") || !onboarding.data || selectedID || !selected) return;
     setSearchParams({ step: selected.id }, { replace: true });
-  }, [onboarding.data, selected, selectedID, setSearchParams]);
+  }, [location.pathname, onboarding.data, selected, selectedID, setSearchParams]);
 
   const preferences = useMutation({
     mutationFn: (next: { deferred: boolean; skippedRecommended: string[] }) => (

@@ -214,33 +214,33 @@ func TestAccountRuntimeUpdatesOneImageWithImmutableReference(t *testing.T) {
 	assertRunningImage(t, client, "alpha", fixtureNewImageID)
 }
 
-func TestAccountRuntimeUpdatesImageWithoutKeysOnlyAfterClosedUnauthenticatedProbe(t *testing.T) {
+func TestAccountRuntimeUpdatesImageWithoutKeysAfterManagementProbe(t *testing.T) {
 	accounts := []controlplane.Account{{ID: "alpha", Port: 18318, GroupEnabled: true}}
 	runtime, store, client, projector := newCPAImageRuntime(t, accounts)
 	store.keys = map[string]controlplane.InternalKey{}
-	client.zeroKeyProbeStatus = http.StatusUnauthorized
+	client.zeroKeyProbeStatus = http.StatusOK
 	var output strings.Builder
 
 	if _, err := runtime.UpdateImage(context.Background(), "alpha", &output); err != nil {
 		t.Fatalf("UpdateImage without Keys: %v", err)
 	}
 	if projector.calls != 1 ||
-		!strings.Contains(output.String(), "未认证访问保持关闭") {
+		!strings.Contains(output.String(), "运行探针") {
 		t.Fatalf("zero-Key image verification: projector=%d output=%q", projector.calls, output.String())
 	}
 	assertRunningImage(t, client, "alpha", fixtureNewImageID)
 }
 
-func TestAccountRuntimeRejectsUnexpectedlyOpenImageWithoutKeys(t *testing.T) {
+func TestAccountRuntimeRejectsUnauthorizedImageManagementProbeWithoutKeys(t *testing.T) {
 	accounts := []controlplane.Account{{ID: "alpha", Port: 18318, GroupEnabled: true}}
 	runtime, store, client, projector := newCPAImageRuntime(t, accounts)
 	store.keys = map[string]controlplane.InternalKey{}
-	client.zeroKeyProbeStatus = http.StatusOK
+	client.zeroKeyProbeStatus = http.StatusUnauthorized
 	before := cloneStringMap(store.state)
 
 	_, err := runtime.UpdateImage(context.Background(), "alpha", io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "expected 401") {
-		t.Fatalf("UpdateImage with open zero-Key endpoint = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "expected 200") {
+		t.Fatalf("UpdateImage with rejected management probe = %v", err)
 	}
 	if projector.calls != 0 || !mapsEqual(before, store.state) {
 		t.Fatalf("open zero-Key update committed state: projector=%d state=%#v", projector.calls, store.state)
@@ -284,7 +284,7 @@ func TestAccountRuntimeUpdateFailureRollsBackAllAttemptedAccountsInReverse(t *te
 	var output strings.Builder
 
 	_, err := runtime.UpdateImage(context.Background(), "all", &output)
-	if err == nil || !strings.Contains(err.Error(), "model probe failed") {
+	if err == nil || !strings.Contains(err.Error(), "runtime probe failed") {
 		t.Fatalf("UpdateImage failure = %v", err)
 	}
 	if projector.calls != 0 || !mapsEqual(before, store.state) {
@@ -364,6 +364,7 @@ func newCPAImageRuntime(
 		keys: map[string]controlplane.InternalKey{
 			"alice@example.com": {Key: "cpa_internal_fixture", Status: "active"},
 		},
+		secrets: map[string]string{"cpa_management_key": "management-key-for-tests"},
 	}
 	projector := &recordingCPAImageProjector{}
 	client.probeStore = store
@@ -387,6 +388,7 @@ type imageMutationStore struct {
 	settings map[string]any
 	state    map[string]any
 	keys     map[string]controlplane.InternalKey
+	secrets  map[string]string
 }
 
 func (store *imageMutationStore) ReadSettings(context.Context) (map[string]any, error) {
@@ -411,6 +413,11 @@ func (store *imageMutationStore) DeleteRuntimeState(context.Context, string) err
 
 func (store *imageMutationStore) ReadInternalKeys(context.Context) (map[string]controlplane.InternalKey, error) {
 	return store.keys, nil
+}
+
+func (store *imageMutationStore) ReadSecret(_ context.Context, name string) (string, bool, error) {
+	value, found := store.secrets[name]
+	return value, found, nil
 }
 
 type recordingCPAImageProjector struct {

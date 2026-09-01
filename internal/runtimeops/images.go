@@ -473,25 +473,10 @@ func (runtime *AccountRuntime) replaceAccountImage(
 }
 
 func (runtime *AccountRuntime) probeImageAccount(ctx context.Context, accountID string, output io.Writer) error {
-	keys, err := runtime.store.ReadInternalKeys(ctx)
-	if err != nil {
-		return fmt.Errorf("read account probe credentials: %w", err)
-	}
-	hasActiveKey := false
-	for _, key := range keys {
-		if key.Status == "active" && strings.TrimSpace(key.Key) != "" {
-			hasActiveKey = true
-			break
-		}
-	}
 	if err := runtime.probeAccount(ctx, accountID); err != nil {
 		return err
 	}
-	if !hasActiveKey {
-		_, _ = fmt.Fprintf(output, "%s 验证通过：未认证访问保持关闭\n", accountID)
-		return nil
-	}
-	_, _ = fmt.Fprintf(output, "%s 验证通过：MODELS\n", accountID)
+	_, _ = fmt.Fprintf(output, "%s 验证通过：运行探针\n", accountID)
 	return nil
 }
 

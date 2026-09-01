@@ -43,6 +43,7 @@ type AccountRuntimeStore interface {
 	ReadSettings(context.Context) (map[string]any, error)
 	ReadRuntimeState(context.Context, string, any) (bool, error)
 	ReadInternalKeys(context.Context) (map[string]controlplane.InternalKey, error)
+	ReadSecret(context.Context, string) (string, bool, error)
 }
 
 type CPAImageProjector interface {
@@ -698,18 +699,27 @@ func (runtime *AccountRuntime) probeAccount(ctx context.Context, accountID strin
 	sort.Strings(users)
 	expectedStatus := http.StatusOK
 	probeKey := ""
+	endpoint := "http://cliproxy-" + accountID + ":8317/v1/models"
 	if len(users) == 0 {
-		// A fresh control plane has no users or internal Keys yet, and its
-		// generated business-CPA configuration therefore has api-keys: [].
-		// An exact 401 proves both that the candidate is serving HTTP and that
-		// the empty-user bootstrap state remains closed to unauthenticated use.
-		expectedStatus = http.StatusUnauthorized
+		// CLIProxyAPI treats api-keys: [] as an unauthenticated model endpoint,
+		// so /v1/models cannot prove the zero-user bootstrap configuration.
+		// The authenticated management endpoint proves both HTTP readiness and
+		// that the generated per-account management credential was loaded.
+		managementKey, found, readError := runtime.store.ReadSecret(ctx, "cpa_management_key")
+		managementKey = strings.TrimSpace(managementKey)
+		if readError != nil {
+			return fmt.Errorf("read account probe management credential: %w", readError)
+		}
+		if !found || managementKey == "" || strings.ContainsAny(managementKey, "\r\n\x00") {
+			return errors.New("cannot verify account runtime without a valid management credential")
+		}
+		probeKey = managementKey
+		endpoint = "http://cliproxy-" + accountID + ":8317/v0/management/auth-files"
 	} else {
 		probeKey = keys[users[0]].Key
 	}
 	probeContext, cancel := context.WithTimeout(ctx, runtime.probeTimeout)
 	defer cancel()
-	endpoint := "http://cliproxy-" + accountID + ":8317/v1/models"
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var lastStatus int
@@ -718,9 +728,7 @@ func (runtime *AccountRuntime) probeAccount(ctx context.Context, accountID strin
 		request := runtime.http.R().
 			SetContext(probeContext).
 			SetDoNotParseResponse(true)
-		if probeKey != "" {
-			request.SetHeader("Authorization", "Bearer "+probeKey)
-		}
+		request.SetHeader("Authorization", "Bearer "+probeKey)
 		response, requestError := request.Get(endpoint)
 		if response != nil {
 			lastStatus = response.StatusCode()
@@ -735,7 +743,7 @@ func (runtime *AccountRuntime) probeAccount(ctx context.Context, accountID strin
 		select {
 		case <-probeContext.Done():
 			return fmt.Errorf(
-				"account %s model probe failed with status %d, expected %d: %w",
+				"account %s runtime probe failed with status %d, expected %d: %w",
 				accountID, lastStatus, expectedStatus, errors.Join(lastError, probeContext.Err()),
 			)
 		case <-ticker.C:

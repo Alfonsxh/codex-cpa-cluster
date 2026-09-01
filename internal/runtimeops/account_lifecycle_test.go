@@ -109,11 +109,11 @@ func TestAccountRuntimeCreatesExactMobySpecProbesAndRollsBackCandidate(t *testin
 	}
 }
 
-func TestAccountRuntimeCreatesFirstAccountOnlyAfterClosedUnauthenticatedProbe(t *testing.T) {
+func TestAccountRuntimeCreatesFirstAccountAfterAuthenticatedManagementProbe(t *testing.T) {
 	root := newRuntimeRoot(t, "gamma")
 	client := &fakeAccountLifecycleClient{}
 	manager := newRuntimeTestManager(t, client)
-	probe := &recordingRoundTripper{status: http.StatusUnauthorized}
+	probe := &recordingRoundTripper{status: http.StatusOK}
 	runtime := newAccountRuntimeForTest(t, manager, root, probe)
 	runtime.store.(*fakeAccountRuntimeStore).keys = map[string]controlplane.InternalKey{}
 
@@ -123,7 +123,8 @@ func TestAccountRuntimeCreatesFirstAccountOnlyAfterClosedUnauthenticatedProbe(t 
 	if err != nil {
 		t.Fatalf("PrepareCreate without users: %v", err)
 	}
-	if probe.authorization != "" || probe.url != "http://cliproxy-gamma:8317/v1/models" {
+	if probe.authorization != "Bearer management-key-for-tests" ||
+		probe.url != "http://cliproxy-gamma:8317/v0/management/auth-files" {
 		t.Fatalf("bootstrap probe = auth %q url %q", probe.authorization, probe.url)
 	}
 	if err := transition.Rollback(context.Background()); err != nil {
@@ -131,22 +132,45 @@ func TestAccountRuntimeCreatesFirstAccountOnlyAfterClosedUnauthenticatedProbe(t 
 	}
 }
 
-func TestAccountRuntimeRejectsUnexpectedOpenFirstAccountEndpoint(t *testing.T) {
+func TestAccountRuntimeRejectsUnauthorizedFirstAccountManagementProbe(t *testing.T) {
 	root := newRuntimeRoot(t, "gamma")
 	client := &fakeAccountLifecycleClient{}
 	manager := newRuntimeTestManager(t, client)
 	runtime := newAccountRuntimeForTest(
-		t, manager, root, &recordingRoundTripper{status: http.StatusOK},
+		t, manager, root, &recordingRoundTripper{status: http.StatusUnauthorized},
 	)
 	runtime.store.(*fakeAccountRuntimeStore).keys = map[string]controlplane.InternalKey{}
 
 	if _, err := runtime.PrepareCreate(context.Background(), controlplane.Account{
 		ID: "gamma", Port: 18320, GroupEnabled: true,
-	}); err == nil || !strings.Contains(err.Error(), "expected 401") {
-		t.Fatalf("PrepareCreate with open bootstrap endpoint = %v", err)
+	}); err == nil || !strings.Contains(err.Error(), "expected 200") {
+		t.Fatalf("PrepareCreate with rejected management probe = %v", err)
 	}
 	if len(client.removed) != 1 || client.removed[0] != "created-1" {
-		t.Fatalf("unexpectedly open candidate removals = %#v", client.removed)
+		t.Fatalf("rejected management candidate removals = %#v", client.removed)
+	}
+}
+
+func TestAccountRuntimeRejectsFirstAccountWithoutManagementCredentialAndRemovesCandidate(t *testing.T) {
+	root := newRuntimeRoot(t, "gamma")
+	client := &fakeAccountLifecycleClient{}
+	manager := newRuntimeTestManager(t, client)
+	probe := &recordingRoundTripper{status: http.StatusOK}
+	runtime := newAccountRuntimeForTest(t, manager, root, probe)
+	store := runtime.store.(*fakeAccountRuntimeStore)
+	store.keys = map[string]controlplane.InternalKey{}
+	delete(store.secrets, "cpa_management_key")
+
+	if _, err := runtime.PrepareCreate(context.Background(), controlplane.Account{
+		ID: "gamma", Port: 18320, GroupEnabled: true,
+	}); err == nil || !strings.Contains(err.Error(), "valid management credential") {
+		t.Fatalf("PrepareCreate without management credential = %v", err)
+	}
+	if probe.url != "" {
+		t.Fatalf("unexpected probe without management credential = %q", probe.url)
+	}
+	if len(client.removed) != 1 || client.removed[0] != "created-1" {
+		t.Fatalf("missing-credential candidate removals = %#v", client.removed)
 	}
 }
 
@@ -353,6 +377,7 @@ func newAccountRuntimeForTest(
 		keys: map[string]controlplane.InternalKey{
 			"alice@example.com": {Key: "cpa_internal_fixture", Status: "active"},
 		},
+		secrets: map[string]string{"cpa_management_key": "management-key-for-tests"},
 	}
 	runtime, err := NewAccountRuntime(manager, store, AccountRuntimeConfig{
 		Root: root, NetworkName: "fixture-backend", InstanceName: "fixture",
@@ -557,6 +582,7 @@ type fakeAccountRuntimeStore struct {
 	settings   map[string]any
 	imageState map[string]any
 	keys       map[string]controlplane.InternalKey
+	secrets    map[string]string
 }
 
 func (store *fakeAccountRuntimeStore) ReadSettings(context.Context) (map[string]any, error) {
@@ -570,6 +596,11 @@ func (store *fakeAccountRuntimeStore) ReadRuntimeState(_ context.Context, _ stri
 
 func (store *fakeAccountRuntimeStore) ReadInternalKeys(context.Context) (map[string]controlplane.InternalKey, error) {
 	return store.keys, nil
+}
+
+func (store *fakeAccountRuntimeStore) ReadSecret(_ context.Context, name string) (string, bool, error) {
+	value, found := store.secrets[name]
+	return value, found, nil
 }
 
 type recordingRoundTripper struct {

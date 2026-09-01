@@ -2570,7 +2570,6 @@ type NotificationWebhookResponse struct {
 // OnboardingPreferencesRequest defines model for OnboardingPreferencesRequest.
 type OnboardingPreferencesRequest struct {
 	Confirm            OnboardingPreferencesRequestConfirm              `json:"confirm"`
-	Deferred           bool                                             `json:"deferred"`
 	SkippedRecommended []OnboardingPreferencesRequestSkippedRecommended `json:"skipped_recommended"`
 }
 
@@ -2595,7 +2594,6 @@ type OnboardingRequiredProgress struct {
 
 // OnboardingStatus defines model for OnboardingStatus.
 type OnboardingStatus struct {
-	Deferred           bool                          `json:"deferred"`
 	GeneratedAt        int64                         `json:"generated_at"`
 	Recommended        OnboardingRecommendedProgress `json:"recommended"`
 	Required           OnboardingRequiredProgress    `json:"required"`

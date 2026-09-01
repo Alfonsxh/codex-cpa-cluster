@@ -145,6 +145,41 @@ func TestConfigurationValueNormalizationCoversSupportedTypesAndBoundaries(t *tes
 	}
 }
 
+func TestConfigurationEndpointPersistsExplicitDefaultSelection(t *testing.T) {
+	base, store := newTestAdmin(t)
+	base.Close()
+	applier := &recordingConfigurationApplier{}
+	server, err := New(Config{Store: store, ConfigurationApplier: applier})
+	if err != nil {
+		t.Fatalf("New configuration Admin: %v", err)
+	}
+	t.Cleanup(server.Close)
+	response := performAdminRequest(server, http.MethodPost, "/admin/api/settings/configuration", map[string]any{
+		"confirm": "save", "values": map[string]any{"user_quota.timezone": "UTC"},
+	}, map[string]string{"X-Management-Key": "test-management-key"}, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("explicit default update = %d %s", response.Code, response.Body.String())
+	}
+	var payload configurationUpdateResponse
+	decodeAdminResponse(t, response, &payload)
+	if !reflect.DeepEqual(payload.Changed, []string{"user_quota.timezone"}) ||
+		!reflect.DeepEqual(payload.Applied, []string{"collector"}) {
+		t.Fatalf("explicit default response = %#v", payload)
+	}
+	settings, err := store.ReadSettings(context.Background())
+	if err != nil || settings["user_quota.timezone"] != "UTC" {
+		t.Fatalf("explicit default setting = %#v, %v", settings["user_quota.timezone"], err)
+	}
+	if len(applier.calls) != 1 || !reflect.DeepEqual(applier.calls[0].Changed, []string{"user_quota.timezone"}) {
+		t.Fatalf("explicit default apply calls = %#v", applier.calls)
+	}
+	onboarding, err := server.onboardingStatus(context.Background())
+	if err != nil {
+		t.Fatalf("read onboarding after explicit default: %v", err)
+	}
+	assertOnboardingStep(t, onboarding, "quota_timezone", onboardingCompleteStatus)
+}
+
 func TestConfigurationEndpointAppliesModesKeepsProxySecretOutOfSettingsAndRollsBack(t *testing.T) {
 	base, store := newTestAdmin(t)
 	base.Close()
@@ -188,10 +223,10 @@ func TestConfigurationEndpointAppliesModesKeepsProxySecretOutOfSettingsAndRollsB
 	}
 	var payload configurationUpdateResponse
 	decodeAdminResponse(t, response, &payload)
-	if !payload.PendingDeployment || !reflect.DeepEqual(payload.Applied, []string{"accounts", "collector", "live"}) {
+	if !payload.PendingDeployment || !reflect.DeepEqual(payload.Applied, []string{"accounts", "collector"}) {
 		t.Fatalf("configuration response = %#v", payload)
 	}
-	if len(applier.calls) != 1 || !reflect.DeepEqual(applier.calls[0].Modes, []string{"accounts", "collector", "deployment", "live"}) {
+	if len(applier.calls) != 1 || !reflect.DeepEqual(applier.calls[0].Modes, []string{"accounts", "collector", "deployment"}) {
 		t.Fatalf("configuration apply calls = %#v", applier.calls)
 	}
 	settings, err := store.ReadSettings(ctx)

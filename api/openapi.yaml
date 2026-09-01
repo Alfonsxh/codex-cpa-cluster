@@ -2118,7 +2118,6 @@ components:
         - version
         - generated_at
         - required_complete
-        - deferred
         - required
         - recommended
         - skipped_recommended
@@ -2127,7 +2126,6 @@ components:
         version: { type: integer, minimum: 1 }
         generated_at: { type: integer, format: int64 }
         required_complete: { type: boolean }
-        deferred: { type: boolean }
         required: { $ref: "#/components/schemas/OnboardingRequiredProgress" }
         recommended: { $ref: "#/components/schemas/OnboardingRecommendedProgress" }
         skipped_recommended:
@@ -2139,10 +2137,9 @@ components:
     OnboardingPreferencesRequest:
       type: object
       additionalProperties: false
-      required: [confirm, deferred, skipped_recommended]
+      required: [confirm, skipped_recommended]
       properties:
         confirm: { type: string, const: save }
-        deferred: { type: boolean }
         skipped_recommended:
           type: array
           uniqueItems: true

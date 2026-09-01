@@ -2,7 +2,6 @@
   "version": 1,
   "generated_at": 1787895720,
   "required_complete": true,
-  "deferred": false,
   "required": { "complete": 5, "total": 5 },
   "recommended": { "complete": 6, "skipped": 0, "total": 6 },
   "skipped_recommended": [],

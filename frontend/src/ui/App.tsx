@@ -104,7 +104,6 @@ function AuthenticatedRoutes({
   if (
     onboarding.data
     && !onboarding.data.required_complete
-    && !onboarding.data.deferred
     && !location.pathname.startsWith("/setup")
     && !autoRedirected.current
   ) {

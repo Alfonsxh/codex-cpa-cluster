@@ -289,7 +289,7 @@ func (server *Server) updateConfiguration(c *gin.Context) {
 		}
 	}
 
-	changed := changedConfigurationKeys(current, updated)
+	changed := changedConfigurationKeys(current, updated, storedBefore, changes)
 	if len(changed) == 0 {
 		c.JSON(http.StatusOK, noConfigurationChanges())
 		return
@@ -673,10 +673,15 @@ func validateConfiguration(values map[string]any) error {
 	return nil
 }
 
-func changedConfigurationKeys(before, after map[string]any) []string {
+func changedConfigurationKeys(before, after, stored, requested map[string]any) []string {
 	result := make([]string, 0)
 	for _, definition := range configurationDefinitions {
-		if !reflect.DeepEqual(before[definition.Key], after[definition.Key]) {
+		_, explicitlyRequested := requested[definition.Key]
+		_, alreadyStored := stored[definition.Key]
+		// Selecting the effective UTC default is still a durable onboarding decision;
+		// without the row, the recommended timezone step would remain incomplete.
+		if !reflect.DeepEqual(before[definition.Key], after[definition.Key]) ||
+			(explicitlyRequested && !alreadyStored && definition.Key == "user_quota.timezone") {
 			result = append(result, definition.Key)
 		}
 	}
@@ -715,7 +720,9 @@ func cloneConfiguration(values map[string]any) map[string]any {
 	for key, value := range values {
 		switch typed := value.(type) {
 		case []string:
-			result[key] = append([]string(nil), typed...)
+			cloned := make([]string, len(typed))
+			copy(cloned, typed)
+			result[key] = cloned
 		default:
 			result[key] = value
 		}

@@ -100,8 +100,8 @@ test("首次管理登录在必需项未完成时进入引导，状态接口失�
     const response = await route.fetch();
     const payload = await response.json();
     payload.required_complete = false;
-    payload.deferred = false;
     payload.required = { complete: 0, total: 5 };
+    payload.recommended = { complete: 0, skipped: 0, total: 6 };
     payload.steps = payload.steps.map((step: { kind: string; status: string }, index: number) => ({
       ...step,
       status: step.kind === "required" ? (index < 3 ? "incomplete" : "blocked") : "incomplete"
@@ -111,7 +111,148 @@ test("首次管理登录在必需项未完成时进入引导，状态接口失�
   await login(page, "/admin/overview");
   await expect(page).toHaveURL(/\/admin\/setup/);
   await expect(page.getByRole("heading", { name: "让第一个用户安全开始使用" })).toBeVisible();
-  await page.getByRole("navigation", { name: "必须完成" }).getByRole("button", { name: /首个 CPA/ }).click();
+  await expect(page.getByRole("button", { name: "全部推荐项稍后再说" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "稍后继续" })).toHaveCount(0);
+  await expect(page.locator(".onboarding-bottom-bar")).toHaveCount(0);
+  await expect(page.getByLabel("允许的邮箱域名")).toBeVisible();
+  const setupGeometry = await page.evaluate(() => {
+    const main = document.querySelector<HTMLElement>(".main-surface");
+    const workspace = document.querySelector<HTMLElement>(".onboarding-workspace");
+    const steps = document.querySelector<HTMLElement>(".onboarding-steps");
+    const panel = document.querySelector<HTMLElement>(".onboarding-step-panel");
+    const form = document.querySelector<HTMLElement>(".onboarding-inline-form");
+    const field = document.querySelector<HTMLElement>("#onboarding-email-domains");
+    const help = form?.querySelector<HTMLElement>("small") ?? null;
+    const submit = form?.querySelector<HTMLElement>(".ant-btn") ?? null;
+    const rect = (element: HTMLElement | null) => element?.getBoundingClientRect();
+    return {
+      mainClientHeight: main?.clientHeight ?? 0,
+      mainScrollHeight: main?.scrollHeight ?? 0,
+      workspaceClientHeight: workspace?.clientHeight ?? 0,
+      workspaceScrollHeight: workspace?.scrollHeight ?? 0,
+      stepsBottom: rect(steps)?.bottom ?? 0,
+      panelTop: rect(panel)?.top ?? 0,
+      panelWidth: rect(panel)?.width ?? 0,
+      formWidth: rect(form)?.width ?? 0,
+      formRight: rect(form)?.right ?? 0,
+      fieldWidth: rect(field)?.width ?? 0,
+      fieldBottom: rect(field)?.bottom ?? 0,
+      helpBottom: rect(help)?.bottom ?? 0,
+      submitTop: rect(submit)?.top ?? 0,
+      submitRight: rect(submit)?.right ?? 0
+    };
+  });
+  expect(setupGeometry.mainScrollHeight).toBeLessThanOrEqual(setupGeometry.mainClientHeight + 1);
+  expect(setupGeometry.workspaceScrollHeight).toBeLessThanOrEqual(setupGeometry.workspaceClientHeight + 1);
+  expect(setupGeometry.stepsBottom).toBeLessThanOrEqual(setupGeometry.panelTop + 1);
+  expect(setupGeometry.formWidth).toBeGreaterThan(setupGeometry.panelWidth * 0.9);
+  expect(setupGeometry.fieldWidth).toBeGreaterThan(setupGeometry.formWidth * 0.9);
+  expect(setupGeometry.submitTop).toBeGreaterThanOrEqual(setupGeometry.fieldBottom);
+  expect(setupGeometry.submitTop).toBeGreaterThanOrEqual(setupGeometry.helpBottom);
+  expect(setupGeometry.formRight - setupGeometry.submitRight).toBeLessThanOrEqual(24);
+  await page.getByRole("navigation", { name: "推荐设置" }).getByRole("button", { name: /访问地址/ }).click();
+  await expect(page.getByLabel("公开访问地址")).toBeVisible();
+  const publicURLGeometry = await page.locator(".onboarding-inline-form").evaluate((form) => {
+    const field = form.querySelector<HTMLElement>("#onboarding-public-url");
+    const help = form.querySelector<HTMLElement>("small");
+    const submit = form.querySelector<HTMLElement>(".ant-btn");
+    const formRect = form.getBoundingClientRect();
+    const fieldRect = field?.getBoundingClientRect();
+    const helpRect = help?.getBoundingClientRect();
+    const submitRect = submit?.getBoundingClientRect();
+    return {
+      fieldBottom: fieldRect?.bottom ?? 0,
+      fieldWidth: fieldRect?.width ?? 0,
+      formWidth: formRect.width,
+      helpBottom: helpRect?.bottom ?? 0,
+      submitRightGap: formRect.right - (submitRect?.right ?? 0),
+      submitTop: submitRect?.top ?? 0
+    };
+  });
+  expect(publicURLGeometry.fieldWidth).toBeGreaterThan(publicURLGeometry.formWidth * 0.9);
+  expect(publicURLGeometry.submitTop).toBeGreaterThanOrEqual(publicURLGeometry.fieldBottom);
+  expect(publicURLGeometry.submitTop).toBeGreaterThanOrEqual(publicURLGeometry.helpBottom);
+  expect(publicURLGeometry.submitRightGap).toBeLessThanOrEqual(24);
+  const recommendedNavigation = page.getByRole("navigation", { name: "推荐设置" });
+  for (const recommendation of [
+    { step: /额度时区/, field: "用户额度时区" },
+    { step: /默认额度/, field: "新用户默认周额度" },
+    { step: /^通知/, field: "企业微信群 Webhook" },
+    { step: /^品牌/, field: "产品名称" },
+    { step: /上游代理/, field: "默认上游代理 URL" }
+  ]) {
+    await recommendedNavigation.getByRole("button", { name: recommendation.step }).click();
+    await expect(page.getByLabel(recommendation.field)).toBeVisible();
+    await expect(page.locator(".onboarding-inline-form")).toBeVisible();
+    await expect(page.getByRole("button", { name: "前往设置" })).toHaveCount(0);
+  }
+  await recommendedNavigation.getByRole("button", { name: /^品牌/ }).click();
+  const brandingGeometry = await page.locator(".onboarding-inline-form").evaluate((form) => {
+    const fields = form.querySelector<HTMLElement>(".onboarding-form-fields");
+    const submit = form.querySelector<HTMLElement>(".ant-btn");
+    const formRect = form.getBoundingClientRect();
+    const fieldsRect = fields?.getBoundingClientRect();
+    const submitRect = submit?.getBoundingClientRect();
+    return {
+      fieldsBottom: fieldsRect?.bottom ?? 0,
+      submitRightGap: formRect.right - (submitRect?.right ?? 0),
+      submitTop: submitRect?.top ?? 0
+    };
+  });
+  expect(brandingGeometry.submitTop).toBeGreaterThanOrEqual(brandingGeometry.fieldsBottom);
+  expect(brandingGeometry.submitRightGap).toBeLessThanOrEqual(24);
+  await page.getByRole("navigation", { name: "必须完成" }).getByRole("button", { name: /初始密码/ }).click();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const narrowGeometry = await page.evaluate(() => {
+    const main = document.querySelector<HTMLElement>(".main-surface");
+    const workspace = document.querySelector<HTMLElement>(".onboarding-workspace");
+    return {
+      mainClientHeight: main?.clientHeight ?? 0,
+      mainScrollHeight: main?.scrollHeight ?? 0,
+      workspaceClientHeight: workspace?.clientHeight ?? 0,
+      workspaceScrollHeight: workspace?.scrollHeight ?? 0
+    };
+  });
+  expect(narrowGeometry.mainScrollHeight).toBeLessThanOrEqual(narrowGeometry.mainClientHeight + 1);
+  expect(narrowGeometry.workspaceScrollHeight).toBeLessThanOrEqual(narrowGeometry.workspaceClientHeight + 1);
+  await page.goto("/admin/setup?step=branding");
+  await expect(page.getByLabel("产品名称")).toBeVisible();
+  const narrowBrandingGeometry = await page.evaluate(() => {
+    const main = document.querySelector<HTMLElement>(".main-surface");
+    const workspace = document.querySelector<HTMLElement>(".onboarding-workspace");
+    const form = document.querySelector<HTMLElement>(".onboarding-inline-form");
+    const submit = form?.querySelector<HTMLElement>(".ant-btn");
+    const formRect = form?.getBoundingClientRect();
+    const submitRect = submit?.getBoundingClientRect();
+    return {
+      mainClientHeight: main?.clientHeight ?? 0,
+      mainScrollHeight: main?.scrollHeight ?? 0,
+      workspaceClientHeight: workspace?.clientHeight ?? 0,
+      workspaceScrollHeight: workspace?.scrollHeight ?? 0,
+      submitRightGap: (formRect?.right ?? 0) - (submitRect?.right ?? 0)
+    };
+  });
+  expect(narrowBrandingGeometry.mainScrollHeight).toBeLessThanOrEqual(narrowBrandingGeometry.mainClientHeight + 1);
+  expect(narrowBrandingGeometry.workspaceScrollHeight).toBeLessThanOrEqual(narrowBrandingGeometry.workspaceClientHeight + 1);
+  expect(narrowBrandingGeometry.submitRightGap).toBeLessThanOrEqual(24);
+  await page.goto("/admin/setup?step=first_account");
+  const actionGeometry = await page.locator(".onboarding-action-card").evaluate((card) => {
+    const copy = card.querySelector<HTMLElement>("div");
+    const submit = card.querySelector<HTMLElement>(".ant-btn");
+    const cardRect = card.getBoundingClientRect();
+    const copyRect = copy?.getBoundingClientRect();
+    const submitRect = submit?.getBoundingClientRect();
+    return {
+      cardBottom: cardRect.bottom,
+      copyBottom: copyRect?.bottom ?? 0,
+      submitBottom: submitRect?.bottom ?? 0,
+      submitRightGap: cardRect.right - (submitRect?.right ?? 0),
+      submitTop: submitRect?.top ?? 0
+    };
+  });
+  expect(actionGeometry.submitTop).toBeGreaterThanOrEqual(actionGeometry.copyBottom);
+  expect(actionGeometry.cardBottom - actionGeometry.submitBottom).toBeLessThanOrEqual(24);
+  expect(actionGeometry.submitRightGap).toBeLessThanOrEqual(24);
   await page.getByRole("button", { name: /前往设置/ }).click();
   await expect(page).toHaveURL(/\/admin\/accounts/);
   await expect(page.getByText("添加业务 CPA", { exact: true })).toBeVisible();

@@ -10,7 +10,7 @@ export function readOnboarding(signal?: AbortSignal): Promise<OnboardingStatus> 
 }
 
 export function saveOnboardingPreferences(
-  preferences: { deferred: boolean; skippedRecommended: string[] },
+  skippedRecommended: string[],
   csrfToken: string
 ): Promise<OnboardingStatus> {
   return apiRequest<OnboardingStatus>("/admin/api/onboarding/preferences", {
@@ -18,8 +18,7 @@ export function saveOnboardingPreferences(
     headers: { "X-CSRF-Token": csrfToken },
     body: JSON.stringify({
       confirm: "save",
-      deferred: preferences.deferred,
-      skipped_recommended: preferences.skippedRecommended
+      skipped_recommended: skippedRecommended
     })
   });
 }

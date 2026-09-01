@@ -27,7 +27,7 @@ func TestOnboardingStatusGuidesFreshTargetWithoutLeakingSecrets(t *testing.T) {
 	}
 	var payload onboardingStatusResponse
 	decodeAdminResponse(t, response, &payload)
-	if payload.Version != onboardingVersion || payload.RequiredComplete || payload.Deferred ||
+	if payload.Version != onboardingVersion || payload.RequiredComplete ||
 		payload.Required != (onboardingRequiredProgress{Complete: 0, Total: 5}) ||
 		payload.Recommended != (onboardingRecommendedProgress{Complete: 0, Skipped: 0, Total: 6}) {
 		t.Fatalf("fresh onboarding payload = %#v", payload)
@@ -117,7 +117,7 @@ func TestOnboardingPreferencesPersistOnlyRecommendedSkips(t *testing.T) {
 	server, store := newOnboardingTestServer(t, Config{})
 	headers := map[string]string{"X-Management-Key": "test-management-key"}
 	response := performAdminRequest(server, http.MethodPut, "/admin/api/onboarding/preferences", map[string]any{
-		"confirm": "save", "deferred": true,
+		"confirm":             "save",
 		"skipped_recommended": []string{"proxy", "public_base_url", "proxy"},
 	}, headers, nil)
 	if response.Code != http.StatusOK {
@@ -125,7 +125,7 @@ func TestOnboardingPreferencesPersistOnlyRecommendedSkips(t *testing.T) {
 	}
 	var payload onboardingStatusResponse
 	decodeAdminResponse(t, response, &payload)
-	if !payload.Deferred || payload.Recommended.Skipped != 2 ||
+	if payload.Recommended.Skipped != 2 ||
 		strings.Join(payload.SkippedRecommended, ",") != "proxy,public_base_url" {
 		t.Fatalf("updated onboarding preferences = %#v", payload)
 	}
@@ -136,12 +136,12 @@ func TestOnboardingPreferencesPersistOnlyRecommendedSkips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read onboarding preference settings: %v", err)
 	}
-	if deferred, ok := settings[onboardingDeferredVersionSetting].(float64); !ok || deferred != onboardingVersion {
-		t.Fatalf("stored deferred version = %#v", settings[onboardingDeferredVersionSetting])
+	if _, found := settings["onboarding.deferred_version"]; found {
+		t.Fatalf("removed deferred setting was written: %#v", settings["onboarding.deferred_version"])
 	}
 
 	invalid := performAdminRequest(server, http.MethodPut, "/admin/api/onboarding/preferences", map[string]any{
-		"confirm": "save", "deferred": false,
+		"confirm":             "save",
 		"skipped_recommended": []string{"initial_password"},
 	}, headers, nil)
 	assertAdminError(t, invalid, http.StatusBadRequest, "invalid_request")

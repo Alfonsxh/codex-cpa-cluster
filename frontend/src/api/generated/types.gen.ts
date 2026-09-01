@@ -119,7 +119,6 @@ export type OnboardingStatus = {
     version: number;
     generated_at: number;
     required_complete: boolean;
-    deferred: boolean;
     required: OnboardingRequiredProgress;
     recommended: OnboardingRecommendedProgress;
     skipped_recommended: Array<string>;
@@ -128,7 +127,6 @@ export type OnboardingStatus = {
 
 export type OnboardingPreferencesRequest = {
     confirm: 'save';
-    deferred: boolean;
     skipped_recommended: Array<'public_base_url' | 'quota_timezone' | 'weekly_quota' | 'notifications' | 'branding' | 'proxy'>;
 };
 

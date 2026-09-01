@@ -15,16 +15,15 @@ import (
 )
 
 const (
-	onboardingVersion                = 1
-	onboardingSkippedSetting         = "onboarding.skipped_recommended"
-	onboardingDeferredVersionSetting = "onboarding.deferred_version"
-	onboardingRequiredKind           = "required"
-	onboardingRecommendedKind        = "recommended"
-	onboardingCompleteStatus         = "complete"
-	onboardingIncompleteStatus       = "incomplete"
-	onboardingBlockedStatus          = "blocked"
-	onboardingSkippedStatus          = "skipped"
-	onboardingUnavailableStatus      = "unavailable"
+	onboardingVersion           = 1
+	onboardingSkippedSetting    = "onboarding.skipped_recommended"
+	onboardingRequiredKind      = "required"
+	onboardingRecommendedKind   = "recommended"
+	onboardingCompleteStatus    = "complete"
+	onboardingIncompleteStatus  = "incomplete"
+	onboardingBlockedStatus     = "blocked"
+	onboardingSkippedStatus     = "skipped"
+	onboardingUnavailableStatus = "unavailable"
 )
 
 var onboardingRecommendedIDs = []string{
@@ -61,7 +60,6 @@ type onboardingStatusResponse struct {
 	Version            int                           `json:"version"`
 	GeneratedAt        int64                         `json:"generated_at"`
 	RequiredComplete   bool                          `json:"required_complete"`
-	Deferred           bool                          `json:"deferred"`
 	Required           onboardingRequiredProgress    `json:"required"`
 	Recommended        onboardingRecommendedProgress `json:"recommended"`
 	SkippedRecommended []string                      `json:"skipped_recommended"`
@@ -70,7 +68,6 @@ type onboardingStatusResponse struct {
 
 type onboardingPreferencesPayload struct {
 	Confirm            string   `json:"confirm"`
-	Deferred           bool     `json:"deferred"`
 	SkippedRecommended []string `json:"skipped_recommended"`
 }
 
@@ -94,13 +91,8 @@ func (server *Server) updateOnboardingPreferences(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err.Error(), "invalid_request")
 		return
 	}
-	deferredVersion := 0
-	if body.Deferred {
-		deferredVersion = onboardingVersion
-	}
 	if err := server.store.UpdateSettings(c.Request.Context(), map[string]any{
-		onboardingSkippedSetting:         skipped,
-		onboardingDeferredVersionSetting: deferredVersion,
+		onboardingSkippedSetting: skipped,
 	}); err != nil {
 		server.internalError(c, "update onboarding preferences", err)
 		return
@@ -138,11 +130,6 @@ func (server *Server) onboardingStatus(ctx context.Context) (onboardingStatusRes
 	if err != nil {
 		return onboardingStatusResponse{}, err
 	}
-	deferred, err := onboardingDeferred(settings)
-	if err != nil {
-		return onboardingStatusResponse{}, err
-	}
-
 	_, customLogo, err := server.store.ReadBrandingAsset(ctx, "logo")
 	if err != nil {
 		return onboardingStatusResponse{}, fmt.Errorf("read onboarding branding status: %w", err)
@@ -246,7 +233,7 @@ func (server *Server) onboardingStatus(ctx context.Context) (onboardingStatusRes
 	steps := append(required, recommendedDefinitions...)
 	return onboardingStatusResponse{
 		Version: onboardingVersion, GeneratedAt: server.now().Unix(), RequiredComplete: requiredComplete,
-		Deferred: deferred && !requiredComplete, Required: requiredProgress, Recommended: recommendedProgress,
+		Required: requiredProgress, Recommended: recommendedProgress,
 		SkippedRecommended: skipped, Steps: steps,
 	}, nil
 }
@@ -364,23 +351,6 @@ func skippedRecommendedFromSettings(settings map[string]any) ([]string, error) {
 	}
 	sort.Strings(filtered)
 	return filtered, nil
-}
-
-func onboardingDeferred(settings map[string]any) (bool, error) {
-	value, found := settings[onboardingDeferredVersionSetting]
-	if !found || value == nil {
-		return false, nil
-	}
-	switch typed := value.(type) {
-	case float64:
-		return typed == onboardingVersion, nil
-	case int:
-		return typed == onboardingVersion, nil
-	case int64:
-		return typed == onboardingVersion, nil
-	default:
-		return false, fmt.Errorf("设置 %s 的数据类型无效", onboardingDeferredVersionSetting)
-	}
 }
 
 func configuredNonEmptyString(settings map[string]any, key string) bool {

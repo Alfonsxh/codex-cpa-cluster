@@ -9,7 +9,7 @@ React 配置中心通过 Go Admin 的细粒度接口读取和修改组织设置�
 | 接口 | 用途 | 安全行为 |
 |---|---|---|
 | `GET /admin/api/onboarding` | 汇总首次设置和推荐设置的真实完成状态 | 只返回状态、数量和阻塞原因，不返回 Secret |
-| `PUT /admin/api/onboarding/preferences` | 保存“稍后继续”和推荐项跳过列表 | CSRF；只允许已知推荐项，必需项不能跳过 |
+| `PUT /admin/api/onboarding/preferences` | 保存单个推荐项的跳过状态 | CSRF；只允许已知推荐项，必需项不能跳过 |
 | `GET /admin/api/settings/configuration` | 按组读取可编辑配置定义、当前值和生效方式 | 管理会话；秘密只返回是否已配置 |
 | `POST /admin/api/settings/configuration` | 按键保存通用配置 | CSRF；类型、范围和枚举校验 |
 | `GET/PUT /admin/api/settings/general` | 品牌、公开地址、邮箱域、Key 前缀和客户端导出默认值 | PUT 需要 CSRF 与 `confirm=save` |
@@ -21,7 +21,7 @@ React 配置中心通过 Go Admin 的细粒度接口读取和修改组织设置�
 
 完整 API Key、管理密钥、密码和 Webhook 不进入 URL、React Query 缓存、Local Storage 或 Session Storage。一次性凭据只存在于当前 Mutation/Modal 内存，关闭后清理。
 
-`/admin/setup` 复用配置中心、账号管理和用户管理的既有写接口。引导完成状态以 Go Admin 的实时读取为准；浏览器只保存当前会话内的页面选择，不持久化完成状态或秘密。推荐项的跳过状态和“稍后继续”版本写入控制面设置，因此换浏览器后仍保持一致。
+`/admin/setup` 复用配置中心、账号管理和用户管理的既有写接口。引导完成状态以 Go Admin 的实时读取为准；浏览器只保存当前会话内的页面选择，不持久化完成状态或秘密。推荐项可逐项跳过，跳过状态写入控制面设置，因此换浏览器后仍保持一致。
 
 ## 存储边界
 

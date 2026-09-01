@@ -2,15 +2,20 @@ import {
   ArrowLeftOutlined,
   ArrowRightOutlined,
   CheckOutlined,
-  ClockCircleOutlined,
   SettingOutlined
 } from "@ant-design/icons";
-import { Alert, Button, Input, Progress, Result, Skeleton, Tag } from "antd";
+import { Alert, Button, Input, InputNumber, Progress, Result, Skeleton, Tag } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
-import { saveConfiguration } from "../api/configuration";
+import {
+  configurationQueryKey,
+  readConfiguration,
+  saveConfiguration,
+  type ConfigurationCatalog
+} from "../api/configuration";
+import { saveNotificationWebhook } from "../api/notifications";
 import {
   onboardingQueryKey,
   readOnboarding,
@@ -38,15 +43,35 @@ const recommendationLabels: Record<string, string> = {
   proxy: "上游代理"
 };
 
+type OnboardingDrafts = {
+  publicURL: string;
+  quotaTimezone: string;
+  weeklyQuota: number | null;
+  webhookURL: string;
+  productName: string;
+  shortName: string;
+  environmentLabel: string;
+  proxyURL: string;
+};
+
 export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { setRefreshAction, setRefreshLabel, setRefreshing } = useAdminToolbar();
-  const leavingSetup = useRef(false);
+  const configurationHydrated = useRef(false);
   const [domains, setDomains] = useState("");
-  const [publicURL, setPublicURL] = useState(() => window.location.origin);
+  const [drafts, setDrafts] = useState<OnboardingDrafts>({
+    publicURL: window.location.origin,
+    quotaTimezone: "",
+    weeklyQuota: null,
+    webhookURL: "",
+    productName: "",
+    shortName: "",
+    environmentLabel: "",
+    proxyURL: ""
+  });
   const [notice, setNotice] = useState("");
   const [initialPasswordOpen, setInitialPasswordOpen] = useState(false);
 
@@ -58,29 +83,54 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     retry: false,
     refetchOnWindowFocus: false
   });
+  const catalog = useQuery({
+    queryKey: configurationQueryKey,
+    queryFn: ({ signal }) => readConfiguration(signal),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false
+  });
   const selectedID = searchParams.get("step") ?? "";
   const selected = useMemo(() => selectOnboardingStep(onboarding.data, selectedID), [onboarding.data, selectedID]);
+  const configurationValues = useMemo(() => configurationValueMap(catalog.data), [catalog.data]);
+  const proxyConfigured = configurationField(catalog.data, "cpa.proxy_url")?.configured === true;
 
-  useEffect(() => setRefreshing(onboarding.isFetching), [onboarding.isFetching, setRefreshing]);
+  useEffect(() => setRefreshing(onboarding.isFetching || catalog.isFetching), [catalog.isFetching, onboarding.isFetching, setRefreshing]);
   useEffect(() => {
     if (onboarding.data) setRefreshLabel(`初始化状态更新于 ${formatStatusTime(onboarding.data.generated_at)}`);
     return () => setRefreshLabel("");
   }, [onboarding.data, setRefreshLabel]);
   useEffect(() => {
     setRefreshAction(async () => {
-      const result = await onboarding.refetch();
-      if (result.error) throw result.error;
+      const results = await Promise.all([onboarding.refetch(), catalog.refetch()]);
+      const error = results.find((result) => result.error)?.error;
+      if (error) throw error;
     });
     return () => setRefreshAction(null);
-  }, [onboarding, setRefreshAction]);
+  }, [catalog, onboarding, setRefreshAction]);
   useEffect(() => {
-    if (leavingSetup.current || !location.pathname.startsWith("/setup") || !onboarding.data || selectedID || !selected) return;
+    if (!location.pathname.startsWith("/setup") || !onboarding.data || selectedID || !selected) return;
     setSearchParams({ step: selected.id }, { replace: true });
   }, [location.pathname, onboarding.data, selected, selectedID, setSearchParams]);
+  useEffect(() => {
+    if (!catalog.data || configurationHydrated.current) return;
+    configurationHydrated.current = true;
+    const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    setDrafts((current) => ({
+      ...current,
+      publicURL: configurationStringValue(catalog.data, "branding.public_base_url") || window.location.origin,
+      quotaTimezone: configurationStringValue(catalog.data, "user_quota.timezone") || browserTimezone,
+      weeklyQuota: configurationNumberValue(catalog.data, "user_quota.default_weekly_tokens"),
+      productName: configurationStringValue(catalog.data, "branding.product_name"),
+      shortName: configurationStringValue(catalog.data, "branding.short_name"),
+      environmentLabel: configurationStringValue(catalog.data, "branding.environment_label")
+    }));
+  }, [catalog.data]);
 
   const preferences = useMutation({
-    mutationFn: (next: { deferred: boolean; skippedRecommended: string[] }) => (
-      saveOnboardingPreferences(next, csrfToken)
+    mutationFn: (skippedRecommended: string[]) => (
+      saveOnboardingPreferences(skippedRecommended, csrfToken)
     ),
     onSuccess: (result) => {
       queryClient.setQueryData(onboardingQueryKey, result);
@@ -88,25 +138,23 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     }
   });
   const configuration = useMutation({
-    mutationFn: ({ key, value }: { key: string; value: unknown }) => saveConfiguration({ [key]: value }, csrfToken),
-    onSuccess: async () => {
-      setNotice("设置已保存，完成状态已重新检查");
+    mutationFn: (values: Record<string, unknown>) => saveConfiguration(values, csrfToken),
+    onSuccess: async (result) => {
+      setNotice(`${result.message}，完成状态已重新检查`);
+      await Promise.all([
+        catalog.refetch(),
+        queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true })
+      ]);
+    }
+  });
+  const notificationWebhook = useMutation({
+    mutationFn: () => saveNotificationWebhook(drafts.webhookURL.trim(), csrfToken),
+    onSuccess: async (result) => {
+      setDrafts((current) => ({ ...current, webhookURL: "" }));
+      setNotice(`${result.message}，完成状态已重新检查`);
       await queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true });
     }
   });
-  const continueLater = async () => {
-    leavingSetup.current = true;
-    try {
-      await preferences.mutateAsync({
-        deferred: true,
-        skippedRecommended: onboarding.data?.skipped_recommended ?? []
-      });
-      navigate("/overview");
-    } catch {
-      leavingSetup.current = false;
-    }
-  };
-
   if (onboarding.isPending) {
     return (
       <section className="page-content onboarding-page" aria-label="正在加载首次设置">
@@ -138,20 +186,16 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     const next = skipped
       ? Array.from(new Set([...status.skipped_recommended, stepID]))
       : status.skipped_recommended.filter((id) => id !== stepID);
-    preferences.mutate({ deferred: false, skippedRecommended: next });
+    preferences.mutate(next);
   };
   const jump = (index: number) => {
     const target = steps[index];
     if (target) setSearchParams({ step: target.id });
   };
-  const saveDomains = () => configuration.mutate({
-    key: "identity.allowed_email_domains",
-    value: domains.trim()
-  });
-  const savePublicURL = () => configuration.mutate({
-    key: "branding.public_base_url",
-    value: publicURL.trim()
-  });
+  const saveDomains = () => configuration.mutate({ "identity.allowed_email_domains": domains.trim() });
+  const updateDraft = (key: keyof OnboardingDrafts, value: OnboardingDrafts[keyof OnboardingDrafts]) => {
+    setDrafts((current) => ({ ...current, [key]: value }));
+  };
 
   return (
     <section className="page-content onboarding-page">
@@ -160,7 +204,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
           <div>
             <span className="section-kicker">FIRST RUN WORKSPACE</span>
             <h2>让第一个用户安全开始使用</h2>
-            <p>先完成 5 项必需设置；推荐设置可逐项跳过，也可以之后从运行总览继续。</p>
+            <p>先完成 5 项必需设置；推荐设置可逐项跳过，不会阻塞必需流程。</p>
           </div>
           <div className="onboarding-progress-card">
             <strong>{status.required.complete}<span>/{status.required.total}</span></strong>
@@ -169,14 +213,14 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
         </header>
 
         {notice ? <Alert className="page-alert" type="success" showIcon closable title={notice} onClose={() => setNotice("")} /> : null}
-        {preferences.isError || configuration.isError ? (
+        {preferences.isError || configuration.isError || notificationWebhook.isError ? (
           <Alert
             className="page-alert"
             type="error"
             showIcon
             title="设置未保存"
-            description={(preferences.error ?? configuration.error) instanceof Error
-              ? (preferences.error ?? configuration.error as Error).message
+            description={(preferences.error ?? configuration.error ?? notificationWebhook.error) instanceof Error
+              ? (preferences.error ?? configuration.error ?? notificationWebhook.error as Error).message
               : "请稍后重试"}
           />
         ) : null}
@@ -216,12 +260,18 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
             <OnboardingStepAction
               step={selected}
               domains={domains}
-              publicURL={publicURL}
-              pending={configuration.isPending}
+              drafts={drafts}
+              configurationValues={configurationValues}
+              configurationPending={catalog.isPending}
+              configurationError={catalog.error}
+              proxyConfigured={proxyConfigured}
+              pending={configuration.isPending || notificationWebhook.isPending}
               onDomainsChange={setDomains}
-              onPublicURLChange={setPublicURL}
+              onDraftChange={updateDraft}
               onSaveDomains={saveDomains}
-              onSavePublicURL={savePublicURL}
+              onSaveConfiguration={(values) => configuration.mutate(values)}
+              onSaveNotification={() => notificationWebhook.mutate()}
+              onRetryConfiguration={() => void catalog.refetch()}
               onOpenInitialPassword={() => setInitialPasswordOpen(true)}
               onNavigate={() => navigate(selected.action_path)}
             />
@@ -233,14 +283,6 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
                 ) : (
                   <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, true)}>暂时跳过此项</Button>
                 )}
-                <Button
-                  type="text"
-                  disabled={preferences.isPending}
-                  onClick={() => preferences.mutate({
-                    deferred: false,
-                    skippedRecommended: steps.filter((step) => step.kind === "recommended" && step.status !== "complete").map((step) => step.id)
-                  })}
-                >全部推荐项稍后再说</Button>
               </div>
             ) : null}
 
@@ -256,16 +298,12 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
           </main>
         </div>
 
-        <div className="onboarding-bottom-bar">
-          <p>{status.required_complete ? "必需设置已完成。推荐项不会阻塞使用。" : "还没准备好？保存进度后可从运行总览继续。"}</p>
-          {!status.required_complete ? (
-            <Button
-              icon={<ClockCircleOutlined />}
-              loading={preferences.isPending}
-              onClick={() => void continueLater()}
-            >稍后继续</Button>
-          ) : <Button type="primary" onClick={() => navigate("/overview")}>完成引导</Button>}
-        </div>
+        {status.required_complete ? (
+          <div className="onboarding-bottom-bar">
+            <p>必需设置已完成。推荐项不会阻塞使用。</p>
+            <Button type="primary" onClick={() => navigate("/overview")}>完成引导</Button>
+          </div>
+        ) : null}
       </div>
 
       <InitialPasswordModal
@@ -322,23 +360,35 @@ function OnboardingStepGroup({
 function OnboardingStepAction({
   step,
   domains,
-  publicURL,
+  drafts,
+  configurationValues,
+  configurationPending,
+  configurationError,
+  proxyConfigured,
   pending,
   onDomainsChange,
-  onPublicURLChange,
+  onDraftChange,
   onSaveDomains,
-  onSavePublicURL,
+  onSaveConfiguration,
+  onSaveNotification,
+  onRetryConfiguration,
   onOpenInitialPassword,
   onNavigate
 }: {
   step: OnboardingStep;
   domains: string;
-  publicURL: string;
+  drafts: OnboardingDrafts;
+  configurationValues: Record<string, unknown>;
+  configurationPending: boolean;
+  configurationError: unknown;
+  proxyConfigured: boolean;
   pending: boolean;
   onDomainsChange: (value: string) => void;
-  onPublicURLChange: (value: string) => void;
+  onDraftChange: (key: keyof OnboardingDrafts, value: OnboardingDrafts[keyof OnboardingDrafts]) => void;
   onSaveDomains: () => void;
-  onSavePublicURL: () => void;
+  onSaveConfiguration: (values: Record<string, unknown>) => void;
+  onSaveNotification: () => void;
+  onRetryConfiguration: () => void;
   onOpenInitialPassword: () => void;
   onNavigate: () => void;
 }) {
@@ -349,19 +399,9 @@ function OnboardingStepAction({
     return (
       <div className="onboarding-inline-form">
         <label htmlFor="onboarding-email-domains">允许的邮箱域名</label>
-        <Input.TextArea id="onboarding-email-domains" value={domains} onChange={(event) => onDomainsChange(event.target.value)} autoSize={{ minRows: 3, maxRows: 5 }} placeholder="example.com, example.org" />
+        <Input.TextArea id="onboarding-email-domains" value={domains} onChange={(event) => onDomainsChange(event.target.value)} autoSize={{ minRows: 2, maxRows: 4 }} placeholder="example.com, example.org" />
         <small>使用逗号、空格或换行分隔。未列入的邮箱无法创建或登录。</small>
         <Button type="primary" loading={pending} disabled={!domains.trim()} onClick={onSaveDomains}>保存并检查</Button>
-      </div>
-    );
-  }
-  if (step.id === "public_base_url") {
-    return (
-      <div className="onboarding-inline-form">
-        <label htmlFor="onboarding-public-url">公开访问地址</label>
-        <Input id="onboarding-public-url" type="url" value={publicURL} onChange={(event) => onPublicURLChange(event.target.value)} placeholder="https://cpa.example.com" />
-        <small>默认使用当前浏览器地址；通知和客户端配置导出会引用此地址。</small>
-        <Button type="primary" loading={pending} disabled={!/^https?:\/\//i.test(publicURL.trim())} onClick={onSavePublicURL}>使用此地址</Button>
       </div>
     );
   }
@@ -374,13 +414,101 @@ function OnboardingStepAction({
       </div>
     );
   }
-  return (
-    <div className="onboarding-action-card">
-      <SettingOutlined aria-hidden="true" />
-      <div><strong>{step.kind === "required" ? "前往现有管理流程" : "按需完成此项"}</strong><p>完成后返回此页面，系统会重新读取真实状态。</p></div>
-      <Button type={step.kind === "required" ? "primary" : "default"} onClick={onNavigate}>前往设置<ArrowRightOutlined /></Button>
-    </div>
-  );
+  if (step.kind === "required") {
+    return (
+      <div className="onboarding-action-card">
+        <SettingOutlined aria-hidden="true" />
+        <div><strong>前往现有管理流程</strong><p>完成后返回此页面，系统会重新读取真实状态。</p></div>
+        <Button type="primary" onClick={onNavigate}>前往设置<ArrowRightOutlined /></Button>
+      </div>
+    );
+  }
+  if (configurationPending) {
+    return <div className="onboarding-inline-form onboarding-form-state" aria-label="正在读取推荐设置"><Skeleton active title={false} paragraph={{ rows: 3 }} /></div>;
+  }
+  if (configurationError) {
+    return (
+      <div className="onboarding-action-card">
+        <SettingOutlined aria-hidden="true" />
+        <div><strong>推荐设置暂时不可用</strong><p>{configurationError instanceof Error ? configurationError.message : "无法读取当前配置，请稍后重试。"}</p></div>
+        <Button type="primary" onClick={onRetryConfiguration}>重新读取</Button>
+      </div>
+    );
+  }
+  if (step.id === "public_base_url") {
+    const valid = /^https?:\/\/[^\s]+$/i.test(drafts.publicURL.trim());
+    return (
+      <div className="onboarding-inline-form">
+        <label htmlFor="onboarding-public-url">公开访问地址</label>
+        <Input id="onboarding-public-url" type="url" value={drafts.publicURL} onChange={(event) => onDraftChange("publicURL", event.target.value)} placeholder="https://cpa.example.com" />
+        <small>默认使用当前浏览器地址；通知和客户端配置导出会引用此地址。</small>
+        <Button type="primary" loading={pending} disabled={!valid} onClick={() => onSaveConfiguration({ "branding.public_base_url": drafts.publicURL.trim() })}>使用此地址</Button>
+      </div>
+    );
+  }
+  if (step.id === "quota_timezone") {
+    return (
+      <div className="onboarding-inline-form">
+        <label htmlFor="onboarding-quota-timezone">用户额度时区</label>
+        <Input id="onboarding-quota-timezone" value={drafts.quotaTimezone} onChange={(event) => onDraftChange("quotaTimezone", event.target.value)} placeholder="Asia/Shanghai" />
+        <small>使用 IANA 时区，例如 Asia/Shanghai、Europe/London 或 UTC。</small>
+        <Button type="primary" loading={pending} disabled={!drafts.quotaTimezone.trim()} onClick={() => onSaveConfiguration({ "user_quota.timezone": drafts.quotaTimezone.trim() })}>保存时区</Button>
+      </div>
+    );
+  }
+  if (step.id === "weekly_quota") {
+    const valid = drafts.weeklyQuota !== null && Number.isInteger(drafts.weeklyQuota) && drafts.weeklyQuota > 0 && drafts.weeklyQuota <= 1_000_000_000_000;
+    return (
+      <div className="onboarding-inline-form">
+        <label htmlFor="onboarding-weekly-quota">新用户默认周额度</label>
+        <InputNumber id="onboarding-weekly-quota" aria-label="新用户默认周额度" min={1} max={1_000_000_000_000} precision={0} value={drafts.weeklyQuota} onChange={(value) => onDraftChange("weeklyQuota", typeof value === "number" ? value : null)} placeholder="20000000" />
+        <small>按自然周统计加权 Token；不设置额度时可直接跳过此推荐项。</small>
+        <Button type="primary" loading={pending} disabled={!valid} onClick={() => onSaveConfiguration({ "user_quota.default_weekly_tokens": drafts.weeklyQuota })}>保存默认额度</Button>
+      </div>
+    );
+  }
+  if (step.id === "notifications") {
+    const valid = drafts.webhookURL.trim().startsWith("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=");
+    return (
+      <div className="onboarding-inline-form">
+        <label htmlFor="onboarding-notification-webhook">企业微信群 Webhook</label>
+        <Input.Password id="onboarding-notification-webhook" value={drafts.webhookURL} onChange={(event) => onDraftChange("webhookURL", event.target.value)} autoComplete="new-password" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+        <small>地址只写入加密存储，不会通过初始化状态接口或浏览器缓存回显。</small>
+        <Button type="primary" loading={pending} disabled={!valid} onClick={onSaveNotification}>保存 Webhook</Button>
+      </div>
+    );
+  }
+  if (step.id === "branding") {
+    const productName = drafts.productName.trim();
+    const shortName = drafts.shortName.trim();
+    const environmentLabel = drafts.environmentLabel.trim();
+    const valid = productName.length >= 2 && productName.length <= 64 && shortName.length >= 2 && shortName.length <= 32 && environmentLabel.length <= 64;
+    const changed = productName !== configurationValues["branding.product_name"] || shortName !== configurationValues["branding.short_name"] || environmentLabel !== configurationValues["branding.environment_label"];
+    return (
+      <div className="onboarding-inline-form onboarding-inline-form-multi">
+        <div className="onboarding-form-fields onboarding-branding-fields">
+          <label htmlFor="onboarding-product-name"><span>产品名称</span><Input id="onboarding-product-name" maxLength={64} value={drafts.productName} onChange={(event) => onDraftChange("productName", event.target.value)} /></label>
+          <label htmlFor="onboarding-short-name"><span>产品简称</span><Input id="onboarding-short-name" maxLength={32} value={drafts.shortName} onChange={(event) => onDraftChange("shortName", event.target.value)} /></label>
+          <label htmlFor="onboarding-environment-label"><span>环境说明</span><Input id="onboarding-environment-label" maxLength={64} value={drafts.environmentLabel} onChange={(event) => onDraftChange("environmentLabel", event.target.value)} placeholder="例如：研发团队专用" /></label>
+        </div>
+        <small>至少修改一项才会标记为已配置；保持默认品牌时可跳过此推荐项。</small>
+        <Button type="primary" loading={pending} disabled={!valid || !changed} onClick={() => onSaveConfiguration({ "branding.product_name": productName, "branding.short_name": shortName, "branding.environment_label": environmentLabel })}>保存品牌信息</Button>
+      </div>
+    );
+  }
+  if (step.id === "proxy") {
+    const proxyURL = drafts.proxyURL.trim();
+    const valid = proxyConfigured ? !proxyURL || /^(?:https?|socks5):\/\/[^\s]+$/i.test(proxyURL) : /^(?:https?|socks5):\/\/[^\s]+$/i.test(proxyURL);
+    return (
+      <div className="onboarding-inline-form">
+        <label htmlFor="onboarding-proxy-url">默认上游代理 URL</label>
+        <Input.Password id="onboarding-proxy-url" value={drafts.proxyURL} onChange={(event) => onDraftChange("proxyURL", event.target.value)} autoComplete="new-password" placeholder={proxyConfigured ? "已加密保存；留空直接启用现有代理" : "socks5://user:password@proxy.example.com:1080"} />
+        <small>保存后会启用默认代理，并应用到所有选择“继承默认”的 CPA；密钥不会回显。</small>
+        <Button type="primary" loading={pending} disabled={!valid} onClick={() => onSaveConfiguration({ "cpa.proxy_enabled": true, ...(proxyURL ? { "cpa.proxy_url": proxyURL } : {}) })}>保存并启用代理</Button>
+      </div>
+    );
+  }
+  return null;
 }
 
 function StepStatusTag({ status }: { status: OnboardingStep["status"] }) {
@@ -411,6 +539,24 @@ function selectOnboardingStep(status: OnboardingStatus | undefined, selectedID: 
   return status.steps.find((step) => step.kind === "required" && step.status !== "complete")
     ?? status.steps.find((step) => step.kind === "recommended" && !["complete", "skipped"].includes(step.status))
     ?? status.steps[0];
+}
+
+function configurationField(catalog: ConfigurationCatalog | undefined, key: string) {
+  return catalog?.groups.flatMap((group) => group.fields).find((field) => field.key === key);
+}
+
+function configurationValueMap(catalog: ConfigurationCatalog | undefined): Record<string, unknown> {
+  return Object.fromEntries(catalog?.groups.flatMap((group) => group.fields).map((field) => [field.key, field.value]) ?? []);
+}
+
+function configurationStringValue(catalog: ConfigurationCatalog, key: string): string {
+  const value = configurationField(catalog, key)?.value;
+  return typeof value === "string" ? value : "";
+}
+
+function configurationNumberValue(catalog: ConfigurationCatalog, key: string): number | null {
+  const value = configurationField(catalog, key)?.value;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function formatStatusTime(timestamp: number) {

@@ -7,7 +7,7 @@ import {
 } from "@ant-design/icons";
 import { Alert, Button, Input, Progress, Result, Skeleton, Tag } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { saveConfiguration } from "../api/configuration";
@@ -44,6 +44,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { setRefreshAction, setRefreshLabel, setRefreshing } = useAdminToolbar();
+  const leavingSetup = useRef(false);
   const [domains, setDomains] = useState("");
   const [publicURL, setPublicURL] = useState(() => window.location.origin);
   const [notice, setNotice] = useState("");
@@ -73,7 +74,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     return () => setRefreshAction(null);
   }, [onboarding, setRefreshAction]);
   useEffect(() => {
-    if (!location.pathname.startsWith("/setup") || !onboarding.data || selectedID || !selected) return;
+    if (leavingSetup.current || !location.pathname.startsWith("/setup") || !onboarding.data || selectedID || !selected) return;
     setSearchParams({ step: selected.id }, { replace: true });
   }, [location.pathname, onboarding.data, selected, selectedID, setSearchParams]);
 
@@ -93,6 +94,18 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
       await queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true });
     }
   });
+  const continueLater = async () => {
+    leavingSetup.current = true;
+    try {
+      await preferences.mutateAsync({
+        deferred: true,
+        skippedRecommended: onboarding.data?.skipped_recommended ?? []
+      });
+      navigate("/overview");
+    } catch {
+      leavingSetup.current = false;
+    }
+  };
 
   if (onboarding.isPending) {
     return (
@@ -249,10 +262,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
             <Button
               icon={<ClockCircleOutlined />}
               loading={preferences.isPending}
-              onClick={() => void preferences.mutateAsync({
-                deferred: true,
-                skippedRecommended: status.skipped_recommended
-              }).then(() => navigate("/overview"))}
+              onClick={() => void continueLater()}
             >稍后继续</Button>
           ) : <Button type="primary" onClick={() => navigate("/overview")}>完成引导</Button>}
         </div>

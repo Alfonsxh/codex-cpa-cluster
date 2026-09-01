@@ -1,1 +1,1 @@
-{"generated_at":1787500800,"authorized_accounts":3,"running_services":6,"total_services":6,"requests_5m":74,"warnings":[]}
+{"generated_at":1787500800,"authorized_accounts":3,"running_services":6,"total_services":6,"requests_5m":74,"account_quota":{"available":true,"enabled_accounts":3,"known_accounts":3,"unknown_accounts":0,"average_used_percent":47.47,"average_remaining_percent":52.53,"equivalent_remaining_accounts":1.58,"exhausted_accounts":0,"high_risk_accounts":0},"warnings":[]}

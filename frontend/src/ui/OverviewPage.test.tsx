@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { OverviewPage } from "./OverviewPage";
@@ -57,6 +58,17 @@ describe("OverviewPage legacy dashboard contract", () => {
       running_services: 7,
       total_services: 8,
       requests_5m: 74,
+      account_quota: {
+        available: true,
+        enabled_accounts: 3,
+        known_accounts: 3,
+        unknown_accounts: 0,
+        average_used_percent: 47.47,
+        average_remaining_percent: 52.53,
+        equivalent_remaining_accounts: 1.58,
+        exhausted_accounts: 0,
+        high_risk_accounts: 0
+      },
       warnings: []
     };
     const jobs = {
@@ -83,9 +95,11 @@ describe("OverviewPage legacy dashboard contract", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const user = userEvent.setup();
     render(
-      <QueryClientProvider client={queryClient}>
-        <OverviewPage />
-      </QueryClientProvider>
+      <MemoryRouter initialEntries={["/overview"]}>
+        <QueryClientProvider client={queryClient}>
+          <OverviewPage />
+        </QueryClientProvider>
+      </MemoryRouter>
     );
 
     expect(await screen.findByText("1 个用户的统一 Key 账号矩阵不完整")).toBeInTheDocument();
@@ -98,6 +112,9 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(within(metrics).getByText("2/3")).toBeInTheDocument();
     expect(within(metrics).getByText("7/8")).toBeInTheDocument();
     expect(within(metrics).getByText("74")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "账号周额度" })).toBeInTheDocument();
+    expect(screen.getByText("47.5%")).toBeInTheDocument();
+    expect(screen.getByText("1.6 个账号")).toBeInTheDocument();
 
     expect(await screen.findByRole("heading", { name: "所有账号未加权 Token 使用量" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "CPA 账号未加权 Token 使用趋势" })).toBeInTheDocument();

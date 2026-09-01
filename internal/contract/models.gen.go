@@ -2634,6 +2634,19 @@ type OperationImpactAction string
 // OperationImpactTargetType defines model for OperationImpact.TargetType.
 type OperationImpactTargetType string
 
+// OverviewAccountQuotaSummary defines model for OverviewAccountQuotaSummary.
+type OverviewAccountQuotaSummary struct {
+	Available                   bool     `json:"available"`
+	AverageRemainingPercent     *float32 `json:"average_remaining_percent"`
+	AverageUsedPercent          *float32 `json:"average_used_percent"`
+	EnabledAccounts             int      `json:"enabled_accounts"`
+	EquivalentRemainingAccounts float32  `json:"equivalent_remaining_accounts"`
+	ExhaustedAccounts           int      `json:"exhausted_accounts"`
+	HighRiskAccounts            int      `json:"high_risk_accounts"`
+	KnownAccounts               int      `json:"known_accounts"`
+	UnknownAccounts             int      `json:"unknown_accounts"`
+}
+
 // OverviewCatalog defines model for OverviewCatalog.
 type OverviewCatalog struct {
 	Accounts    []OverviewCatalogAccount `json:"accounts"`
@@ -2668,12 +2681,13 @@ type OverviewPayloadSource string
 
 // OverviewStatusPayload defines model for OverviewStatusPayload.
 type OverviewStatusPayload struct {
-	AuthorizedAccounts int      `json:"authorized_accounts"`
-	GeneratedAt        int64    `json:"generated_at"`
-	Requests5m         int64    `json:"requests_5m"`
-	RunningServices    int      `json:"running_services"`
-	TotalServices      int      `json:"total_services"`
-	Warnings           []string `json:"warnings"`
+	AccountQuota       OverviewAccountQuotaSummary `json:"account_quota"`
+	AuthorizedAccounts int                         `json:"authorized_accounts"`
+	GeneratedAt        int64                       `json:"generated_at"`
+	Requests5m         int64                       `json:"requests_5m"`
+	RunningServices    int                         `json:"running_services"`
+	TotalServices      int                         `json:"total_services"`
+	Warnings           []string                    `json:"warnings"`
 }
 
 // OverviewSummary defines model for OverviewSummary.

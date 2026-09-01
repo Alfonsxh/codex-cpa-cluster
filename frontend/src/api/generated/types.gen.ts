@@ -91,7 +91,20 @@ export type OverviewStatusPayload = {
     running_services: number;
     total_services: number;
     requests_5m: number;
+    account_quota: OverviewAccountQuotaSummary;
     warnings: Array<string>;
+};
+
+export type OverviewAccountQuotaSummary = {
+    available: boolean;
+    enabled_accounts: number;
+    known_accounts: number;
+    unknown_accounts: number;
+    average_used_percent: number | null;
+    average_remaining_percent: number | null;
+    equivalent_remaining_accounts: number;
+    exhausted_accounts: number;
+    high_risk_accounts: number;
 };
 
 export type OnboardingStep = {

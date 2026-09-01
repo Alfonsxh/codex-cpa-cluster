@@ -1351,6 +1351,15 @@ func TestOverviewStatusUsesLiveOAuthRuntimeAndFiveMinuteUsage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write overview status accounts: %v", err)
 	}
+	if err := store.WriteRuntimeState(ctx, quota.RuntimeStateName, quota.RuntimeState{
+		Version: 1,
+		Snapshot: quota.Snapshot{Accounts: []quota.AccountQuota{
+			{Account: "alpha", Status: "ok", Weekly: &quota.WeeklyWindow{UsedPercent: 20}},
+			{Account: "beta", Status: "ok", Weekly: &quota.WeeklyWindow{UsedPercent: 70}},
+		}},
+	}); err != nil {
+		t.Fatalf("write overview status quota state: %v", err)
+	}
 	usageReader := &fakeUsageReader{publicResult: map[string]usage.PublicAccountUsage{
 		"alpha": {Account: "alpha", RequestCount: 41},
 		"beta":  {Account: "beta", RequestCount: 6},
@@ -1383,6 +1392,11 @@ func TestOverviewStatusUsesLiveOAuthRuntimeAndFiveMinuteUsage(t *testing.T) {
 		len(payload.Warnings) != 0 {
 		t.Fatalf("overview status payload = %#v", payload)
 	}
+	assertOverviewAccountQuotaSummary(t, payload.AccountQuota, overviewAccountQuotaSummary{
+		Available: true, EnabledAccounts: 2, KnownAccounts: 2,
+		AverageUsedPercent: float64Pointer(45), AverageRemainingPercent: float64Pointer(55),
+		EquivalentRemainingAccounts: 1.1,
+	})
 	if usageReader.publicCalls != 1 || usageReader.publicStartAt != 1_799_999_700 ||
 		usageReader.publicEndAt != 1_800_000_000 ||
 		!slices.Equal(usageReader.publicAccounts, []string{"alpha", "beta"}) {

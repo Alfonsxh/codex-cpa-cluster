@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 
@@ -34,12 +35,25 @@ type overviewCatalogResponse struct {
 }
 
 type overviewStatusResponse struct {
-	GeneratedAt        int64    `json:"generated_at"`
-	AuthorizedAccounts int      `json:"authorized_accounts"`
-	RunningServices    int      `json:"running_services"`
-	TotalServices      int      `json:"total_services"`
-	Requests5M         int64    `json:"requests_5m"`
-	Warnings           []string `json:"warnings"`
+	GeneratedAt        int64                       `json:"generated_at"`
+	AuthorizedAccounts int                         `json:"authorized_accounts"`
+	RunningServices    int                         `json:"running_services"`
+	TotalServices      int                         `json:"total_services"`
+	Requests5M         int64                       `json:"requests_5m"`
+	AccountQuota       overviewAccountQuotaSummary `json:"account_quota"`
+	Warnings           []string                    `json:"warnings"`
+}
+
+type overviewAccountQuotaSummary struct {
+	Available                   bool     `json:"available"`
+	EnabledAccounts             int      `json:"enabled_accounts"`
+	KnownAccounts               int      `json:"known_accounts"`
+	UnknownAccounts             int      `json:"unknown_accounts"`
+	AverageUsedPercent          *float64 `json:"average_used_percent"`
+	AverageRemainingPercent     *float64 `json:"average_remaining_percent"`
+	EquivalentRemainingAccounts float64  `json:"equivalent_remaining_accounts"`
+	ExhaustedAccounts           int      `json:"exhausted_accounts"`
+	HighRiskAccounts            int      `json:"high_risk_accounts"`
 }
 
 type overviewGatewayUsageReader interface {
@@ -180,8 +194,11 @@ func (server *Server) readOverviewStatus(c *gin.Context) {
 		return
 	}
 	var (
-		accounts []controlplane.Account
-		services []runtimeops.Service
+		accounts        []controlplane.Account
+		services        []runtimeops.Service
+		officialQuota   quota.RuntimeState
+		quotaFound      bool
+		quotaStateError error
 	)
 	group, groupContext := errgroup.WithContext(c.Request.Context())
 	group.Go(func() error {
@@ -194,6 +211,10 @@ func (server *Server) readOverviewStatus(c *gin.Context) {
 		services, err = server.runtime.List(groupContext)
 		return err
 	})
+	group.Go(func() error {
+		quotaFound, quotaStateError = server.store.ReadRuntimeState(groupContext, quota.RuntimeStateName, &officialQuota)
+		return nil
+	})
 	if err := group.Wait(); err != nil {
 		server.internalError(c, "read overview runtime status", err)
 		return
@@ -204,6 +225,15 @@ func (server *Server) readOverviewStatus(c *gin.Context) {
 		TotalServices: len(services),
 		Warnings:      make([]string, 0),
 	}
+	if quotaStateError != nil {
+		server.logger.Warn("overview account quota is unavailable", zap.Error(quotaStateError))
+		response.Warnings = append(response.Warnings, "账号周额度读取失败")
+	}
+	response.AccountQuota = buildOverviewAccountQuotaSummary(
+		accounts,
+		officialQuota.Snapshot,
+		quotaFound && quotaStateError == nil,
+	)
 	for _, service := range services {
 		if service.State == "running" {
 			response.RunningServices++
@@ -235,4 +265,61 @@ func (server *Server) readOverviewStatus(c *gin.Context) {
 		response.Warnings = append(response.Warnings, "近 5 分钟统计暂不可用")
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func buildOverviewAccountQuotaSummary(
+	accounts []controlplane.Account,
+	snapshot quota.Snapshot,
+	quotaFound bool,
+) overviewAccountQuotaSummary {
+	summary := overviewAccountQuotaSummary{}
+	quotaByAccount := make(map[string]quota.AccountQuota, len(snapshot.Accounts))
+	if quotaFound {
+		for _, accountQuota := range snapshot.Accounts {
+			quotaByAccount[accountQuota.Account] = accountQuota
+		}
+	}
+	var usedTotal, remainingTotal float64
+	for _, account := range accounts {
+		if !account.GroupEnabled {
+			continue
+		}
+		summary.EnabledAccounts++
+		accountQuota, found := quotaByAccount[account.ID]
+		if !found || accountQuota.Status != "ok" || accountQuota.Weekly == nil {
+			continue
+		}
+		used := math.Max(0, math.Min(accountQuota.Weekly.UsedPercent, 100))
+		limitReached := accountQuota.Weekly.LimitReached ||
+			(accountQuota.LimitReached != nil && *accountQuota.LimitReached) ||
+			(accountQuota.Allowed != nil && !*accountQuota.Allowed)
+		if limitReached {
+			used = 100
+		}
+		remaining := 100 - used
+		summary.KnownAccounts++
+		usedTotal += used
+		remainingTotal += remaining
+		switch {
+		case used >= 100:
+			summary.ExhaustedAccounts++
+		case used >= 90:
+			summary.HighRiskAccounts++
+		}
+	}
+	summary.UnknownAccounts = summary.EnabledAccounts - summary.KnownAccounts
+	if summary.KnownAccounts == 0 {
+		return summary
+	}
+	summary.Available = true
+	averageUsed := roundOverviewQuota(usedTotal / float64(summary.KnownAccounts))
+	averageRemaining := roundOverviewQuota(remainingTotal / float64(summary.KnownAccounts))
+	summary.AverageUsedPercent = &averageUsed
+	summary.AverageRemainingPercent = &averageRemaining
+	summary.EquivalentRemainingAccounts = roundOverviewQuota(remainingTotal / 100)
+	return summary
+}
+
+func roundOverviewQuota(value float64) float64 {
+	return math.Round(value*100) / 100
 }

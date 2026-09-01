@@ -8,6 +8,7 @@ import type {
 } from "./generated";
 
 export type {
+  OverviewAccountQuotaSummary,
   OverviewCatalog,
   OverviewPayload,
   OverviewStatusPayload,

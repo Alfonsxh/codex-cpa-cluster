@@ -23,6 +23,7 @@ import {
 import { listRuntimeJobs, runtimeJobsQueryKey, type RuntimeJob } from "../api/runtime";
 import { onboardingQueryKey, readOnboarding } from "../api/onboarding";
 import { useAdminToolbar } from "./AdminToolbarContext";
+import { AccountQuotaOverview } from "./AccountQuotaOverview";
 import {
   CustomUsageRangeModal,
   formatCustomUsageRange,
@@ -253,6 +254,8 @@ export function OverviewPage() {
         <Metric label="运行服务" value={`${status.data.running_services}/${status.data.total_services}`} detail="Compose 服务" />
         <Metric label="5 分钟请求" value={status.data.requests_5m} detail="网关访问日志" />
       </div>
+
+      <AccountQuotaOverview quota={status.data.account_quota} />
 
       <section className="overview-legacy-monitor" aria-labelledby="overview-token-monitor-title">
         <div className="overview-legacy-toolbar overview-legacy-panel">

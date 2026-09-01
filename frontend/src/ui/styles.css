@@ -1735,6 +1735,31 @@ a { color: inherit; text-decoration: none; }
 .overview-legacy-metric small { display: block; margin-top: 10px; overflow: hidden; color: var(--faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .overview-legacy-metrics-loading .ant-skeleton-element,
 .overview-legacy-metrics-loading .ant-skeleton-node { width: 100%; height: 134px; border-radius: 15px; }
+.overview-account-quota { margin-top: 16px; }
+.overview-account-quota-header { min-height: 62px; padding: 16px 18px 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.overview-account-quota-header h3 { margin: 0; color: var(--ink); font-size: 15px; letter-spacing: -.02em; }
+.overview-account-quota-header .section-kicker { margin: 7px 0 0; color: var(--accent); font: 650 9px/1.2 var(--mono); letter-spacing: .13em; }
+.overview-account-quota-link { min-height: 34px; padding: 7px 12px; border-radius: 8px; font-size: 10px; }
+.overview-account-quota-body { display: grid; min-width: 0; grid-template-columns: minmax(280px, .78fr) minmax(500px, 1.22fr); align-items: center; gap: 30px; padding: 0 18px 15px; }
+.overview-account-quota-primary { display: grid; min-width: 0; gap: 8px; }
+.overview-account-quota-primary > span { color: var(--muted); font-size: 9px; }
+.overview-account-quota-primary > strong { color: var(--ink); font: 700 29px/.95 var(--mono); letter-spacing: -.04em; }
+.overview-account-quota-progress { position: relative; width: 100%; height: 8px; overflow: hidden; background: var(--surface-3); border-radius: 999px; }
+.overview-account-quota-progress i { position: absolute; inset: 0 auto 0 0; display: block; max-width: 100%; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 72%, #fff)); border-radius: inherit; }
+.overview-account-quota-progress-labels { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--faint); font: 8px/1.2 var(--mono); }
+.overview-account-quota-progress-labels span:first-child { color: var(--accent); }
+.overview-account-quota-metrics { display: grid; min-width: 0; grid-template-columns: repeat(5, minmax(82px, 1fr)); margin: 0; }
+.overview-account-quota-metrics > div { min-width: 0; padding: 4px 14px; text-align: center; }
+.overview-account-quota-metrics > div + div { border-left: 1px solid var(--line); }
+.overview-account-quota-metrics dt { overflow: hidden; color: var(--faint); font: 8px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.overview-account-quota-metrics dd { margin: 9px 0 0; overflow: hidden; color: var(--ink); font: 700 13px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.overview-account-quota-metrics .tone-danger dd { color: var(--danger); }
+.overview-account-quota-metrics .tone-warning dd { color: var(--warning); }
+.overview-account-quota-metrics .tone-neutral dd { color: var(--muted); }
+.overview-account-quota-footer { padding: 0 18px 14px; color: var(--faint); font: 8px/1.4 var(--mono); }
+.overview-account-quota-state { min-height: 108px; margin: 0 18px 16px; padding: 22px; display: grid; align-content: center; justify-items: center; gap: 7px; color: var(--muted); background: var(--surface-2); border: 1px dashed var(--line-strong); border-radius: 10px; text-align: center; }
+.overview-account-quota-state strong { color: var(--ink); font-size: 12px; }
+.overview-account-quota-state span { font-size: 9px; line-height: 1.5; }
 .overview-legacy-panel { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: var(--shadow-soft); }
 .overview-legacy-monitor { display: grid; min-width: 0; gap: 12px; margin-top: 16px; }
 .overview-legacy-toolbar { position: relative; z-index: 4; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 18px; overflow: visible; }
@@ -2669,6 +2694,7 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
   .overview-legacy-filters { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(360px, 1fr) repeat(2, minmax(130px, .45fr)) minmax(100px, .35fr); }
   .overview-legacy-refresh-cluster { grid-column: auto; }
   .overview-legacy-monitor-meta { grid-column: 2; grid-row: 1; }
+  .overview-account-quota-body { grid-template-columns: minmax(0, 1fr); gap: 18px; }
 }
 
 @media (max-width: 860px) {
@@ -2756,6 +2782,12 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
   .overview-legacy-page { padding-top: 30px; }
   .overview-legacy-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .overview-legacy-metric { padding: 18px; }
+  .overview-account-quota-header { align-items: center; }
+  .overview-account-quota-body { padding-bottom: 16px; }
+  .overview-account-quota-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .overview-account-quota-metrics > div { padding-block: 10px; }
+  .overview-account-quota-metrics > div:nth-child(4) { border-left: 0; }
+  .overview-account-quota-metrics > div:nth-child(n + 4) { border-top: 1px solid var(--line); }
   .overview-legacy-toolbar { grid-template-columns: minmax(0, 1fr); gap: 13px; }
   .overview-legacy-toolbar-title { min-width: 0; grid-column: auto; grid-row: auto; }
   .overview-legacy-filters { grid-column: auto; grid-row: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2778,6 +2810,12 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
 
 @media (max-width: 460px) {
   .top-bar .theme-toggle { width: 38px; min-width: 38px; padding-inline: 0; }
+  .overview-account-quota-header { align-items: stretch; flex-direction: column; }
+  .overview-account-quota-link { width: 100%; justify-content: center; }
+  .overview-account-quota-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-account-quota-metrics > div:nth-child(odd) { border-left: 0; }
+  .overview-account-quota-metrics > div:nth-child(n + 3) { border-top: 1px solid var(--line); }
+  .overview-account-quota-metrics > div:last-child { grid-column: 1 / -1; }
   .overview-legacy-summary-metrics { grid-template-columns: minmax(0, 1fr); }
   .overview-legacy-summary-metrics > div { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; padding: 7px 0; }
   .overview-legacy-summary-metrics > div + div { border-top: 1px solid var(--line); border-left: 0; }

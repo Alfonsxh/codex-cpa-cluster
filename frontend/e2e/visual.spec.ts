@@ -544,6 +544,38 @@ test("账号展开区复用旧版四层信息结构", async ({ page }) => {
   await expect(page).toHaveScreenshot("react-accounts-expanded-desktop-dark.png", { fullPage: false });
 });
 
+test("账号周额度卡片在窄屏与移动端不产生横向溢出", async ({ page }) => {
+  await setTheme(page, "light");
+  await login(page, "/admin/overview", "账号周额度");
+
+  for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/admin/overview");
+    const card = page.locator(".overview-account-quota");
+    await expect(card).toBeVisible();
+    await card.scrollIntoViewIfNeeded();
+    await expect(card.getByRole("progressbar", { name: "账号平均周额度已用" })).toBeVisible();
+    await expect(card.getByRole("link", { name: "查看账号详情" })).toHaveAttribute("href", "/admin/accounts");
+
+    const geometry = await card.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const metrics = element.querySelector<HTMLElement>(".overview-account-quota-metrics");
+      return {
+        viewportWidth: window.innerWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+        left: bounds.left,
+        right: bounds.right,
+        metricsClientWidth: metrics?.clientWidth ?? 0,
+        metricsScrollWidth: metrics?.scrollWidth ?? 0
+      };
+    });
+    expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+    expect(geometry.metricsScrollWidth).toBeLessThanOrEqual(geometry.metricsClientWidth);
+  }
+});
+
 const stateCases = [
   {
     slug: "overview",
@@ -553,7 +585,11 @@ const stateCases = [
     error: "总览数据加载失败",
     empty: "所选范围内没有账号 Token 数据",
     stateSurface: "page",
-    emptyRoutes: ["**/admin/api/overview/summary", "**/admin/api/overview/usage?*"]
+    emptyRoutes: [
+      "**/admin/api/overview/summary",
+      "**/admin/api/overview/status",
+      "**/admin/api/overview/usage?*"
+    ]
   },
   {
     slug: "accounts",
@@ -1141,6 +1177,22 @@ async function fulfillEmpty(route: Route, slug: string) {
   if (slug === "overview") {
     if (route.request().url().includes("/summary")) {
       payload.summary = Object.fromEntries(Object.keys(payload.summary).map((key) => [key, 0]));
+    } else if (route.request().url().includes("/status")) {
+      payload.authorized_accounts = 0;
+      payload.running_services = 0;
+      payload.total_services = 0;
+      payload.requests_5m = 0;
+      payload.account_quota = {
+        available: false,
+        enabled_accounts: 0,
+        known_accounts: 0,
+        unknown_accounts: 0,
+        average_used_percent: null,
+        average_remaining_percent: null,
+        equivalent_remaining_accounts: 0,
+        exhausted_accounts: 0,
+        high_risk_accounts: 0
+      };
     } else {
       payload.accounts = [];
       payload.users = [];

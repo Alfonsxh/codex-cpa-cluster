@@ -2769,22 +2769,27 @@ components:
     Team:
       type: object
       additionalProperties: false
-      required: [id, name, description, user_count, created_at, updated_at]
+      required: [id, name, description, tag_style, user_count, created_at, updated_at]
       properties:
         id: { type: string }
         name: { type: string }
         description: { type: string }
+        tag_style: { $ref: "#/components/schemas/TeamTagStyle" }
         user_count: { type: integer }
         created_at: { type: integer, format: int64 }
         updated_at: { type: integer, format: int64 }
+    TeamTagStyle:
+      type: string
+      enum: [indigo, blue, cyan, teal, green, amber, orange, rose, violet, slate]
     UserTeam:
       type: object
       additionalProperties: false
-      required: [id, name, description]
+      required: [id, name, description, tag_style]
       properties:
         id: { type: string }
         name: { type: string }
         description: { type: string }
+        tag_style: { $ref: "#/components/schemas/TeamTagStyle" }
     TeamCatalog:
       type: object
       additionalProperties: false

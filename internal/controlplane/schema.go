@@ -1,6 +1,6 @@
 package controlplane
 
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 var requiredTables = []string{
 	"schema_migrations",
@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS teams (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
     description TEXT NOT NULL DEFAULT '',
+    tag_style TEXT NOT NULL DEFAULT 'indigo'
+        CHECK(tag_style IN ('indigo', 'blue', 'cyan', 'teal', 'green', 'amber', 'orange', 'rose', 'violet', 'slate')),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -135,6 +137,15 @@ var expectedAccountColumns = map[string]struct{}{
 
 var retiredAccountColumns = map[string]struct{}{
 	"gost_port": {},
+}
+
+var expectedTeamColumns = map[string]struct{}{
+	"id":          {},
+	"name":        {},
+	"description": {},
+	"tag_style":   {},
+	"created_at":  {},
+	"updated_at":  {},
 }
 
 const rebuildAccountsSQL = `

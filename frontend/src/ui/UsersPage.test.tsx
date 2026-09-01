@@ -20,6 +20,7 @@ describe("UsersPage legacy parity", () => {
     renderUsers();
 
     expect(await screen.findByText("alice@example.com")).toBeInTheDocument();
+    expect(screen.getByText("Platform", { selector: ".team-chip" })).toHaveClass("team-tag-style-rose");
     await waitFor(() => expect(requestPaths(fetchMock)).toContain("/admin/api/teams/usage?window=today"));
     expect(screen.getAllByRole("columnheader")).toHaveLength(11);
     expect(screen.getByRole("button", { name: /Token 用量，当前降序/ })).toBeInTheDocument();
@@ -196,7 +197,7 @@ function userCatalog() {
   return {
     users: [baseUser()],
     accounts: { alpha: { email: "alpha@example.com" } },
-    teams: [{ id: "team_platform", name: "Platform", description: "Core", user_count: 1, created_at: 100, updated_at: 200 }],
+    teams: [{ id: "team_platform", name: "Platform", description: "Core", tag_style: "rose", user_count: 1, created_at: 100, updated_at: 200 }],
     tags: [],
     collector: { status: "healthy", heartbeat_at: 300, last_success_at: 300, last_error: "", queue_depth: 0 },
     pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
@@ -222,7 +223,7 @@ function baseUser() {
     updated_at: 200,
     route_account_id: "alpha",
     team_id: "team_platform",
-    team: { id: "team_platform", name: "Platform", description: "Core" },
+    team: { id: "team_platform", name: "Platform", description: "Core", tag_style: "rose" },
     team_membership_version: 4,
     account_count: 1,
     usage: metrics(1_200, 1_500),
@@ -284,6 +285,7 @@ function teamUsageCatalog() {
       id: "team_platform",
       name: "Platform",
       description: "Core",
+      tag_style: "rose",
       user_count: 1,
       current_user_count: 1,
       created_at: 100,

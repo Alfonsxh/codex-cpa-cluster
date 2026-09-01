@@ -89,6 +89,52 @@ func TestOpenMigratesV5AccountsAndDropsOnlyRetiredSecret(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesTeamTagStylesInCreationOrder(t *testing.T) {
+	root := t.TempDir()
+	database := createLegacyDatabase(t, root, `
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at INTEGER NOT NULL
+        );
+        INSERT INTO schema_migrations VALUES (6, 1);
+        CREATE TABLE teams (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            description TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        INSERT INTO teams VALUES ('team_01', 'Team 01', '', 1, 1);
+        INSERT INTO teams VALUES ('team_02', 'Team 02', '', 2, 2);
+        INSERT INTO teams VALUES ('team_03', 'Team 03', '', 3, 3);
+        INSERT INTO teams VALUES ('team_04', 'Team 04', '', 4, 4);
+        INSERT INTO teams VALUES ('team_05', 'Team 05', '', 5, 5);
+        INSERT INTO teams VALUES ('team_06', 'Team 06', '', 6, 6);
+        INSERT INTO teams VALUES ('team_07', 'Team 07', '', 7, 7);
+        INSERT INTO teams VALUES ('team_08', 'Team 08', '', 8, 8);
+        INSERT INTO teams VALUES ('team_09', 'Team 09', '', 9, 9);
+        INSERT INTO teams VALUES ('team_10', 'Team 10', '', 10, 10);
+        INSERT INTO teams VALUES ('team_11', 'Team 11', '', 11, 11);`)
+	database.Close()
+
+	store := openTestStore(t, root)
+	defer store.Close()
+	teams, err := store.ListTeams(context.Background())
+	if err != nil || len(teams) != 11 {
+		t.Fatalf("ListTeams = (%#v, %v)", teams, err)
+	}
+	for index, team := range teams {
+		want := teamTagStyles[index%len(teamTagStyles)]
+		if team.TagStyle != want {
+			t.Fatalf("migrated team %d tag style = %q, want %q", index+1, team.TagStyle, want)
+		}
+	}
+	var version int
+	if err := store.db.Get(&version, "SELECT MAX(version) FROM schema_migrations"); err != nil || version != SchemaVersion {
+		t.Fatalf("migrated schema version = (%d, %v), want %d", version, err, SchemaVersion)
+	}
+}
+
 func TestOpenAddsMissingProxyModeWithoutRetiredColumns(t *testing.T) {
 	root := t.TempDir()
 	database := createLegacyDatabase(t, root, `

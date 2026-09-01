@@ -505,15 +505,19 @@ export type Team = {
     id: string;
     name: string;
     description: string;
+    tag_style: TeamTagStyle;
     user_count: number;
     created_at: number;
     updated_at: number;
 };
 
+export type TeamTagStyle = 'indigo' | 'blue' | 'cyan' | 'teal' | 'green' | 'amber' | 'orange' | 'rose' | 'violet' | 'slate';
+
 export type UserTeam = {
     id: string;
     name: string;
     description: string;
+    tag_style: TeamTagStyle;
 };
 
 export type TeamCatalog = {

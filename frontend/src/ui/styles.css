@@ -2234,7 +2234,17 @@ a { color: inherit; text-decoration: none; }
 .user-chevron { display: inline-block; color: var(--faint); font: 18px/1 var(--mono); transition: color .15s ease, transform .15s ease; }
 .user-summary-row.expanded .user-chevron { color: var(--accent); transform: rotate(90deg); }
 .classification-button { width: 100%; padding: 0; display: flex; align-items: center; justify-content: center; color: inherit; background: none; border: 0; cursor: pointer; }
-.team-chip { max-width: 100%; padding: 4px 7px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 999px; font-size: 9px; white-space: normal; }
+.team-chip { --team-tag-color: var(--accent); max-width: 100%; padding: 4px 7px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: color-mix(in srgb, var(--team-tag-color) 72%, var(--ink)); background: color-mix(in srgb, var(--team-tag-color) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--team-tag-color) 34%, var(--line)); border-radius: 999px; font-size: 9px; font-weight: 700; white-space: normal; }
+.team-tag-style-indigo { --team-tag-color: #6374d8; }
+.team-tag-style-blue { --team-tag-color: #2563eb; }
+.team-tag-style-cyan { --team-tag-color: #0891b2; }
+.team-tag-style-teal { --team-tag-color: #0f766e; }
+.team-tag-style-green { --team-tag-color: #15803d; }
+.team-tag-style-amber { --team-tag-color: #ca8a04; }
+.team-tag-style-orange { --team-tag-color: #c2410c; }
+.team-tag-style-rose { --team-tag-color: #be123c; }
+.team-tag-style-violet { --team-tag-color: #7e22ce; }
+.team-tag-style-slate { --team-tag-color: #64748b; }
 .team-chip.unassigned { color: var(--faint); background: var(--surface-2); border-style: dashed; }
 .status-chip { padding: 5px 8px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
 .status-chip::before { width: 6px; height: 6px; flex: none; background: currentColor; border-radius: 50%; content: ""; }

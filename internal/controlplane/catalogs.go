@@ -24,6 +24,19 @@ var (
 
 const maximumTeamBatchSize = 500
 
+var teamTagStyles = [...]string{
+	"indigo",
+	"blue",
+	"cyan",
+	"teal",
+	"green",
+	"amber",
+	"orange",
+	"rose",
+	"violet",
+	"slate",
+}
+
 const userListQuery = `
 WITH user_summaries AS (
     SELECT lower(trim(user_email)) AS email,
@@ -44,7 +57,8 @@ WITH user_summaries AS (
     SELECT u.email, u.status, u.active_keys, u.active_accounts, u.total_records,
            u.created_at, u.updated_at, r.account_id AS route_account_id,
            m.team_id, COALESCE(m.membership_version, 0) AS team_membership_version,
-           t.name AS team_name, t.description AS team_description
+           t.name AS team_name, t.description AS team_description,
+           t.tag_style AS team_tag_style
       FROM user_summaries AS u
       LEFT JOIN user_routes AS r ON lower(trim(r.user_email)) = u.email
       LEFT JOIN user_team_memberships AS m ON lower(trim(m.user_email)) = u.email
@@ -86,7 +100,7 @@ func normalizeTeamDescription(value string) (string, error) {
 func (store *Store) ListTeams(ctx context.Context) ([]Team, error) {
 	result := make([]Team, 0)
 	if err := store.db.SelectContext(ctx, &result, `
-        SELECT t.id, t.name, t.description, COUNT(m.user_email) AS user_count,
+        SELECT t.id, t.name, t.description, t.tag_style, COUNT(m.user_email) AS user_count,
                t.created_at, t.updated_at
           FROM teams AS t
           LEFT JOIN user_team_memberships AS m ON m.team_id = t.id
@@ -115,9 +129,14 @@ func (store *Store) CreateTeam(ctx context.Context, name string, description str
 		UpdatedAt:   now,
 	}
 	err = store.writeTransaction(ctx, func(transaction *sqlx.Tx) error {
+		tagStyle, styleError := nextTeamTagStyle(ctx, transaction)
+		if styleError != nil {
+			return styleError
+		}
+		team.TagStyle = tagStyle
 		if _, err := transaction.ExecContext(ctx, `
-            INSERT INTO teams(id, name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)`, team.ID, team.Name, team.Description, now, now); err != nil {
+            INSERT INTO teams(id, name, description, tag_style, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)`, team.ID, team.Name, team.Description, team.TagStyle, now, now); err != nil {
 			if isTeamNameConflict(err) {
 				return fmt.Errorf("%w: %s", ErrTeamNameExists, team.Name)
 			}
@@ -126,6 +145,31 @@ func (store *Store) CreateTeam(ctx context.Context, name string, description str
 		return nil
 	})
 	return team, err
+}
+
+func nextTeamTagStyle(ctx context.Context, transaction *sqlx.Tx) (string, error) {
+	counts := make(map[string]int, len(teamTagStyles))
+	rows := make([]struct {
+		TagStyle string `db:"tag_style"`
+		Count    int    `db:"team_count"`
+	}, 0, len(teamTagStyles))
+	if err := transaction.SelectContext(
+		ctx,
+		&rows,
+		"SELECT tag_style, COUNT(*) AS team_count FROM teams GROUP BY tag_style",
+	); err != nil {
+		return "", fmt.Errorf("count control-plane teams by tag style: %w", err)
+	}
+	for _, row := range rows {
+		counts[row.TagStyle] = row.Count
+	}
+	selected := teamTagStyles[0]
+	for _, style := range teamTagStyles[1:] {
+		if counts[style] < counts[selected] {
+			selected = style
+		}
+	}
+	return selected, nil
 }
 
 func (store *Store) UpdateTeam(
@@ -376,7 +420,7 @@ func (store *Store) ListUserSummaries(ctx context.Context) ([]UserSummary, error
 	if err := transaction.SelectContext(ctx, &rows, userListQuery+`
 SELECT email, status, active_keys, active_accounts, total_records,
        created_at, updated_at, route_account_id, team_id,
-       team_membership_version, team_name, team_description
+       team_membership_version, team_name, team_description, team_tag_style
   FROM catalog
  ORDER BY email COLLATE NOCASE`); err != nil {
 		return nil, fmt.Errorf("list control-plane user summaries: %w", err)
@@ -431,7 +475,7 @@ func (store *Store) ListUsers(ctx context.Context, options UserListOptions) (Use
 		userListQuery+`
 SELECT email, status, active_keys, active_accounts, total_records,
        created_at, updated_at, route_account_id, team_id,
-       team_membership_version, team_name, team_description
+       team_membership_version, team_name, team_description, team_tag_style
   FROM catalog`+where+`
  ORDER BY email COLLATE NOCASE
  LIMIT ? OFFSET ?`,
@@ -457,6 +501,7 @@ func hydrateUserSummaryTeams(rows []UserSummary) {
 			ID:          *rows[index].TeamID,
 			Name:        *rows[index].TeamName,
 			Description: optionalStringValue(rows[index].TeamDescription),
+			TagStyle:    optionalStringValue(rows[index].TeamTagStyle),
 		}
 	}
 }
@@ -500,7 +545,8 @@ func (store *Store) ReadUserTeams(
 		end := min(offset+500, len(users))
 		query, arguments, err := sqlx.In(`
             SELECT m.user_email, m.team_id, m.membership_version,
-                   t.name AS team_name, t.description AS team_description
+                   t.name AS team_name, t.description AS team_description,
+                   t.tag_style AS team_tag_style
               FROM user_team_memberships AS m
               LEFT JOIN teams AS t ON t.id = m.team_id
              WHERE m.user_email IN (?)`, users[offset:end])
@@ -513,6 +559,7 @@ func (store *Store) ReadUserTeams(
 			MembershipVersion int64   `db:"membership_version"`
 			TeamName          *string `db:"team_name"`
 			TeamDescription   *string `db:"team_description"`
+			TeamTagStyle      *string `db:"team_tag_style"`
 		}, 0)
 		if err := store.db.SelectContext(ctx, &rows, store.db.Rebind(query), arguments...); err != nil {
 			return nil, fmt.Errorf("read control-plane team memberships: %w", err)
@@ -527,6 +574,7 @@ func (store *Store) ReadUserTeams(
 					ID:          *row.TeamID,
 					Name:        optionalString(row.TeamName),
 					Description: optionalString(row.TeamDescription),
+					TagStyle:    optionalString(row.TeamTagStyle),
 				}
 			}
 			result[row.UserEmail] = classification
@@ -645,7 +693,7 @@ func (store *Store) DeleteBrandingAsset(ctx context.Context, name string) error 
 func (store *Store) teamByID(ctx context.Context, teamID string) (Team, error) {
 	var team Team
 	err := store.db.GetContext(ctx, &team, `
-        SELECT t.id, t.name, t.description, COUNT(m.user_email) AS user_count,
+        SELECT t.id, t.name, t.description, t.tag_style, COUNT(m.user_email) AS user_count,
                t.created_at, t.updated_at
           FROM teams AS t
           LEFT JOIN user_team_memberships AS m ON m.team_id = t.id

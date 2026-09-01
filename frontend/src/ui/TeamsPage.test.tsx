@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TeamsPage } from "./TeamsPage";
 
 const teams = [
-  { id: "platform", name: "平台研发", description: "核心平台与基础设施", user_count: 2, created_at: 10, updated_at: 100 },
-  { id: "data", name: "数据智能", description: "数据产品与分析", user_count: 1, created_at: 20, updated_at: 200 },
-  { id: "empty", name: "空团队", description: "", user_count: 0, created_at: 30, updated_at: 300 }
+  { id: "platform", name: "平台研发", description: "核心平台与基础设施", tag_style: "indigo", user_count: 2, created_at: 10, updated_at: 100 },
+  { id: "data", name: "数据智能", description: "数据产品与分析", tag_style: "cyan", user_count: 1, created_at: 20, updated_at: 200 },
+  { id: "empty", name: "空团队", description: "", tag_style: "rose", user_count: 0, created_at: 30, updated_at: 300 }
 ];
 
 const users = [
@@ -65,6 +65,8 @@ describe("TeamsPage frozen legacy contract", () => {
       "序号", "团队", "当前成员", "活跃成员", "全部历史 Token", "更新时间", "操作"
     ]);
     expect(await screen.findByText("12.4")).toBeInTheDocument();
+    expect(screen.getByText("平台研发")).toHaveClass("team-tag-style-indigo");
+    expect(screen.getByText("数据智能")).toHaveClass("team-tag-style-cyan");
     expect(screen.getAllByText("12,400,000 Token")).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "删除" })[0]).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "删除" })[2]).toBeEnabled();
@@ -221,7 +223,8 @@ function installFetch(override?: (request: { url: string; method: string; body: 
 }
 
 function user(email: string, teamID: string | null, teamName: string, tokens: number) {
-  return { email, status: "active", active_keys: 1, active_accounts: 3, total_records: 3, created_at: 1, updated_at: 2, route_account_id: "cpa-main", team_id: teamID, team: teamID ? { id: teamID, name: teamName, description: "" } : null, team_membership_version: 1, account_count: 3, usage: usage(tokens, tokens ? 1 : 0), weekly_quota: {} };
+  const tagStyle = teams.find((team) => team.id === teamID)?.tag_style;
+  return { email, status: "active", active_keys: 1, active_accounts: 3, total_records: 3, created_at: 1, updated_at: 2, route_account_id: "cpa-main", team_id: teamID, team: teamID && tagStyle ? { id: teamID, name: teamName, description: "", tag_style: tagStyle } : null, team_membership_version: 1, account_count: 3, usage: usage(tokens, tokens ? 1 : 0), weekly_quota: {} };
 }
 
 function usage(tokens: number, activeUsers: number) {

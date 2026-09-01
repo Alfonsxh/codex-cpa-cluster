@@ -79,6 +79,7 @@ import {
   tokenReadableText
 } from "./formatters";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
+import { teamTagClassName } from "./teamTagStyles";
 
 const { Paragraph, Text } = Typography;
 
@@ -854,7 +855,7 @@ function userColumns({
             onTeam(user);
           }}
         >
-          <span className={"team-chip" + (user.team ? "" : " unassigned")}>
+          <span className={teamTagClassName(user.team?.tag_style, !user.team)}>
             {user.team?.name ?? "未分组"}
           </span>
         </button>

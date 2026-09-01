@@ -1273,6 +1273,48 @@ func (e SendNotificationResponseFormat) Valid() bool {
 	}
 }
 
+// Defines values for TeamTagStyle.
+const (
+	Amber  TeamTagStyle = "amber"
+	Blue   TeamTagStyle = "blue"
+	Cyan   TeamTagStyle = "cyan"
+	Green  TeamTagStyle = "green"
+	Indigo TeamTagStyle = "indigo"
+	Orange TeamTagStyle = "orange"
+	Rose   TeamTagStyle = "rose"
+	Slate  TeamTagStyle = "slate"
+	Teal   TeamTagStyle = "teal"
+	Violet TeamTagStyle = "violet"
+)
+
+// Valid indicates whether the value is a known member of the TeamTagStyle enum.
+func (e TeamTagStyle) Valid() bool {
+	switch e {
+	case Amber:
+		return true
+	case Blue:
+		return true
+	case Cyan:
+		return true
+	case Green:
+		return true
+	case Indigo:
+		return true
+	case Orange:
+		return true
+	case Rose:
+		return true
+	case Slate:
+		return true
+	case Teal:
+		return true
+	case Violet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TeamUsageBreakdownResponseAttribution.
 const (
 	TeamUsageBreakdownResponseAttributionCurrentMembership TeamUsageBreakdownResponseAttribution = "current_membership"
@@ -3251,12 +3293,13 @@ type SettingsWorkspaceStorage struct {
 
 // Team defines model for Team.
 type Team struct {
-	CreatedAt   int64  `json:"created_at"`
-	Description string `json:"description"`
-	Id          string `json:"id"`
-	Name        string `json:"name"`
-	UpdatedAt   int64  `json:"updated_at"`
-	UserCount   int    `json:"user_count"`
+	CreatedAt   int64        `json:"created_at"`
+	Description string       `json:"description"`
+	Id          string       `json:"id"`
+	Name        string       `json:"name"`
+	TagStyle    TeamTagStyle `json:"tag_style"`
+	UpdatedAt   int64        `json:"updated_at"`
+	UserCount   int          `json:"user_count"`
 }
 
 // TeamAccountUsage defines model for TeamAccountUsage.
@@ -3321,6 +3364,9 @@ type TeamMutationResponse struct {
 	Message string `json:"message"`
 	Team    Team   `json:"team"`
 }
+
+// TeamTagStyle defines model for TeamTagStyle.
+type TeamTagStyle string
 
 // TeamUpdateInput defines model for TeamUpdateInput.
 type TeamUpdateInput struct {
@@ -3817,9 +3863,10 @@ type UserSummaryStatus string
 
 // UserTeam defines model for UserTeam.
 type UserTeam struct {
-	Description string `json:"description"`
-	Id          string `json:"id"`
-	Name        string `json:"name"`
+	Description string       `json:"description"`
+	Id          string       `json:"id"`
+	Name        string       `json:"name"`
+	TagStyle    TeamTagStyle `json:"tag_style"`
 }
 
 // UserWeeklyQuota defines model for UserWeeklyQuota.

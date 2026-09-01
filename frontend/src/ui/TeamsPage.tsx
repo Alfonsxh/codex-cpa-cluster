@@ -33,6 +33,7 @@ import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
 import { NativeTableViewport } from "./components/NativeTableViewport";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { formatTokenAmount } from "./formatters";
+import { teamTagClassName } from "./teamTagStyles";
 
 type TeamStatus = "all" | "active" | "empty";
 type MemberScope = "current" | "unassigned" | "all";
@@ -300,7 +301,7 @@ function TeamRow({ index, team, usage, onMembers, onEdit, onDelete }: {
   return (
     <tr>
       <td className="table-index-cell">{index}</td>
-      <td><span className="organization-catalog-name"><strong title={team.name}>{team.name}</strong><small title={team.description || "无说明"}>{team.description || "无说明"}</small></span></td>
+      <td><span className="organization-catalog-name"><strong title={team.name}><span className={teamTagClassName(team.tag_style)}>{team.name}</span></strong><small title={team.description || "无说明"}>{team.description || "无说明"}</small></span></td>
       <td className="number-cell">{formatNumber(team.user_count)}</td>
       <td className="number-cell">{formatNumber(usage?.usage.active_users ?? 0)}</td>
       <td className="number-cell token-total"><LegacyTokenValue value={usage?.usage.weighted_tokens ?? 0} /></td>

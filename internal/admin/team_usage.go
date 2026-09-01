@@ -78,6 +78,7 @@ func (server *Server) readTeamUsage(c *gin.Context) {
 			ID:          "unassigned",
 			Name:        "未分组",
 			Description: "尚未分配团队的当前用户",
+			TagStyle:    "slate",
 			UserCount:   catalog.unassignedCount,
 		},
 		CurrentUserCount: catalog.unassignedCount,

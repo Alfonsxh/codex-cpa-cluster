@@ -365,7 +365,8 @@ func TestAdminTeamAPIUsesFineGrainedContractWithoutTags(t *testing.T) {
 		Team controlplane.Team `json:"team"`
 	}
 	decodeAdminResponse(t, response, &created)
-	if created.Team.Name != "Platform Team" || created.Team.Description != "Core owners" {
+	if created.Team.Name != "Platform Team" || created.Team.Description != "Core owners" ||
+		created.Team.TagStyle != "indigo" {
 		t.Fatalf("created team = %#v", created.Team)
 	}
 

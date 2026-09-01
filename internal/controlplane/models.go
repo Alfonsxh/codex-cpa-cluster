@@ -45,6 +45,7 @@ type Team struct {
 	ID          string `db:"id" json:"id"`
 	Name        string `db:"name" json:"name"`
 	Description string `db:"description" json:"description"`
+	TagStyle    string `db:"tag_style" json:"tag_style"`
 	UserCount   int    `db:"user_count" json:"user_count"`
 	CreatedAt   int64  `db:"created_at" json:"created_at"`
 	UpdatedAt   int64  `db:"updated_at" json:"updated_at"`
@@ -68,6 +69,7 @@ type TeamSummary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	TagStyle    string `json:"tag_style"`
 }
 
 type UserTeamClassification struct {
@@ -102,6 +104,7 @@ type UserSummary struct {
 	TeamMembershipVersion int64        `db:"team_membership_version" json:"team_membership_version"`
 	TeamName              *string      `db:"team_name" json:"-"`
 	TeamDescription       *string      `db:"team_description" json:"-"`
+	TeamTagStyle          *string      `db:"team_tag_style" json:"-"`
 }
 
 type UserPage struct {

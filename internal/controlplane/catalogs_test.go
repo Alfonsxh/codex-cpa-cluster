@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,6 +21,9 @@ func TestTeamLifecycleAndMembershipVersioning(t *testing.T) {
 	}
 	if team.Name != "Platform Team" || team.Description != "Core platform owners" || team.UserCount != 0 {
 		t.Fatalf("created team = %#v", team)
+	}
+	if team.TagStyle != "indigo" {
+		t.Fatalf("first team tag style = %q, want indigo", team.TagStyle)
 	}
 	if _, err := store.CreateTeam(ctx, "platform team", "duplicate"); err == nil {
 		t.Fatal("case-insensitive duplicate team name unexpectedly succeeded")
@@ -55,7 +59,8 @@ func TestTeamLifecycleAndMembershipVersioning(t *testing.T) {
 		t.Fatalf("ReadUserTeams: %v", err)
 	}
 	alice := classifications["alice@example.com"]
-	if alice.TeamID == nil || *alice.TeamID != team.ID || alice.Team == nil || alice.Team.Name != team.Name {
+	if alice.TeamID == nil || *alice.TeamID != team.ID || alice.Team == nil || alice.Team.Name != team.Name ||
+		alice.Team.TagStyle != team.TagStyle {
 		t.Fatalf("alice team classification = %#v", alice)
 	}
 	if idle := classifications["idle@example.com"]; idle.TeamID != nil || idle.Team != nil || idle.TeamMembershipVersion != 0 {
@@ -81,6 +86,44 @@ func TestTeamLifecycleAndMembershipVersioning(t *testing.T) {
 	teams, err := store.ListTeams(ctx)
 	if err != nil || len(teams) != 0 {
 		t.Fatalf("ListTeams after delete = (%#v, %v)", teams, err)
+	}
+}
+
+func TestTeamTagStylesCycleAndSurviveUpdates(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, t.TempDir())
+	defer store.Close()
+
+	created := make([]Team, 0, len(teamTagStyles)+1)
+	for index := 0; index <= len(teamTagStyles); index++ {
+		team, err := store.CreateTeam(ctx, fmt.Sprintf("Team %02d", index+1), "")
+		if err != nil {
+			t.Fatalf("CreateTeam(%d): %v", index+1, err)
+		}
+		created = append(created, team)
+	}
+	for index, team := range created {
+		want := teamTagStyles[index%len(teamTagStyles)]
+		if team.TagStyle != want {
+			t.Fatalf("team %d tag style = %q, want %q", index+1, team.TagStyle, want)
+		}
+	}
+	updated, err := store.UpdateTeam(ctx, created[4].ID, "Renamed Team", "preserve style")
+	if err != nil {
+		t.Fatalf("UpdateTeam: %v", err)
+	}
+	if updated.TagStyle != created[4].TagStyle {
+		t.Fatalf("updated tag style = %q, want %q", updated.TagStyle, created[4].TagStyle)
+	}
+	if _, err := store.DeleteTeam(ctx, created[2].ID); err != nil {
+		t.Fatalf("DeleteTeam: %v", err)
+	}
+	replacement, err := store.CreateTeam(ctx, "Replacement Team", "")
+	if err != nil {
+		t.Fatalf("CreateTeam replacement: %v", err)
+	}
+	if replacement.TagStyle != created[2].TagStyle {
+		t.Fatalf("replacement tag style = %q, want least-used %q", replacement.TagStyle, created[2].TagStyle)
 	}
 }
 
@@ -182,7 +225,8 @@ func TestListUsersIsPaginatedFilteredAndNeverReturnsKeyMaterial(t *testing.T) {
 	alice := page.Users[0]
 	if alice.Email != "alice@example.com" || alice.Status != "active" || alice.ActiveKeys != 1 ||
 		alice.ActiveAccounts != 2 || alice.TotalRecords != 3 || alice.RouteAccountID == nil ||
-		*alice.RouteAccountID != "beta" || alice.Team == nil || alice.Team.Name != "Platform" {
+		*alice.RouteAccountID != "beta" || alice.Team == nil || alice.Team.Name != "Platform" ||
+		alice.Team.TagStyle != team.TagStyle {
 		t.Fatalf("alice summary = %#v", alice)
 	}
 	if page.Users[1].Status != "inactive" || page.Users[1].TeamID != nil {

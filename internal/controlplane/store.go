@@ -323,6 +323,9 @@ func (store *Store) initialize(ctx context.Context) error {
 		if err := migrateAccountsSchema(ctx, transaction); err != nil {
 			return err
 		}
+		if err := migrateTeamsSchema(ctx, transaction); err != nil {
+			return err
+		}
 		if err := validateSchema(ctx, transaction); err != nil {
 			return err
 		}
@@ -412,6 +415,42 @@ func migrateAccountsSchema(ctx context.Context, transaction *sqlx.Tx) error {
 	return nil
 }
 
+func migrateTeamsSchema(ctx context.Context, transaction *sqlx.Tx) error {
+	columns, err := tableColumns(ctx, transaction, "teams")
+	if err != nil {
+		return err
+	}
+	if _, ok := columns["tag_style"]; ok {
+		return nil
+	}
+	if _, err := transaction.ExecContext(
+		ctx,
+		`ALTER TABLE teams ADD COLUMN tag_style TEXT NOT NULL DEFAULT 'indigo'
+            CHECK(tag_style IN ('indigo', 'blue', 'cyan', 'teal', 'green', 'amber', 'orange', 'rose', 'violet', 'slate'))`,
+	); err != nil {
+		return fmt.Errorf("add teams tag_style column: %w", err)
+	}
+	teamIDs := make([]string, 0)
+	if err := transaction.SelectContext(
+		ctx,
+		&teamIDs,
+		"SELECT id FROM teams ORDER BY created_at, id",
+	); err != nil {
+		return fmt.Errorf("list teams for tag style migration: %w", err)
+	}
+	for index, teamID := range teamIDs {
+		if _, err := transaction.ExecContext(
+			ctx,
+			"UPDATE teams SET tag_style = ? WHERE id = ?",
+			teamTagStyles[index%len(teamTagStyles)],
+			teamID,
+		); err != nil {
+			return fmt.Errorf("migrate team %s tag style: %w", teamID, err)
+		}
+	}
+	return nil
+}
+
 func validateSchema(ctx context.Context, transaction *sqlx.Tx) error {
 	tables := make(map[string]struct{})
 	rows, err := transaction.QueryxContext(
@@ -450,6 +489,32 @@ func validateSchema(ctx context.Context, transaction *sqlx.Tx) error {
 			strings.Join(missing, ", "),
 			strings.Join(unexpected, ", "),
 		)
+	}
+	columns, err = tableColumns(ctx, transaction, "teams")
+	if err != nil {
+		return err
+	}
+	missing = setDifference(expectedTeamColumns, columns)
+	unexpected = setDifference(columns, expectedTeamColumns)
+	if len(missing) > 0 || len(unexpected) > 0 {
+		return fmt.Errorf(
+			"unsupported teams table: missing [%s], unexpected [%s]",
+			strings.Join(missing, ", "),
+			strings.Join(unexpected, ", "),
+		)
+	}
+	var invalidTeamStyles int
+	if err := transaction.GetContext(
+		ctx,
+		&invalidTeamStyles,
+		`SELECT COUNT(*) FROM teams
+		  WHERE tag_style IS NULL
+             OR tag_style NOT IN ('indigo', 'blue', 'cyan', 'teal', 'green', 'amber', 'orange', 'rose', 'violet', 'slate')`,
+	); err != nil {
+		return fmt.Errorf("validate team tag styles: %w", err)
+	}
+	if invalidTeamStyles > 0 {
+		return fmt.Errorf("unsupported teams table: %d invalid tag styles", invalidTeamStyles)
 	}
 	return nil
 }

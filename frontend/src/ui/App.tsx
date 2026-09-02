@@ -173,6 +173,7 @@ export function AdminShell({
   const { toasts, showToast } = useLegacyToasts();
   const { theme } = useTheme();
   const location = useLocation();
+  const isOnboarding = location.pathname.startsWith("/setup");
   const page = currentAdminPage(location.pathname);
   const selectedPath = currentNavigationPath(location.pathname);
   const navigationRef = useRef<HTMLElement>(null);
@@ -187,6 +188,7 @@ export function AdminShell({
   const releaseStatus = useQuery({
     queryKey: ["admin-release-status"],
     queryFn: ({ signal }) => readReleaseStatus(false, signal),
+    enabled: !isOnboarding,
     retry: false,
     refetchInterval: 15 * 60 * 1_000,
     refetchOnWindowFocus: false
@@ -223,6 +225,21 @@ export function AdminShell({
     }
   };
   const refreshing = pageRefreshing || manualRefreshing;
+  const toolbar = {
+    setRefreshing: setPageRefreshing,
+    setRefreshLabel,
+    setRefreshAction,
+    setPageDetail
+  };
+  if (isOnboarding) {
+    return (
+      <div className="onboarding-app-shell">
+        <AdminToolbarContext.Provider value={toolbar}>
+          {children}
+        </AdminToolbarContext.Provider>
+      </div>
+    );
+  }
   return (
     <div className="app-shell">
       <aside className="side-nav" aria-label="管理中心导航">
@@ -312,12 +329,7 @@ export function AdminShell({
             </button>
           </div>
         </header>
-        <AdminToolbarContext.Provider value={{
-          setRefreshing: setPageRefreshing,
-          setRefreshLabel,
-          setRefreshAction,
-          setPageDetail
-        }}>
+        <AdminToolbarContext.Provider value={toolbar}>
           {children}
         </AdminToolbarContext.Provider>
         <LegacyToastRegion toasts={toasts} />

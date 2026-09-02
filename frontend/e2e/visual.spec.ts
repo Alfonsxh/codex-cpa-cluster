@@ -59,8 +59,7 @@ for (const viewport of viewports) {
           expect(geometry.heroRight).toBeLessThanOrEqual(geometry.viewport - 12);
         }
         if (route.slug === "setup") {
-          await expect(page.locator(".top-bar h1")).toHaveText("首次设置");
-          await expect(page.locator(".top-bar-heading .eyebrow")).toHaveText("GETTING STARTED");
+          await expect(page.getByRole("navigation", { name: "初始化配置" })).toBeVisible();
         }
         if (route.slug === "configuration") {
           const configurationPanel = page.getByRole("region", { name: "CPA 请求" });
@@ -93,7 +92,7 @@ for (const viewport of viewports) {
   }
 }
 
-test("首次管理登录进入可退出的统一配置页，状态接口失败时不阻塞管理中心", async ({ page }) => {
+test("首次管理登录进入独立配置页，状态接口失败时不阻塞其他管理页面", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setTheme(page, "light");
   await page.route("**/admin/api/onboarding", async (route) => {
@@ -241,9 +240,6 @@ test("首次管理登录进入可退出的统一配置页，状态接口失败�
   expect(narrowBrandingGeometry.mainScrollHeight).toBeLessThanOrEqual(narrowBrandingGeometry.mainClientHeight + 1);
   expect(narrowBrandingGeometry.workspaceScrollHeight).toBeLessThanOrEqual(narrowBrandingGeometry.workspaceClientHeight + 1);
   expect(narrowBrandingGeometry.submitRightGap).toBeLessThanOrEqual(24);
-  await page.getByRole("button", { name: "进入运行总览" }).click();
-  await expect(page).toHaveURL(/\/admin\/overview/);
-
   await page.unroute("**/admin/api/onboarding");
   await page.route("**/admin/api/onboarding", (route) => route.fulfill({
     status: 503,
@@ -685,6 +681,7 @@ test("所有菜单滚动时保持页面标题固定", async ({ page }) => {
   await login(page, routes[0].path);
 
   for (const route of routes) {
+    if (route.slug === "setup") continue;
     await openRoute(page, route);
     const topBar = page.locator(".top-bar");
     const before = await topBar.boundingBox();
@@ -1135,7 +1132,12 @@ async function login(page: Page, path: string, ready?: string) {
 
 async function openRoute(page: Page, route: (typeof routes)[number]) {
   await page.goto(route.path);
-  await expect(page.getByRole("heading", { name: route.title, level: 1 })).toBeVisible();
+  if (route.slug === "setup") {
+    await expect(page.getByRole("heading", { name: "完成基础配置", level: 2 })).toBeVisible();
+    await expect(page.locator(".app-shell, .side-nav, .top-bar")).toHaveCount(0);
+  } else {
+    await expect(page.getByRole("heading", { name: route.title, level: 1 })).toBeVisible();
+  }
   await expect(page.getByText(route.ready, { exact: false }).first()).toBeVisible();
   await page.waitForTimeout(200);
 }

@@ -33,10 +33,31 @@ fi
   exit 1
 }
 
+run_operator_script ingress set external --yes >/dev/null
+[ "$(cat "$CONFIG_FILE")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAC_INGRESS_MODE=external')" ] || {
+  echo "deploy.sh did not persist the external ingress mode" >&2
+  exit 1
+}
+if run_operator_script deploy --ingress managed </dev/null >/dev/null 2>&1; then
+  echo "deploy.sh silently switched a persisted ingress mode" >&2
+  exit 1
+fi
+run_operator_script ingress set managed --yes >/dev/null
+[ "$(cat "$CONFIG_FILE")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAC_INGRESS_MODE=managed')" ] || {
+  echo "deploy.sh did not persist the managed ingress mode" >&2
+  exit 1
+}
+
 MISSING_CONFIG="$TEST_ROOT/missing/config.env"
 if CPAC_DEPLOY_ROOT="$TEST_ROOT/deploy" \
   run_operator_script deploy --config "$MISSING_CONFIG" </dev/null >/dev/null 2>&1; then
   echo "non-interactive first deploy accepted a missing domain" >&2
+  exit 1
+fi
+if CPAC_DEPLOY_ROOT="$TEST_ROOT/deploy" \
+  run_operator_script deploy --domain qdata.example.com --config "$MISSING_CONFIG" \
+    </dev/null >/dev/null 2>&1; then
+  echo "non-interactive first deploy accepted no ingress selection" >&2
   exit 1
 fi
 
@@ -48,7 +69,7 @@ LEGACY_PENDING="$(dirname -- "$LEGACY_CONFIG_FILE")/bootstrap-admin.key"
 printf '%s\n' 'pending-secret-must-remain' >"$LEGACY_PENDING"
 chmod 0600 "$LEGACY_PENDING"
 run_operator_script domain set Legacy.Example.COM. --yes --config "$LEGACY_CONFIG_FILE" >/dev/null
-[ "$(cat "$CONFIG_FILE")" = "CPA_DOMAIN=legacy.example.com" ] \
+[ "$(cat "$CONFIG_FILE")" = "$(printf 'CPA_DOMAIN=legacy.example.com\nCPAC_INGRESS_MODE=managed')" ] \
   || { echo "legacy domain config was not migrated" >&2; exit 1; }
 PENDING="$OPERATOR_ROOT/bootstrap-admin.key"
 [ "$(cat "$PENDING")" = 'pending-secret-must-remain' ] \
@@ -65,7 +86,7 @@ if run_operator_script domain set legacy.example.com --yes >/dev/null 2>&1; then
   echo "deploy.sh accepted conflicting old and new domain configs" >&2
   exit 1
 fi
-[ "$(cat "$CONFIG_FILE")" = 'CPA_DOMAIN=legacy.example.com' ] \
+[ "$(cat "$CONFIG_FILE")" = "$(printf 'CPA_DOMAIN=legacy.example.com\nCPAC_INGRESS_MODE=managed')" ] \
   && [ "$(cat "$LEGACY_CONFIG_FILE")" = 'CPA_DOMAIN=conflict.example.com' ] \
   || { echo "conflicting migration mutated operator config" >&2; exit 1; }
 rm -f -- "$LEGACY_CONFIG_FILE"

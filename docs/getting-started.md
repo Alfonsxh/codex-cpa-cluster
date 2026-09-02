@@ -49,7 +49,15 @@ sudo chmod 0755 /home/cpac/deploy.sh
 sudo /home/cpac/deploy.sh
 ```
 
-首次执行会提示域名并写入 `/home/cpac/config.env`；无交互环境使用 `sudo /home/cpac/deploy.sh deploy --domain qdata.example.com`。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。脚本安装必要依赖、配置 Nginx/TLS、校验 GitHub Release、初始化空状态、启动服务并调用正式烟测。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 CPAC 管理 Nginx/TLS）；选择会与域名一起写入 `/home/cpac/config.env`。无交互环境必须使用例如 `sudo /home/cpac/deploy.sh deploy --domain qdata.example.com --ingress external`。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无 CPAC 托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+
+日后如确需切换入口，先处理好宿主机站点归属，再执行并确认：
+
+```sh
+sudo /home/cpac/deploy.sh ingress set managed
+# 或
+sudo /home/cpac/deploy.sh ingress set external
+```
 
 ### 首次管理员设置
 

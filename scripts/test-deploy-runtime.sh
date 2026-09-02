@@ -12,8 +12,10 @@ IMAGE_ID=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 OLD_IMAGE_ID=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 FAKE_BIN="$TEST_ROOT/bin"
 COMMAND_LOG="$TEST_ROOT/docker.log"
+SYSTEM_LOG="$TEST_ROOT/system.log"
 mkdir -p "$FAKE_BIN"
 : >"$COMMAND_LOG"
+: >"$SYSTEM_LOG"
 
 cat >"$FAKE_BIN/docker" <<'FAKE_DOCKER'
 #!/usr/bin/env sh
@@ -529,6 +531,9 @@ chmod 0755 "$FAKE_BIN/curl"
 for command in certbot flock getent nginx systemctl; do
   cat >"$FAKE_BIN/$command" <<'FAKE_SUCCESS'
 #!/usr/bin/env sh
+if [ -n "${FAKE_SYSTEM_LOG:-}" ]; then
+  printf '%s %s\n' "$(basename -- "$0")" "$*" >>"$FAKE_SYSTEM_LOG"
+fi
 exit 0
 FAKE_SUCCESS
   chmod 0755 "$FAKE_BIN/$command"
@@ -553,6 +558,7 @@ chmod 0755 "$FAKE_BIN/readlink"
 run_operator_deploy() {
   PATH="$FAKE_BIN:$PATH" \
     FAKE_DOCKER_LOG="$COMMAND_LOG" \
+    FAKE_SYSTEM_LOG="$SYSTEM_LOG" \
     FAKE_DOCKER_SCENARIO=ordinary \
     FAKE_RELEASE_DIR="$RELEASE_SERVER" \
     FAKE_RELEASE_VERSION="$RELEASE_VERSION" \
@@ -567,7 +573,7 @@ run_operator_deploy() {
     CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
     CPAC_ACME_ROOT="$TEST_ROOT/acme" \
     sh "$OPERATOR_ROOT/deploy.sh" deploy \
-      --domain qdata.example.com --version "$RELEASE_VERSION"
+      --domain qdata.example.com --ingress managed --version "$RELEASE_VERSION"
 }
 
 INSTALL_OUTPUT="$OPERATOR_ROOT/install-output.log"
@@ -626,8 +632,48 @@ cmp -s "$OPERATOR_ROOT/deploy.sh" "$RELEASE_SERVER/deploy.sh" \
   || { echo "fresh deploy created the removed external operator config directory" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
   || { echo "fresh deploy published a second target-side script directory" >&2; exit 1; }
-[ "$(cat "$OPERATOR_CONFIG")" = 'CPA_DOMAIN=qdata.example.com' ] \
+[ "$(cat "$OPERATOR_CONFIG")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAC_INGRESS_MODE=managed')" ] \
   || { echo "fresh deploy did not persist its domain" >&2; exit 1; }
+
+EXTERNAL_OPERATOR_ROOT="$TEST_ROOT/home/external-cpac"
+EXTERNAL_CONFIG="$EXTERNAL_OPERATOR_ROOT/config.env"
+mkdir -p "$EXTERNAL_OPERATOR_ROOT"
+cp "$ROOT_DIR/scripts/deploy.sh" "$EXTERNAL_OPERATOR_ROOT/deploy.sh"
+chmod 0755 "$EXTERNAL_OPERATOR_ROOT/deploy.sh"
+: >"$SYSTEM_LOG"
+PATH="$FAKE_BIN:$PATH" \
+  FAKE_DOCKER_LOG="$COMMAND_LOG" \
+  FAKE_SYSTEM_LOG="$SYSTEM_LOG" \
+  FAKE_DOCKER_SCENARIO=ordinary \
+  FAKE_RELEASE_DIR="$RELEASE_SERVER" \
+  FAKE_RELEASE_VERSION="$RELEASE_VERSION" \
+  CPAC_ALLOW_NON_ROOT=true \
+  CPAC_STAGING_ROOT="$EXTERNAL_OPERATOR_ROOT" \
+  CPAC_DEPLOY_ROOT="$EXTERNAL_OPERATOR_ROOT/runtime" \
+  CPAC_BACKUP_DIR="$EXTERNAL_OPERATOR_ROOT/backups" \
+  CPAC_LEGACY_CONFIG_FILE="$TEST_ROOT/external-etc/cpac/config.env" \
+  CPAC_LOCK_FILE="$TEST_ROOT/external-cpa-deploy.lock" \
+  CPAC_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
+  CPAC_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
+  CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
+  CPAC_ACME_ROOT="$TEST_ROOT/acme" \
+  sh "$EXTERNAL_OPERATOR_ROOT/deploy.sh" deploy \
+    --domain existing.example.com --ingress external --version "$RELEASE_VERSION" \
+    >"$EXTERNAL_OPERATOR_ROOT/install-output.log"
+[ "$(cat "$EXTERNAL_CONFIG")" = "$(printf 'CPA_DOMAIN=existing.example.com\nCPAC_INGRESS_MODE=external')" ] \
+  || { echo "external ingress mode was not persisted" >&2; exit 1; }
+grep -Fq '复用现有反向代理' "$EXTERNAL_OPERATOR_ROOT/install-output.log" \
+  || { echo "external ingress did not describe the existing proxy contract" >&2; exit 1; }
+grep -Fq '已跳过公网检查' "$EXTERNAL_OPERATOR_ROOT/install-output.log" \
+  || { echo "external ingress unexpectedly performed public HTTPS validation" >&2; exit 1; }
+if grep -Eq '^(nginx|certbot) |^systemctl .*nginx' "$SYSTEM_LOG"; then
+  echo "external ingress changed Nginx or Certbot" >&2
+  cat "$SYSTEM_LOG" >&2
+  exit 1
+fi
+[ ! -e "$TEST_ROOT/nginx/available/existing.example.com.conf" ] \
+  && [ ! -e "$TEST_ROOT/nginx/enabled/existing.example.com.conf" ] \
+  || { echo "external ingress wrote an Nginx site" >&2; exit 1; }
 
 mv "$OPERATOR_ROOT/runtime/release-manifest.json" \
   "$OPERATOR_ROOT/runtime/release-manifest.json.missing"
@@ -698,5 +744,16 @@ for database in state/control-plane.sqlite3 state/usage.sqlite3; do
     exit 1
   }
 done
+
+site_file="$TEST_ROOT/nginx/available/qdata.example.com.conf"
+site_without_marker="$TEST_ROOT/nginx/unmanaged-site.conf"
+sed '/^# Managed by CPAC deploy\.sh$/d' "$site_file" >"$site_without_marker"
+mv "$site_without_marker" "$site_file"
+if run_operator_deploy >"$OPERATOR_ROOT/unmanaged-site.log" 2>&1; then
+  echo "managed ingress overwrote an unmanaged same-domain site" >&2
+  exit 1
+fi
+grep -Fq 'Nginx 已有未托管的同名站点，拒绝覆盖' "$OPERATOR_ROOT/unmanaged-site.log" \
+  || { echo "managed ingress did not explain the unmanaged site refusal" >&2; cat "$OPERATOR_ROOT/unmanaged-site.log" >&2; exit 1; }
 
 printf '%s\n' 'Go target deployment contract tests passed'

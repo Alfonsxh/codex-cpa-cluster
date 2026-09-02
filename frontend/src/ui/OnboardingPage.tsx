@@ -125,6 +125,13 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     }));
   }, [catalog.data]);
 
+  const advanceAfterSave = () => {
+    const steps = onboarding.data?.steps ?? [];
+    const currentIndex = steps.findIndex((step) => step.id === selected?.id);
+    const next = currentIndex >= 0 ? steps[currentIndex + 1] : undefined;
+    if (next) setSearchParams({ step: next.id });
+  };
+
   const preferences = useMutation({
     mutationFn: (skippedRecommended: string[]) => (
       saveOnboardingPreferences(skippedRecommended, csrfToken)
@@ -142,6 +149,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
         catalog.refetch(),
         queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true })
       ]);
+      advanceAfterSave();
     }
   });
   const notificationWebhook = useMutation({
@@ -150,6 +158,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
       setDrafts((current) => ({ ...current, webhookURL: "" }));
       setNotice(`${result.message}，完成状态已重新检查`);
       await queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true });
+      advanceAfterSave();
     }
   });
   if (onboarding.isPending) {
@@ -165,10 +174,9 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
         <Result
           status="warning"
           title="首次设置状态暂时不可用"
-          subTitle={onboarding.error instanceof Error ? onboarding.error.message : "无法读取初始化状态，其他管理功能不受影响。"}
+          subTitle={onboarding.error instanceof Error ? onboarding.error.message : "无法读取首次设置状态，请稍后重试。"}
           extra={[
-            <Button key="retry" type="primary" onClick={() => void onboarding.refetch()}>重新加载</Button>,
-            <Button key="overview" onClick={() => navigate("/overview")}>进入运行总览</Button>
+            <Button key="retry" type="primary" onClick={() => void onboarding.refetch()}>重新加载</Button>
           ]}
         />
       </section>
@@ -209,7 +217,6 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
               <strong>{completedCount}<span>/{totalCount}</span></strong>
               <div><span>配置进度</span><Progress percent={completionPercent} showInfo={false} size="small" /></div>
             </div>
-            <Button ghost onClick={() => navigate("/overview")}>进入运行总览</Button>
           </div>
         </header>
 
@@ -263,24 +270,23 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
               onNavigate={() => navigate(selected.action_path)}
             />
 
-            {selected.kind === "recommended" && selected.status !== "complete" ? (
-              <div className="onboarding-recommendation-actions">
-                {selected.status === "skipped" ? (
-                  <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, false)}>重新设置</Button>
-                ) : (
-                  <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, true)}>暂时跳过</Button>
-                )}
-              </div>
-            ) : null}
-
             <footer className="onboarding-step-footer">
               <Button icon={<ArrowLeftOutlined />} disabled={selectedIndex <= 0} onClick={() => jump(selectedIndex - 1)}>上一步</Button>
               <span>第 {selectedIndex + 1} 步，共 {steps.length} 步</span>
-              {selectedIndex < steps.length - 1 ? (
-                <Button type="primary" onClick={() => jump(selectedIndex + 1)}>下一步<ArrowRightOutlined /></Button>
-              ) : (
-                <Button type="primary" onClick={() => navigate("/overview")}>进入运行总览<ArrowRightOutlined /></Button>
-              )}
+              <div className="onboarding-step-footer-actions">
+                {selected.kind === "recommended" && selected.status !== "complete" ? (
+                  selected.status === "skipped" ? (
+                    <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, false)}>重新设置</Button>
+                  ) : (
+                    <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, true)}>暂时跳过</Button>
+                  )
+                ) : null}
+                {selectedIndex < steps.length - 1 ? (
+                  <Button type="primary" onClick={() => jump(selectedIndex + 1)}>下一步<ArrowRightOutlined /></Button>
+                ) : (
+                  <Button type="primary" onClick={() => navigate("/overview")}>进入运行总览<ArrowRightOutlined /></Button>
+                )}
+              </div>
             </footer>
           </main>
         </div>
@@ -294,6 +300,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
           setInitialPasswordOpen(false);
           setNotice(message);
           void queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true });
+          advanceAfterSave();
         }}
       />
     </section>

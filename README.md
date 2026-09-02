@@ -65,20 +65,23 @@ sudo chmod 0755 /home/cpac/deploy.sh
 sudo /home/cpac/deploy.sh
 ```
 
-首次运行时，脚本检测不到本机配置，会提示输入访问域名：
+首次运行时，脚本检测不到本机配置，会提示输入访问域名，并检测本机是否已有 Nginx、同域名站点和证书，再让操作者选择入口方式：
 
 ```text
 $ sudo /home/cpac/deploy.sh
 请输入访问域名: qdata.example.com
+  1) 使用现有反向代理（不修改 Nginx / Certbot）
+  2) 由 CPAC 管理 Nginx 与 Let's Encrypt 证书
+  3) 取消
 ```
 
-域名经过严格的 FQDN 格式校验和规范化后，以单一 `CPA_DOMAIN=<域名>` 配置写入 `/home/cpac/config.env`。配置通过同目录临时文件原子替换，由 `root` 所有且权限为 `0600`，不会把任意用户输入作为 Shell 执行。后续执行自动读取域名并判断“首次初始化”或“原地升级”。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会在下一次使用默认入口时校验、迁移到 `/home/cpac/` 并删除旧文件；新旧配置不一致时失败关闭。无交互环境可显式传入域名：
+域名经过严格的 FQDN 格式校验和规范化后，与入口模式一同写入 `/home/cpac/config.env`：`CPA_DOMAIN=<域名>`、`CPAC_INGRESS_MODE=managed|external`。配置通过同目录临时文件原子替换，由 `root` 所有且权限为 `0600`，不会把任意用户输入作为 Shell 执行。后续执行自动读取两项配置并判断“首次初始化”或“原地升级”，不会静默改写入口模式。旧版本仅有域名的配置按兼容规则视为 `managed`；一旦成功升级便持久化该值。无交互环境首次运行必须显式传入域名和入口模式：
 
 ```sh
-sudo /home/cpac/deploy.sh deploy --domain qdata.example.com
+sudo /home/cpac/deploy.sh deploy --domain qdata.example.com --ingress external
 ```
 
-如果配置尚不存在、标准输入也不是终端，并且没有提供 `--domain`，脚本必须失败，不能猜测域名。已有部署不能通过普通 `--domain` 静默覆盖域名；改域名需执行 `sudo /home/cpac/deploy.sh domain set <新域名>` 并确认。
+如果配置尚不存在、标准输入也不是终端，并且没有同时提供 `--domain`、`--ingress`，脚本必须失败，不能猜测域名或接管宿主机入口。已有部署不能通过普通参数静默覆盖域名或入口模式；改域名需执行 `sudo /home/cpac/deploy.sh domain set <新域名>`，切换入口需执行 `sudo /home/cpac/deploy.sh ingress set managed|external` 并确认。
 
 ```text
 sudo /home/cpac/deploy.sh
@@ -114,7 +117,7 @@ sudo /home/cpac/deploy.sh
     └── logs/gateway/
 ```
 
-Nginx、Let's Encrypt、Docker 数据和进程锁仍遵循宿主机系统目录；它们不是第二套 CPA 业务状态。
+Docker 数据和进程锁仍遵循宿主机系统目录；它们不是第二套 CPA 业务状态。仅在 `managed` 模式，脚本才按需安装、启动和配置 Nginx/Certbot；`external` 模式完全不安装、不启动、不改动它们。
 
 脚本从同一 GitHub Release 下载自身、归档、发布环境和 `SHA256SUMS`，校验后才更新入口或使用不可变镜像。首次安装在 `/home/cpac/` 同一文件系统的临时目录创建两份 SQLite、主密钥、空 Gateway 快照、账号容器所需的 `management/config/static` 目录和随机管理员凭据，再原子发布为 `/home/cpac/runtime`。升级先通过 SQLite Backup API 生成两份通过 `quick_check` 的一致性数据库副本，并与主密钥、OAuth 和运行配置一起写入 `/home/cpac/backups/` 的 root-only 归档，再安全补齐可能缺失的空账号运行目录并执行 Gateway 蓝绿排空、Control/Web 更新和烟测；任一层为符号链接或非目录时失败关闭，部署失败时恢复上一发布配置。
 
@@ -124,7 +127,7 @@ Nginx、Let's Encrypt、Docker 数据和进程锁仍遵循宿主机系统目录�
 
 首次使用管理密钥登录 `/admin/` 后，Web 管理中心会进入统一的首次配置页，可直接设置邮箱域、用户初始密码、公开地址、额度时区、默认周额度、通知、品牌和上游代理，并可随时返回运行总览。CPA 创建、OAuth 授权和用户创建保留在各自管理页面，不再作为初始化步骤。未处理的配置会在运行总览保留恢复入口；状态由控制面实时计算，Secret 不进入读取接口或浏览器持久化存储。
 
-脚本负责安装必要依赖、配置本站 Nginx 反向代理并申请或复用 Let's Encrypt 证书；DNS 必须预先指向目标机。它不修改仓库范围外的代理拓扑或 `/opt/cliproxyapi`。
+`managed` 模式负责安装必要依赖、写入带 `# Managed by CPAC deploy.sh` 标记的 CPAC 专属站点，并申请或复用 Let's Encrypt 证书；若同域名站点不是该脚本托管，脚本拒绝覆盖。旧版无标记站点也不会被自动认领：保留它时应显式切换为 `external`。DNS 必须预先指向目标机。`external` 模式只部署本机监听于 `127.0.0.1:18317` 的 CPAC 服务，并输出反向代理要求：保留 `Host`、`X-Forwarded-*`，支持 WebSocket/SSE 和至少 3600 秒流式超时；操作者负责验证 `<既有入口>/__health` 返回 `200`。它不修改仓库范围外的代理拓扑或 `/opt/cliproxyapi`。
 
 ### 开发者底层入口
 

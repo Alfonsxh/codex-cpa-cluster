@@ -110,17 +110,28 @@ ui_complete() {
   ui_version=$1
   ui_domain=$2
   ui_root=$3
+  ui_ingress_mode=$4
   if [ "$UI_IS_TERMINAL" = true ]; then
     printf '\n%s%s╭─ 部署完成 ───────────────────────────────────%s\n' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
     printf '%s%s│%s  版本    %s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_version"
-    printf '%s%s│%s  地址    https://%s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
-    printf '%s%s│%s  管理员登录  https://%s/admin/\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
+    if [ "$ui_ingress_mode" = managed ]; then
+      printf '%s%s│%s  地址    https://%s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
+      printf '%s%s│%s  管理员登录  https://%s/admin/\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
+    else
+      printf '%s%s│%s  入口    由现有反向代理提供（%s）\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
+      printf '%s%s│%s  管理员登录  <既有入口>/admin/\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET"
+    fi
     printf '%s%s│%s  目录    %s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_root"
     printf '%s%s╰──────────────────────────────────────────────%s\n' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
   else
     printf '\nCPA 部署完成\n'
-    printf '  版本: %s\n  地址: https://%s\n  管理员登录: https://%s/admin/\n  目录: %s\n' \
-      "$ui_version" "$ui_domain" "$ui_domain" "$ui_root"
+    if [ "$ui_ingress_mode" = managed ]; then
+      printf '  版本: %s\n  地址: https://%s\n  管理员登录: https://%s/admin/\n  目录: %s\n' \
+        "$ui_version" "$ui_domain" "$ui_domain" "$ui_root"
+    else
+      printf '  版本: %s\n  入口: 由现有反向代理提供（%s）\n  管理员登录: <既有入口>/admin/\n  目录: %s\n' \
+        "$ui_version" "$ui_domain" "$ui_root"
+    fi
   fi
 }
 
@@ -171,14 +182,51 @@ config_domain() {
   normalize_domain "$values" || die "域名配置无效：$config_file"
 }
 
+validate_ingress_mode() {
+  case "$1" in
+    managed|external) printf '%s\n' "$1" ;;
+    *) return 1 ;;
+  esac
+}
+
+config_ingress_mode() {
+  config_file=$1
+  [ -e "$config_file" ] || return 1
+  [ -f "$config_file" ] && [ ! -L "$config_file" ] \
+    || die "入口配置必须是普通非符号链接文件：$config_file"
+  values=$(awk -F= '$1 == "CPAC_INGRESS_MODE" { print substr($0, index($0, "=") + 1) }' "$config_file")
+  count=$(printf '%s\n' "$values" | awk 'NF { count++ } END { print count + 0 }')
+  case "$count" in
+    0) printf '%s\n' managed ;;
+    1) validate_ingress_mode "$values" || die "入口模式无效：$config_file" ;;
+    *) die "入口配置必须且只能包含一个 CPAC_INGRESS_MODE：$config_file" ;;
+  esac
+}
+
+config_has_explicit_ingress_mode() {
+  config_file=$1
+  config_ingress_mode "$config_file" >/dev/null
+  count=$(awk -F= '$1 == "CPAC_INGRESS_MODE" { count++ } END { print count + 0 }' "$config_file")
+  [ "$count" -eq 1 ]
+}
+
 write_config() {
   config_file=$1
   domain=$2
+  ingress_mode=${3:-}
+  normalize_domain "$domain" >/dev/null || die "域名配置无效：$domain"
+  if [ -n "$ingress_mode" ]; then
+    ingress_mode=$(validate_ingress_mode "$ingress_mode") \
+      || die "入口模式无效：$ingress_mode"
+  fi
   config_directory=$(dirname -- "$config_file")
   [ ! -L "$config_directory" ] || die "配置目录不能是符号链接：$config_directory"
   mkdir -p -- "$config_directory"
   config_tmp=$(mktemp "$config_directory/.config.XXXXXX")
-  if ! printf 'CPA_DOMAIN=%s\n' "$domain" >"$config_tmp" \
+  if ! {
+    printf 'CPA_DOMAIN=%s\n' "$domain"
+    [ -z "$ingress_mode" ] || printf 'CPAC_INGRESS_MODE=%s\n' "$ingress_mode"
+  } >"$config_tmp" \
     || ! chmod 0600 "$config_tmp" \
     || ! mv -f -- "$config_tmp" "$config_file"; then
     rm -f -- "$config_tmp"
@@ -251,7 +299,7 @@ migrate_legacy_operator_state() {
     die "新旧域名配置不一致，拒绝自动迁移"
   fi
   if [ -n "$migration_legacy_domain" ] && [ -z "$migration_destination_domain" ]; then
-    write_config "$migration_destination" "$migration_legacy_domain"
+    write_config "$migration_destination" "$migration_legacy_domain" managed
     migration_destination_domain=$migration_legacy_domain
     migration_changed=true
   fi
@@ -290,8 +338,118 @@ resolve_deploy_domain() {
     IFS= read -r entered_domain
     domain=$(normalize_domain "$entered_domain") || die "域名格式无效：$entered_domain"
   fi
-  write_config "$config_file" "$domain"
   printf '%s\n' "$domain"
+}
+
+nginx_domain_server_count() {
+  domain=$1
+  nginx_output=$(mktemp "${TMPDIR:-/var/tmp}/cpac-nginx-config.XXXXXX") \
+    || die "无法创建 Nginx 配置检查文件"
+  if ! nginx -T >"$nginx_output" 2>&1; then
+    rm -f -- "$nginx_output"
+    return 1
+  fi
+  count=$(awk -v domain="$domain" '
+    {
+      sub(/#.*/, "")
+      if ($0 !~ /server_name[[:space:]]/) next
+      sub(/.*server_name[[:space:]]+/, "")
+      gsub(/;/, "")
+      number = split($0, names, /[[:space:]]+/)
+      for (position = 1; position <= number; position++) {
+        if (names[position] == domain) count++
+      }
+    }
+    END { print count + 0 }
+  ' "$nginx_output")
+  rm -f -- "$nginx_output"
+  printf '%s\n' "$count"
+}
+
+inspect_existing_ingress() {
+  domain=$1
+  if command -v nginx >/dev/null 2>&1; then
+    if systemctl is-active --quiet nginx >/dev/null 2>&1; then
+      printf '%s\n' '检测：Nginx 已安装且正在运行' >&2
+    else
+      printf '%s\n' '检测：Nginx 已安装，但当前未运行' >&2
+    fi
+    if nginx_servers=$(nginx_domain_server_count "$domain"); then
+      if [ "$nginx_servers" -gt 0 ]; then
+        printf '%s\n' "检测：Nginx 已有 $nginx_servers 个 server_name 包含 $domain" >&2
+      else
+        printf '%s\n' "检测：Nginx 尚未声明 $domain" >&2
+      fi
+    else
+      printf '%s\n' '检测：无法安全读取当前 Nginx 配置；不会覆盖任何站点' >&2
+    fi
+  else
+    printf '%s\n' '检测：未安装 Nginx' >&2
+  fi
+  if [ -s "$CERTIFICATE_ROOT/$domain/fullchain.pem" ] \
+    && [ -s "$CERTIFICATE_ROOT/$domain/privkey.pem" ]; then
+    printf '%s\n' "检测：已存在 $domain 的 Let's Encrypt 证书" >&2
+  else
+    printf '%s\n' "检测：未找到 $domain 的 Let's Encrypt 证书" >&2
+  fi
+}
+
+choose_ingress_mode() {
+  domain=$1
+  [ -t 0 ] || die "首次部署必须明确选择入口：sudo $SCRIPT_PATH deploy --ingress managed|external"
+  printf '\n访问入口选择（仅首次选择，后续升级会复用）：\n' >&2
+  inspect_existing_ingress "$domain"
+  cat >&2 <<EOF
+
+  1) 使用现有反向代理（不安装、不启动、不修改 Nginx 或 Certbot）
+  2) 由 CPAC 管理 Nginx 与 Let's Encrypt 证书
+  3) 取消
+请选择 [1-3]:
+EOF
+  IFS= read -r ingress_choice
+  case "$ingress_choice" in
+    1) printf '%s\n' external ;;
+    2) printf '%s\n' managed ;;
+    *) die "已取消部署" ;;
+  esac
+}
+
+resolve_deploy_ingress_mode() {
+  config_file=$1
+  explicit_mode=$2
+  deploy_root=$3
+  domain=$4
+  stored_mode=
+  stored_mode_explicit=false
+  if [ -e "$config_file" ]; then
+    stored_mode=$(config_ingress_mode "$config_file")
+    if config_has_explicit_ingress_mode "$config_file"; then
+      stored_mode_explicit=true
+    fi
+  fi
+  if [ -n "$explicit_mode" ]; then
+    explicit_mode=$(validate_ingress_mode "$explicit_mode") \
+      || die "入口模式无效：${explicit_mode}（仅支持 managed 或 external）"
+  fi
+  if [ "$stored_mode_explicit" = true ]; then
+    if [ -n "$explicit_mode" ] && [ "$stored_mode" != "$explicit_mode" ]; then
+      die "已记录入口模式为 $stored_mode；请使用 sudo $SCRIPT_PATH ingress set $explicit_mode"
+    fi
+    printf '%s\n' "$stored_mode"
+    return
+  fi
+  if [ -e "$deploy_root" ]; then
+    if [ -n "$explicit_mode" ] && [ "$explicit_mode" != managed ]; then
+      die "既有安装按兼容模式使用 managed；如需切换请使用 sudo $SCRIPT_PATH ingress set external"
+    fi
+    printf '%s\n' managed
+    return
+  fi
+  if [ -n "$explicit_mode" ]; then
+    printf '%s\n' "$explicit_mode"
+  else
+    choose_ingress_mode "$domain"
+  fi
 }
 
 validate_version() {
@@ -314,11 +472,16 @@ validate_release_image() {
 }
 
 install_prerequisites() {
+  ingress_mode=$1
+  validate_ingress_mode "$ingress_mode" >/dev/null \
+    || die "入口模式无效：$ingress_mode"
   set --
   command -v curl >/dev/null 2>&1 || set -- "$@" curl ca-certificates
   command -v docker >/dev/null 2>&1 || set -- "$@" docker.io
-  command -v nginx >/dev/null 2>&1 || set -- "$@" nginx
-  command -v certbot >/dev/null 2>&1 || set -- "$@" certbot
+  if [ "$ingress_mode" = managed ]; then
+    command -v nginx >/dev/null 2>&1 || set -- "$@" nginx
+    command -v certbot >/dev/null 2>&1 || set -- "$@" certbot
+  fi
   command -v flock >/dev/null 2>&1 || set -- "$@" util-linux
   command -v sqlite3 >/dev/null 2>&1 || set -- "$@" sqlite3
   if [ "$#" -gt 0 ]; then
@@ -327,11 +490,18 @@ install_prerequisites() {
     DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" \
       || die "安装系统依赖失败：$*"
   fi
-  for command in awk certbot cmp cp curl docker flock getent grep install mktemp nginx \
+  for command in awk cmp cp curl docker flock getent grep install mktemp \
     readlink sed sha256sum sqlite3 systemctl tar; do
     require_command "$command"
   done
-  systemctl enable --now docker nginx || die "启动 Docker 或 Nginx 失败"
+  if [ "$ingress_mode" = managed ]; then
+    require_command nginx
+    require_command certbot
+  fi
+  systemctl enable --now docker || die "启动 Docker 失败"
+  if [ "$ingress_mode" = managed ]; then
+    systemctl enable --now nginx || die "启动 Nginx 失败"
+  fi
   if ! docker compose version >/dev/null 2>&1; then
     command -v apt-get >/dev/null 2>&1 || die "缺少 Docker Compose v2 且系统没有 apt-get"
     apt-get update || die "更新 Docker Compose 软件索引失败"
@@ -641,12 +811,24 @@ write_nginx_site() {
   if [ -e "$site_file" ] || [ -L "$site_file" ]; then
     [ -f "$site_file" ] && [ ! -L "$site_file" ] \
       || die "Nginx 站点必须是普通非符号链接文件：$site_file"
+    grep -Fxq '# Managed by CPAC deploy.sh' "$site_file" \
+      || die "Nginx 已有未托管的同名站点，拒绝覆盖：${site_file}；请改用 external 或手动处理"
     site_backup=$(mktemp "$available_directory/.cpa-site-backup.XXXXXX")
     cp -p -- "$site_file" "$site_backup"
     had_site=true
   else
     site_backup=
     had_site=false
+  fi
+  if nginx_domain_servers=$(nginx_domain_server_count "$domain"); then
+    if [ "$had_site" = false ] && [ "$nginx_domain_servers" -gt 0 ]; then
+      die "Nginx 已存在 $domain 的未托管站点，拒绝新增冲突配置；请改用 external 或手动处理"
+    fi
+    if [ "$nginx_domain_servers" -gt 2 ]; then
+      die "Nginx 检测到多个 $domain 站点，拒绝覆盖；请改用 external 或手动处理"
+    fi
+  else
+    die "无法安全读取当前 Nginx 配置，拒绝修改站点：$domain"
   fi
   if [ -e "$enabled_file" ] || [ -L "$enabled_file" ]; then
     [ -L "$enabled_file" ] && [ "$(readlink -f -- "$enabled_file")" = "$site_file" ] \
@@ -658,6 +840,7 @@ write_nginx_site() {
   nginx_tmp=$(mktemp "$available_directory/.cpa-site.XXXXXX")
   if [ "$mode" = http ]; then
     cat >"$nginx_tmp" <<EOF
+# Managed by CPAC deploy.sh
 server {
     listen 80;
     server_name $domain;
@@ -674,6 +857,7 @@ server {
 EOF
   else
     cat >"$nginx_tmp" <<EOF
+# Managed by CPAC deploy.sh
 server {
     listen 80;
     server_name $domain;
@@ -770,6 +954,36 @@ configure_nginx_tls() {
   write_nginx_site https "$domain"
 }
 
+show_external_ingress_contract() {
+  domain=$1
+  ui_step "复用现有反向代理"
+  ui_done "未安装、启动或修改 Nginx / Certbot"
+  cat <<EOF
+
+CPAC 本机上游：http://127.0.0.1:18317
+现有反向代理必须：
+  - 保留 Host、X-Forwarded-For、X-Forwarded-Proto；
+  - 透传 WebSocket 的 Upgrade / Connection；SSE 必须关闭响应缓冲；
+  - 为流式响应设置至少 3600 秒的读取和发送超时；
+  - 将 ${domain}/__health 转发到该上游，公网预期返回 HTTP 200。
+
+Nginx 示例（按你的站点规范合并，不由 CPAC 写入）：
+  location / {
+      proxy_pass http://127.0.0.1:18317;
+      proxy_http_version 1.1;
+      proxy_set_header Host \$host;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_set_header Upgrade \$http_upgrade;
+      proxy_set_header Connection \$http_connection;
+      proxy_buffering off;
+      proxy_request_buffering off;
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
+  }
+EOF
+}
+
 update_operator_script() {
   verified_script=$1
   [ -f "$SCRIPT_PATH" ] && [ ! -L "$SCRIPT_PATH" ] \
@@ -836,10 +1050,12 @@ run_deploy() {
   deploy_root=$DEFAULT_DEPLOY_ROOT
   repository=$DEFAULT_REPOSITORY
   explicit_domain=${CPAC_DOMAIN:-}
+  explicit_ingress_mode=${CPAC_INGRESS_MODE:-}
   version=
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --domain) [ "$#" -ge 2 ] || die "--domain 缺少参数"; explicit_domain=$2; shift 2 ;;
+      --ingress) [ "$#" -ge 2 ] || die "--ingress 缺少参数"; explicit_ingress_mode=$2; shift 2 ;;
       --version) [ "$#" -ge 2 ] || die "--version 缺少参数"; version=$2; shift 2 ;;
       --config) [ "$#" -ge 2 ] || die "--config 缺少参数"; config_file=$2; shift 2 ;;
       *) die "未知 deploy 参数：$1" ;;
@@ -851,15 +1067,19 @@ run_deploy() {
   ui_banner
   migrate_legacy_operator_state "$config_file"
   domain=$(resolve_deploy_domain "$config_file" "$explicit_domain")
+  ingress_mode=$(resolve_deploy_ingress_mode \
+    "$config_file" "$explicit_ingress_mode" "$deploy_root" "$domain")
+  write_config "$config_file" "$domain" "$ingress_mode"
   if [ -e "$deploy_root" ]; then
     deploy_mode=升级
   else
     deploy_mode=首次安装
   fi
   ui_note "模式  $deploy_mode"
-  ui_note "域名  https://$domain"
+  ui_note "域名  $domain"
+  ui_note "入口  $ingress_mode"
   ui_note "目录  $deploy_root"
-  ui_run "检查系统环境" install_prerequisites
+  ui_run "检查系统环境" install_prerequisites "$ingress_mode"
 
   lock_file=${CPAC_LOCK_FILE:-/var/lock/cpa-deploy.lock}
   mkdir -p -- "$(dirname -- "$lock_file")"
@@ -913,7 +1133,8 @@ run_deploy() {
     cleanup_files
     trap - EXIT HUP INT TERM
     exec 9>&-
-    exec "$SCRIPT_PATH" deploy --domain "$domain" --version "$selected_version" --config "$config_file"
+    exec "$SCRIPT_PATH" deploy --domain "$domain" --ingress "$ingress_mode" \
+      --version "$selected_version" --config "$config_file"
   fi
   ui_done "部署脚本已是当前版本"
 
@@ -924,9 +1145,13 @@ run_deploy() {
     && [ -f "$extract_directory/release-manifest.json" ] \
     || die "发布包缺少部署元数据"
 
-  ui_step "配置 Nginx 与 HTTPS"
-  configure_nginx_tls "$domain"
-  ui_done "Nginx 与 HTTPS 已就绪"
+  if [ "$ingress_mode" = managed ]; then
+    ui_step "配置 Nginx 与 HTTPS"
+    configure_nginx_tls "$domain"
+    ui_done "Nginx 与 HTTPS 已就绪"
+  else
+    show_external_ingress_contract "$domain"
+  fi
   fresh=false
   backup=
   if [ -e "$deploy_root" ]; then
@@ -1017,13 +1242,17 @@ run_deploy() {
   upgrade_pending=false
   write_initialized_marker "$deploy_root" "$selected_version"
   prune_legacy_release_payload "$deploy_root"
-  ui_step "验证公网 HTTPS"
-  external_status=$(curl --connect-timeout 10 --max-time 30 -sS -o /dev/null \
-    -w '%{http_code}' "https://$domain/__health" || true)
-  [ "$external_status" = 200 ] \
-    || die "容器部署已完成，但 https://$domain/__health 返回 ${external_status:-连接失败}"
-  ui_done "公网 HTTPS 健康检查通过"
-  ui_complete "$selected_version" "$domain" "$deploy_root"
+  if [ "$ingress_mode" = managed ]; then
+    ui_step "验证公网 HTTPS"
+    external_status=$(curl --connect-timeout 10 --max-time 30 -sS -o /dev/null \
+      -w '%{http_code}' "https://$domain/__health" || true)
+    [ "$external_status" = 200 ] \
+      || die "容器部署已完成，但 https://$domain/__health 返回 ${external_status:-连接失败}"
+    ui_done "公网 HTTPS 健康检查通过"
+  else
+    ui_note "已跳过公网检查；请由现有反向代理验证 ${domain}/__health 返回 HTTP 200"
+  fi
+  ui_complete "$selected_version" "$domain" "$deploy_root" "$ingress_mode"
   [ -z "$backup" ] || ui_note "升级前备份  $backup"
   pending_key="$(dirname -- "$config_file")/bootstrap-admin.key"
   if [ -f "$pending_key" ]; then
@@ -1053,23 +1282,61 @@ run_domain_set() {
   migrate_legacy_operator_state "$config_file"
   domain=$(normalize_domain "$requested") || die "域名格式无效：$requested"
   current=
+  current_ingress_mode=
   [ ! -e "$config_file" ] || current=$(config_domain "$config_file")
+  if [ -e "$config_file" ] && config_has_explicit_ingress_mode "$config_file"; then
+    current_ingress_mode=$(config_ingress_mode "$config_file")
+  fi
   if [ -n "$current" ] && [ "$current" != "$domain" ] && [ "$confirmed" != true ]; then
     [ -t 0 ] || die "非交互修改域名必须添加 --yes"
     printf '确认将域名从 %s 修改为 %s？[y/N] ' "$current" "$domain" >&2
     IFS= read -r answer
     case "$answer" in y|Y|yes|YES) ;; *) die "已取消域名修改" ;; esac
   fi
-  write_config "$config_file" "$domain"
+  write_config "$config_file" "$domain" "$current_ingress_mode"
   printf '已记录域名：%s\n' "$domain"
+}
+
+run_ingress_set() {
+  require_root ingress set
+  config_file=$DEFAULT_CONFIG_FILE
+  confirmed=false
+  [ "$#" -ge 1 ] || die "用法：sudo $SCRIPT_PATH ingress set managed|external"
+  requested=$1
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --yes) confirmed=true; shift ;;
+      --config) [ "$#" -ge 2 ] || die "--config 缺少参数"; config_file=$2; shift 2 ;;
+      *) die "未知 ingress set 参数：$1" ;;
+    esac
+  done
+  migrate_legacy_operator_state "$config_file"
+  [ -e "$config_file" ] || die "请先记录域名：sudo $SCRIPT_PATH domain set <域名>"
+  domain=$(config_domain "$config_file")
+  current=$(config_ingress_mode "$config_file")
+  requested=$(validate_ingress_mode "$requested") \
+    || die "入口模式无效：${requested}（仅支持 managed 或 external）"
+  if [ "$current" != "$requested" ] && [ "$confirmed" != true ]; then
+    [ -t 0 ] || die "非交互切换入口模式必须添加 --yes"
+    printf '确认将入口模式从 %s 修改为 %s？[y/N] ' "$current" "$requested" >&2
+    IFS= read -r answer
+    case "$answer" in y|Y|yes|YES) ;; *) die "已取消入口模式修改" ;; esac
+  fi
+  write_config "$config_file" "$domain" "$requested"
+  printf '已记录入口模式：%s\n' "$requested"
+  if [ "$requested" = external ]; then
+    printf '%s\n' 'CPAC 不会删除或修改既有 Nginx 站点；请先由你的反向代理接管该域名，再执行 deploy。'
+  fi
 }
 
 operator_usage() {
   cat <<EOF
 用法：
   sudo $SCRIPT_PATH
-  sudo $SCRIPT_PATH deploy [--domain DOMAIN] [--version VERSION]
+  sudo $SCRIPT_PATH deploy [--domain DOMAIN] [--ingress managed|external] [--version VERSION]
   sudo $SCRIPT_PATH domain set DOMAIN
+  sudo $SCRIPT_PATH ingress set managed|external
   sudo $SCRIPT_PATH admin-key claim
 EOF
 }
@@ -1089,6 +1356,14 @@ case "$ENTRY_COMMAND" in
     [ "$subcommand" = set ] || die "用法：sudo $SCRIPT_PATH domain set <新域名>"
     shift
     run_domain_set "$@"
+    exit 0
+    ;;
+  ingress)
+    shift
+    subcommand=${1:-}
+    [ "$subcommand" = set ] || die "用法：sudo $SCRIPT_PATH ingress set managed|external"
+    shift
+    run_ingress_set "$@"
     exit 0
     ;;
   admin-key)

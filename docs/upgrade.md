@@ -8,7 +8,7 @@
 sudo /home/cpac/deploy.sh
 ```
 
-命令自动复用 `/home/cpac/config.env` 中的域名，获取最新 GitHub Release，校验并按需更新自身，在 `/home/cpac/backups/` 创建 root-only 备份，然后执行正式蓝绿部署。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会先安全迁移到 `/home/cpac/`。固定版本排障可使用 `sudo /home/cpac/deploy.sh deploy --version v2.0.0`。
+命令自动复用 `/home/cpac/config.env` 中的域名和入口模式，获取最新 GitHub Release，校验并按需更新自身，在 `/home/cpac/backups/` 创建 root-only 备份，然后执行正式蓝绿部署。升级绝不因缺少 Nginx、证书或不同域名站点而改变既有入口模式：`external` 始终不触碰 Nginx/Certbot 且跳过公网检查；`managed` 只更新带 `# Managed by CPAC deploy.sh` 标记的 CPAC 站点。旧版无标记站点不会被自动认领，保留旧站点时应先执行 `sudo /home/cpac/deploy.sh ingress set external`。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会先安全迁移到 `/home/cpac/`。固定版本排障可使用 `sudo /home/cpac/deploy.sh deploy --version v2.0.0`。需要切换入口时必须显式确认 `sudo /home/cpac/deploy.sh ingress set managed|external`，再执行日常部署。
 
 ## 前置条件
 

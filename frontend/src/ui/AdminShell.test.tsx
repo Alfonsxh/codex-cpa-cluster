@@ -60,4 +60,14 @@ describe("AdminShell legacy visual contract", () => {
     await user.click(refresh);
     expect(refresh).toBeEnabled();
   });
+
+  it("uses a dedicated distraction-free shell for first setup", () => {
+    renderShell("/setup", <div>首次设置内容</div>);
+
+    expect(screen.getByText("首次设置内容")).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "管理中心导航" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "退出" })).not.toBeInTheDocument();
+  });
 });

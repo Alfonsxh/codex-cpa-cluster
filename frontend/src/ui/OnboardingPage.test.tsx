@@ -35,7 +35,7 @@ describe("OnboardingPage", () => {
     await user.click(screen.getByRole("button", { name: "保存并检查" }));
 
     expect(await screen.findByText("已保存 1 项配置，完成状态已重新检查")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=initial_password"));
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
     const mutation = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
@@ -50,7 +50,6 @@ describe("OnboardingPage", () => {
       if (path === "/admin/api/settings/configuration") return jsonResponse(configurationCatalog());
       throw new Error(`unexpected request: ${path}`);
     }));
-    const user = userEvent.setup();
     renderOnboarding("/setup?step=first_account");
 
     expect(await screen.findByRole("heading", { name: "完成基础配置" })).toBeInTheDocument();
@@ -59,8 +58,7 @@ describe("OnboardingPage", () => {
     for (const removed of ["首个 CPA", "OAuth 授权", "首个用户", "必须完成", "推荐设置", "REQUIRED STEP"]) {
       expect(screen.queryByText(removed)).not.toBeInTheDocument();
     }
-    await user.click(screen.getByRole("button", { name: "进入运行总览" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/overview");
+    expect(screen.queryByRole("button", { name: "进入运行总览" })).not.toBeInTheDocument();
   });
 
   it("lets operators skip and restore optional configuration in the unified progress", async () => {
@@ -81,7 +79,10 @@ describe("OnboardingPage", () => {
     renderOnboarding("/setup?step=public_base_url");
 
     expect((await screen.findByRole("progressbar")).getAttribute("aria-valuenow")).toBe("25");
-    await user.click(screen.getByRole("button", { name: "暂时跳过" }));
+    const skip = screen.getByRole("button", { name: "暂时跳过" });
+    const next = screen.getByRole("button", { name: /下一步/ });
+    expect(skip.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(skip);
     expect(await screen.findByText("已跳过")).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "38");
 
@@ -127,18 +128,18 @@ describe("OnboardingPage", () => {
     await user.clear(timezone);
     await user.type(timezone, "Asia/Shanghai");
     await user.click(screen.getByRole("button", { name: "保存时区" }));
-    await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=weekly_quota"));
 
     const configurationNavigation = screen.getByRole("navigation", { name: "初始化配置" });
     await user.click(within(configurationNavigation).getByRole("button", { name: /默认额度/ }));
     await user.type(await screen.findByLabelText("新用户默认周额度"), "20000000");
     await user.click(screen.getByRole("button", { name: "保存默认额度" }));
-    await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=notifications"));
 
     await user.click(within(configurationNavigation).getByRole("button", { name: /^通知/ }));
     await user.type(await screen.findByLabelText("企业微信群 Webhook"), webhookURL);
     await user.click(screen.getByRole("button", { name: "保存 Webhook" }));
-    await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=branding"));
 
     await user.click(within(configurationNavigation).getByRole("button", { name: /^品牌/ }));
     const productName = await screen.findByLabelText("产品名称");
@@ -148,7 +149,7 @@ describe("OnboardingPage", () => {
     await user.clear(environmentLabel);
     await user.type(environmentLabel, "研发团队专用");
     await user.click(screen.getByRole("button", { name: "保存品牌信息" }));
-    await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=proxy"));
 
     await user.click(within(configurationNavigation).getByRole("button", { name: /上游代理/ }));
     await user.type(await screen.findByLabelText("默认上游代理 URL"), "socks5://user:password@proxy.example.com:1080");
@@ -185,12 +186,10 @@ describe("OnboardingPage", () => {
         error: { code: "status_unavailable", message: "状态检查暂不可用" }
       }), { status: 503, headers: { "Content-Type": "application/json" } });
     }));
-    const user = userEvent.setup();
     renderOnboarding("/setup");
 
     expect(await screen.findByText("首次设置状态暂时不可用")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "进入运行总览" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/overview");
+    expect(screen.queryByRole("button", { name: "进入运行总览" })).not.toBeInTheDocument();
   });
 });
 

@@ -208,8 +208,9 @@ func TestAccountRuntimeUpdatesOneImageWithImmutableReference(t *testing.T) {
 		t.Fatalf("created images = %#v", client.createImages)
 	}
 	if projector.calls != 1 || projector.references[0] != fixtureImmutableImage ||
+		projector.listenAddresses[0] != "127.0.0.1" ||
 		stringValue(mapValue(store.state["applied"])["image_id"]) != fixtureNewImageID {
-		t.Fatalf("commit projector=%#v state=%#v", projector.references, store.state)
+		t.Fatalf("commit projector=%#v listeners=%#v state=%#v", projector.references, projector.listenAddresses, store.state)
 	}
 	assertRunningImage(t, client, "alpha", fixtureNewImageID)
 }
@@ -421,14 +422,16 @@ func (store *imageMutationStore) ReadSecret(_ context.Context, name string) (str
 }
 
 type recordingCPAImageProjector struct {
-	calls      int
-	references []string
-	err        error
+	calls           int
+	references      []string
+	listenAddresses []string
+	err             error
 }
 
-func (projector *recordingCPAImageProjector) ProjectCPAImage(_ context.Context, reference string) error {
+func (projector *recordingCPAImageProjector) ProjectCPAImage(_ context.Context, reference string, listenAddress string) error {
 	projector.calls++
 	projector.references = append(projector.references, reference)
+	projector.listenAddresses = append(projector.listenAddresses, listenAddress)
 	return projector.err
 }
 

@@ -112,35 +112,44 @@ type AccountComposeEnvironmentProjector struct {
 	Root string
 }
 
-// ProjectCPAImage atomically replaces only CLIPROXY_IMAGE in the already
-// initialized private account-Compose projection.
-func (projector *AccountComposeEnvironmentProjector) ProjectCPAImage(ctx context.Context, resolvedReference string) error {
+// ProjectCPAImage atomically replaces only CLIPROXY_IMAGE in the private
+// account-Compose projection. The projection is derived state, so a missing
+// file is rebuilt from the caller's already-validated image and listener.
+func (projector *AccountComposeEnvironmentProjector) ProjectCPAImage(
+	ctx context.Context,
+	resolvedReference string,
+	listenAddress string,
+) error {
 	resolvedReference = strings.TrimSpace(resolvedReference)
 	if resolvedReference == "" || len(resolvedReference) > 512 || strings.ContainsAny(resolvedReference, "\r\n\t \x00") {
 		return errors.New("resolved CPA image reference is invalid")
 	}
-	path, raw, err := projector.readExisting(ctx)
+	path, raw, found, err := projector.readExisting(ctx)
 	if err != nil {
 		return err
 	}
-	existing, err := parseComposeEnvironment(raw)
-	if err != nil {
-		return err
+	if found {
+		if _, err := parseComposeEnvironment(raw); err != nil {
+			return err
+		}
 	}
-	return writeAccountComposeEnvironment(path, resolvedReference, existing["BUSINESS_CPA_LISTEN_ADDRESS"])
+	return writeAccountComposeEnvironment(path, resolvedReference, listenAddress)
 }
 
 func (projector *AccountComposeEnvironmentProjector) ProjectConfiguration(
 	ctx context.Context,
 	values map[string]any,
 ) error {
-	path, raw, err := projector.readExisting(ctx)
+	path, raw, found, err := projector.readExisting(ctx)
 	if err != nil {
 		return err
 	}
-	existing, err := parseComposeEnvironment(raw)
-	if err != nil {
-		return err
+	existing := map[string]string{}
+	if found {
+		existing, err = parseComposeEnvironment(raw)
+		if err != nil {
+			return err
+		}
 	}
 
 	return writeAccountComposeEnvironment(
@@ -173,31 +182,42 @@ func writeAccountComposeEnvironment(path string, image string, listenAddress str
 	return replaceComposeEnvironment(path, []byte(content.String()))
 }
 
-func (projector *AccountComposeEnvironmentProjector) readExisting(ctx context.Context) (string, []byte, error) {
+func (projector *AccountComposeEnvironmentProjector) readExisting(ctx context.Context) (string, []byte, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return "", nil, err
+		return "", nil, false, err
 	}
 	root := strings.TrimSpace(projector.Root)
 	if root == "" {
-		return "", nil, errors.New("Compose environment root is required")
+		return "", nil, false, errors.New("Compose environment root is required")
 	}
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
-		return "", nil, fmt.Errorf("resolve Compose environment root: %w", err)
+		return "", nil, false, fmt.Errorf("resolve Compose environment root: %w", err)
 	}
-	path := filepath.Join(filepath.Clean(absoluteRoot), "state", "compose.env")
-	information, err := os.Lstat(path)
+	stateDirectory := filepath.Join(filepath.Clean(absoluteRoot), "state")
+	state, err := os.Lstat(stateDirectory)
 	if err != nil {
-		return "", nil, fmt.Errorf("inspect existing Compose environment: %w", err)
+		return "", nil, false, fmt.Errorf("inspect account Compose state directory: %w", err)
+	}
+	if !state.IsDir() || state.Mode()&os.ModeSymlink != 0 {
+		return "", nil, false, errors.New("account Compose state directory must be a regular directory")
+	}
+	path := filepath.Join(stateDirectory, "compose.env")
+	information, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return path, nil, false, nil
+	}
+	if err != nil {
+		return "", nil, false, fmt.Errorf("inspect existing Compose environment: %w", err)
 	}
 	if !information.Mode().IsRegular() || information.Mode()&os.ModeSymlink != 0 {
-		return "", nil, errors.New("existing Compose environment must be a regular file")
+		return "", nil, false, errors.New("existing Compose environment must be a regular file")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", nil, fmt.Errorf("read existing Compose environment: %w", err)
+		return "", nil, false, fmt.Errorf("read existing Compose environment: %w", err)
 	}
-	return path, raw, nil
+	return path, raw, true, nil
 }
 
 func replaceComposeEnvironment(path string, content []byte) error {

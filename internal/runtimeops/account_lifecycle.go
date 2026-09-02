@@ -47,7 +47,7 @@ type AccountRuntimeStore interface {
 }
 
 type CPAImageProjector interface {
-	ProjectCPAImage(context.Context, string) error
+	ProjectCPAImage(context.Context, string, string) error
 }
 
 type AccountLifecycleDockerClient interface {
@@ -675,7 +675,7 @@ func (runtime *AccountRuntime) imageAndListenAddress(ctx context.Context) (strin
 			return "", "", err
 		}
 	}
-	listenAddress, err := runtimeStringSetting(settings, "accounts.listen_address", defaultAccountListen)
+	listenAddress, err := accountListenAddress(settings)
 	if err != nil {
 		return "", "", err
 	}
@@ -683,6 +683,18 @@ func (runtime *AccountRuntime) imageAndListenAddress(ctx context.Context) (strin
 		return "", "", errors.New("applied CPA image reference is invalid")
 	}
 	return image, strings.TrimSpace(listenAddress), nil
+}
+
+func (runtime *AccountRuntime) configuredAccountListenAddress(ctx context.Context) (string, error) {
+	settings, err := runtime.store.ReadSettings(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read account runtime settings: %w", err)
+	}
+	return accountListenAddress(settings)
+}
+
+func accountListenAddress(settings map[string]any) (string, error) {
+	return runtimeStringSetting(settings, "accounts.listen_address", defaultAccountListen)
 }
 
 func (runtime *AccountRuntime) probeAccount(ctx context.Context, accountID string) error {

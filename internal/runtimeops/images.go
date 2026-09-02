@@ -516,6 +516,10 @@ func (runtime *AccountRuntime) commitCPAImageApplied(
 	if err != nil {
 		return fmt.Errorf("read CPA image state before commit: %w", err)
 	}
+	listenAddress, err := runtime.configuredAccountListenAddress(ctx)
+	if err != nil {
+		return fmt.Errorf("read account listen address before commit: %w", err)
+	}
 	before := cloneStringMap(previous)
 	next := cloneStringMap(previous)
 	history := cloneStringMap(mapValue(next["history"]))
@@ -539,7 +543,7 @@ func (runtime *AccountRuntime) commitCPAImageApplied(
 		return fmt.Errorf("write applied CPA image state: %w", err)
 	}
 	resolvedReference := stringValue(identity["resolved_ref"])
-	if err := runtime.imageProjector.ProjectCPAImage(ctx, resolvedReference); err != nil {
+	if err := runtime.imageProjector.ProjectCPAImage(ctx, resolvedReference, listenAddress); err != nil {
 		var restoreError error
 		if found {
 			restoreError = store.WriteRuntimeState(context.WithoutCancel(ctx), "cliproxy_image", before)

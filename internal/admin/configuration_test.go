@@ -410,7 +410,7 @@ func TestComposeEnvironmentProjectorUpdatesCPAImageAndDropsRetiredKeys(t *testin
 		t.Fatalf("seed Compose environment: %v", err)
 	}
 	projector := &AccountComposeEnvironmentProjector{Root: root}
-	if err := projector.ProjectCPAImage(context.Background(), "registry.example.test/cpa:v2@sha256:new"); err != nil {
+	if err := projector.ProjectCPAImage(context.Background(), "registry.example.test/cpa:v2@sha256:new", "127.0.0.2"); err != nil {
 		t.Fatalf("ProjectCPAImage: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -419,12 +419,39 @@ func TestComposeEnvironmentProjectorUpdatesCPAImageAndDropsRetiredKeys(t *testin
 	}
 	want := "# Generated from state/control-plane.sqlite3; do not edit.\n" +
 		"CLIPROXY_IMAGE=registry.example.test/cpa:v2@sha256:new\n" +
-		"BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.1\n"
+		"BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.2\n"
 	if string(raw) != want {
 		t.Fatalf("CPA image projection did not canonicalize retired settings:\n--- got ---\n%s--- want ---\n%s", raw, want)
 	}
-	if err := projector.ProjectCPAImage(context.Background(), "mutable image:latest"); err == nil {
+	if err := projector.ProjectCPAImage(context.Background(), "mutable image:latest", "127.0.0.1"); err == nil {
 		t.Fatal("ProjectCPAImage accepted an invalid reference")
+	}
+}
+
+func TestComposeEnvironmentProjectorRebuildsMissingDerivedEnvironment(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatalf("create state: %v", err)
+	}
+	projector := &AccountComposeEnvironmentProjector{Root: root}
+	if err := projector.ProjectCPAImage(context.Background(), "registry.example.test/cpa:v2@sha256:new", "127.0.0.2"); err != nil {
+		t.Fatalf("ProjectCPAImage: %v", err)
+	}
+	path := filepath.Join(state, "compose.env")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rebuilt Compose environment: %v", err)
+	}
+	want := "# Generated from state/control-plane.sqlite3; do not edit.\n" +
+		"CLIPROXY_IMAGE=registry.example.test/cpa:v2@sha256:new\n" +
+		"BUSINESS_CPA_LISTEN_ADDRESS=127.0.0.2\n"
+	if string(raw) != want {
+		t.Fatalf("rebuilt Compose environment = %q, want %q", raw, want)
+	}
+	information, err := os.Stat(path)
+	if err != nil || information.Mode().Perm() != 0o600 {
+		t.Fatalf("rebuilt Compose environment mode = %v, %v", information, err)
 	}
 }
 

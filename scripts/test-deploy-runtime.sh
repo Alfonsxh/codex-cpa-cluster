@@ -581,8 +581,9 @@ run_operator_deploy >"$INSTALL_OUTPUT"
 for expected_output in \
   "== CPAC 安装与升级 ==" \
   "检查系统环境" \
-  "拉取组件镜像" \
-  "管理员登录: https://qdata.example.com/admin/" \
+  "拉取 Control / Web / Gateway / Edge 镜像" \
+  "镜像 Control" \
+  "管理员登录  https://qdata.example.com/admin/" \
   "首次管理员凭据已安全保留"
 do
   grep -Fq "$expected_output" "$INSTALL_OUTPUT" || {
@@ -591,6 +592,13 @@ do
     exit 1
   }
 done
+completion_rows=$(grep -c '^│' "$INSTALL_OUTPUT")
+bordered_completion_rows=$(grep -c '^│.*│$' "$INSTALL_OUTPUT")
+[ "$completion_rows" -gt 0 ] && [ "$completion_rows" -eq "$bordered_completion_rows" ] || {
+  echo "completion card rows are missing their right border" >&2
+  sed -n '1,240p' "$INSTALL_OUTPUT" >&2
+  exit 1
+}
 if grep -Fq "Go target images verified" "$INSTALL_OUTPUT"; then
   echo "successful operator deploy leaked captured target command output" >&2
   exit 1
@@ -666,6 +674,10 @@ grep -Fq '复用现有反向代理' "$EXTERNAL_OPERATOR_ROOT/install-output.log"
   || { echo "external ingress did not describe the existing proxy contract" >&2; exit 1; }
 grep -Fq '已跳过公网检查' "$EXTERNAL_OPERATOR_ROOT/install-output.log" \
   || { echo "external ingress unexpectedly performed public HTTPS validation" >&2; exit 1; }
+grep -Fq '外部托管；Nginx / Certbot 未修改' "$EXTERNAL_OPERATOR_ROOT/install-output.log" \
+  || { echo "external ingress summary did not confirm Nginx was untouched" >&2; exit 1; }
+grep -Fq '管理员登录  https://existing.example.com/admin/' "$EXTERNAL_OPERATOR_ROOT/install-output.log" \
+  || { echo "external ingress completion did not show the login URL" >&2; exit 1; }
 if grep -Eq '^(nginx|certbot) |^systemctl .*nginx' "$SYSTEM_LOG"; then
   echo "external ingress changed Nginx or Certbot" >&2
   cat "$SYSTEM_LOG" >&2
@@ -715,7 +727,33 @@ rm -- "$OPERATOR_ROOT/runtime/management/config"
 
 mkdir -p "$OPERATOR_ROOT/runtime/scripts"
 printf '%s\n' legacy >"$OPERATOR_ROOT/runtime/scripts/legacy.sh"
-run_operator_deploy >/dev/null
+old_target_env="$OPERATOR_ROOT/runtime/.target-env.old"
+awk -F= -v old_digest="$OLD_IMAGE_ID" '
+  $1 == "CPA_CONTROL_IMAGE" || $1 == "CPA_WEB_IMAGE" {
+    sub(/sha256-[0-9a-f]+$/, "sha256-" old_digest)
+  }
+  { print }
+' "$OPERATOR_ROOT/runtime/target.env" >"$old_target_env"
+chmod 0600 "$old_target_env"
+mv "$old_target_env" "$OPERATOR_ROOT/runtime/target.env"
+printf '%s\n' 'version=v9.9.8' >"$OPERATOR_ROOT/runtime/.deploy-initialized"
+chmod 0600 "$OPERATOR_ROOT/runtime/.deploy-initialized"
+UPGRADE_OUTPUT="$OPERATOR_ROOT/upgrade-output.log"
+run_operator_deploy >"$UPGRADE_OUTPUT"
+for expected_change in \
+  "版本        v9.9.8 -> $RELEASE_VERSION" \
+  "镜像 Control  更新 dddddddddddd -> aaaaaaaaaaaa" \
+  "Web      更新 dddddddddddd -> aaaaaaaaaaaa" \
+  "Gateway  复用 aaaaaaaaaaaa" \
+  "Edge     复用 aaaaaaaaaaaa" \
+  "备份        已创建 $OPERATOR_ROOT/backups/"
+do
+  grep -Fq "$expected_change" "$UPGRADE_OUTPUT" || {
+    echo "upgrade summary is missing: $expected_change" >&2
+    sed -n '1,260p' "$UPGRADE_OUTPUT" >&2
+    exit 1
+  }
+done
 [ -d "$OPERATOR_ROOT/runtime/management/config/static" ] \
   && [ ! -L "$OPERATOR_ROOT/runtime/management/config/static" ] \
   || { echo "upgrade did not repair the missing account management static directory" >&2; exit 1; }

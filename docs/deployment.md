@@ -43,6 +43,8 @@ logs/gateway/
 
 `docker-compose.yml` 与 `release-manifest.json` 必须来自本次选择的同一个发布包。主密钥必须与控制库匹配，`active-gateway.conf` 必须只选择 `blue` 或 `green`，`logs/gateway/` 必须允许镜像内 UID `10001` 写入。`deploy.sh` 的内部目标动作不会初始化新目标、导入退役 JSON、替换 OAuth，或沿符号链接读写运行数据；首次初始化只由同一脚本在未发布的临时根目录调用镜像内 `cpa-bootstrap` 完成。
 
+成功部署会在各阶段后报告可验证结果，并在带完整左右边框的完成卡片中汇总版本变化、Control/Web/Gateway/Edge 镜像更新或复用、Gateway 槽位切换和旧槽排空、Admin/Web/Edge 与四个 Writer 容器动作、升级备份及入口模式。`external` 入口会明确标记 Nginx/Certbot 未修改，同时仍给出按所记录域名生成的站点和管理员登录链接。
+
 ## 镜像发布
 
 ```sh

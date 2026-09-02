@@ -23,6 +23,7 @@ UI_CYAN=
 UI_GREEN=
 UI_RED=
 UI_YELLOW=
+UI_BOX_WIDTH=74
 
 ui_initialize() {
   if [ -t 1 ]; then
@@ -106,33 +107,84 @@ ui_run() {
   return "$ui_status"
 }
 
+ui_repeat() {
+  repeat_character=$1
+  repeat_count=$2
+  while [ "$repeat_count" -gt 0 ]; do
+    printf '%s' "$repeat_character"
+    repeat_count=$((repeat_count - 1))
+  done
+}
+
+ui_display_width() {
+  width_text=$1
+  width_bytes=$(printf '%s' "$width_text" | wc -c | tr -d '[:space:]')
+  width_characters=$(printf '%s' "$width_text" | wc -m | tr -d '[:space:]')
+  case "$width_bytes:$width_characters" in
+    *[!0-9:]*|:*|*:) width_characters=${#width_text}; width_bytes=$width_characters ;;
+  esac
+  if [ "$width_bytes" -ge "$width_characters" ]; then
+    # Completion rows deliberately use only ASCII plus three-byte CJK text.
+    # Each CJK character occupies two terminal cells, so this converts byte
+    # and character counts into the displayed width without Python or Perl.
+    printf '%s\n' $((width_characters + (width_bytes - width_characters) / 2))
+  else
+    printf '%s\n' "$width_characters"
+  fi
+}
+
+ui_box_top() {
+  box_title='─ 部署完成 '
+  # One box-drawing cell, one space, four double-width CJK characters, one space.
+  box_title_width=11
+  box_fill=$((UI_BOX_WIDTH - box_title_width))
+  [ "$box_fill" -ge 0 ] || box_fill=0
+  printf '\n%s%s╭%s' "$UI_BOLD" "$UI_GREEN" "$box_title"
+  ui_repeat '─' "$box_fill"
+  printf '╮%s\n' "$UI_RESET"
+}
+
+ui_box_row() {
+  box_text=$1
+  box_text_width=$(ui_display_width "$box_text")
+  box_padding=$((UI_BOX_WIDTH - box_text_width))
+  [ "$box_padding" -ge 0 ] || box_padding=0
+  printf '%s%s│%s%s' "$UI_BOLD" "$UI_GREEN" "$UI_RESET" "$box_text"
+  printf '%*s' "$box_padding" ''
+  printf '%s%s│%s\n' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
+}
+
+ui_box_bottom() {
+  printf '%s%s╰' "$UI_BOLD" "$UI_GREEN"
+  ui_repeat '─' "$UI_BOX_WIDTH"
+  printf '╯%s\n' "$UI_RESET"
+}
+
 ui_complete() {
   ui_version=$1
   ui_domain=$2
   ui_root=$3
   ui_ingress_mode=$4
-  if [ "$UI_IS_TERMINAL" = true ]; then
-    printf '\n%s%s╭─ 部署完成 ───────────────────────────────────%s\n' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
-    printf '%s%s│%s  版本    %s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_version"
-    if [ "$ui_ingress_mode" = managed ]; then
-      printf '%s%s│%s  地址    https://%s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
-      printf '%s%s│%s  管理员登录  https://%s/admin/\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
-    else
-      printf '%s%s│%s  入口    由现有反向代理提供（%s）\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_domain"
-      printf '%s%s│%s  管理员登录  <既有入口>/admin/\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET"
-    fi
-    printf '%s%s│%s  目录    %s\n' "$UI_GREEN" "$UI_BOLD" "$UI_RESET" "$ui_root"
-    printf '%s%s╰──────────────────────────────────────────────%s\n' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
+  ui_box_top
+  ui_box_row "  版本        ${DEPLOY_SUMMARY_PREVIOUS_VERSION:-未安装} -> $ui_version"
+  ui_box_row "  镜像 Control  ${DEPLOY_SUMMARY_CONTROL_IMAGE:-未知}"
+  ui_box_row "       Web      ${DEPLOY_SUMMARY_WEB_IMAGE:-未知}"
+  ui_box_row "       Gateway  ${DEPLOY_SUMMARY_GATEWAY_IMAGE:-未知}"
+  ui_box_row "       Edge     ${DEPLOY_SUMMARY_EDGE_IMAGE:-未知}"
+  ui_box_row "  Gateway     ${DEPLOY_SUMMARY_GATEWAY_ACTION:-状态未知}"
+  ui_box_row "  核心容器    ${DEPLOY_SUMMARY_CORE_ACTIONS:-状态未知}"
+  ui_box_row "  后台任务    ${DEPLOY_SUMMARY_WRITER_ACTIONS:-状态未知}"
+  ui_box_row "  备份        ${DEPLOY_SUMMARY_BACKUP:-未创建}"
+  ui_box_row "  入口        ${DEPLOY_SUMMARY_INGRESS:-未知}"
+  if [ "$ui_ingress_mode" = managed ]; then
+    ui_box_row "  地址        https://$ui_domain"
+    ui_box_row "  管理员登录  https://$ui_domain/admin/"
   else
-    printf '\nCPA 部署完成\n'
-    if [ "$ui_ingress_mode" = managed ]; then
-      printf '  版本: %s\n  地址: https://%s\n  管理员登录: https://%s/admin/\n  目录: %s\n' \
-        "$ui_version" "$ui_domain" "$ui_domain" "$ui_root"
-    else
-      printf '  版本: %s\n  入口: 由现有反向代理提供（%s）\n  管理员登录: <既有入口>/admin/\n  目录: %s\n' \
-        "$ui_version" "$ui_domain" "$ui_root"
-    fi
+    ui_box_row "  入口域名    $ui_domain"
+    ui_box_row "  管理员登录  https://$ui_domain/admin/"
   fi
+  ui_box_row "  目录        $ui_root"
+  ui_box_bottom
 }
 
 die() {
@@ -433,7 +485,7 @@ resolve_deploy_ingress_mode() {
   fi
   if [ "$stored_mode_explicit" = true ]; then
     if [ -n "$explicit_mode" ] && [ "$stored_mode" != "$explicit_mode" ]; then
-      die "已记录入口模式为 $stored_mode；请使用 sudo $SCRIPT_PATH ingress set $explicit_mode"
+      die "已记录入口模式为 ${stored_mode}；请使用 sudo $SCRIPT_PATH ingress set $explicit_mode"
     fi
     printf '%s\n' "$stored_mode"
     return
@@ -491,7 +543,7 @@ install_prerequisites() {
       || die "安装系统依赖失败：$*"
   fi
   for command in awk cmp cp curl docker flock getent grep install mktemp \
-    readlink sed sha256sum sqlite3 systemctl tar; do
+    readlink sed sha256sum sqlite3 systemctl tar wc; do
     require_command "$command"
   done
   if [ "$ingress_mode" = managed ]; then
@@ -1010,13 +1062,203 @@ run_target_action() {
 target_action_label() {
   case "$1" in
     config) printf '%s\n' "检查部署配置" ;;
-    pull) printf '%s\n' "拉取组件镜像" ;;
+    pull) printf '%s\n' "拉取 Control / Web / Gateway / Edge 镜像" ;;
     verify-images) printf '%s\n' "验证镜像身份" ;;
     activate) printf '%s\n' "激活运行时所有权" ;;
-    up-core) printf '%s\n' "启动核心服务" ;;
-    up-writers) printf '%s\n' "启动后台任务" ;;
+    up-core) printf '%s\n' "蓝绿更新 Gateway 与核心服务" ;;
+    up-writers) printf '%s\n' "更新后台任务容器" ;;
     smoke) printf '%s\n' "执行本机健康检查" ;;
     *) printf '%s\n' "$1" ;;
+  esac
+}
+
+deployment_env_value() {
+  env_file=$1
+  env_key=$2
+  [ -f "$env_file" ] && [ ! -L "$env_file" ] || return 1
+  awk -F= -v key="$env_key" \
+    '$1 == key { print substr($0, index($0, "=") + 1); found++ } END { if (found != 1) exit 1 }' \
+    "$env_file"
+}
+
+deployment_marker_version() {
+  marker_file=$1
+  [ -f "$marker_file" ] && [ ! -L "$marker_file" ] || return 1
+  marker_version=$(awk -F= \
+    '$1 == "version" { print substr($0, index($0, "=") + 1); found++ } END { if (found != 1) exit 1 }' \
+    "$marker_file") || return 1
+  validate_version "$marker_version" || return 1
+  printf '%s\n' "$marker_version"
+}
+
+deployment_image_digest() {
+  image_reference=$1
+  image_digest=${image_reference##*:sha256-}
+  if [ "$image_digest" = "$image_reference" ] || [ -z "$image_digest" ]; then
+    printf '%s\n' 未知
+  else
+    printf '%.12s\n' "$image_digest"
+  fi
+}
+
+deployment_image_change() {
+  previous_image=$1
+  selected_image=$2
+  selected_digest=$(deployment_image_digest "$selected_image")
+  if [ -z "$previous_image" ]; then
+    printf '安装 %s\n' "$selected_digest"
+  elif [ "$previous_image" = "$selected_image" ]; then
+    printf '复用 %s\n' "$selected_digest"
+  else
+    previous_digest=$(deployment_image_digest "$previous_image")
+    printf '更新 %s -> %s\n' "$previous_digest" "$selected_digest"
+  fi
+}
+
+deployment_active_slot() {
+  selection_file=$1
+  [ -f "$selection_file" ] && [ ! -L "$selection_file" ] || {
+    printf '%s\n' 未知
+    return
+  }
+  selection=$(cat "$selection_file" 2>/dev/null || true)
+  case "$selection" in
+    'set $active_gateway_backend gateway-blue:8317;') printf '%s\n' blue ;;
+    'set $active_gateway_backend gateway-green:8317;') printf '%s\n' green ;;
+    *) printf '%s\n' 未知 ;;
+  esac
+}
+
+deployment_container_id() {
+  container_name=$1
+  container_id=$(docker inspect --format '{{.Id}}' "$container_name" 2>/dev/null || true)
+  if [ -n "$container_id" ] && [ "$container_id" != '{}' ]; then
+    printf '%s\n' "$container_id"
+  else
+    printf '%s\n' 未运行
+  fi
+}
+
+deployment_container_change() {
+  previous_id=$1
+  current_id=$2
+  if [ "$previous_id" = 未运行 ] && [ "$current_id" != 未运行 ]; then
+    printf '%s\n' 新建
+  elif [ "$previous_id" = "$current_id" ] && [ "$current_id" != 未运行 ]; then
+    printf '%s\n' 复用
+  elif [ "$current_id" = 未运行 ]; then
+    printf '%s\n' 未运行
+  else
+    printf '%s\n' 更新
+  fi
+}
+
+prepare_deployment_summary() {
+  summary_root=$1
+  summary_release_file=$2
+  summary_fresh=$3
+  DEPLOY_SUMMARY_PREVIOUS_VERSION=未安装
+  previous_control_image=
+  previous_web_image=
+  previous_gateway_image=
+  previous_edge_image=
+  if [ "$summary_fresh" = false ]; then
+    DEPLOY_SUMMARY_PREVIOUS_VERSION=$(deployment_marker_version \
+      "$summary_root/.deploy-initialized" 2>/dev/null || printf '%s\n' 未知)
+    previous_control_image=$(deployment_env_value "$summary_root/target.env" CPA_CONTROL_IMAGE 2>/dev/null || true)
+    previous_web_image=$(deployment_env_value "$summary_root/target.env" CPA_WEB_IMAGE 2>/dev/null || true)
+    previous_gateway_image=$(deployment_env_value "$summary_root/target.env" CPA_GATEWAY_IMAGE 2>/dev/null || true)
+    previous_edge_image=$(deployment_env_value "$summary_root/target.env" CPA_EDGE_IMAGE 2>/dev/null || true)
+  fi
+  selected_control_image=$(release_value "$summary_release_file" CPAC_CONTROL_IMAGE)
+  selected_web_image=$(release_value "$summary_release_file" CPAC_WEB_IMAGE)
+  selected_gateway_image=$(release_value "$summary_release_file" CPAC_GATEWAY_IMAGE)
+  selected_edge_image=$(release_value "$summary_release_file" CPAC_EDGE_IMAGE)
+  DEPLOY_SUMMARY_CONTROL_IMAGE=$(deployment_image_change "$previous_control_image" "$selected_control_image")
+  DEPLOY_SUMMARY_WEB_IMAGE=$(deployment_image_change "$previous_web_image" "$selected_web_image")
+  DEPLOY_SUMMARY_GATEWAY_IMAGE=$(deployment_image_change "$previous_gateway_image" "$selected_gateway_image")
+  DEPLOY_SUMMARY_EDGE_IMAGE=$(deployment_image_change "$previous_edge_image" "$selected_edge_image")
+
+  DEPLOY_SUMMARY_BEFORE_SLOT=$(deployment_active_slot "$summary_root/state/edge/active-gateway.conf")
+  DEPLOY_SUMMARY_BEFORE_GATEWAY_BLUE=$(deployment_container_id codex-cpa-gateway-blue)
+  DEPLOY_SUMMARY_BEFORE_GATEWAY_GREEN=$(deployment_container_id codex-cpa-gateway-green)
+  DEPLOY_SUMMARY_BEFORE_ADMIN=$(deployment_container_id codex-cpa-admin)
+  DEPLOY_SUMMARY_BEFORE_WEB=$(deployment_container_id codex-cpa-web)
+  DEPLOY_SUMMARY_BEFORE_EDGE=$(deployment_container_id codex-cpa-edge)
+  DEPLOY_SUMMARY_BEFORE_QUOTA=$(deployment_container_id codex-cpa-quota)
+  DEPLOY_SUMMARY_BEFORE_COLLECTOR=$(deployment_container_id codex-cpa-usage-collector)
+  DEPLOY_SUMMARY_BEFORE_FAILOVER=$(deployment_container_id codex-cpa-account-failover)
+  DEPLOY_SUMMARY_BEFORE_LOGS=$(deployment_container_id codex-cpa-log-maintenance)
+}
+
+collect_core_deployment_summary() {
+  summary_root=$1
+  current_slot=$(deployment_active_slot "$summary_root/state/edge/active-gateway.conf")
+  current_gateway_blue=$(deployment_container_id codex-cpa-gateway-blue)
+  current_gateway_green=$(deployment_container_id codex-cpa-gateway-green)
+  blue_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_GATEWAY_BLUE" "$current_gateway_blue")
+  green_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_GATEWAY_GREEN" "$current_gateway_green")
+  if [ "$DEPLOY_SUMMARY_BEFORE_SLOT" = 未知 ]; then
+    DEPLOY_SUMMARY_GATEWAY_ACTION="初始化 blue/green；活动槽 $current_slot"
+  elif [ "$DEPLOY_SUMMARY_BEFORE_SLOT" != "$current_slot" ]; then
+    DEPLOY_SUMMARY_GATEWAY_ACTION="$DEPLOY_SUMMARY_BEFORE_SLOT -> ${current_slot}；原槽排空完成；双槽已对齐"
+  elif [ "$blue_action" = 复用 ] && [ "$green_action" = 复用 ]; then
+    DEPLOY_SUMMARY_GATEWAY_ACTION="保持 ${current_slot}；双槽复用，无需切换"
+  else
+    DEPLOY_SUMMARY_GATEWAY_ACTION="保持 ${current_slot}；blue ${blue_action}；green $green_action"
+  fi
+  admin_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_ADMIN" \
+    "$(deployment_container_id codex-cpa-admin)")
+  web_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_WEB" \
+    "$(deployment_container_id codex-cpa-web)")
+  edge_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_EDGE" \
+    "$(deployment_container_id codex-cpa-edge)")
+  DEPLOY_SUMMARY_CORE_ACTIONS="Admin ${admin_action}；Web ${web_action}；Edge $edge_action"
+}
+
+collect_writer_deployment_summary() {
+  quota_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_QUOTA" \
+    "$(deployment_container_id codex-cpa-quota)")
+  collector_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_COLLECTOR" \
+    "$(deployment_container_id codex-cpa-usage-collector)")
+  failover_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_FAILOVER" \
+    "$(deployment_container_id codex-cpa-account-failover)")
+  logs_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_LOGS" \
+    "$(deployment_container_id codex-cpa-log-maintenance)")
+  DEPLOY_SUMMARY_WRITER_ACTIONS="quota ${quota_action}；collector ${collector_action}；failover ${failover_action}；logs $logs_action"
+}
+
+show_target_action_details() {
+  summary_action=$1
+  summary_root=$2
+  case "$summary_action" in
+    config)
+      ui_note "Compose、发布清单与 target.env 配置一致"
+      ;;
+    pull)
+      ui_note "Control  $DEPLOY_SUMMARY_CONTROL_IMAGE"
+      ui_note "Web      $DEPLOY_SUMMARY_WEB_IMAGE"
+      ui_note "Gateway  $DEPLOY_SUMMARY_GATEWAY_IMAGE"
+      ui_note "Edge     $DEPLOY_SUMMARY_EDGE_IMAGE"
+      ;;
+    verify-images)
+      ui_note "4/4 镜像标签、组件指纹与发布清单一致"
+      ;;
+    activate)
+      ui_note "运行时所有权已确认：codex-cpa"
+      ;;
+    up-core)
+      collect_core_deployment_summary "$summary_root"
+      ui_note "Gateway  $DEPLOY_SUMMARY_GATEWAY_ACTION"
+      ui_note "$DEPLOY_SUMMARY_CORE_ACTIONS"
+      ;;
+    up-writers)
+      collect_writer_deployment_summary
+      ui_note "$DEPLOY_SUMMARY_WRITER_ACTIONS"
+      ;;
+    smoke)
+      ui_note "健康、鉴权边界、内部探针与 Web 路由检查通过"
+      ;;
   esac
 }
 
@@ -1145,12 +1387,21 @@ run_deploy() {
     && [ -f "$extract_directory/release-manifest.json" ] \
     || die "发布包缺少部署元数据"
 
+  if [ -e "$deploy_root" ]; then
+    summary_fresh=false
+  else
+    summary_fresh=true
+  fi
+  prepare_deployment_summary "$deploy_root" "$release_file" "$summary_fresh"
+
   if [ "$ingress_mode" = managed ]; then
     ui_step "配置 Nginx 与 HTTPS"
     configure_nginx_tls "$domain"
     ui_done "Nginx 与 HTTPS 已就绪"
+    DEPLOY_SUMMARY_INGRESS="CPAC 托管；Nginx / HTTPS 已校验"
   else
     show_external_ingress_contract "$domain"
+    DEPLOY_SUMMARY_INGRESS="外部托管；Nginx / Certbot 未修改"
   fi
   fresh=false
   backup=
@@ -1173,6 +1424,7 @@ run_deploy() {
     write_target_env "$release_file" "$selected_version" "$deploy_root/target.env" "$deploy_root"
     ui_done "现有环境备份完成"
     ui_note "备份  $backup"
+    DEPLOY_SUMMARY_BACKUP="已创建 $backup"
   else
     ui_step "初始化全新运行环境"
     fresh=true
@@ -1208,6 +1460,7 @@ run_deploy() {
     mv -- "$install_root" "$deploy_root"
     install_root=
     ui_done "全新运行环境初始化完成"
+    DEPLOY_SUMMARY_BACKUP="首次安装，不创建升级备份"
   fi
 
   if ! docker network inspect cliproxy-backend >/dev/null 2>&1; then
@@ -1221,6 +1474,7 @@ run_deploy() {
       deployment_failed=true
       break
     fi
+    show_target_action_details "$action" "$deploy_root"
   done
   if [ "$deployment_failed" = true ]; then
     if [ "$fresh" = false ]; then

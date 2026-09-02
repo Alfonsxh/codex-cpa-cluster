@@ -2751,6 +2751,7 @@ type PortalAccount struct {
 	ActiveUsers1h int                 `json:"active_users_1h"`
 	Current       bool                `json:"current"`
 	DisplayName   string              `json:"display_name"`
+	Email         openapi_types.Email `json:"email"`
 	Enabled       bool                `json:"enabled"`
 	Id            string              `json:"id"`
 	Selectable    bool                `json:"selectable"`

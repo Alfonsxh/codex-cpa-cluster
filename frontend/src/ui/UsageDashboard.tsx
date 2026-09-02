@@ -1,12 +1,14 @@
 import { Alert, App as AntApp, Button, Form, Input, Modal, Skeleton, Space, Tooltip } from "antd";
-import { CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { ApiError } from "../api/client";
 import {
+  autoAssignPortalAccount,
   portalAccountsQueryKey,
+  portalAccountsQueryRoot,
   portalBreakdownQueryKey,
   portalProfileQueryKey,
   portalQuotaQueryKey,
@@ -31,6 +33,7 @@ import { formatTokenAmount, formatTokens } from "./formatters";
 
 type SortField = "current" | "account" | "quota" | "active_users" | "status" | "requests" | "tokens" | "last_used";
 type SortState = { field: SortField; direction: "asc" | "desc"; pinCurrent: boolean };
+type PrimarySection = "trend" | "accounts";
 
 const defaultSort: SortState = { field: "quota", direction: "asc", pinCurrent: true };
 
@@ -40,12 +43,14 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const [window, setWindow] = useState<PortalUsageWindow>("today");
   const [sort, setSort] = useState<SortState>(defaultSort);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [primarySection, setPrimarySection] = useState<PrimarySection>("trend");
   const [showKey, setShowKey] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyValue, setKeyValue] = useState("");
   const [keyLoading, setKeyLoading] = useState(false);
   const [keyError, setKeyError] = useState("");
   const keyRequest = useRef<AbortController | null>(null);
+  const autoAssignAttempted = useRef(false);
   const [rotationOpen, setRotationOpen] = useState(false);
   const [clientConfigMode, setClientConfigMode] = useState<PortalClientConfigMode | null>(null);
   const [switchTarget, setSwitchTarget] = useState<PortalAccount | null>(null);
@@ -112,6 +117,21 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       void message.success(result.changed ? "账号已切换并完成 Gateway 激活确认" : "当前已使用该账号");
     }
   });
+  const autoAssignment = useMutation({
+    mutationFn: autoAssignPortalAccount,
+    onSuccess: async (result) => {
+      queryClient.setQueryData(portalRouteQueryKey, {
+        current_group: result.current_group,
+        generated_at: Math.floor(Date.now() / 1000)
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: portalProfileQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: portalQuotaQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: portalAccountsQueryRoot })
+      ]);
+      void message.success(result.changed ? `已自动分配 ${accountLabelByID(accounts.data?.accounts ?? [], result.current_group)}` : "已恢复当前 CPA 账号");
+    }
+  });
   const rotation = useMutation({
     gcTime: 0,
     mutationFn: rotatePortalKey,
@@ -125,6 +145,12 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       void message.success("API Key 已刷新；旧 Key 已立即失效");
     }
   });
+
+  useEffect(() => {
+    if (!route.isSuccess || !accounts.isSuccess || currentGroup || accounts.data.accounts.length === 0 || autoAssignAttempted.current) return;
+    autoAssignAttempted.current = true;
+    autoAssignment.mutate();
+  }, [accounts.data, accounts.isSuccess, currentGroup, route.isSuccess]);
 
   const copyKey = async () => {
     if (!keyValue) return;
@@ -209,18 +235,34 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
         <section className="usage-route-notice" role="status" key={warning}><strong>账号提示</strong><span>{warning}</span></section>
       ))}
       {!currentGroup && !accounts.isPending ? (
-        <section className="usage-route-notice" role="status">
-          <strong>暂时无法自动分配 CPA</strong>
-          <span>当前没有可用账号；系统会在下次刷新时自动重试，也可以在下方手动选择。</span>
-        </section>
+        <Alert
+          className="usage-route-alert"
+          type={autoAssignment.isError ? "error" : "info"}
+          showIcon
+          role={autoAssignment.isError ? "alert" : "status"}
+          title={autoAssignment.isPending ? "正在自动分配 CPA" : autoAssignment.isError ? "自动分配 CPA 失败" : "暂时无法自动分配 CPA"}
+          description={autoAssignment.isPending
+            ? "正在选择周额度使用最少的可用账号并完成 Gateway 激活确认。"
+            : autoAssignment.isError
+              ? `${errorMessage(autoAssignment.error)}；可以重试自动分配，也可以在账号明细中手动选择。`
+              : accounts.data?.accounts.length
+                ? "自动分配尚未完成，可以重试或在账号明细中手动选择。"
+                : "当前没有可用账号；账号就绪后刷新页面会自动重试。"}
+          action={autoAssignment.isError ? <Button size="small" onClick={() => { autoAssignment.reset(); autoAssignment.mutate(); }}>重试自动分配</Button> : undefined}
+        />
       ) : null}
 
-      <PortalDailyUsageTrend onSessionExpired={onSessionExpired} />
+      <div className={`usage-detail-sections ${primarySection === "trend" ? "trend-primary" : "accounts-primary"}`}>
+        <PortalDailyUsageTrend
+          expanded={primarySection === "trend"}
+          onExpandedChange={(next) => setPrimarySection(next ? "trend" : "accounts")}
+          onSessionExpired={onSessionExpired}
+        />
 
-      <section className="usage-account-section">
+      <section className={`usage-account-section${primarySection === "accounts" ? "" : " collapsed"}`} aria-labelledby="usage-account-section-title">
         <div className="usage-section-toolbar">
-          <h2>账号明细</h2>
-          <div className="usage-toolbar-actions">
+          <h2 id="usage-account-section-title">账号明细</h2>
+          {primarySection === "accounts" ? <div className="usage-toolbar-actions">
             <div className="usage-window-switcher" role="group" aria-label="统计时间范围">
               {portalWindowOptions.map((option) => (
                 <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => setWindow(option.value)}>{option.label}</button>
@@ -230,15 +272,15 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
               {accounts.isFetching && !accounts.isPending ? "刷新中…" : "刷新"}
             </button>
             <time className="usage-updated">额度更新 {formatTimestamp(accounts.data?.generated_at ?? quota.data?.generated_at ?? 0)}</time>
-          </div>
+          </div> : <span className="usage-account-summary">{accounts.isPending ? "正在读取账号" : `${sortedAccounts.length} 个账号`}</span>}
         </div>
 
-        {accounts.isError ? (
+        {primarySection === "accounts" && accounts.isError ? (
           <div className="usage-error" role="alert">
             <span><strong>账号与用量加载失败</strong> · {errorMessage(accounts.error)}</span>
             <button className="usage-secondary-button" type="button" onClick={() => void accounts.refetch()}>重新加载</button>
           </div>
-        ) : (
+        ) : primarySection === "accounts" ? (
           <NativeTableViewport className="usage-table-wrap" aria-label="账号明细表格">
             <table className="usage-account-table">
               <thead>
@@ -273,10 +315,16 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
             </table>
             {!accounts.isPending && sortedAccounts.length === 0 ? <div className="usage-empty">暂无可用账号</div> : null}
           </NativeTableViewport>
-        )}
+        ) : null}
       </section>
 
-      <Modal title={`切换到 ${switchTarget?.display_name ?? "目标账号"}`} open={Boolean(switchTarget)} okText="确认切换" cancelText="取消" confirmLoading={accountSwitch.isPending} onCancel={() => !accountSwitch.isPending && setSwitchTarget(null)} onOk={() => switchTarget && accountSwitch.mutate(switchTarget)} destroyOnHidden>
+        <nav className="usage-section-switcher" aria-label="切换主要内容区域">
+          <Button type="text" icon={<ArrowUpOutlined aria-hidden="true" />} aria-label="展开每日用量趋势" aria-pressed={primarySection === "trend"} onClick={() => setPrimarySection("trend")} />
+          <Button type="text" icon={<ArrowDownOutlined aria-hidden="true" />} aria-label="展开账号明细" aria-pressed={primarySection === "accounts"} onClick={() => setPrimarySection("accounts")} />
+        </nav>
+      </div>
+
+      <Modal title={`切换到 ${switchTarget ? accountLabel(switchTarget) : "目标账号"}`} open={Boolean(switchTarget)} okText="确认切换" cancelText="取消" confirmLoading={accountSwitch.isPending} onCancel={() => !accountSwitch.isPending && setSwitchTarget(null)} onOk={() => switchTarget && accountSwitch.mutate(switchTarget)} destroyOnHidden>
         <Space orientation="vertical" size={16} className="portal-form-stack">
           <Alert type="info" showIcon title="现有 API Key 不会改变" description="只更新你的目标 CPA。系统会原子写入路由、发布鉴权快照并等待 Gateway 确认；失败时自动恢复原路由。" />
           {accountSwitch.isError ? <Alert type="error" showIcon title="账号切换失败" description={errorMessage(accountSwitch.error)} /> : null}
@@ -324,7 +372,7 @@ function CurrentAccountSummary({ account, loading }: { account?: PortalAccount; 
         <span className="usage-current-account-label" id="current-account-label">当前账号</span>
         {loading && !account ? <span className="usage-status degraded">读取中</span> : account ? <StatusTag account={account} /> : <span className="usage-status degraded">待选择</span>}
       </div>
-      <strong className="usage-current-account-name" title={account?.display_name}>{account?.display_name ?? (loading ? "正在读取" : "尚未选择")}</strong>
+      <strong className="usage-current-account-name" title={account ? accountLabel(account) : undefined}>{account ? accountLabel(account) : loading ? "正在读取" : "尚未选择"}</strong>
       <div className={`usage-current-quota ${used >= 100 ? "exhausted" : used >= 80 ? "warning" : ""}`.trim()}>
         <div><span>{account ? `周额度 ${formatPercent(used)}` : "选择可用账号后显示"}</span><strong>{account ? `剩余 ${formatPercent(remaining)}` : "—"}</strong></div>
         <progress className="usage-quota-track" max="100" value={used} aria-label={account ? `当前账号周额度已使用 ${formatPercent(used)}` : "尚未选择当前账号"} />
@@ -412,7 +460,7 @@ function AccountRows({ account, index, currentGroup, window, expanded, onToggle,
         <td data-label="当前账号">
           {current ? <span className="usage-current-mark" title="当前账号">✓<span className="sr-only">当前账号</span></span> : <button className="usage-select-button" type="button" disabled={!account.selectable || !account.status.selectable} title={account.status.reason} onClick={onSwitch}>{currentGroup ? "切换" : "选择"}</button>}
         </td>
-        <td data-label="CPA 账号"><strong className="usage-account-id" title={account.display_name}>{account.display_name}</strong></td>
+        <td data-label="CPA 账号"><strong className="usage-account-id" title={accountLabel(account)}>{accountLabel(account)}</strong></td>
         <td data-label="账号周额度">
           <div className={`usage-quota ${used >= 100 ? "exhausted" : used >= 80 ? "warning" : ""}`.trim()}>
             <div><strong>{formatPercent(used)}</strong><span>剩余 {formatPercent(remaining)}</span></div>
@@ -554,18 +602,27 @@ function UsageTableSkeleton() {
   return <>{Array.from({ length: 3 }, (_, row) => <tr className="usage-summary-row usage-skeleton-row" key={row} aria-label="正在加载账号与用量">{Array.from({ length: 10 }, (_item, column) => <td key={column}><span /></td>)}</tr>)}</>;
 }
 
+function accountLabel(account: PortalAccount) {
+  return account.email.trim() || account.display_name;
+}
+
+function accountLabelByID(accounts: PortalAccount[], accountID: string) {
+  const account = accounts.find((item) => item.id === accountID);
+  return account ? accountLabel(account) : "可用 CPA 账号";
+}
+
 function sortAccounts(accounts: PortalAccount[], currentGroup: string, sort: SortState) {
   const direction = sort.direction === "asc" ? 1 : -1;
   return [...accounts].sort((left, right) => {
     if (sort.pinCurrent && (left.id === currentGroup) !== (right.id === currentGroup)) return left.id === currentGroup ? -1 : 1;
     const compared = compareSortValue(sortValue(left, currentGroup, sort.field), sortValue(right, currentGroup, sort.field));
-    return compared * direction || left.display_name.localeCompare(right.display_name, "zh-CN", { numeric: true });
+    return compared * direction || accountLabel(left).localeCompare(accountLabel(right), "zh-CN", { numeric: true });
   });
 }
 
 function sortValue(account: PortalAccount, currentGroup: string, field: SortField): number | string | null {
   if (field === "current") return account.id === currentGroup ? 0 : 1;
-  if (field === "account") return account.display_name;
+  if (field === "account") return accountLabel(account);
   if (field === "quota") return Number.isFinite(accountUsedPercent(account)) ? accountUsedPercent(account) : null;
   if (field === "active_users") return account.active_users_1h;
   if (field === "status") return statusRank(account);

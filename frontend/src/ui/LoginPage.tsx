@@ -82,6 +82,7 @@ export function LoginPage({ notice = "", onAuthenticated }: { notice?: string; o
               <button
                 className="password-visibility-toggle"
                 type="button"
+                tabIndex={-1}
                 aria-controls="management-key"
                 aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
                 aria-pressed={passwordVisible}

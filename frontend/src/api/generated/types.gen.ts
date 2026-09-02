@@ -1009,6 +1009,7 @@ export type PortalAccountStatus = {
 
 export type PortalAccount = {
     id: string;
+    email: string;
     display_name: string;
     current: boolean;
     enabled: boolean;
@@ -4025,6 +4026,31 @@ export type GetPortalRouteResponses = {
 };
 
 export type GetPortalRouteResponse = GetPortalRouteResponses[keyof GetPortalRouteResponses];
+
+export type AutoAssignPortalRouteData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/usage/me/route/auto-assign';
+};
+
+export type AutoAssignPortalRouteErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type AutoAssignPortalRouteError = AutoAssignPortalRouteErrors[keyof AutoAssignPortalRouteErrors];
+
+export type AutoAssignPortalRouteResponses = {
+    /**
+     * Existing route retained or a new route activated
+     */
+    200: PortalRouteMutationResponse;
+};
+
+export type AutoAssignPortalRouteResponse = AutoAssignPortalRouteResponses[keyof AutoAssignPortalRouteResponses];
 
 export type GetPortalUsageBreakdownData = {
     body?: never;

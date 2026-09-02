@@ -103,9 +103,17 @@ describe("GeneralSettingsPage", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "立即设置" }));
-    await user.type(screen.getByLabelText("新初始密码"), "future-user-password!");
-    await user.type(screen.getByLabelText("再次输入"), "future-user-password!");
-    await user.click(screen.getByRole("button", { name: "安全保存" }));
+    const initialPassword = screen.getByLabelText("新初始密码");
+    const confirmation = screen.getByLabelText("再次输入");
+    await waitFor(() => expect(initialPassword).toHaveFocus());
+    screen.getAllByRole("button", { name: "显示密码" }).forEach((button) => expect(button).toHaveAttribute("tabindex", "-1"));
+    await user.type(initialPassword, "future-user-password!");
+    await user.tab();
+    expect(confirmation).toHaveFocus();
+    await user.type(confirmation, "future-user-password!");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "安全保存" })).toHaveFocus();
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByText("用户初始密码已安全保存；已有用户密码不会自动变化")).toBeInTheDocument();
     expect(screen.queryByLabelText("新初始密码")).not.toBeInTheDocument();
@@ -198,9 +206,15 @@ describe("GeneralSettingsPage", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "轮换密钥" }));
-    await user.type(screen.getByLabelText("新管理密钥"), "replacement-management-key");
-    await user.type(screen.getByLabelText("确认新管理密钥"), "replacement-management-key");
-    await user.click(screen.getByRole("button", { name: "确认轮换并重新登录" }));
+    const newKey = screen.getByLabelText("新管理密钥");
+    const keyConfirmation = screen.getByLabelText("确认新管理密钥");
+    await user.type(newKey, "replacement-management-key");
+    await user.tab();
+    expect(keyConfirmation).toHaveFocus();
+    await user.type(keyConfirmation, "replacement-management-key");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "确认轮换并重新登录" })).toHaveFocus();
+    await user.keyboard("{Enter}");
 
     await waitFor(() => expect(onManagementKeyRotated).toHaveBeenCalledWith("管理密钥已更新，请使用新密钥重新进入"));
     const request = fetchMock.mock.calls.find(([path]) => String(path) === "/admin/api/settings/management-key");

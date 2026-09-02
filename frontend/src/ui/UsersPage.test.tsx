@@ -24,6 +24,8 @@ describe("UsersPage legacy parity", () => {
     await waitFor(() => expect(requestPaths(fetchMock)).toContain("/admin/api/teams/usage?window=today"));
     expect(screen.getAllByRole("columnheader")).toHaveLength(11);
     expect(screen.getByRole("button", { name: /Token 用量，当前降序/ })).toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox", { name: "搜索用户" }), "alice{Enter}");
+    await waitFor(() => expect(requestPaths(fetchMock).some((path) => path.includes("q=alice"))).toBe(true));
     expect(requestPaths(fetchMock).some((path) => path.includes("/users/detail"))).toBe(false);
     expect(requestPaths(fetchMock).some((path) => path.includes("/users/usage-breakdown"))).toBe(false);
     expect(requestPaths(fetchMock).some((path) => path.includes("/teams/usage-breakdown"))).toBe(false);

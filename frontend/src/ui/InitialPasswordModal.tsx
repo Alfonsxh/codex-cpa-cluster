@@ -75,7 +75,7 @@ export function InitialPasswordModal({
       onCancel={close}
       destroyOnHidden
       footer={[
-        <Button key="cancel" className="legacy-modal-ghost" disabled={mutation.isPending} onClick={close}>取消</Button>,
+        <Button key="cancel" className="legacy-modal-ghost" tabIndex={-1} disabled={mutation.isPending} onClick={close}>取消</Button>,
         <Button
           key="submit"
           type="primary"

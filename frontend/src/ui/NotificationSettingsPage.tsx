@@ -178,7 +178,7 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
       <Row gutter={[16, 16]} className="notification-grid">
         <Col xs={24} xl={10}>
           <Card title="企业微信 Webhook" extra={<WebhookTag configured={status.webhook_configured} />}>
-            <Form layout="vertical" requiredMark={false}>
+            <Form layout="vertical" requiredMark={false} onFinish={() => webhookForm.handleSubmit(() => webhookMutation.mutate())()}>
               <Form.Item
                 label="Webhook 地址"
                 htmlFor="notification-webhook"
@@ -193,6 +193,7 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
                       {...field}
                       id="notification-webhook"
                       autoComplete="off"
+                      visibilityToggle={{ tabIndex: -1 }}
                       placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
                     />
                   )}
@@ -201,9 +202,9 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
               <Space wrap>
                 <Button
                   type="primary"
+                  htmlType="submit"
                   icon={<SaveOutlined aria-hidden="true" />}
                   loading={webhookMutation.isPending}
-                  onClick={() => void webhookForm.handleSubmit(() => webhookMutation.mutate())()}
                 >
                   保存 Webhook
                 </Button>

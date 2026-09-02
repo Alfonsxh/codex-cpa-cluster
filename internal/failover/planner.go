@@ -3,6 +3,7 @@ package failover
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -49,6 +50,48 @@ type Plan struct {
 	SkippedUsers      int               `json:"skipped_users"`
 	UnassignedUsers   int               `json:"unassigned_users"`
 	TargetCounts      map[string]int    `json:"target_counts,omitempty"`
+}
+
+// LeastUsedEligibleAccount selects one explicitly allowed account using the
+// reliable weekly quota percentage. It fails closed for missing, stale, or
+// otherwise ineligible state and uses the account ID as a deterministic tie
+// breaker. Callers remain responsible for constraining candidates to the
+// authenticated user's account catalog.
+func LeastUsedEligibleAccount(candidates []string, states map[string]AccountState) (string, bool) {
+	eligible := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, rawAccount := range candidates {
+		account := strings.TrimSpace(rawAccount)
+		if account == "" {
+			continue
+		}
+		if _, duplicate := seen[account]; duplicate {
+			continue
+		}
+		seen[account] = struct{}{}
+		state, found := states[account]
+		if !found || strings.TrimSpace(state.Account) != account || !state.Eligible || state.Exhausted ||
+			state.Reason != "available" || state.Headroom <= 0 || state.RemainingPercent == nil ||
+			state.UsedPercent == nil || math.IsNaN(*state.UsedPercent) || math.IsInf(*state.UsedPercent, 0) ||
+			math.IsNaN(*state.RemainingPercent) || math.IsInf(*state.RemainingPercent, 0) ||
+			*state.UsedPercent < 0 || *state.UsedPercent > 100 ||
+			*state.RemainingPercent < 0 || *state.RemainingPercent > 100 {
+			continue
+		}
+		eligible = append(eligible, account)
+	}
+	if len(eligible) == 0 {
+		return "", false
+	}
+	sort.Slice(eligible, func(left int, right int) bool {
+		leftUsed := *states[eligible[left]].UsedPercent
+		rightUsed := *states[eligible[right]].UsedPercent
+		if leftUsed != rightUsed {
+			return leftUsed < rightUsed
+		}
+		return eligible[left] < eligible[right]
+	})
+	return eligible[0], true
 }
 
 func PlanEvacuation(

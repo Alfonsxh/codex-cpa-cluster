@@ -1,4 +1,4 @@
-import { Button, Modal, Tooltip } from "antd";
+import { Button, Empty, Modal, Spin, Tooltip } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
@@ -60,6 +60,13 @@ const defaultMemberCriteria: MemberCriteria = {
   usageState: "all",
   window: "all"
 };
+
+function initialMemberCriteria(team: Team | null): MemberCriteria {
+  return {
+    ...defaultMemberCriteria,
+    scope: team?.user_count === 0 ? "unassigned" : "current"
+  };
+}
 
 export function TeamsPage({ csrfToken }: { csrfToken: string }) {
   const queryClient = useQueryClient();
@@ -279,6 +286,7 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
         空团队删除后无法恢复。
       </LegacyConfirmModal>
       <TeamMembersModal
+        key={memberTeam?.id ?? "closed"}
         team={memberTeam}
         csrfToken={csrfToken}
         onClose={() => setMemberTeam(null)}
@@ -385,8 +393,8 @@ function TeamMembersModal({ team, csrfToken, onClose, onCatalogRefresh, onToast 
   onCatalogRefresh: () => Promise<void>;
   onToast: (message: string, kind?: "success" | "error") => void;
 }) {
-  const [draftCriteria, setDraftCriteria] = useState<MemberCriteria>(defaultMemberCriteria);
-  const [criteria, setCriteria] = useState<MemberCriteria>(defaultMemberCriteria);
+  const [draftCriteria, setDraftCriteria] = useState<MemberCriteria>(() => initialMemberCriteria(team));
+  const [criteria, setCriteria] = useState<MemberCriteria>(() => initialMemberCriteria(team));
   const [page, setPage] = useState(1);
   const selectedRef = useRef<Map<string, string | null>>(new Map());
   const [renderedSelected, setRenderedSelected] = useState<Map<string, string | null>>(new Map());
@@ -516,8 +524,27 @@ function TeamMembersModal({ team, csrfToken, onClose, onCatalogRefresh, onToast 
       const count = assignment.users.length;
       const emptySelection = new Map<string, string | null>();
       selectedRef.current = emptySelection;
+      setRenderedSelected(emptySelection);
       onToast(`已更新 ${count} 位用户的团队归属`);
-      await onCatalogRefresh();
+
+      const refreshes: Array<Promise<unknown>> = [onCatalogRefresh()];
+      if (assignment.mode === "join" && criteria.scope === "unassigned") {
+        // Empty teams initially show joinable users. After a successful join,
+        // move to the member view so the updated relationship remains visible
+        // instead of making the row appear to vanish from the old filter.
+        const nextCriteria = { ...draftCriteria, scope: "current" as const };
+        setDraftCriteria(nextCriteria);
+        setCriteria(nextCriteria);
+        setPage(1);
+      } else {
+        refreshes.push(memberWorkspace.refetch().then((result) => {
+          if (result.isError) throw result.error;
+        }));
+      }
+      const refreshResults = await Promise.allSettled(refreshes);
+      if (refreshResults.some((result) => result.status === "rejected")) {
+        setError("团队归属已更新，但最新状态刷新失败，请刷新页面后确认。");
+      }
     } catch (assignmentError) {
       setError(errorMessage(assignmentError));
     } finally {
@@ -545,17 +572,17 @@ function TeamMembersModal({ team, csrfToken, onClose, onCatalogRefresh, onToast 
       >
         <div className="organization-members-body">
           <div className="organization-member-toolbar">
-            <label className="search-field"><span aria-hidden="true">⌕</span><input type="search" aria-label="搜索用户邮箱" placeholder="搜索用户邮箱" value={draftCriteria.query} onChange={(event) => setDraftCriteria((current) => ({ ...current, query: event.target.value }))} /></label>
+            <label className="search-field"><span aria-hidden="true">⌕</span><input type="search" aria-label="搜索用户邮箱" placeholder="搜索用户邮箱" value={draftCriteria.query} onChange={(event) => setDraftCriteria((current) => ({ ...current, query: event.target.value }))} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); const nextCriteria = { ...draftCriteria, query: event.currentTarget.value }; setCriteria(nextCriteria); setPage(1); const emptySelection = new Map<string, string | null>(); selectedRef.current = emptySelection; setRenderedSelected(emptySelection); setError(""); }} /></label>
             <label className="window-field filter-field"><span>成员范围</span><LegacyEnhancedSelect id="organization-user-scope-react" label="成员范围" value={draftCriteria.scope} options={[{ value: "current", label: "当前团队成员" }, { value: "unassigned", label: "未分组用户" }, { value: "all", label: "全部用户" }]} onChange={(scope) => setDraftCriteria((current) => ({ ...current, scope }))} /></label>
             <label className="window-field filter-field"><span>Token 状态</span><LegacyEnhancedSelect id="organization-usage-state-react" label="Token 状态" value={draftCriteria.usageState} options={[{ value: "all", label: "不限用量" }, { value: "used", label: "已产生 Token" }, { value: "unused", label: "未产生 Token" }]} onChange={(usageState) => setDraftCriteria((current) => ({ ...current, usageState }))} /></label>
             <label className="window-field filter-field"><span>统计范围</span><LegacyEnhancedSelect id="organization-usage-window-react" label="统计范围" value={draftCriteria.window} options={[{ value: "today", label: "今日" }, { value: "604800", label: "近 7 天" }, { value: "2592000", label: "近 30 天" }, { value: "all", label: "全部历史" }]} onChange={(window) => setDraftCriteria((current) => ({ ...current, window }))} /></label>
           </div>
           <NativeTableViewport className="organization-member-table-wrap" aria-label="团队成员表格">
-            <table className="organization-member-table">
+            <table className={`organization-member-table${showInitialMemberLoading || visibleUsers.length === 0 ? " is-state" : ""}`}>
               <thead><tr><th className="table-index-column">序号</th><th className="user-select-column"><IndeterminateCheckbox ariaLabel="选择本页用户" checked={everyVisible} indeterminate={!everyVisible && anyVisible} onChange={toggleVisible} /></th><th>用户</th><th>团队归属</th><th>Token 用量</th><th>{team ? `与“${team.name}”的关系` : "与当前团队的关系"}</th></tr></thead>
               <tbody>
-                {showInitialMemberLoading ? <tr><td colSpan={6} className="team-usage-state">正在加载成员…</td></tr> : null}
-                {!showInitialMemberLoading && visibleUsers.length === 0 ? <tr><td colSpan={6} className="team-usage-state">当前条件没有匹配用户</td></tr> : null}
+                {showInitialMemberLoading ? <tr><td colSpan={6} className="organization-member-state"><span role="status" className="organization-member-state-content"><Spin size="small" />正在加载成员…</span></td></tr> : null}
+                {!showInitialMemberLoading && visibleUsers.length === 0 ? <tr><td colSpan={6} className="organization-member-state"><div role="status" className="organization-member-state-content"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前条件没有匹配用户" /></div></td></tr> : null}
                 {!showInitialMemberLoading ? visibleUsers.map((user, index) => <MemberRow key={user.email} index={(pagination.page - 1) * pagination.page_size + index + 1} user={user} teamID={openTeamID} checked={renderedSelected.has(user.email)} onChange={(checked) => toggleUser(user, checked)} />) : null}
               </tbody>
             </table>

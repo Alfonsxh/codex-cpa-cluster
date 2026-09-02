@@ -26,6 +26,8 @@ type UserLifecycleStore interface {
 	UserExists(context.Context, string) (bool, error)
 	KnownUsers(context.Context) ([]string, error)
 	ActiveUserKey(context.Context, string) (string, error)
+	ReadInternalKey(context.Context, string) (controlplane.InternalKey, bool, error)
+	RestoreInternalKey(context.Context, string, *controlplane.InternalKey) error
 	ApplyUserCreation(context.Context, string, string, *string) (controlplane.UserCreation, error)
 	RestoreUserCreation(context.Context, controlplane.UserCreation) error
 	ApplyUserRevocation(context.Context, string) (controlplane.UserRevocation, error)
@@ -47,6 +49,14 @@ type UserCredentialStore interface {
 	ApplyQuotaAction(context.Context, usage.QuotaActionRequest) (usage.QuotaActionResult, error)
 }
 
+// UserLifecycleProjection refreshes the CPA internal-Key configuration from
+// authoritative control-plane state. The projection is part of the same
+// compensated lifecycle operation as the control mutation and activated
+// Gateway snapshot.
+type UserLifecycleProjection interface {
+	RefreshAccounts(context.Context) error
+}
+
 type UserLifecycleService interface {
 	CreateUser(context.Context, string, *string) (UserCreateResult, error)
 	RotateUserKey(context.Context, string) (identity.RotationResult, error)
@@ -64,6 +74,7 @@ type UserLifecycleService interface {
 type UserLifecycleConfig struct {
 	Store       UserLifecycleStore
 	Credentials UserCredentialStore
+	Projection  UserLifecycleProjection
 	Snapshots   identity.SnapshotPublisher
 	Lock        sync.Locker
 }
@@ -71,6 +82,7 @@ type UserLifecycleConfig struct {
 type UserManager struct {
 	store       UserLifecycleStore
 	credentials UserCredentialStore
+	projection  UserLifecycleProjection
 	snapshots   identity.SnapshotPublisher
 	keys        *identity.Service
 	mu          sync.Locker
@@ -116,7 +128,7 @@ type UserWeeklyQuota struct {
 }
 
 func NewUserManager(config UserLifecycleConfig) (*UserManager, error) {
-	if config.Store == nil || config.Credentials == nil || config.Snapshots == nil {
+	if config.Store == nil || config.Credentials == nil || config.Projection == nil || config.Snapshots == nil {
 		return nil, ErrUserLifecycleUnavailable
 	}
 	lock := config.Lock
@@ -124,7 +136,7 @@ func NewUserManager(config UserLifecycleConfig) (*UserManager, error) {
 		lock = &sync.Mutex{}
 	}
 	return &UserManager{
-		store: config.Store, credentials: config.Credentials, snapshots: config.Snapshots,
+		store: config.Store, credentials: config.Credentials, projection: config.Projection, snapshots: config.Snapshots,
 		keys: &identity.Service{Store: config.Store, Snapshots: config.Snapshots}, mu: lock,
 	}, nil
 }
@@ -160,6 +172,10 @@ func (manager *UserManager) CreateUser(
 	if credentialError != nil && !errors.Is(credentialError, usage.ErrPortalCredentialNotFound) {
 		return UserCreateResult{}, fmt.Errorf("read previous portal credential: %w", credentialError)
 	}
+	previousInternalKey, err := manager.readPreviousInternalKey(ctx, user)
+	if err != nil {
+		return UserCreateResult{}, fmt.Errorf("read internal Keys before user creation: %w", err)
+	}
 	creation, err := manager.store.ApplyUserCreation(ctx, user, apiKey, teamID)
 	if err != nil {
 		return UserCreateResult{}, err
@@ -173,23 +189,17 @@ func (manager *UserManager) CreateUser(
 			wrapLifecycleError("rollback user creation", rollbackError),
 		)
 	}
+	if err := manager.projection.RefreshAccounts(ctx); err != nil {
+		return UserCreateResult{}, manager.rollbackCreation(
+			ctx, creation, user, previousCredential, credentialFound, previousInternalKey,
+			fmt.Errorf("refresh user creation account projection: %w", err),
+		)
+	}
 	snapshot, err := manager.snapshots.PublishAuthSnapshot(ctx, true)
 	if err != nil {
-		rollbackContext, cancel := lifecycleRollbackContext(ctx)
-		defer cancel()
-		controlError := manager.store.RestoreUserCreation(rollbackContext, creation)
-		credentialRollbackError := manager.restoreCredential(
-			rollbackContext, user, previousCredential, credentialFound,
-		)
-		var snapshotRollbackError error
-		if controlError == nil {
-			_, snapshotRollbackError = manager.snapshots.PublishAuthSnapshot(rollbackContext, true)
-		}
-		return UserCreateResult{}, errors.Join(
+		return UserCreateResult{}, manager.rollbackCreation(
+			ctx, creation, user, previousCredential, credentialFound, previousInternalKey,
 			fmt.Errorf("publish user creation snapshot: %w", err),
-			wrapLifecycleError("rollback user creation", controlError),
-			wrapLifecycleError("rollback portal credential", credentialRollbackError),
-			wrapLifecycleError("publish user creation rollback snapshot", snapshotRollbackError),
 		)
 	}
 	return UserCreateResult{
@@ -210,6 +220,9 @@ func (manager *UserManager) RotateUserKey(ctx context.Context, rawUser string) (
 	if err != nil {
 		return identity.RotationResult{}, err
 	}
+	// External API Key rotation changes only Gateway-facing Key records. CPA
+	// configs contain the stable per-user internal Key, so refreshing their
+	// projection here would add failure surface without changing any output.
 	return manager.keys.RotateUserKey(ctx, user, expectedKey)
 }
 
@@ -220,23 +233,23 @@ func (manager *UserManager) RevokeUser(ctx context.Context, rawUser string) (Use
 	if err != nil {
 		return UserRevokeResult{}, err
 	}
+	previousInternalKey, err := manager.readPreviousInternalKey(ctx, user)
+	if err != nil {
+		return UserRevokeResult{}, fmt.Errorf("read internal Keys before user revocation: %w", err)
+	}
 	revocation, err := manager.store.ApplyUserRevocation(ctx, user)
 	if err != nil {
 		return UserRevokeResult{}, err
 	}
 	snapshot, err := manager.snapshots.PublishAuthSnapshot(ctx, true)
 	if err != nil {
-		rollbackContext, cancel := lifecycleRollbackContext(ctx)
-		defer cancel()
-		controlError := manager.store.RestoreUserRevocation(rollbackContext, revocation)
-		var snapshotRollbackError error
-		if controlError == nil {
-			_, snapshotRollbackError = manager.snapshots.PublishAuthSnapshot(rollbackContext, true)
-		}
-		return UserRevokeResult{}, errors.Join(
-			fmt.Errorf("publish user revocation snapshot: %w", err),
-			wrapLifecycleError("rollback user revocation", controlError),
-			wrapLifecycleError("publish user revocation rollback snapshot", snapshotRollbackError),
+		return UserRevokeResult{}, manager.rollbackRevocation(
+			ctx, revocation, previousInternalKey, fmt.Errorf("publish user revocation snapshot: %w", err),
+		)
+	}
+	if err := manager.projection.RefreshAccounts(ctx); err != nil {
+		return UserRevokeResult{}, manager.rollbackRevocation(
+			ctx, revocation, previousInternalKey, fmt.Errorf("refresh user revocation account projection: %w", err),
 		)
 	}
 	unique := make(map[string]struct{})
@@ -298,10 +311,19 @@ func (manager *UserManager) DeleteUser(
 	}
 	snapshot, err := manager.snapshots.PublishAuthSnapshot(ctx, true)
 	if err != nil {
-		return UserDeleteResult{}, manager.rollbackDeletion(ctx, deletion, fmt.Errorf("publish user deletion snapshot: %w", err))
+		return UserDeleteResult{}, manager.rollbackDeletion(
+			ctx, deletion, fmt.Errorf("publish user deletion snapshot: %w", err),
+		)
+	}
+	if err := manager.projection.RefreshAccounts(ctx); err != nil {
+		return UserDeleteResult{}, manager.rollbackDeletion(
+			ctx, deletion, fmt.Errorf("refresh user deletion account projection: %w", err),
+		)
 	}
 	if err := manager.credentials.DeleteUserState(ctx, user); err != nil {
-		return UserDeleteResult{}, manager.rollbackDeletion(ctx, deletion, fmt.Errorf("delete portal user state: %w", err))
+		return UserDeleteResult{}, manager.rollbackDeletion(
+			ctx, deletion, fmt.Errorf("delete portal user state: %w", err),
+		)
 	}
 	return UserDeleteResult{
 		User: user, RemovedRecords: len(deletion.Rows), RevokedActiveKeys: deletion.RevokedActiveKeys,
@@ -417,15 +439,100 @@ func (manager *UserManager) rollbackDeletion(
 	rollbackContext, cancel := lifecycleRollbackContext(ctx)
 	defer cancel()
 	controlError := manager.store.RestoreUserDeletion(rollbackContext, deletion)
-	var snapshotError error
-	if controlError == nil {
-		_, snapshotError = manager.snapshots.PublishAuthSnapshot(rollbackContext, true)
-	}
+	projectionError, snapshotError := manager.restorePublishedUserState(rollbackContext, controlError)
 	return errors.Join(
 		cause,
 		wrapLifecycleError("rollback user deletion", controlError),
+		wrapLifecycleError("restore user deletion account projection", projectionError),
 		wrapLifecycleError("publish user deletion rollback snapshot", snapshotError),
 	)
+}
+
+func (manager *UserManager) rollbackCreation(
+	ctx context.Context,
+	creation controlplane.UserCreation,
+	user string,
+	previousCredential usage.PortalCredential,
+	credentialFound bool,
+	previousInternalKey *controlplane.InternalKey,
+	cause error,
+) error {
+	rollbackContext, cancel := lifecycleRollbackContext(ctx)
+	defer cancel()
+	controlError := manager.store.RestoreUserCreation(rollbackContext, creation)
+	credentialError := manager.restoreCredential(rollbackContext, user, previousCredential, credentialFound)
+	internalKeyError := manager.restoreInternalKey(rollbackContext, controlError, user, previousInternalKey)
+	projectionError, snapshotError := manager.restorePublishedUserState(
+		rollbackContext, errors.Join(controlError, internalKeyError),
+	)
+	return errors.Join(
+		cause,
+		wrapLifecycleError("rollback user creation", controlError),
+		wrapLifecycleError("rollback portal credential", credentialError),
+		wrapLifecycleError("rollback user creation internal Keys", internalKeyError),
+		wrapLifecycleError("restore user creation account projection", projectionError),
+		wrapLifecycleError("publish user creation rollback snapshot", snapshotError),
+	)
+}
+
+func (manager *UserManager) rollbackRevocation(
+	ctx context.Context,
+	revocation controlplane.UserRevocation,
+	previousInternalKey *controlplane.InternalKey,
+	cause error,
+) error {
+	rollbackContext, cancel := lifecycleRollbackContext(ctx)
+	defer cancel()
+	controlError := manager.store.RestoreUserRevocation(rollbackContext, revocation)
+	internalKeyError := manager.restoreInternalKey(rollbackContext, controlError, revocation.User, previousInternalKey)
+	projectionError, snapshotError := manager.restorePublishedUserState(
+		rollbackContext, errors.Join(controlError, internalKeyError),
+	)
+	return errors.Join(
+		cause,
+		wrapLifecycleError("rollback user revocation", controlError),
+		wrapLifecycleError("rollback user revocation internal Keys", internalKeyError),
+		wrapLifecycleError("restore user revocation account projection", projectionError),
+		wrapLifecycleError("publish user revocation rollback snapshot", snapshotError),
+	)
+}
+
+func (manager *UserManager) restoreInternalKey(
+	ctx context.Context,
+	controlError error,
+	user string,
+	previous *controlplane.InternalKey,
+) error {
+	if controlError != nil {
+		return nil
+	}
+	return manager.store.RestoreInternalKey(ctx, user, previous)
+}
+
+func (manager *UserManager) readPreviousInternalKey(
+	ctx context.Context,
+	user string,
+) (*controlplane.InternalKey, error) {
+	key, found, err := manager.store.ReadInternalKey(ctx, user)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &key, nil
+}
+
+func (manager *UserManager) restorePublishedUserState(
+	ctx context.Context,
+	prerequisiteError error,
+) (error, error) {
+	if prerequisiteError != nil {
+		return nil, nil
+	}
+	projectionError := manager.projection.RefreshAccounts(ctx)
+	if projectionError != nil {
+		return projectionError, nil
+	}
+	_, snapshotError := manager.snapshots.PublishAuthSnapshot(ctx, true)
+	return nil, snapshotError
 }
 
 func (manager *UserManager) settingsAndUser(

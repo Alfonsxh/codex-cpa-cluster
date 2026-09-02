@@ -550,6 +550,7 @@ describe("AccountsPage", () => {
   });
 
   it("checks legacy OAuth jobs before confirming and submits through the legacy operation path", async () => {
+    const clipboard = { writeText: vi.fn(async () => undefined) };
     const fetchMock = accountPageFetchMock(catalog, {
       "/admin/api/jobs": { jobs: [] },
       "/admin/api/operations": {
@@ -564,6 +565,7 @@ describe("AccountsPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
     renderPage();
 
     await user.click(await screen.findByRole("row", { name: "展开 alpha" }));
@@ -575,6 +577,23 @@ describe("AccountsPage", () => {
 
     expect(await screen.findByText("TASK OUTPUT")).toBeInTheDocument();
     expect(screen.getByText("TEST-CODE")).toBeInTheDocument();
+    const taskMeta = document.querySelector<HTMLElement>(".oauth-task-meta");
+    expect(taskMeta).not.toBeNull();
+    expect(within(taskMeta!).getByText("alpha@example.com")).toBeInTheDocument();
+    const authorizationPanel = screen.getByLabelText("OAuth 设备授权信息");
+    const addressCard = within(authorizationPanel).getByText("授权地址").closest<HTMLElement>("div");
+    const codeCard = within(authorizationPanel).getByText("设备码").closest<HTMLElement>("div");
+    expect(addressCard).not.toBeNull();
+    expect(codeCard).not.toBeNull();
+    await user.click(within(addressCard!).getByRole("button", { name: "复制地址" }));
+    expect(await within(addressCard!).findByRole("button", { name: "已复制" })).toBeInTheDocument();
+    await user.click(within(addressCard!).getByRole("button", { name: "已复制" }));
+    expect(clipboard.writeText).toHaveBeenNthCalledWith(1, "https://auth.example.test/device");
+    expect(clipboard.writeText).toHaveBeenNthCalledWith(2, "https://auth.example.test/device");
+    await user.click(within(codeCard!).getByRole("button", { name: "复制设备码" }));
+    expect(await within(codeCard!).findByRole("button", { name: "已复制" })).toBeInTheDocument();
+    expect(clipboard.writeText).toHaveBeenNthCalledWith(3, "TEST-CODE");
+    expect(screen.queryByText("设备码已复制")).not.toBeInTheDocument();
     const mutation = requestsTo(fetchMock, "/admin/api/operations")[0];
     expect(JSON.parse(String(mutation[1]?.body))).toEqual({ action: "login", target: "alpha" });
   });
@@ -629,9 +648,17 @@ describe("AccountsPage", () => {
     expect(createDialog).toHaveTextContent("添加业务 CPA");
     expect(createDialog).toHaveTextContent("NEW BUSINESS CPA");
     expect(createDialog).toHaveTextContent("后台补齐已有用户 Key");
-    await user.type(screen.getByLabelText("账号标识"), "gamma");
-    await user.type(screen.getByLabelText("上游账号邮箱"), "Gamma@Example.com");
-    await user.click(within(createDialog).getByRole("button", { name: "创建并启动" }));
+    const accountID = screen.getByLabelText("账号标识");
+    const accountEmail = screen.getByLabelText("上游账号邮箱");
+    await user.type(accountID, "gamma");
+    await user.tab();
+    expect(accountEmail).toHaveFocus();
+    await user.type(accountEmail, "Gamma@Example.com");
+    await user.tab();
+    expect(within(createDialog).getByRole("button", { name: /出口代理/ })).toHaveFocus();
+    await user.tab();
+    expect(within(createDialog).getByRole("button", { name: "创建并启动" })).toHaveFocus();
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByText("业务 CPA 已创建并通过运行探针")).toBeInTheDocument();
     await waitFor(() => expect(requestsTo(fetchMock, "/admin/api/accounts?window=today")).toHaveLength(2));
@@ -725,6 +752,7 @@ describe("AccountsPage", () => {
     await user.click(screen.getByRole("button", { name: "编辑 alpha" }));
     await waitFor(() => expect(screen.getByLabelText("CPA 标识")).toHaveFocus());
     const proxyInput = screen.getByLabelText("账号代理 URL");
+    expect(proxyInput.parentElement?.querySelector('[role="button"]')).toHaveAttribute("tabindex", "-1");
     expect(proxyInput).toHaveValue("");
     expect(proxyInput).toHaveAttribute("placeholder", "留空保持现有代理；支持 HTTP、HTTPS、SOCKS5");
     expect(screen.queryByText("清除已加密保存的独立代理地址")).not.toBeInTheDocument();

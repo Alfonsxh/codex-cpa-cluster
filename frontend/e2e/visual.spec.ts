@@ -362,6 +362,7 @@ for (const state of ["loading", "empty", "error"] as const) {
     const page = await context.newPage();
     await installUsageVisualBackend(page, state);
     await page.goto("/usage/");
+    await page.getByRole("button", { name: "展开账号明细" }).click();
     if (state === "loading") await expect(page.locator(".usage-skeleton-row").first()).toBeVisible();
     if (state === "empty") await expect(page.getByText("暂无可用账号", { exact: true })).toBeVisible();
     if (state === "error") await expect(page.getByText("账号与用量加载失败", { exact: true })).toBeVisible();
@@ -370,7 +371,7 @@ for (const state of ["loading", "empty", "error"] as const) {
   });
 }
 
-test("个人使用中心每日趋势按范围和组合维度独立请求并可收起", async ({ page }) => {
+test("个人使用中心每日趋势默认展开，按范围和组合维度独立请求并可切换", async ({ page }) => {
   await page.setViewportSize({ width: 1086, height: 900 });
   await setTheme(page, "light");
   const trendRequests: string[] = [];
@@ -382,18 +383,12 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
   await page.goto("http://127.0.0.1:5194/usage/");
 
   const chart = page.getByRole("img", { name: /个人每日 Token 用量趋势/ });
-  await expect(chart).toHaveCount(0);
-  await expect.poll(() => trendRequests).toEqual([]);
-  await expect(page.getByText("30天", { exact: true })).toBeVisible();
-  const collapsedAccountTop = await page.getByText("账号明细", { exact: true }).evaluate((element) => element.getBoundingClientRect().top);
-
-  await page.getByRole("button", { name: /^展开/ }).click();
   await expect(chart).toBeVisible();
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
-  const expandedAccountTop = await page.getByText("账号明细", { exact: true }).evaluate((element) => element.getBoundingClientRect().top);
-  expect(collapsedAccountTop).toBeLessThan(expandedAccountTop - 120);
+  await expect(page.getByRole("button", { name: "展开每日用量趋势" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toHaveCount(0);
   await expect(page.getByLabel("趋势图例")).toHaveCount(0);
   await page.getByRole("button", { name: "7天", exact: true }).click();
   await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
@@ -456,8 +451,9 @@ test("个人使用中心每日趋势按范围和组合维度独立请求并可�
   expect(tooltipRect.top).toBeGreaterThanOrEqual(0);
   expect(tooltipRect.bottom).toBeLessThanOrEqual(900);
   await expect(tooltip).toHaveScreenshot("react-usage-trend-tooltip-model-reasoning.png");
-  await page.getByRole("button", { name: /^收起/ }).click();
+  await page.getByRole("button", { name: "展开账号明细" }).click();
   await expect(chart).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();
 });
 
 test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
@@ -466,6 +462,7 @@ test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
+  await page.getByRole("button", { name: "展开账号明细" }).click();
   await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toHaveCount(0);
   await expect(page.getByText("账号明细", { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot("react-usage-trend-collapsed-desktop-light.png", { fullPage: false });
@@ -477,7 +474,6 @@ test("个人使用中心模型与推理强度组合趋势视觉基准", async ({
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
-  await page.getByRole("button", { name: /^展开/ }).click();
   await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
   await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeVisible();
@@ -489,6 +485,7 @@ test("个人使用中心移动端可滚动到账号明细", async ({ page }) => 
   await setTheme(page, "light");
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
+  await page.getByRole("button", { name: "展开账号明细" }).click();
 
   const header = page.locator(".usage-center-head");
   const content = page.locator(".usage-center-content");
@@ -1238,7 +1235,8 @@ function usageAccountsFixture() {
     current_group: "alpha",
     accounts: [{
       id: "alpha",
-      display_name: "CPA 1",
+      email: "cpa.alpha@example.com",
+      display_name: "cpa.alpha@example.com",
       current: true,
       enabled: true,
       selectable: true,

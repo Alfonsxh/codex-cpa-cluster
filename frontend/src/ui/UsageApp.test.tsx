@@ -27,6 +27,7 @@ const accounts = {
     {
       id: "alpha",
       display_name: "CPA 1",
+      email: "zeta.cpa@example.com",
       current: true,
       enabled: true,
       selectable: true,
@@ -46,6 +47,7 @@ const accounts = {
     {
       id: "beta",
       display_name: "CPA 2",
+      email: "alpha.cpa@example.com",
       current: false,
       enabled: true,
       selectable: true,
@@ -156,17 +158,20 @@ describe("UsageApp", () => {
     await user.type(screen.getByLabelText("密码"), "initial-password");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
-    expect((await screen.findAllByText("CPA 1")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith("/usage/session", expect.objectContaining({
       method: "POST",
       credentials: "same-origin"
     }));
   });
 
-  it("blocks all profile and usage reads until the required password change succeeds", async () => {
+  it("uses the successful login response immediately and blocks user reads until the required password change succeeds", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
-      if (path === "/usage/session") {
+      if (path === "/usage/session" && (!init?.method || init.method === "GET")) {
+        return jsonResponse({ error: { code: "session_required", message: "用户会话已失效" } }, 401);
+      }
+      if (path === "/usage/session" && init?.method === "POST") {
         return jsonResponse({
           authenticated: true,
           user: "alice@example.com",
@@ -183,6 +188,10 @@ describe("UsageApp", () => {
     const user = userEvent.setup();
     renderPortal(<UsageApp />);
 
+    expect(await screen.findByRole("dialog", { name: "登录使用中心" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("用户邮箱"), "alice@example.com");
+    await user.type(screen.getByLabelText("密码"), "initial-password");
+    await user.click(screen.getByRole("button", { name: "登录" }));
     expect(await screen.findByRole("dialog", { name: "首次登录必须修改密码" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith("/usage/me/") && String(path) !== "/usage/me/password")).toBe(false);
     await user.type(screen.getByLabelText("当前密码"), "initial-password");
@@ -190,7 +199,7 @@ describe("UsageApp", () => {
     await user.type(screen.getByLabelText("确认新密码"), "replacement-password");
     await user.click(screen.getByRole("button", { name: "保存新密码" }));
 
-    expect((await screen.findAllByText("CPA 1")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith("/usage/me/password", expect.objectContaining({
       method: "PUT",
       body: JSON.stringify({ current_password: "initial-password", new_password: "replacement-password" })
@@ -251,7 +260,7 @@ describe("UsageDashboard", () => {
     const user = userEvent.setup();
     renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
 
-    expect((await screen.findAllByText("CPA 1")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
     expect(screen.getByText("个人用量")).toBeInTheDocument();
     expect(screen.getByText("加权已用 3 M / 20 M")).toBeInTheDocument();
     const quotaHelp = screen.getByRole("button", { name: "查看个人周额度 Token 说明" });
@@ -266,14 +275,25 @@ describe("UsageDashboard", () => {
     expect(within(quotaTooltip).getByText("剩余额度")).toBeInTheDocument();
     expect(within(quotaTooltip).getByText("17 M Token")).toBeInTheDocument();
     await user.unhover(quotaHelp);
+    await user.click(screen.getByRole("button", { name: "展开账号明细" }));
     for (const heading of ["序号", "当前账号", "CPA 账号", "账号周额度", "活跃用户", "账号状态", "我的请求", "我的 Token", "最后使用"]) {
       expect(screen.getByRole("columnheader", { name: new RegExp(heading) })).toBeInTheDocument();
     }
+    expect(screen.getByText("alpha.cpa@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("CPA 1")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /CPA 账号，点击排序/ }));
+    expect([...document.querySelectorAll(".usage-account-id")].map((node) => node.textContent)).toEqual([
+      "alpha.cpa@example.com",
+      "zeta.cpa@example.com"
+    ]);
+    await user.click(screen.getByRole("button", { name: "切换" }));
+    expect(await findModal("切换到 alpha.cpa@example.com")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /取\s*消/ }));
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("usage-breakdown"))).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
     await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
     expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/usage-breakdown?window=today&account=alpha")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/usage-breakdown?window=today&account=beta")).toBe(true);
     await user.click(screen.getByRole("button", { name: "收起使用明细" }));
     expect(screen.queryByText("gpt-5.6")).not.toBeInTheDocument();
 
@@ -321,19 +341,19 @@ describe("UsageDashboard", () => {
     expect(within(switchDialog).queryByRole("button", { name: "仅复制图片配置" })).not.toBeInTheDocument();
   }, 15_000);
 
-  it("keeps the daily trend collapsed by default, loads only the selected range, and preserves cached state", async () => {
+  it("opens the daily trend by default and preserves both section states while switching with arrows", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => portalReadResponse(String(input)));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
 
     expect(await screen.findByRole("heading", { name: "每日用量趋势" })).toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
-    expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: /^展开/ }));
+    expect(screen.getByRole("button", { name: "展开每日用量趋势" })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toEqual([
       "/usage/me/usage-trend?window=30d&dimension=total"
     ]));
+    expect(await screen.findByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /CPA 账号/ })).not.toBeInTheDocument();
     expect(screen.getByText("30天加权")).toBeInTheDocument();
     expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
 
@@ -352,13 +372,66 @@ describe("UsageDashboard", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
 
     expect(screen.queryByLabelText("趋势图例")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^收起/ }));
+    await user.click(screen.getByRole("button", { name: "展开账号明细" }));
     expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
     expect(screen.getByText("7天")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /CPA 账号/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "7 天" }));
+    await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
+    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
     const beforeExpand = requestPaths(fetchMock, "/usage/me/usage-trend?").length;
-    await user.click(screen.getByRole("button", { name: /^展开/ }));
+    await user.click(screen.getByRole("button", { name: "展开每日用量趋势" }));
     expect(await screen.findByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeInTheDocument();
     expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toHaveLength(beforeExpand);
+    expect(screen.getByRole("button", { name: "模型 + 推理强度" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "展开账号明细" }));
+    expect(screen.getByRole("button", { name: "7 天" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("gpt-5.6")).toBeInTheDocument();
+  });
+
+  it("auto-assigns an unbound user once after route and account data are ready", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/usage/me/profile") return jsonResponse({ ...profile, current_group: "" });
+      if (path === "/usage/me/route") return jsonResponse({ current_group: "", generated_at: 10_000 });
+      if (path === "/usage/me/accounts?window=today") return jsonResponse({ ...accounts, current_group: "" });
+      if (path === "/usage/me/route/auto-assign" && init?.method === "POST") {
+        return jsonResponse({ message: "已自动分配", current_group: "alpha", changed: true, snapshot_generation: "generation-auto" });
+      }
+      return portalReadResponse(path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
+
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/route/auto-assign")).toHaveLength(1));
+    expect(fetchMock).toHaveBeenCalledWith("/usage/me/route/auto-assign", expect.objectContaining({ method: "POST" }));
+    expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(requestPaths(fetchMock, "/usage/me/route/auto-assign")).toHaveLength(1);
+  });
+
+  it("shows the auto-assignment failure and lets the user retry without refreshing", async () => {
+    let attempts = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/usage/me/profile") return jsonResponse({ ...profile, current_group: "" });
+      if (path === "/usage/me/route") return jsonResponse({ current_group: "", generated_at: 10_000 });
+      if (path === "/usage/me/accounts?window=today") return jsonResponse({ ...accounts, current_group: "" });
+      if (path === "/usage/me/route/auto-assign" && init?.method === "POST") {
+        attempts += 1;
+        if (attempts === 1) return jsonResponse({ error: { code: "account_state_not_ready", message: "账号额度状态尚未就绪" } }, 503);
+        return jsonResponse({ message: "已自动分配", current_group: "alpha", changed: true });
+      }
+      return portalReadResponse(path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
+
+    expect(await screen.findByText(/账号额度状态尚未就绪/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重试自动分配" }));
+    expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
+    expect(requestPaths(fetchMock, "/usage/me/route/auto-assign")).toHaveLength(2);
   });
 });
 
@@ -387,7 +460,12 @@ function portalReadResponse(path: string) {
   if (path === "/usage/me/key") return jsonResponse({ api_key: "old-secret-api-key-1234", generated_at: 10_000 });
   if (path === "/usage/me/route") return jsonResponse({ current_group: "alpha", generated_at: 10_000 });
   if (path === "/usage/me/quota") return jsonResponse(quota);
-  if (path === "/usage/me/accounts?window=today") return jsonResponse(accounts);
+  if (path.startsWith("/usage/me/accounts?")) {
+    const url = new URL(path, "http://portal.test");
+    const window = url.searchParams.get("window") ?? "today";
+    return jsonResponse({ ...accounts, window: { ...accounts.window, window } });
+  }
+  if (path.startsWith("/usage/me/usage-breakdown?")) return jsonResponse(breakdown);
   if (path.startsWith("/usage/me/usage-trend?")) {
     const url = new URL(path, "http://portal.test");
     const window = url.searchParams.get("window") ?? "30d";

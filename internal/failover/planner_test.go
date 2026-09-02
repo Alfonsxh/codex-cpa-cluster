@@ -3,9 +3,47 @@ package failover
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 )
+
+func TestLeastUsedEligibleAccountFailsClosedAndBreaksTiesByAccountID(t *testing.T) {
+	usedTen := 10.0
+	usedTwenty := 20.0
+	remainingNinety := 90.0
+	remainingEighty := 80.0
+	notANumber := math.NaN()
+	states := map[string]AccountState{
+		"alpha": {Account: "alpha", Eligible: true, Reason: "available", UsedPercent: &usedTen,
+			RemainingPercent: &remainingNinety, Headroom: 85},
+		"beta": {Account: "beta", Eligible: true, Reason: "available", UsedPercent: &usedTen,
+			RemainingPercent: &remainingNinety, Headroom: 85},
+		"higher": {Account: "higher", Eligible: true, Reason: "available", UsedPercent: &usedTwenty,
+			RemainingPercent: &remainingEighty, Headroom: 75},
+		"stale": {Account: "stale", Eligible: true, Reason: "quota_stale", UsedPercent: &usedTen,
+			RemainingPercent: &remainingNinety, Headroom: 85},
+		"unknown": {Account: "unknown", Eligible: true, Reason: "available", Headroom: 85,
+			RemainingPercent: &remainingNinety},
+		"nan": {Account: "nan", Eligible: true, Reason: "available", UsedPercent: &notANumber,
+			RemainingPercent: &remainingNinety, Headroom: 85},
+		"disabled": {
+			Account: "disabled", Eligible: false, Reason: "available", UsedPercent: &usedTen,
+			RemainingPercent: &remainingNinety, Headroom: 85,
+		},
+	}
+
+	target, found := LeastUsedEligibleAccount(
+		[]string{"higher", "beta", "stale", "alpha", "unknown", "nan", "disabled", "alpha"},
+		states,
+	)
+	if !found || target != "alpha" {
+		t.Fatalf("least used target = %q, found=%v", target, found)
+	}
+	if target, found := LeastUsedEligibleAccount([]string{"stale", "unknown", "disabled"}, states); found || target != "" {
+		t.Fatalf("unsafe target = %q, found=%v", target, found)
+	}
+}
 
 func TestParseModeRemovesObserve(t *testing.T) {
 	for _, value := range []string{"off", "active", " ACTIVE "} {

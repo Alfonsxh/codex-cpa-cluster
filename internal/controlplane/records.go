@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -404,6 +405,76 @@ func (store *Store) ReadInternalKeys(ctx context.Context) (map[string]InternalKe
 		result[row.UserEmail] = InternalKey{Key: row.Key, CreatedAt: row.CreatedAt, Status: row.Status}
 	}
 	return result, nil
+}
+
+// ReadInternalKey returns one user's stable Gateway-to-CPA credential without
+// widening a lifecycle rollback into a full-catalog read/write operation.
+func (store *Store) ReadInternalKey(
+	ctx context.Context,
+	user string,
+) (InternalKey, bool, error) {
+	user = strings.ToLower(strings.TrimSpace(user))
+	if user == "" {
+		return InternalKey{}, false, fmt.Errorf("%w: internal key user is required", ErrInvalidCatalogInput)
+	}
+	var row struct {
+		Key       string `db:"secret"`
+		CreatedAt int64  `db:"created_at"`
+		Status    string `db:"status"`
+	}
+	err := store.db.GetContext(ctx, &row, `
+		SELECT secret, created_at, status
+		  FROM internal_keys
+		 WHERE lower(trim(user_email)) = ?`, user)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InternalKey{}, false, nil
+	}
+	if err != nil {
+		return InternalKey{}, false, fmt.Errorf("read control-plane internal key: %w", err)
+	}
+	return InternalKey{Key: row.Key, CreatedAt: row.CreatedAt, Status: row.Status}, true, nil
+}
+
+// RestoreInternalKey restores or removes exactly one user's internal Key in a
+// single transaction. It deliberately leaves every other user untouched so a
+// lifecycle compensation cannot overwrite concurrent Collector reconciliation.
+func (store *Store) RestoreInternalKey(
+	ctx context.Context,
+	user string,
+	previous *InternalKey,
+) error {
+	user = strings.ToLower(strings.TrimSpace(user))
+	if user == "" {
+		return fmt.Errorf("%w: internal key user is required", ErrInvalidCatalogInput)
+	}
+	if previous != nil {
+		if strings.TrimSpace(previous.Key) == "" || previous.CreatedAt < 0 ||
+			(previous.Status != "active" && previous.Status != "inactive") {
+			return fmt.Errorf("%w: previous internal key is invalid", ErrInvalidCatalogInput)
+		}
+	}
+	return store.writeTransaction(ctx, func(transaction *sqlx.Tx) error {
+		if previous == nil {
+			if _, err := transaction.ExecContext(
+				ctx, "DELETE FROM internal_keys WHERE lower(trim(user_email)) = ?", user,
+			); err != nil {
+				return fmt.Errorf("remove restored internal key for %s: %w", user, err)
+			}
+			return nil
+		}
+		if _, err := transaction.ExecContext(ctx, `
+			INSERT INTO internal_keys(user_email, secret, created_at, status)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(user_email) DO UPDATE SET
+				secret = excluded.secret,
+				created_at = excluded.created_at,
+				status = excluded.status`,
+			user, previous.Key, previous.CreatedAt, previous.Status,
+		); err != nil {
+			return fmt.Errorf("restore internal key for %s: %w", user, err)
+		}
+		return nil
+	})
 }
 
 func (store *Store) WriteInternalKeys(ctx context.Context, users map[string]InternalKey) error {

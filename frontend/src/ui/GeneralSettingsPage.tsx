@@ -307,13 +307,14 @@ export function GeneralSettingsPage({
         okText="确认轮换并重新登录"
         cancelText="取消"
         confirmLoading={managementKeyMutation.isPending}
+        cancelButtonProps={{ tabIndex: -1 }}
+        okButtonProps={{ htmlType: "submit", form: "general-settings-management-key-form" }}
         onCancel={() => {
           if (managementKeyMutation.isPending) return;
           setManagementKeyOpen(false);
           managementKeyForm.reset();
           managementKeyMutation.reset();
         }}
-        onOk={() => void managementKeyForm.handleSubmit(() => managementKeyMutation.mutate())()}
         destroyOnHidden
       >
         <Alert
@@ -324,13 +325,14 @@ export function GeneralSettingsPage({
           description="API Key、用户会话和数据面流量不会改变；你需要使用新管理密钥重新进入。"
         />
         {managementKeyMutation.isError ? <Alert className="page-alert" type="error" showIcon message="管理密钥未更新" description={managementKeyMutation.error instanceof Error ? managementKeyMutation.error.message : "请稍后重试"} /> : null}
-        <Form layout="vertical" requiredMark={false}>
+        <form id="general-settings-management-key-form" onSubmit={managementKeyForm.handleSubmit(() => managementKeyMutation.mutate())}>
+        <Form component={false} layout="vertical" requiredMark={false}>
           <Controller
             control={managementKeyForm.control}
             name="new_key"
             render={({ field, fieldState }) => (
               <Form.Item label="新管理密钥" validateStatus={fieldState.error ? "error" : undefined} help={fieldState.error?.message}>
-                <Input.Password {...field} aria-label="新管理密钥" autoComplete="new-password" />
+                <Input.Password {...field} aria-label="新管理密钥" autoComplete="new-password" visibilityToggle={{ tabIndex: -1 }} />
               </Form.Item>
             )}
           />
@@ -339,11 +341,12 @@ export function GeneralSettingsPage({
             name="confirmation"
             render={({ field, fieldState }) => (
               <Form.Item label="确认新管理密钥" validateStatus={fieldState.error ? "error" : undefined} help={fieldState.error?.message}>
-                <Input.Password {...field} aria-label="确认新管理密钥" autoComplete="new-password" />
+                <Input.Password {...field} aria-label="确认新管理密钥" autoComplete="new-password" visibilityToggle={{ tabIndex: -1 }} />
               </Form.Item>
             )}
           />
         </Form>
+        </form>
       </Modal>
     </section>
   );

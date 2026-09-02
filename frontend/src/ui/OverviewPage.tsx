@@ -223,10 +223,7 @@ export function OverviewPage() {
   const summary = overview.data.summary;
   return (
     <section className="page-content overview-legacy-page">
-      {onboarding.data && (
-        !onboarding.data.required_complete
-        || onboarding.data.recommended.complete + onboarding.data.recommended.skipped < onboarding.data.recommended.total
-      ) ? <OnboardingCard status={onboarding.data} /> : null}
+      {onboarding.data ? <OnboardingCard status={onboarding.data} /> : null}
       {summary.incomplete_key_matrices > 0 ? (
         <Alert
           className="page-alert"

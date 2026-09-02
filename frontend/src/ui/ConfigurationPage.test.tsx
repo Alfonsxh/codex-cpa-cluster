@@ -50,13 +50,13 @@ describe("ConfigurationPage", () => {
     expect(await screen.findByPlaceholderText("已配置；留空保持不变")).toHaveValue("");
     expect(fetchMock).toHaveBeenCalledTimes(4);
 
-    await user.type(screen.getByLabelText("搜索配置"), "产品名称");
-    await user.click(await screen.findByRole("button", { name: /产品名称/ }));
+    await user.type(screen.getByLabelText("搜索配置"), "产品名称{Enter}");
     const productName = await screen.findByLabelText("产品名称");
     await user.clear(productName);
     await user.type(productName, "CPA Control");
     expect(screen.getByText("1 项未保存")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "保存配置" }));
+    productName.focus();
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByText("已保存 1 项配置")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
@@ -185,8 +185,12 @@ describe("ConfigurationPage", () => {
     await user.click(screen.getByRole("button", { name: /用户额度/ }));
     expect(await screen.findByText("2 位有用量")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "清零全部用户本周已用量" }));
-    await user.type(screen.getByLabelText("操作原因"), "incident correction");
+    const reason = screen.getByLabelText("操作原因");
+    await user.type(reason, "incident{Enter}correction");
+    expect(reason).toHaveValue("incident\ncorrection");
     await user.type(screen.getByLabelText("清零确认文字"), "RESET ALL USERS");
+    await user.keyboard("{Enter}");
+    expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/admin/api/users/quota-actions" && init?.method === "POST")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "确认清零" }));
 
     expect(await screen.findByText("已清零 2 位用户的本周已用量；将在下次采集后生效")).toBeInTheDocument();
@@ -222,9 +226,15 @@ describe("ConfigurationPage", () => {
     expect(screen.getByText("configuration.update")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /访问凭据/ }));
     await user.click(screen.getByRole("button", { name: "更换管理密钥" }));
-    await user.type(screen.getByLabelText("新管理密钥"), "replacement-key-2026");
-    await user.type(screen.getByLabelText("再次输入管理密钥"), "replacement-key-2026");
-    await user.click(screen.getByRole("button", { name: "更新并重新进入" }));
+    const newKey = screen.getByLabelText("新管理密钥");
+    const confirmation = screen.getByLabelText("再次输入管理密钥");
+    await user.type(newKey, "replacement-key-2026");
+    await user.tab();
+    expect(confirmation).toHaveFocus();
+    await user.type(confirmation, "replacement-key-2026");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "更新并重新进入" })).toHaveFocus();
+    await user.keyboard("{Enter}");
 
     await waitFor(() => expect(rotated).toHaveBeenCalledWith("管理密钥已更新，请重新登录"));
     const request = fetchMock.mock.calls.find(([path]) => String(path) === "/admin/api/settings/management-key");

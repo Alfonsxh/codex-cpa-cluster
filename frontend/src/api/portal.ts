@@ -5,6 +5,7 @@ import type {
   PortalProfile,
   PortalQuota,
   PortalRoute,
+  PortalRouteMutationResponse,
   PortalSession,
   PortalUsageTrend,
   PortalUsageTrendDimension,
@@ -21,6 +22,7 @@ export type {
   PortalProfile,
   PortalQuota,
   PortalRoute,
+  PortalRouteMutationResponse,
   PortalSession,
   PortalUsageTrend,
   PortalUsageTrendDimension,
@@ -119,15 +121,16 @@ export function changePortalPassword(
   });
 }
 
-export function switchPortalAccount(groupID: string): Promise<{
-  message: string;
-  current_group: string;
-  changed: boolean;
-  snapshot_generation?: string;
-}> {
+export function switchPortalAccount(groupID: string): Promise<PortalRouteMutationResponse> {
   return apiRequest("/usage/me/group", {
     method: "PUT",
     body: JSON.stringify({ group_id: groupID })
+  });
+}
+
+export function autoAssignPortalAccount(): Promise<PortalRouteMutationResponse> {
+  return apiRequest("/usage/me/route/auto-assign", {
+    method: "POST"
   });
 }
 

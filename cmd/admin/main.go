@@ -314,10 +314,13 @@ func runOwnedAdmin(
 	}
 	var portalServer *portalapi.Server
 	var userManager adminapi.UserLifecycleService
+	projectionRenderer := &accountprojection.Renderer{Root: config.Root, Store: store}
 	if fencedPortalStore != nil {
 		userManager, err = adminapi.NewUserManager(adminapi.UserLifecycleConfig{
-			Store: store, Credentials: fencedPortalStore, Snapshots: snapshotPublisher,
-			Lock: identityOperationLock,
+			Store: store, Credentials: fencedPortalStore,
+			Projection: configurationProjectionAdapter{renderer: projectionRenderer},
+			Snapshots:  snapshotPublisher,
+			Lock:       identityOperationLock,
 		})
 		if err != nil {
 			return err
@@ -338,7 +341,6 @@ func runOwnedAdmin(
 	var accountManager *accountlifecycle.Manager
 	var accountRuntime *runtimeops.AccountRuntime
 	var accountRuntimeError error
-	projectionRenderer := &accountprojection.Renderer{Root: config.Root, Store: store}
 	composeEnvironmentProjector := &adminapi.AccountComposeEnvironmentProjector{Root: config.Root}
 	if runtimeManager != nil {
 		if !config.RuntimeReadOnly {

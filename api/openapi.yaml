@@ -1683,6 +1683,26 @@ paths:
                 $ref: "#/components/schemas/PortalRoute"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /usage/me/route/auto-assign:
+    post:
+      operationId: autoAssignPortalRoute
+      tags: [portal]
+      security:
+        - portalSession: []
+      description: >-
+        Idempotently assigns the authenticated user only when no current route exists. Candidates
+        are restricted to the user's active Key records and require a fresh, reliable, available
+        default weekly quota state. The lowest used percentage wins with a deterministic account-ID
+        tie break, and the selected route is activated through the normal Gateway snapshot path.
+      responses:
+        "200":
+          description: Existing route retained or a new route activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalRouteMutationResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /usage/me/usage-breakdown:
     get:
       operationId: getPortalUsageBreakdown
@@ -3608,9 +3628,10 @@ components:
     PortalAccount:
       type: object
       additionalProperties: false
-      required: [id, display_name, current, enabled, selectable, status, active_users_1h, usage]
+      required: [id, email, display_name, current, enabled, selectable, status, active_users_1h, usage]
       properties:
         id: { type: string }
+        email: { type: string, format: email }
         display_name: { type: string }
         current: { type: boolean }
         enabled: { type: boolean }

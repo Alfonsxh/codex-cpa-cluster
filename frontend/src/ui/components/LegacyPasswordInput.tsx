@@ -45,6 +45,7 @@ export function LegacyPasswordInput({
       <button
         className="password-visibility-toggle"
         type="button"
+        tabIndex={-1}
         aria-controls={id}
         aria-label={visible ? "隐藏密码" : "显示密码"}
         aria-pressed={visible}

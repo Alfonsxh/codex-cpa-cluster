@@ -460,7 +460,7 @@ function OnboardingStepAction({
     return (
       <div className="onboarding-inline-form">
         <label htmlFor="onboarding-notification-webhook">企业微信群 Webhook</label>
-        <Input.Password id="onboarding-notification-webhook" value={drafts.webhookURL} onChange={(event) => onDraftChange("webhookURL", event.target.value)} autoComplete="new-password" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+        <Input.Password id="onboarding-notification-webhook" value={drafts.webhookURL} onChange={(event) => onDraftChange("webhookURL", event.target.value)} autoComplete="new-password" visibilityToggle={{ tabIndex: -1 }} placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
         <small>地址只写入加密存储，不会通过初始化状态接口或浏览器缓存回显。</small>
         <Button type="primary" loading={pending} disabled={!valid} onClick={onSaveNotification}>保存 Webhook</Button>
       </div>
@@ -490,7 +490,7 @@ function OnboardingStepAction({
     return (
       <div className="onboarding-inline-form">
         <label htmlFor="onboarding-proxy-url">默认上游代理 URL</label>
-        <Input.Password id="onboarding-proxy-url" value={drafts.proxyURL} onChange={(event) => onDraftChange("proxyURL", event.target.value)} autoComplete="new-password" placeholder={proxyConfigured ? "已加密保存；留空直接启用现有代理" : "socks5://user:password@proxy.example.com:1080"} />
+        <Input.Password id="onboarding-proxy-url" value={drafts.proxyURL} onChange={(event) => onDraftChange("proxyURL", event.target.value)} autoComplete="new-password" visibilityToggle={{ tabIndex: -1 }} placeholder={proxyConfigured ? "已加密保存；留空直接启用现有代理" : "socks5://user:password@proxy.example.com:1080"} />
         <small>保存后会启用默认代理，并应用到所有选择“继承默认”的 CPA；密钥不会回显。</small>
         <Button type="primary" loading={pending} disabled={!valid} onClick={() => onSaveConfiguration({ "cpa.proxy_enabled": true, ...(proxyURL ? { "cpa.proxy_url": proxyURL } : {}) })}>保存并启用代理</Button>
       </div>

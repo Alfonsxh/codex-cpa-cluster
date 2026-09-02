@@ -44,10 +44,17 @@ const trendWindows: Array<{ value: PortalUsageTrendWindow; label: string }> = [
 ];
 const directCombinationLimit = 9;
 
-export function PortalDailyUsageTrend({ onSessionExpired }: { onSessionExpired: () => void }) {
+export function PortalDailyUsageTrend({
+  expanded,
+  onExpandedChange,
+  onSessionExpired
+}: {
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onSessionExpired: () => void;
+}) {
   const [window, setWindow] = useState<PortalUsageTrendWindow>("30d");
   const [dimension, setDimension] = useState<PortalUsageTrendDimension>("total");
-  const [expanded, setExpanded] = useState(false);
   const query = useQuery({
     queryKey: portalUsageTrendQueryKey(window, dimension),
     queryFn: ({ signal }) => readPortalUsageTrend(window, dimension, signal),
@@ -101,7 +108,7 @@ export function PortalDailyUsageTrend({ onSessionExpired }: { onSessionExpired: 
               ))}
             </div>
           ) : <strong className="usage-trend-current-window">{trendWindowLabel(window)}</strong>}
-          <button className="usage-trend-collapse" type="button" aria-expanded={expanded} aria-controls="usage-trend-body" onClick={() => setExpanded((current) => !current)}>
+          <button className="usage-trend-collapse" type="button" aria-expanded={expanded} aria-controls="usage-trend-body" onClick={() => onExpandedChange(!expanded)}>
             {expanded ? "收起" : "展开"}<span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
           </button>
         </div>

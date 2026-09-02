@@ -95,7 +95,7 @@ export function PortalPasswordModal({
               control={form.control}
               name="currentPassword"
               render={({ field }) => (
-                <Input.Password id="portal-current-password" autoComplete="current-password" {...field} />
+                <Input.Password id="portal-current-password" autoComplete="current-password" visibilityToggle={{ tabIndex: -1 }} {...field} />
               )}
             />
           </Form.Item>
@@ -109,7 +109,7 @@ export function PortalPasswordModal({
               control={form.control}
               name="newPassword"
               render={({ field }) => (
-                <Input.Password id="portal-new-password" autoComplete="new-password" {...field} />
+                <Input.Password id="portal-new-password" autoComplete="new-password" visibilityToggle={{ tabIndex: -1 }} {...field} />
               )}
             />
           </Form.Item>
@@ -123,12 +123,12 @@ export function PortalPasswordModal({
               control={form.control}
               name="confirmation"
               render={({ field }) => (
-                <Input.Password id="portal-password-confirmation" autoComplete="new-password" {...field} />
+                <Input.Password id="portal-password-confirmation" autoComplete="new-password" visibilityToggle={{ tabIndex: -1 }} {...field} />
               )}
             />
           </Form.Item>
           <Space className="portal-form-actions">
-            {!mandatory ? <Button onClick={close}>取消</Button> : null}
+            {!mandatory ? <Button tabIndex={-1} onClick={close}>取消</Button> : null}
             <Button type="primary" htmlType="submit" loading={change.isPending}>保存新密码</Button>
           </Space>
         </form>

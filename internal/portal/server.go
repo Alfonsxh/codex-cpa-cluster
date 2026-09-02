@@ -185,6 +185,7 @@ func (server *Server) Register(router gin.IRouter) {
 	usageRoutes.GET("/me/quota", server.readQuota)
 	usageRoutes.GET("/me/accounts", server.readAccounts)
 	usageRoutes.GET("/me/route", server.readRoute)
+	usageRoutes.POST("/me/route/auto-assign", server.autoAssignRoute)
 	usageRoutes.GET("/me/usage-breakdown", server.readUsageBreakdown)
 	usageRoutes.GET("/me/usage-trend", server.readUsageTrend)
 	usageRoutes.PUT("/me/password", server.limitBody(), server.changePassword)
@@ -384,7 +385,7 @@ func (server *Server) createSession(c *gin.Context) {
 	}
 	server.writeSessionCookie(c, token, session.ExpiresAt)
 	c.JSON(http.StatusCreated, gin.H{
-		"user": user, "expires_at": session.ExpiresAt,
+		"authenticated": true, "user": user, "expires_at": session.ExpiresAt,
 		"password_change_required": credential.MustChange,
 	})
 }
@@ -574,12 +575,15 @@ func (server *Server) readAccounts(c *gin.Context) {
 			server.logger.Warn("portal account activity unavailable", zap.Error(activityError))
 		}
 	}
-	items := make([]gin.H, 0, len(accounts))
-	for index, account := range accounts {
+	items := make([]gin.H, 0, len(auth.Records))
+	for _, account := range accounts {
+		if !recordHasAccount(auth.Records, account.ID) {
+			continue
+		}
 		state, stateFound := states[account.ID]
 		presentation := presentAccountState(account, state, stateFound)
 		items = append(items, gin.H{
-			"id": account.ID, "display_name": fmt.Sprintf("CPA %d", index+1),
+			"id": account.ID, "email": account.Email, "display_name": account.Email,
 			"current": routes[auth.Session.User] == account.ID,
 			"enabled": account.GroupEnabled, "selectable": presentation.Selectable,
 			"status": presentation, "active_users_1h": activity[account.ID],
@@ -804,6 +808,79 @@ func (server *Server) changeRoute(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "当前账号已切换", "current_group": target, "changed": result.MovedUsers > 0,
+		"snapshot_generation": result.SnapshotGeneration,
+	})
+}
+
+func (server *Server) autoAssignRoute(c *gin.Context) {
+	auth, ok := server.requireAuth(c, false)
+	if !ok {
+		return
+	}
+	routes, err := server.identity.ReadRoutes(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read portal route for automatic assignment", err)
+		return
+	}
+	if current := strings.TrimSpace(routes[auth.Session.User]); current != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "当前用户已有账号", "current_group": current, "changed": false,
+		})
+		return
+	}
+	if server.states == nil {
+		writeError(c, http.StatusServiceUnavailable, "账号额度状态服务尚未就绪", "account_state_not_ready")
+		return
+	}
+	if server.routes == nil {
+		writeError(c, http.StatusServiceUnavailable, "路由切换服务尚未就绪", "route_change_not_ready")
+		return
+	}
+	accounts, err := server.identity.ReadAccounts(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read portal accounts for automatic assignment", err)
+		return
+	}
+	states, err := server.states.AccountStates(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read portal account state for automatic assignment", err)
+		return
+	}
+	candidates := make([]string, 0, len(auth.Records))
+	for _, account := range accounts {
+		if account.GroupEnabled && recordHasAccount(auth.Records, account.ID) {
+			candidates = append(candidates, account.ID)
+		}
+	}
+	target, found := failover.LeastUsedEligibleAccount(candidates, states)
+	if !found {
+		writeError(c, http.StatusConflict, "当前没有额度状态可靠且可用的账号", "route_unavailable")
+		return
+	}
+	result, err := server.routes.MoveUser(c.Request.Context(), auth.Session.User, target, "")
+	if err != nil {
+		if errors.Is(err, controlplane.ErrRouteConflict) {
+			latest, readError := server.identity.ReadRoutes(c.Request.Context())
+			if readError == nil {
+				if current := strings.TrimSpace(latest[auth.Session.User]); current != "" {
+					c.JSON(http.StatusOK, gin.H{
+						"message": "当前用户已有账号", "current_group": current, "changed": false,
+					})
+					return
+				}
+			}
+			writeError(c, http.StatusConflict, "账号分配状态已变化，请重试", "route_conflict")
+			return
+		}
+		if errors.Is(err, controlplane.ErrRouteUserUnsafe) || errors.Is(err, controlplane.ErrRouteTargetNotFound) {
+			writeError(c, http.StatusConflict, "当前用户或目标账号不满足安全分配条件", "route_unavailable")
+			return
+		}
+		server.internalError(c, "automatically assign portal route", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "已自动分配当前账号", "current_group": target, "changed": result.MovedUsers > 0,
 		"snapshot_generation": result.SnapshotGeneration,
 	})
 }

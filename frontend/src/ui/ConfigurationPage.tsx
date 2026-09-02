@@ -399,7 +399,7 @@ export function ConfigurationPage({
           <div className="settings-navigation-fixed">
             <label className="configuration-search">
               <span aria-hidden="true">⌕</span>
-              <input aria-label="搜索配置" type="search" placeholder="搜索名称或 Key" autoComplete="off" value={search} onChange={(event) => setSearch(event.target.value)} />
+              <input aria-label="搜索配置" type="search" placeholder="搜索名称或 Key" autoComplete="off" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && searchMatches[0]) { event.preventDefault(); selectConfigurationGroup(searchMatches[0].group, searchMatches[0].key); } }} />
             </label>
             <div className="configuration-search-results" hidden={!search.trim()}>
               {searchMatches.length ? searchMatches.map((field) => (
@@ -460,7 +460,7 @@ export function ConfigurationPage({
               {selectedGroup.name === "用户额度" ? <QuotaSystemDanger summary={quotaOperations.data} pending={quotaOperations.isPending || quotaOperations.isFetching} failed={quotaOperations.isError} onReset={() => setQuotaResetOpen(true)} /> : null}
               {saveMutation.isError && !confirmOpen ? <p className="form-error" role="alert">{saveMutation.error instanceof Error ? saveMutation.error.message : "配置未保存"}</p> : null}
               <p className="form-error" role="alert">{saveError}</p>
-              <div className="configuration-actions"><div className="configuration-change-summary"><span className={`status-chip ${dirtyFields.length ? "warning" : "neutral"}`}>{dirtyFields.length ? `${dirtyFields.length} 项未保存` : "未修改"}</span><div className="configuration-impact-summary">{dirtyModes.size ? [...dirtyModes.entries()].map(([label, count]) => <span key={label}><strong>{count}</strong>{label}</span>) : <span>修改后将在这里汇总生效影响</span>}</div></div><div className="configuration-action-buttons"><button className="button button-quiet" type="button" disabled={!dirtyFields.length || saveMutation.isPending} onClick={() => { setDraft(configurationDraft(catalog.data)); setSaveError(""); }}>撤销未保存修改</button><button className="button button-primary" type="submit" disabled={!dirtyFields.length || saveMutation.isPending}>{saveMutation.isPending ? "正在保存…" : "保存配置"}</button></div></div>
+              <div className="configuration-actions"><div className="configuration-change-summary"><span className={`status-chip ${dirtyFields.length ? "warning" : "neutral"}`}>{dirtyFields.length ? `${dirtyFields.length} 项未保存` : "未修改"}</span><div className="configuration-impact-summary">{dirtyModes.size ? [...dirtyModes.entries()].map(([label, count]) => <span key={label}><strong>{count}</strong>{label}</span>) : <span>修改后将在这里汇总生效影响</span>}</div></div><div className="configuration-action-buttons"><button className="button button-primary" type="submit" disabled={!dirtyFields.length || saveMutation.isPending}>{saveMutation.isPending ? "正在保存…" : "保存配置"}</button><button className="button button-quiet" type="button" disabled={!dirtyFields.length || saveMutation.isPending} onClick={() => { setDraft(configurationDraft(catalog.data)); setSaveError(""); }}>撤销未保存修改</button></div></div>
             </form>
           ) : null}
           {selection.kind === "configuration" && !selectedGroup ? (
@@ -492,7 +492,7 @@ export function ConfigurationPage({
         onCancel={() => { if (managementKeyMutation.isPending) return; setManagementKeyOpen(false); managementKeyForm.reset(); managementKeyMutation.reset(); }}
         destroyOnHidden
         footer={[
-          <Button key="cancel" className="legacy-modal-ghost" disabled={managementKeyMutation.isPending} onClick={() => { setManagementKeyOpen(false); managementKeyForm.reset(); managementKeyMutation.reset(); }}>取消</Button>,
+          <Button key="cancel" className="legacy-modal-ghost" tabIndex={-1} disabled={managementKeyMutation.isPending} onClick={() => { setManagementKeyOpen(false); managementKeyForm.reset(); managementKeyMutation.reset(); }}>取消</Button>,
           <Button key="submit" type="primary" htmlType="submit" form="settings-management-key-form" disabled={managementKeyMutation.isPending}>{managementKeyMutation.isPending ? "正在更新…" : "更新并重新进入"}</Button>
         ]}
       >

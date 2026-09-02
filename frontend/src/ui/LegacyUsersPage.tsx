@@ -447,6 +447,13 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
               placeholder="搜索用户邮箱"
               value={searchDraft}
               onChange={(event) => setSearchDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                setQuery(event.currentTarget.value.trim());
+                setPage(1);
+                setExpandedUsers([]);
+              }}
             />
           </label>
           <div className="user-toolbar-actions management-toolbar-controls">

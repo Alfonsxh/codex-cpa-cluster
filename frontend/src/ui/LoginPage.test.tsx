@@ -38,6 +38,11 @@ describe("LoginPage", () => {
     expect(screen.queryByRole("button", { name: "切换为深色主题" })).not.toBeInTheDocument();
     expect(input).toHaveAttribute("type", "password");
     expect(visibility).toHaveAttribute("aria-pressed", "false");
+    expect(visibility).toHaveAttribute("tabindex", "-1");
+    input.focus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "验证并进入" })).toHaveFocus();
+    input.focus();
     await user.type(input, "test-management-key");
     await user.click(visibility);
     expect(input).toHaveAttribute("type", "text");

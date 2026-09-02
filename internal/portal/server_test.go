@@ -45,6 +45,12 @@ func TestPortalLoginSetsClockBoundHttpOnlyCookieWithoutLeakingKey(t *testing.T) 
 	if response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "old-key") {
 		t.Fatalf("login response headers/body = %#v %s", response.Header(), response.Body.String())
 	}
+	var payload struct {
+		Authenticated bool `json:"authenticated"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || !payload.Authenticated {
+		t.Fatalf("login response contract = (%#v, %v)", payload, err)
+	}
 }
 
 func TestPortalLoginRateLimitsOneAccountAcrossClientAddresses(t *testing.T) {
@@ -136,6 +142,9 @@ func TestPortalRevokesSessionWhenUserIsDeletedOrDisabled(t *testing.T) {
 func TestPortalUsageReadsAreUserScopedAndBoundedToOneGeneratedWindow(t *testing.T) {
 	fixture := newPortalFixture(t)
 	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	fixture.identity.accounts = append(fixture.identity.accounts,
+		controlplane.Account{ID: "private", Email: "private@example.test", GroupEnabled: true},
+	)
 	fixture.usage.accountsResult = usage.UserAccountSummary{
 		Totals: usage.WeightedMetrics{RawMetrics: usage.RawMetrics{TotalTokens: 12}, WeightedTokens: 18},
 		Accounts: []usage.UserAccountUsage{{
@@ -154,8 +163,14 @@ func TestPortalUsageReadsAreUserScopedAndBoundedToOneGeneratedWindow(t *testing.
 		fixture.usage.startAt != 6_400 || fixture.usage.endAt == nil || *fixture.usage.endAt != 10_000 {
 		t.Fatalf("bounded usage call = %#v", fixture.usage)
 	}
-	if strings.Contains(response.Body.String(), "bob@example.com") || strings.Contains(response.Body.String(), "bob-key") {
+	if strings.Contains(response.Body.String(), "bob@example.com") || strings.Contains(response.Body.String(), "bob-key") ||
+		strings.Contains(response.Body.String(), "private@example.test") {
 		t.Fatalf("account response leaked another user: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"email":"alpha@example.test"`) ||
+		!strings.Contains(response.Body.String(), `"display_name":"alpha@example.test"`) ||
+		strings.Contains(response.Body.String(), `"display_name":"CPA `) {
+		t.Fatalf("account response does not expose the entitled CPA email: %s", response.Body.String())
 	}
 
 	breakdown := fixture.request(http.MethodGet, "/usage/me/usage-breakdown?window=3600", "", "session")
@@ -311,6 +326,100 @@ func TestPortalRouteChangeUsesExpectedValueAndSurfacesConflict(t *testing.T) {
 	}
 }
 
+func TestPortalAutoAssignsLeastUsedReliableEntitledAccount(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.server.states = fixture.states
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	delete(fixture.identity.routes, "alice@example.com")
+	usedAlpha, usedBeta, usedPrivate, usedDisabled := 30.0, 10.0, 1.0, 0.0
+	fixture.identity.accounts = append(fixture.identity.accounts,
+		controlplane.Account{ID: "private", Email: "private@example.test", GroupEnabled: true},
+		controlplane.Account{ID: "disabled", Email: "disabled@example.test", GroupEnabled: false},
+	)
+	fixture.identity.records = append(fixture.identity.records,
+		controlplane.KeyRecord{
+			Label: "alice:disabled", Account: "disabled", User: "alice@example.com", Status: "active", Key: "old-key",
+		},
+	)
+	fixture.states.states = map[string]failover.AccountState{
+		"alpha":    reliablePortalAccountState("alpha", &usedAlpha),
+		"beta":     reliablePortalAccountState("beta", &usedBeta),
+		"private":  reliablePortalAccountState("private", &usedPrivate),
+		"disabled": reliablePortalAccountState("disabled", &usedDisabled),
+	}
+	fixture.routes.result = failover.RebalanceResult{MovedUsers: 1, SnapshotGeneration: "generation-2"}
+
+	response := fixture.request(http.MethodPost, "/usage/me/route/auto-assign", "", "session")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"current_group":"beta"`) ||
+		!strings.Contains(response.Body.String(), `"changed":true`) ||
+		!strings.Contains(response.Body.String(), `"snapshot_generation":"generation-2"`) {
+		t.Fatalf("automatic route assignment = %d %s", response.Code, response.Body.String())
+	}
+	if !reflect.DeepEqual(
+		[]string{fixture.routes.user, fixture.routes.target, fixture.routes.expected},
+		[]string{"alice@example.com", "beta", ""},
+	) {
+		t.Fatalf("automatic route arguments = %#v", fixture.routes)
+	}
+}
+
+func TestPortalAutoAssignmentIsIdempotentAndFailsClosedWithoutReliableQuota(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.server.states = fixture.states
+	unauthorized := fixture.request(http.MethodPost, "/usage/me/route/auto-assign", "", "")
+	assertPortalError(t, unauthorized, http.StatusUnauthorized, "session_required")
+	if fixture.routes.user != "" {
+		t.Fatalf("unauthenticated automatic assignment reached route changer: %#v", fixture.routes)
+	}
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+
+	alreadyAssigned := fixture.request(http.MethodPost, "/usage/me/route/auto-assign", "", "session")
+	if alreadyAssigned.Code != http.StatusOK || !strings.Contains(alreadyAssigned.Body.String(), `"current_group":"alpha"`) ||
+		!strings.Contains(alreadyAssigned.Body.String(), `"changed":false`) || fixture.routes.user != "" {
+		t.Fatalf("idempotent automatic route assignment = %d %s, route=%#v", alreadyAssigned.Code, alreadyAssigned.Body.String(), fixture.routes)
+	}
+
+	delete(fixture.identity.routes, "alice@example.com")
+	fixture.states.states = map[string]failover.AccountState{
+		"alpha": {Account: "alpha", Eligible: true, Reason: "quota_stale"},
+	}
+	unavailable := fixture.request(http.MethodPost, "/usage/me/route/auto-assign", "", "session")
+	assertPortalError(t, unavailable, http.StatusConflict, "route_unavailable")
+	if fixture.routes.user != "" {
+		t.Fatalf("unsafe automatic assignment reached route changer: %#v", fixture.routes)
+	}
+}
+
+func TestPortalAutoAssignmentTreatsConcurrentWinnerAsIdempotentSuccess(t *testing.T) {
+	fixture := newPortalFixture(t)
+	fixture.server.states = fixture.states
+	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
+	delete(fixture.identity.routes, "alice@example.com")
+	used := 10.0
+	fixture.states.states = map[string]failover.AccountState{"alpha": reliablePortalAccountState("alpha", &used)}
+	fixture.routes.onMove = func() {
+		fixture.identity.routes["alice@example.com"] = "beta"
+	}
+	fixture.routes.err = controlplane.ErrRouteConflict
+
+	response := fixture.request(http.MethodPost, "/usage/me/route/auto-assign", "", "session")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"current_group":"beta"`) ||
+		!strings.Contains(response.Body.String(), `"changed":false`) {
+		t.Fatalf("concurrent automatic route assignment = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func reliablePortalAccountState(account string, used *float64) failover.AccountState {
+	return failover.AccountState{
+		Account: account, Eligible: true, Reason: "available", UsedPercent: used,
+		RemainingPercent: floatPointer(100 - *used), Headroom: 95 - *used,
+	}
+}
+
+func floatPointer(value float64) *float64 {
+	return &value
+}
+
 func TestPortalKeyRotationRequiresConfirmationAndReturnsOnlyNewKey(t *testing.T) {
 	fixture := newPortalFixture(t)
 	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}
@@ -424,6 +533,7 @@ type portalFixture struct {
 	keys     *portalKeyFake
 	quota    *portalQuotaStateFake
 	weekly   *portalWeeklyQuotaFake
+	states   *portalStatesFake
 }
 
 func newPortalFixture(t *testing.T) *portalFixture {
@@ -459,6 +569,7 @@ func newPortalFixture(t *testing.T) *portalFixture {
 	keyRotator := &portalKeyFake{}
 	quotaStore := &portalQuotaStateFake{}
 	weeklyQuota := &portalWeeklyQuotaFake{}
+	states := &portalStatesFake{}
 	server, err := New(Config{
 		Identity: identityStore, Sessions: sessions, Usage: usageReader,
 		Quotas:      weeklyQuota,
@@ -477,7 +588,7 @@ func newPortalFixture(t *testing.T) *portalFixture {
 	return &portalFixture{
 		t: t, server: server, router: router, identity: identityStore,
 		sessions: sessions, usage: usageReader, routes: routeChanger, keys: keyRotator,
-		quota: quotaStore, weekly: weeklyQuota,
+		quota: quotaStore, weekly: weeklyQuota, states: states,
 	}
 }
 
@@ -730,6 +841,7 @@ type portalRouteFake struct {
 	expected string
 	result   failover.RebalanceResult
 	err      error
+	onMove   func()
 }
 
 func (changer *portalRouteFake) MoveUser(
@@ -739,7 +851,23 @@ func (changer *portalRouteFake) MoveUser(
 	expected string,
 ) (failover.RebalanceResult, error) {
 	changer.user, changer.target, changer.expected = user, target, expected
+	if changer.onMove != nil {
+		changer.onMove()
+	}
 	return changer.result, changer.err
+}
+
+type portalStatesFake struct {
+	states map[string]failover.AccountState
+	err    error
+}
+
+func (provider *portalStatesFake) AccountStates(context.Context) (map[string]failover.AccountState, error) {
+	result := make(map[string]failover.AccountState, len(provider.states))
+	for account, state := range provider.states {
+		result[account] = state
+	}
+	return result, provider.err
 }
 
 type portalKeyFake struct {

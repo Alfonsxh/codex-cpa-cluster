@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  CheckOutlined,
   CopyOutlined,
   ExportOutlined,
   SafetyCertificateOutlined
@@ -780,6 +781,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
       />
       <TaskOutputModal
         job={taskJob}
+        accountEmail={catalog.accounts.find((account) => account.id === taskJob?.target)?.email ?? ""}
         pollError={taskPollError}
         cancelling={taskCancel.isPending}
         onCancelJob={() => taskJob && taskCancel.mutate(taskJob.id)}
@@ -1691,10 +1693,9 @@ function AccountEditorModal({
       maskTransitionName=""
       okText={account ? "保存修改" : pending ? "正在创建…" : "创建并启动"}
       cancelText="取消"
-      cancelButtonProps={{ className: "legacy-modal-ghost" }}
-      okButtonProps={{ disabled: pending }}
+      cancelButtonProps={{ className: "legacy-modal-ghost", tabIndex: -1 }}
+      okButtonProps={{ disabled: pending, htmlType: "submit", form: "account-editor-form" }}
       onCancel={onCancel}
-      onOk={() => void submit()}
       afterOpenChange={(opened) => {
         if (!opened) return;
         const active = document.activeElement;
@@ -1706,7 +1707,7 @@ function AccountEditorModal({
       }}
       destroyOnHidden
     >
-      <Form className="account-editor-form" layout="vertical" requiredMark={false}>
+      <Form id="account-editor-form" className="account-editor-form" layout="vertical" requiredMark={false} onFinish={() => void submit()}>
         {account ? (
           <div className="account-editor-facts">
             <AccountDetailFact label="端口" value={`:${account.port}`} />
@@ -1758,6 +1759,7 @@ function AccountEditorModal({
                       {...field}
                       aria-label="账号代理 URL"
                       autoComplete="new-password"
+                      visibilityToggle={{ tabIndex: -1 }}
                       placeholder={account ? "留空保持现有代理；支持 HTTP、HTTPS、SOCKS5" : "例如 socks5://user:pass@host:1080"}
                     />
                   </Form.Item>
@@ -1967,19 +1969,35 @@ function OAuthFlowModals({
 
 function TaskOutputModal({
   job,
+  accountEmail,
   pollError,
   cancelling,
   onCancelJob,
   onClose
 }: {
   job: LegacyRuntimeJobView | null;
+  accountEmail: string;
   pollError: unknown;
   cancelling: boolean;
   onCancelJob: () => void;
   onClose: () => void;
 }) {
   const [copyNotice, setCopyNotice] = useState("");
-  useEffect(() => setCopyNotice(""), [job?.id]);
+  const [deviceCopyState, setDeviceCopyState] = useState<Record<"url" | "code", "idle" | "copied" | "failed">>({
+    url: "idle",
+    code: "idle"
+  });
+  const copyResetTimers = useRef<Partial<Record<"url" | "code", number>>>({});
+  const currentJobID = useRef(job?.id ?? "");
+  currentJobID.current = job?.id ?? "";
+  useEffect(() => {
+    setCopyNotice("");
+    setDeviceCopyState({ url: "idle", code: "idle" });
+    return () => {
+      Object.values(copyResetTimers.current).forEach((timer) => window.clearTimeout(timer));
+      copyResetTimers.current = {};
+    };
+  }, [job?.id]);
   if (!job) return null;
   const output = job.output || "任务正在排队…";
   const device = parseOAuthDeviceOutput(output);
@@ -1992,6 +2010,37 @@ function TaskOutputModal({
       setCopyNotice(`${label}复制失败，请手动复制`);
     }
   };
+  const copyDeviceValue = async (target: "url" | "code", value: string) => {
+    const sourceJobID = job.id;
+    setCopyNotice("");
+    const existingTimer = copyResetTimers.current[target];
+    if (existingTimer) window.clearTimeout(existingTimer);
+    try {
+      await navigator.clipboard.writeText(value);
+      if (currentJobID.current !== sourceJobID) return;
+      setDeviceCopyState((current) => ({ ...current, [target]: "copied" }));
+    } catch {
+      if (currentJobID.current !== sourceJobID) return;
+      setDeviceCopyState((current) => ({ ...current, [target]: "failed" }));
+    }
+    copyResetTimers.current[target] = window.setTimeout(() => {
+      if (currentJobID.current === sourceJobID) {
+        setDeviceCopyState((current) => ({ ...current, [target]: "idle" }));
+      }
+      delete copyResetTimers.current[target];
+    }, 1_600);
+  };
+  const deviceCopyButton = (target: "url" | "code", idleLabel: string) => {
+    const state = deviceCopyState[target];
+    return {
+      label: state === "copied" ? "已复制" : state === "failed" ? "复制失败" : idleLabel,
+      icon: state === "copied"
+        ? <CheckOutlined aria-hidden="true" />
+        : <CopyOutlined aria-hidden="true" />
+    };
+  };
+  const addressCopyButton = deviceCopyButton("url", "复制地址");
+  const codeCopyButton = deviceCopyButton("code", "复制设备码");
   return (
     <Modal
       className="legacy-output-modal"
@@ -2013,7 +2062,10 @@ function TaskOutputModal({
       ]}
     >
       <div className="oauth-task-meta">
-        <span>{job.target}</span>
+        <span className="oauth-task-account">
+          <span>{job.target}</span>
+          {accountEmail ? <span className="oauth-task-email">{accountEmail}</span> : null}
+        </span>
         <Tag color={job.status === "succeeded" ? "success" : job.status === "failed" ? "error" : "processing"}>
           {runtimeJobStatusLabels[job.status] ?? job.status}
         </Tag>
@@ -2035,12 +2087,22 @@ function TaskOutputModal({
             <div>
               <span>授权地址</span>
               <code>{device.url || "—"}</code>
-              <Button disabled={!device.url} icon={<CopyOutlined aria-hidden="true" />} onClick={() => void copy(device.url, "授权地址")}>复制地址</Button>
+              <Button
+                disabled={!device.url}
+                danger={deviceCopyState.url === "failed"}
+                icon={addressCopyButton.icon}
+                onClick={() => void copyDeviceValue("url", device.url)}
+              >{addressCopyButton.label}</Button>
             </div>
             <div>
               <span>设备码</span>
               <code className="device-code">{device.code || "—"}</code>
-              <Button disabled={!device.code} icon={<CopyOutlined aria-hidden="true" />} onClick={() => void copy(device.code, "设备码")}>复制设备码</Button>
+              <Button
+                disabled={!device.code}
+                danger={deviceCopyState.code === "failed"}
+                icon={codeCopyButton.icon}
+                onClick={() => void copyDeviceValue("code", device.code)}
+              >{codeCopyButton.label}</Button>
             </div>
           </div>
         </section>

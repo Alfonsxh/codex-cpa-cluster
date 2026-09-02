@@ -51,6 +51,11 @@ type OnboardingDrafts = {
   proxyURL: string;
 };
 
+type OnboardingPreferenceUpdate = {
+  skippedRecommended: string[];
+  advanceAfterSave: boolean;
+};
+
 export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -133,12 +138,13 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   };
 
   const preferences = useMutation({
-    mutationFn: (skippedRecommended: string[]) => (
+    mutationFn: ({ skippedRecommended }: OnboardingPreferenceUpdate) => (
       saveOnboardingPreferences(skippedRecommended, csrfToken)
     ),
-    onSuccess: (result) => {
+    onSuccess: (result, update) => {
       queryClient.setQueryData(onboardingQueryKey, result);
       setNotice("初始化偏好已保存");
+      if (update.advanceAfterSave) advanceAfterSave();
     }
   });
   const configuration = useMutation({
@@ -193,7 +199,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     const next = skipped
       ? Array.from(new Set([...status.skipped_recommended, stepID]))
       : status.skipped_recommended.filter((id) => id !== stepID);
-    preferences.mutate(next);
+    preferences.mutate({ skippedRecommended: next, advanceAfterSave: skipped });
   };
   const jump = (index: number) => {
     const target = steps[index];
@@ -443,8 +449,8 @@ function OnboardingStepAction({
     return (
       <div className="onboarding-inline-form">
         <label htmlFor="onboarding-weekly-quota">新用户默认周额度</label>
-        <InputNumber id="onboarding-weekly-quota" aria-label="新用户默认周额度" min={1} max={1_000_000_000_000} precision={0} value={drafts.weeklyQuota} onChange={(value) => onDraftChange("weeklyQuota", typeof value === "number" ? value : null)} placeholder="20000000" />
-        <small>按自然周统计加权 Token；不设置额度时可直接跳过此推荐项。</small>
+        <InputNumber id="onboarding-weekly-quota" aria-label="新用户默认周额度" min={1} max={1_000_000_000_000} precision={0} suffix="Token" value={drafts.weeklyQuota} onChange={(value) => onDraftChange("weeklyQuota", typeof value === "number" ? value : null)} placeholder="20000000" />
+        <small>按自然周统计加权 Token；例如 15,000,000 表示 1,500 万 Token。留空表示不设默认限额，可直接跳过。</small>
         <Button type="primary" loading={pending} disabled={!valid} onClick={() => onSaveConfiguration({ "user_quota.default_weekly_tokens": drafts.weeklyQuota })}>保存默认额度</Button>
       </div>
     );

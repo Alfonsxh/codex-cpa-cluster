@@ -83,11 +83,15 @@ describe("OnboardingPage", () => {
     const next = screen.getByRole("button", { name: /下一步/ });
     expect(skip.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(skip);
-    expect(await screen.findByText("已跳过")).toBeInTheDocument();
+    expect(await screen.findByLabelText("已跳过")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=quota_timezone"));
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "38");
 
+    const configurationNavigation = screen.getByRole("navigation", { name: "初始化配置" });
+    await user.click(within(configurationNavigation).getByRole("button", { name: /访问地址/ }));
     await user.click(screen.getByRole("button", { name: "重新设置" }));
     expect(await screen.findByText("待设置")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=public_base_url"));
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
     const requests = fetchMock.mock.calls.filter(([path]) => String(path) === "/admin/api/onboarding/preferences");
     expect(JSON.parse(String(requests[0][1]?.body))).toMatchObject({
@@ -132,7 +136,10 @@ describe("OnboardingPage", () => {
 
     const configurationNavigation = screen.getByRole("navigation", { name: "初始化配置" });
     await user.click(within(configurationNavigation).getByRole("button", { name: /默认额度/ }));
-    await user.type(await screen.findByLabelText("新用户默认周额度"), "20000000");
+    const weeklyQuota = await screen.findByLabelText("新用户默认周额度");
+    expect(weeklyQuota.closest(".ant-input-number")?.querySelector(".ant-input-number-suffix")).toHaveTextContent("Token");
+    expect(screen.getByText(/例如 15,000,000 表示 1,500 万 Token/)).toBeInTheDocument();
+    await user.type(weeklyQuota, "20000000");
     await user.click(screen.getByRole("button", { name: "保存默认额度" }));
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=notifications"));
 

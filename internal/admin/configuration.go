@@ -97,6 +97,13 @@ var retiredConfigurationKeys = map[string]struct{}{
 	"delivery.gateway_drain_timeout_seconds": {},
 }
 
+// The control-plane settings table is shared by the configuration catalog and
+// focused Admin features. Preserve explicitly owned non-catalog rows across a
+// configuration read/update instead of treating them as corrupt catalog keys.
+var configurationPassthroughSettingKeys = map[string]struct{}{
+	onboardingSkippedSetting: {},
+}
+
 func buildConfigurationDefinitions() []configurationDefinition {
 	text := func(key, label, fallback string, minimum, maximum int, mode string, optional bool) configurationDefinition {
 		valueType := "text"
@@ -376,6 +383,10 @@ func (server *Server) currentConfiguration(
 	cleaned := make(map[string]any, len(stored))
 	for key, value := range stored {
 		if _, retired := retiredConfigurationKeys[key]; retired {
+			continue
+		}
+		if _, passthrough := configurationPassthroughSettingKeys[key]; passthrough {
+			cleaned[key] = value
 			continue
 		}
 		if _, found := configurationDefinitionByKey[key]; !found {

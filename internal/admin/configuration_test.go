@@ -180,6 +180,47 @@ func TestConfigurationEndpointPersistsExplicitDefaultSelection(t *testing.T) {
 	assertOnboardingStep(t, onboarding, "quota_timezone", onboardingCompleteStatus)
 }
 
+func TestConfigurationEndpointsPreserveOnboardingPreferences(t *testing.T) {
+	server, store := newTestAdmin(t)
+	headers := map[string]string{"X-Management-Key": "test-management-key"}
+	preference := performAdminRequest(server, http.MethodPut, "/admin/api/onboarding/preferences", map[string]any{
+		"confirm": "save", "skipped_recommended": []string{"branding"},
+	}, headers, nil)
+	if preference.Code != http.StatusOK {
+		t.Fatalf("save onboarding preference = %d %s", preference.Code, preference.Body.String())
+	}
+
+	catalog := performAdminRequest(server, http.MethodGet, "/admin/api/settings/configuration", nil, headers, nil)
+	if catalog.Code != http.StatusOK {
+		t.Fatalf("configuration catalog with onboarding preference = %d %s", catalog.Code, catalog.Body.String())
+	}
+	update := performAdminRequest(server, http.MethodPost, "/admin/api/settings/configuration", map[string]any{
+		"confirm": "save", "values": map[string]any{"branding.public_base_url": "https://cpa.example.com"},
+	}, headers, nil)
+	if update.Code != http.StatusOK {
+		t.Fatalf("configuration update with onboarding preference = %d %s", update.Code, update.Body.String())
+	}
+
+	settings, err := store.ReadSettings(context.Background())
+	if err != nil {
+		t.Fatalf("read settings after configuration update: %v", err)
+	}
+	skipped, err := skippedRecommendedFromSettings(settings)
+	if err != nil || !reflect.DeepEqual(skipped, []string{"branding"}) {
+		t.Fatalf("preserved onboarding preferences = %#v, %v", skipped, err)
+	}
+}
+
+func TestConfigurationCatalogStillRejectsUnownedUnknownSettings(t *testing.T) {
+	server, store := newTestAdmin(t)
+	if err := store.UpdateSettings(context.Background(), map[string]any{"unknown.owner_key": true}); err != nil {
+		t.Fatalf("write unknown setting fixture: %v", err)
+	}
+	response := performAdminRequest(server, http.MethodGet, "/admin/api/settings/configuration", nil,
+		map[string]string{"X-Management-Key": "test-management-key"}, nil)
+	assertAdminError(t, response, http.StatusInternalServerError, "internal_error")
+}
+
 func TestConfigurationEndpointAppliesModesKeepsProxySecretOutOfSettingsAndRollsBack(t *testing.T) {
 	base, store := newTestAdmin(t)
 	base.Close()

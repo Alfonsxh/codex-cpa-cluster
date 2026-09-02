@@ -2,14 +2,12 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
 )
 
 func TestOnboardingStatusGuidesFreshTargetWithoutLeakingSecrets(t *testing.T) {
@@ -28,15 +26,18 @@ func TestOnboardingStatusGuidesFreshTargetWithoutLeakingSecrets(t *testing.T) {
 	var payload onboardingStatusResponse
 	decodeAdminResponse(t, response, &payload)
 	if payload.Version != onboardingVersion || payload.RequiredComplete ||
-		payload.Required != (onboardingRequiredProgress{Complete: 0, Total: 5}) ||
+		payload.Required != (onboardingRequiredProgress{Complete: 0, Total: 2}) ||
 		payload.Recommended != (onboardingRecommendedProgress{Complete: 0, Skipped: 0, Total: 6}) {
 		t.Fatalf("fresh onboarding payload = %#v", payload)
 	}
 	assertOnboardingStep(t, payload, "email_domains", onboardingIncompleteStatus)
 	assertOnboardingStep(t, payload, "initial_password", onboardingIncompleteStatus)
-	assertOnboardingStep(t, payload, "first_account", onboardingIncompleteStatus)
-	assertOnboardingStep(t, payload, "account_authorization", onboardingBlockedStatus)
-	assertOnboardingStep(t, payload, "first_user", onboardingBlockedStatus)
+	for _, removed := range []string{"first_account", "account_authorization", "first_user"} {
+		assertOnboardingStepMissing(t, payload, removed)
+	}
+	if len(payload.Steps) != 8 {
+		t.Fatalf("fresh onboarding steps = %d, want 8", len(payload.Steps))
+	}
 	for _, forbidden := range []string{"test-management-key", "portal_initial_password", "cpa_management_key", "wecom_webhook"} {
 		if strings.Contains(response.Body.String(), forbidden) {
 			t.Fatalf("fresh onboarding leaked %q: %s", forbidden, response.Body.String())
@@ -44,13 +45,8 @@ func TestOnboardingStatusGuidesFreshTargetWithoutLeakingSecrets(t *testing.T) {
 	}
 }
 
-func TestOnboardingStatusCompletesFromDurableSettingsAndLiveCPAState(t *testing.T) {
-	server, store := newOnboardingTestServer(t, Config{
-		OAuth: mappedAdminOAuth{configured: map[string]bool{"alpha": true}},
-		Runtime: &fakeRuntimeCatalog{services: []runtimeops.Service{{
-			Service: "cliproxy-alpha", State: "running", Health: "healthy",
-		}}},
-	})
+func TestOnboardingStatusCompletesFromDurableSettings(t *testing.T) {
+	server, store := newOnboardingTestServer(t, Config{})
 	ctx := context.Background()
 	if err := store.WriteSettings(ctx, map[string]any{
 		"identity.allowed_email_domains":   []string{"example.com"},
@@ -71,19 +67,6 @@ func TestOnboardingStatusCompletesFromDurableSettingsAndLiveCPAState(t *testing.
 			t.Fatalf("write onboarding secret %s: %v", name, err)
 		}
 	}
-	if err := store.WriteAccounts(ctx, []controlplane.Account{{
-		ID: "alpha", Email: "alpha@accounts.example.com", Port: 18318,
-		GroupEnabled: true, DefaultGroup: true,
-	}}); err != nil {
-		t.Fatalf("write onboarding account: %v", err)
-	}
-	if err := store.WriteKeyRecords(ctx, []controlplane.KeyRecord{{
-		Label: "alice@example.com:alpha", Account: "alpha", AccountEmail: "alpha@accounts.example.com",
-		User: "alice@example.com", Status: "active", Key: "must-not-leak-user-key", CreatedAt: 100, UpdatedAt: 100,
-	}}); err != nil {
-		t.Fatalf("write onboarding user: %v", err)
-	}
-
 	response := performAdminRequest(
 		server,
 		http.MethodGet,
@@ -97,7 +80,8 @@ func TestOnboardingStatusCompletesFromDurableSettingsAndLiveCPAState(t *testing.
 	}
 	var payload onboardingStatusResponse
 	decodeAdminResponse(t, response, &payload)
-	if !payload.RequiredComplete || payload.Required.Complete != 5 || payload.Recommended.Complete != 6 ||
+	if !payload.RequiredComplete || payload.Required.Complete != 2 || payload.Required.Total != 2 ||
+		payload.Recommended.Complete != 6 ||
 		payload.Recommended.Skipped != 0 {
 		t.Fatalf("complete onboarding payload = %#v", payload)
 	}
@@ -106,7 +90,7 @@ func TestOnboardingStatusCompletesFromDurableSettingsAndLiveCPAState(t *testing.
 			t.Fatalf("complete onboarding step = %#v", step)
 		}
 	}
-	for _, forbidden := range []string{"one-time-user-password", "must-not-leak-user-key", "qyapi.weixin.qq.com", "proxy.example.com"} {
+	for _, forbidden := range []string{"one-time-user-password", "qyapi.weixin.qq.com", "proxy.example.com"} {
 		if strings.Contains(response.Body.String(), forbidden) {
 			t.Fatalf("complete onboarding leaked %q: %s", forbidden, response.Body.String())
 		}
@@ -147,17 +131,19 @@ func TestOnboardingPreferencesPersistOnlyRecommendedSkips(t *testing.T) {
 	assertAdminError(t, invalid, http.StatusBadRequest, "invalid_request")
 }
 
-func TestOnboardingStatusKeepsOtherStepsAvailableWhenRuntimeStatusFails(t *testing.T) {
-	server, store := newOnboardingTestServer(t, Config{
-		OAuth:   mappedAdminOAuth{configured: map[string]bool{"alpha": true}},
-		Runtime: &fakeRuntimeCatalog{listError: errors.New("docker unavailable")},
-	})
+func TestOnboardingStatusDoesNotDependOnAccountLifecycleState(t *testing.T) {
+	server, store := newOnboardingTestServer(t, Config{})
 	if err := store.WriteAccounts(context.Background(), []controlplane.Account{{
 		ID: "alpha", Email: "alpha@example.com", Port: 18318, GroupEnabled: true, DefaultGroup: true,
 	}}); err != nil {
-		t.Fatalf("write onboarding account: %v", err)
+		t.Fatalf("write account state: %v", err)
 	}
-
+	if err := store.WriteKeyRecords(context.Background(), []controlplane.KeyRecord{{
+		Label: "alice@example.com:alpha", Account: "alpha", AccountEmail: "alpha@example.com",
+		User: "alice@example.com", Status: "active", Key: "must-not-leak-user-key", CreatedAt: 100, UpdatedAt: 100,
+	}}); err != nil {
+		t.Fatalf("write user state: %v", err)
+	}
 	response := performAdminRequest(
 		server,
 		http.MethodGet,
@@ -167,15 +153,18 @@ func TestOnboardingStatusKeepsOtherStepsAvailableWhenRuntimeStatusFails(t *testi
 		nil,
 	)
 	if response.Code != http.StatusOK {
-		t.Fatalf("runtime-unavailable onboarding = %d %s", response.Code, response.Body.String())
+		t.Fatalf("account-independent onboarding = %d %s", response.Code, response.Body.String())
 	}
 	var payload onboardingStatusResponse
 	decodeAdminResponse(t, response, &payload)
-	assertOnboardingStep(t, payload, "first_account", onboardingCompleteStatus)
-	assertOnboardingStep(t, payload, "account_authorization", onboardingUnavailableStatus)
-	if !strings.Contains(response.Body.String(), "容器运行状态暂时不可用") ||
-		strings.Contains(response.Body.String(), "docker unavailable") {
-		t.Fatalf("runtime-unavailable onboarding response = %s", response.Body.String())
+	if payload.Required.Total != 2 || len(payload.Steps) != 8 {
+		t.Fatalf("account-independent onboarding payload = %#v", payload)
+	}
+	for _, removed := range []string{"first_account", "account_authorization", "first_user"} {
+		assertOnboardingStepMissing(t, payload, removed)
+	}
+	if strings.Contains(response.Body.String(), "must-not-leak-user-key") {
+		t.Fatalf("account-independent onboarding leaked user state: %s", response.Body.String())
 	}
 }
 
@@ -216,4 +205,13 @@ func assertOnboardingStep(t *testing.T, payload onboardingStatusResponse, id str
 		}
 	}
 	t.Fatalf("onboarding step %s is missing", id)
+}
+
+func assertOnboardingStepMissing(t *testing.T, payload onboardingStatusResponse, id string) {
+	t.Helper()
+	for _, step := range payload.Steps {
+		if step.ID == id {
+			t.Fatalf("onboarding step %s should not be present: %#v", id, step)
+		}
+	}
 }

@@ -1854,7 +1854,7 @@ export type GetAdminOnboardingError = GetAdminOnboardingErrors[keyof GetAdminOnb
 
 export type GetAdminOnboardingResponses = {
     /**
-     * Secret-free first-run and recommended-configuration status
+     * Secret-free first-run configuration status
      */
     200: OnboardingStatus;
 };

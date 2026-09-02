@@ -40,6 +40,13 @@ func TestPreviewServesSettingsAndPortalAssetsWithGoOnly(t *testing.T) {
 		if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json; charset=utf-8" {
 			t.Fatalf("%s = %d %#v %q", path, response.Code, response.Header(), response.Body.String())
 		}
+		if path == "/admin/api/onboarding" {
+			for _, removed := range []string{"first_account", "account_authorization", "first_user"} {
+				if strings.Contains(response.Body.String(), removed) {
+					t.Fatalf("preview onboarding still contains removed step %q: %s", removed, response.Body.String())
+				}
+			}
+		}
 	}
 }
 

@@ -7,7 +7,7 @@ const routes = [
   { slug: "teams", path: "/admin/teams", ready: "创建团队", title: "团队管理" },
   { slug: "runtime", path: "/admin/runtime", ready: "容器服务", title: "运行维护" },
   { slug: "configuration", path: "/admin/configuration", ready: "保存配置", title: "系统设置" },
-  { slug: "setup", path: "/admin/setup", ready: "让第一个用户安全开始使用", title: "首次设置" }
+  { slug: "setup", path: "/admin/setup", ready: "完成基础配置", title: "首次设置" }
 ] as const;
 
 const viewports = [
@@ -30,7 +30,7 @@ for (const viewport of viewports) {
         if (viewport.width <= 560 && route.slug !== "setup") await expectActiveNavigationVisible(page);
         if (route.slug === "setup" && viewport.width <= 560) {
           const setupSteps = page.locator(".onboarding-steps");
-          const lastStep = page.getByRole("navigation", { name: "推荐设置" }).getByRole("button").last();
+          const lastStep = page.getByRole("navigation", { name: "初始化配置" }).getByRole("button").last();
           await lastStep.scrollIntoViewIfNeeded();
           const stepReachability = await setupSteps.evaluate((element) => {
             const last = element.querySelector<HTMLElement>(".onboarding-step-group:last-child button:last-child");
@@ -93,26 +93,32 @@ for (const viewport of viewports) {
   }
 }
 
-test("首次管理登录在必需项未完成时进入引导，状态接口失败时不阻塞管理中心", async ({ page }) => {
+test("首次管理登录进入可退出的统一配置页，状态接口失败时不阻塞管理中心", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setTheme(page, "light");
   await page.route("**/admin/api/onboarding", async (route) => {
     const response = await route.fetch();
     const payload = await response.json();
     payload.required_complete = false;
-    payload.required = { complete: 0, total: 5 };
+    payload.required = { complete: 0, total: 2 };
     payload.recommended = { complete: 0, skipped: 0, total: 6 };
-    payload.steps = payload.steps.map((step: { kind: string; status: string }, index: number) => ({
+    payload.steps = payload.steps
+      .filter((step: { id: string }) => !["first_account", "account_authorization", "first_user"].includes(step.id))
+      .map((step: { status: string }) => ({
       ...step,
-      status: step.kind === "required" ? (index < 3 ? "incomplete" : "blocked") : "incomplete"
-    }));
+      status: "incomplete"
+      }));
     await route.fulfill({ response, json: payload });
   });
   await login(page, "/admin/overview");
   await expect(page).toHaveURL(/\/admin\/setup/);
-  await expect(page.getByRole("heading", { name: "让第一个用户安全开始使用" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "全部推荐项稍后再说" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "稍后继续" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "完成基础配置" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "初始化配置" })).toBeVisible();
+  await expect(page.getByText("必须完成", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("推荐设置", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("首个 CPA", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("OAuth 授权", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("首个用户", { exact: true })).toHaveCount(0);
   await expect(page.locator(".onboarding-bottom-bar")).toHaveCount(0);
   await expect(page.getByLabel("允许的邮箱域名")).toBeVisible();
   const setupGeometry = await page.evaluate(() => {
@@ -150,7 +156,8 @@ test("首次管理登录在必需项未完成时进入引导，状态接口失�
   expect(setupGeometry.submitTop).toBeGreaterThanOrEqual(setupGeometry.fieldBottom);
   expect(setupGeometry.submitTop).toBeGreaterThanOrEqual(setupGeometry.helpBottom);
   expect(setupGeometry.formRight - setupGeometry.submitRight).toBeLessThanOrEqual(24);
-  await page.getByRole("navigation", { name: "推荐设置" }).getByRole("button", { name: /访问地址/ }).click();
+  const configurationNavigation = page.getByRole("navigation", { name: "初始化配置" });
+  await configurationNavigation.getByRole("button", { name: /访问地址/ }).click();
   await expect(page.getByLabel("公开访问地址")).toBeVisible();
   const publicURLGeometry = await page.locator(".onboarding-inline-form").evaluate((form) => {
     const field = form.querySelector<HTMLElement>("#onboarding-public-url");
@@ -173,7 +180,6 @@ test("首次管理登录在必需项未完成时进入引导，状态接口失�
   expect(publicURLGeometry.submitTop).toBeGreaterThanOrEqual(publicURLGeometry.fieldBottom);
   expect(publicURLGeometry.submitTop).toBeGreaterThanOrEqual(publicURLGeometry.helpBottom);
   expect(publicURLGeometry.submitRightGap).toBeLessThanOrEqual(24);
-  const recommendedNavigation = page.getByRole("navigation", { name: "推荐设置" });
   for (const recommendation of [
     { step: /额度时区/, field: "用户额度时区" },
     { step: /默认额度/, field: "新用户默认周额度" },
@@ -181,12 +187,12 @@ test("首次管理登录在必需项未完成时进入引导，状态接口失�
     { step: /^品牌/, field: "产品名称" },
     { step: /上游代理/, field: "默认上游代理 URL" }
   ]) {
-    await recommendedNavigation.getByRole("button", { name: recommendation.step }).click();
+    await configurationNavigation.getByRole("button", { name: recommendation.step }).click();
     await expect(page.getByLabel(recommendation.field)).toBeVisible();
     await expect(page.locator(".onboarding-inline-form")).toBeVisible();
     await expect(page.getByRole("button", { name: "前往设置" })).toHaveCount(0);
   }
-  await recommendedNavigation.getByRole("button", { name: /^品牌/ }).click();
+  await configurationNavigation.getByRole("button", { name: /^品牌/ }).click();
   const brandingGeometry = await page.locator(".onboarding-inline-form").evaluate((form) => {
     const fields = form.querySelector<HTMLElement>(".onboarding-form-fields");
     const submit = form.querySelector<HTMLElement>(".ant-btn");
@@ -201,7 +207,7 @@ test("首次管理登录在必需项未完成时进入引导，状态接口失�
   });
   expect(brandingGeometry.submitTop).toBeGreaterThanOrEqual(brandingGeometry.fieldsBottom);
   expect(brandingGeometry.submitRightGap).toBeLessThanOrEqual(24);
-  await page.getByRole("navigation", { name: "必须完成" }).getByRole("button", { name: /初始密码/ }).click();
+  await configurationNavigation.getByRole("button", { name: /初始密码/ }).click();
   await page.setViewportSize({ width: 1024, height: 768 });
   const narrowGeometry = await page.evaluate(() => {
     const main = document.querySelector<HTMLElement>(".main-surface");
@@ -235,28 +241,8 @@ test("首次管理登录在必需项未完成时进入引导，状态接口失�
   expect(narrowBrandingGeometry.mainScrollHeight).toBeLessThanOrEqual(narrowBrandingGeometry.mainClientHeight + 1);
   expect(narrowBrandingGeometry.workspaceScrollHeight).toBeLessThanOrEqual(narrowBrandingGeometry.workspaceClientHeight + 1);
   expect(narrowBrandingGeometry.submitRightGap).toBeLessThanOrEqual(24);
-  await page.goto("/admin/setup?step=first_account");
-  const actionGeometry = await page.locator(".onboarding-action-card").evaluate((card) => {
-    const copy = card.querySelector<HTMLElement>("div");
-    const submit = card.querySelector<HTMLElement>(".ant-btn");
-    const cardRect = card.getBoundingClientRect();
-    const copyRect = copy?.getBoundingClientRect();
-    const submitRect = submit?.getBoundingClientRect();
-    return {
-      cardBottom: cardRect.bottom,
-      copyBottom: copyRect?.bottom ?? 0,
-      submitBottom: submitRect?.bottom ?? 0,
-      submitRightGap: cardRect.right - (submitRect?.right ?? 0),
-      submitTop: submitRect?.top ?? 0
-    };
-  });
-  expect(actionGeometry.submitTop).toBeGreaterThanOrEqual(actionGeometry.copyBottom);
-  expect(actionGeometry.cardBottom - actionGeometry.submitBottom).toBeLessThanOrEqual(24);
-  expect(actionGeometry.submitRightGap).toBeLessThanOrEqual(24);
-  await page.getByRole("button", { name: /前往设置/ }).click();
-  await expect(page).toHaveURL(/\/admin\/accounts/);
-  await expect(page.getByText("添加业务 CPA", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: "进入运行总览" }).click();
+  await expect(page).toHaveURL(/\/admin\/overview/);
 
   await page.unroute("**/admin/api/onboarding");
   await page.route("**/admin/api/onboarding", (route) => route.fulfill({

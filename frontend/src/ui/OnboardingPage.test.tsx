@@ -42,8 +42,29 @@ describe("OnboardingPage", () => {
     expect(mutation?.[1]).toMatchObject({ headers: expect.objectContaining({ "X-CSRF-Token": "csrf-test" }) });
   });
 
-  it("lets operators skip and restore recommendations while required progress remains separate", async () => {
-    let status = { ...freshStatus(), required: { complete: 2, total: 5 } };
+  it("shows one recoverable configuration flow without account lifecycle or hard groups", async () => {
+    const status = freshStatus();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === "/admin/api/onboarding") return jsonResponse(status);
+      if (path === "/admin/api/settings/configuration") return jsonResponse(configurationCatalog());
+      throw new Error(`unexpected request: ${path}`);
+    }));
+    const user = userEvent.setup();
+    renderOnboarding("/setup?step=first_account");
+
+    expect(await screen.findByRole("heading", { name: "完成基础配置" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "初始化配置" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=email_domains"));
+    for (const removed of ["首个 CPA", "OAuth 授权", "首个用户", "必须完成", "推荐设置", "REQUIRED STEP"]) {
+      expect(screen.queryByText(removed)).not.toBeInTheDocument();
+    }
+    await user.click(screen.getByRole("button", { name: "进入运行总览" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/overview");
+  });
+
+  it("lets operators skip and restore optional configuration in the unified progress", async () => {
+    let status = { ...freshStatus(), required_complete: true, required: { complete: 2, total: 2 } };
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
       if (path === "/admin/api/onboarding" && !init?.method) return jsonResponse(status);
@@ -59,15 +80,14 @@ describe("OnboardingPage", () => {
     const user = userEvent.setup();
     renderOnboarding("/setup?step=public_base_url");
 
-    expect((await screen.findByRole("progressbar")).getAttribute("aria-valuenow")).toBe("40");
-    expect(screen.queryByRole("button", { name: "全部推荐项稍后再说" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "稍后继续" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "暂时跳过此项" }));
+    expect((await screen.findByRole("progressbar")).getAttribute("aria-valuenow")).toBe("25");
+    await user.click(screen.getByRole("button", { name: "暂时跳过" }));
     expect(await screen.findByText("已跳过")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "40");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "38");
 
-    await user.click(screen.getByRole("button", { name: "恢复此推荐项" }));
+    await user.click(screen.getByRole("button", { name: "重新设置" }));
     expect(await screen.findByText("待设置")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
     const requests = fetchMock.mock.calls.filter(([path]) => String(path) === "/admin/api/onboarding/preferences");
     expect(JSON.parse(String(requests[0][1]?.body))).toMatchObject({
       confirm: "save",
@@ -109,17 +129,18 @@ describe("OnboardingPage", () => {
     await user.click(screen.getByRole("button", { name: "保存时区" }));
     await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
 
-    await user.click(within(screen.getByRole("navigation", { name: "推荐设置" })).getByRole("button", { name: /默认额度/ }));
+    const configurationNavigation = screen.getByRole("navigation", { name: "初始化配置" });
+    await user.click(within(configurationNavigation).getByRole("button", { name: /默认额度/ }));
     await user.type(await screen.findByLabelText("新用户默认周额度"), "20000000");
     await user.click(screen.getByRole("button", { name: "保存默认额度" }));
     await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
 
-    await user.click(within(screen.getByRole("navigation", { name: "推荐设置" })).getByRole("button", { name: /^通知/ }));
+    await user.click(within(configurationNavigation).getByRole("button", { name: /^通知/ }));
     await user.type(await screen.findByLabelText("企业微信群 Webhook"), webhookURL);
     await user.click(screen.getByRole("button", { name: "保存 Webhook" }));
     await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
 
-    await user.click(within(screen.getByRole("navigation", { name: "推荐设置" })).getByRole("button", { name: /^品牌/ }));
+    await user.click(within(configurationNavigation).getByRole("button", { name: /^品牌/ }));
     const productName = await screen.findByLabelText("产品名称");
     await user.clear(productName);
     await user.type(productName, "QData CPA");
@@ -129,7 +150,7 @@ describe("OnboardingPage", () => {
     await user.click(screen.getByRole("button", { name: "保存品牌信息" }));
     await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
 
-    await user.click(within(screen.getByRole("navigation", { name: "推荐设置" })).getByRole("button", { name: /上游代理/ }));
+    await user.click(within(configurationNavigation).getByRole("button", { name: /上游代理/ }));
     await user.type(await screen.findByLabelText("默认上游代理 URL"), "socks5://user:password@proxy.example.com:1080");
     expect(screen.queryByRole("button", { name: "前往设置" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存并启用代理" }));
@@ -193,10 +214,7 @@ function LocationProbe() {
 function freshStatus(): OnboardingStatus {
   const required = [
     ["email_domains", "组织与访问", "/configuration?group=品牌与身份&key=identity.allowed_email_domains"],
-    ["initial_password", "用户初始密码", "/configuration?section=access"],
-    ["first_account", "创建第一个 CPA", "/accounts?create=1"],
-    ["account_authorization", "OAuth 与运行状态", "/accounts?auth=pending"],
-    ["first_user", "创建第一个用户", "/users?create=1"]
+    ["initial_password", "用户初始密码", "/configuration?section=access"]
   ] as const;
   const recommended = [
     ["public_base_url", "公开访问地址"],
@@ -210,18 +228,18 @@ function freshStatus(): OnboardingStatus {
     version: 1,
     generated_at: 1_800_000_000,
     required_complete: false,
-    required: { complete: 0, total: 5 },
+    required: { complete: 0, total: 2 },
     recommended: { complete: 0, skipped: 0, total: 6 },
     skipped_recommended: [],
     steps: [
-      ...required.map(([id, title, action_path], index) => ({
+      ...required.map(([id, title, action_path]) => ({
         id,
         kind: "required" as const,
-        status: index >= 3 ? "blocked" as const : "incomplete" as const,
+        status: "incomplete" as const,
         title,
         description: `${title}说明`,
         action_path,
-        blockers: index >= 3 ? ["先完成前置步骤"] : []
+        blockers: []
       })),
       ...recommended.map(([id, title]) => ({
         id,

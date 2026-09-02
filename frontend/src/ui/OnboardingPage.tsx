@@ -28,10 +28,7 @@ import { InitialPasswordModal } from "./InitialPasswordModal";
 
 const requiredLabels: Record<string, string> = {
   email_domains: "访问范围",
-  initial_password: "初始密码",
-  first_account: "首个 CPA",
-  account_authorization: "OAuth 授权",
-  first_user: "首个用户"
+  initial_password: "初始密码"
 };
 
 const recommendationLabels: Record<string, string> = {
@@ -110,7 +107,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     return () => setRefreshAction(null);
   }, [catalog, onboarding, setRefreshAction]);
   useEffect(() => {
-    if (!location.pathname.startsWith("/setup") || !onboarding.data || selectedID || !selected) return;
+    if (!location.pathname.startsWith("/setup") || !onboarding.data || !selected || selectedID === selected.id) return;
     setSearchParams({ step: selected.id }, { replace: true });
   }, [location.pathname, onboarding.data, selected, selectedID, setSearchParams]);
   useEffect(() => {
@@ -181,7 +178,9 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   const status = onboarding.data;
   const steps = status.steps;
   const selectedIndex = steps.findIndex((step) => step.id === selected.id);
-  const requiredPercent = Math.round(status.required.complete / Math.max(1, status.required.total) * 100);
+  const completedCount = status.required.complete + status.recommended.complete + status.recommended.skipped;
+  const totalCount = status.required.total + status.recommended.total;
+  const completionPercent = Math.round(completedCount / Math.max(1, totalCount) * 100);
   const updateSkipped = (stepID: string, skipped: boolean) => {
     const next = skipped
       ? Array.from(new Set([...status.skipped_recommended, stepID]))
@@ -202,13 +201,15 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
       <div className="onboarding-shell">
         <header className="onboarding-hero">
           <div>
-            <span className="section-kicker">FIRST RUN WORKSPACE</span>
-            <h2>让第一个用户安全开始使用</h2>
-            <p>先完成 5 项必需设置；推荐设置可逐项跳过，不会阻塞必需流程。</p>
+            <h2>完成基础配置</h2>
+            <p>集中设置访问范围、初始密码和运行参数；其他业务操作可在对应管理页面中完成。</p>
           </div>
-          <div className="onboarding-progress-card">
-            <strong>{status.required.complete}<span>/{status.required.total}</span></strong>
-            <div><span>必需设置</span><Progress percent={requiredPercent} showInfo={false} size="small" /></div>
+          <div className="onboarding-hero-actions">
+            <div className="onboarding-progress-card">
+              <strong>{completedCount}<span>/{totalCount}</span></strong>
+              <div><span>配置进度</span><Progress percent={completionPercent} showInfo={false} size="small" /></div>
+            </div>
+            <Button ghost onClick={() => navigate("/overview")}>进入运行总览</Button>
           </div>
         </header>
 
@@ -226,18 +227,9 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
         ) : null}
 
         <div className="onboarding-workspace">
-          <aside className="onboarding-steps" aria-label="首次设置步骤">
-            <OnboardingStepGroup
-              title="必须完成"
-              detail={`${status.required.complete}/${status.required.total}`}
-              steps={steps.filter((step) => step.kind === "required")}
-              selectedID={selected.id}
-              onSelect={(id) => setSearchParams({ step: id })}
-            />
-            <OnboardingStepGroup
-              title="推荐设置"
-              detail={`${status.recommended.complete + status.recommended.skipped}/${status.recommended.total}`}
-              steps={steps.filter((step) => step.kind === "recommended")}
+          <aside className="onboarding-steps" aria-label="初始化配置">
+            <OnboardingStepList
+              steps={steps}
               selectedID={selected.id}
               onSelect={(id) => setSearchParams({ step: id })}
             />
@@ -246,16 +238,11 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
           <main className="onboarding-step-panel">
             <div className="onboarding-step-heading">
               <div>
-                <span className="section-kicker">{selected.kind === "required" ? "REQUIRED STEP" : "RECOMMENDED"}</span>
                 <h3>{selected.title}</h3>
                 <p>{selected.description}</p>
               </div>
               <StepStatusTag status={selected.status} />
             </div>
-
-            {selected.blockers.length ? (
-              <Alert className="onboarding-blockers" type="warning" showIcon title="完成此步骤前还需要" description={selected.blockers.join("；")} />
-            ) : null}
 
             <OnboardingStepAction
               step={selected}
@@ -279,9 +266,9 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
             {selected.kind === "recommended" && selected.status !== "complete" ? (
               <div className="onboarding-recommendation-actions">
                 {selected.status === "skipped" ? (
-                  <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, false)}>恢复此推荐项</Button>
+                  <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, false)}>重新设置</Button>
                 ) : (
-                  <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, true)}>暂时跳过此项</Button>
+                  <Button disabled={preferences.isPending} onClick={() => updateSkipped(selected.id, true)}>暂时跳过</Button>
                 )}
               </div>
             ) : null}
@@ -297,13 +284,6 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
             </footer>
           </main>
         </div>
-
-        {status.required_complete ? (
-          <div className="onboarding-bottom-bar">
-            <p>必需设置已完成。推荐项不会阻塞使用。</p>
-            <Button type="primary" onClick={() => navigate("/overview")}>完成引导</Button>
-          </div>
-        ) : null}
       </div>
 
       <InitialPasswordModal
@@ -320,23 +300,18 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   );
 }
 
-function OnboardingStepGroup({
-  title,
-  detail,
+function OnboardingStepList({
   steps,
   selectedID,
   onSelect
 }: {
-  title: string;
-  detail: string;
   steps: OnboardingStep[];
   selectedID: string;
   onSelect: (id: string) => void;
 }) {
   return (
     <section className="onboarding-step-group">
-      <div className="onboarding-step-group-title"><strong>{title}</strong><span>{detail}</span></div>
-      <nav aria-label={title}>
+      <nav aria-label="初始化配置">
         {steps.map((step, index) => (
           <button
             key={step.id}
@@ -424,13 +399,13 @@ function OnboardingStepAction({
     );
   }
   if (configurationPending) {
-    return <div className="onboarding-inline-form onboarding-form-state" aria-label="正在读取推荐设置"><Skeleton active title={false} paragraph={{ rows: 3 }} /></div>;
+    return <div className="onboarding-inline-form onboarding-form-state" aria-label="正在读取配置"><Skeleton active title={false} paragraph={{ rows: 3 }} /></div>;
   }
   if (configurationError) {
     return (
       <div className="onboarding-action-card">
         <SettingOutlined aria-hidden="true" />
-        <div><strong>推荐设置暂时不可用</strong><p>{configurationError instanceof Error ? configurationError.message : "无法读取当前配置，请稍后重试。"}</p></div>
+        <div><strong>配置暂时不可用</strong><p>{configurationError instanceof Error ? configurationError.message : "无法读取当前配置，请稍后重试。"}</p></div>
         <Button type="primary" onClick={onRetryConfiguration}>重新读取</Button>
       </div>
     );

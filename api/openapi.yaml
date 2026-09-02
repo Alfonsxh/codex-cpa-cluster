@@ -133,7 +133,7 @@ paths:
         - adminSession: []
       responses:
         "200":
-          description: Secret-free first-run and recommended-configuration status
+          description: Secret-free first-run configuration status
           content:
             application/json:
               schema:

@@ -3408,6 +3408,26 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
   backdrop-filter: blur(12px);
 }
 
+.onboarding-hero-actions {
+  position: relative;
+  z-index: 1;
+  flex: 0 1 480px;
+  width: min(480px, 48%);
+  display: grid;
+  gap: 8px;
+}
+
+.onboarding-hero-actions .onboarding-progress-card {
+  width: 100%;
+  max-width: none;
+}
+
+.onboarding-hero-actions > .ant-btn {
+  justify-self: end;
+  color: #fff;
+  border-color: rgb(255 255 255 / 45%);
+}
+
 .onboarding-progress-card > strong {
   font-size: 28px;
   line-height: 1;
@@ -3449,8 +3469,8 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
 .onboarding-steps {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   padding: 12px 16px;
   background: color-mix(in srgb, var(--surface, #fff) 72%, var(--canvas, #f4f5f8));
   border-bottom: 1px solid var(--border, #dfe3ed);
@@ -3828,6 +3848,7 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
   .onboarding-page { padding-inline: 14px; }
   .onboarding-hero { align-items: flex-start; gap: 18px; padding-inline: 20px; }
   .onboarding-progress-card { flex-basis: 360px; width: min(360px, 48%); }
+  .onboarding-hero-actions { flex-basis: 360px; width: min(360px, 48%); }
   .onboarding-step-panel { padding: 18px 20px 14px; }
   .onboarding-resume-card { grid-template-columns: 48px minmax(0, 1fr) auto; }
   .onboarding-resume-progress { display: none; }
@@ -3839,6 +3860,8 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
   .onboarding-hero h2 { margin: 0; font-size: 22px; white-space: nowrap; }
   .onboarding-hero p { display: none; }
   .onboarding-progress-card { width: auto; max-width: none; justify-self: stretch; padding: 8px 12px; }
+  .onboarding-hero-actions { width: 100%; max-width: none; justify-self: stretch; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .onboarding-hero-actions > .ant-btn { justify-self: end; }
   .onboarding-progress-card > strong { font-size: 24px; }
   .onboarding-steps { display: block; padding-block: 9px; }
   .onboarding-step-group:not(:has(button.active)) { display: none; }
@@ -3857,6 +3880,8 @@ th[aria-sort="ascending"] > .legacy-sort-button.active::after { content: "↑"; 
   .onboarding-hero { display: grid; padding: 22px; border-radius: 15px; }
   .onboarding-hero p { display: block; }
   .onboarding-progress-card { min-width: 0; width: 100%; max-width: 100%; grid-template-columns: auto minmax(0, 1fr); }
+  .onboarding-hero-actions { min-width: 0; width: 100%; max-width: 100%; }
+  .onboarding-hero-actions > .ant-btn { width: 100%; justify-self: stretch; }
   .onboarding-workspace { display: block; overflow: visible; border-radius: 15px; }
   .onboarding-steps { overflow-x: auto; display: flex; gap: 12px; padding: 14px; border-right: 0; border-bottom: 1px solid var(--border, #dfe3ed); }
   .onboarding-step-group { min-width: max-content; }

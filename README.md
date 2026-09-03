@@ -8,8 +8,7 @@
 
   <p>
     自托管的多账号 CLIProxyAPI 控制平面、稳定网关与用量中心。<br>
-    <sub>Self-hosted multi-account CLIProxyAPI control plane, gateway and usage center.</sub>
-  </p>
+   </p>
 
   <p>
     简体中文 · <a href="./README.en.md">English</a>
@@ -33,18 +32,14 @@
   <img alt="CPAC 运行总览" src="./docs/assets/screenshot-overview.png" width="1440">
 </div>
 
-**CPAC** 将多个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 账号容器收敛到一个稳定入口。CLIProxyAPI 负责把 Codex、Claude、Gemini 等上游账号封装为 OpenAI 兼容 API；CPAC 在不暴露上游凭据的前提下，补齐它单机运行时缺失的多账号治理、团队共享与升级稳定性。
-
-**典型用户是小企业和小团队**，典型用法是：
+**CPAC** 将多个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 账号容器收敛到一个稳定入口。典型用法是：
 
 - 把若干个 Codex 账号集中托管为一个共享账号池；
 - 为每位成员发放独立 API Key，并分配周额度；
 - 成员照常在自己的工具里接入使用；
 - 管理者在一个面板里查看所有成员的用量与消耗趋势。
 
-个人聚合多账号同样适用。
-
-Admin 与 Web 不在模型请求数据路径上，Gateway 升级时已有 SSE 请求会留在原槽排空。
+> PS：个人聚合多账号同样适用。
 
 <a id="quick-start"></a>
 
@@ -62,32 +57,6 @@ sudo sh run.sh
 ```sh
 curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
 ```
-
-**环境要求**：
-
-- 启用 systemd 的 Linux 服务器；
-- 已安装 `curl` 和 `sudo`；
-- 缺少依赖时脚本可通过 `apt-get` 自动安装，即 Debian/Ubuntu 系；
-- 一个已解析到该服务器的域名。
-
-**脚本会做什么**：
-
-- 首次运行引导你输入域名，并选择入口模式（复用现有反向代理，或由 CPAC 托管 Nginx 与 HTTPS）；
-- 部署 `control`、`web`、`gateway`、`edge` 四类容器，完成后输出管理员登录地址和仅出现一次的管理密钥；
-- 之后任何时候再次执行同一条命令即为安全升级：升级前自动生成一致性 SQLite 备份，保留现有 Key、OAuth 和路由。
-
-**它不会做什么**：
-
-- 不安装、不启动、不改写你未交给它管理的 Nginx 或其他反向代理站点；
-- 不触碰外部代理拓扑或 `/opt/cliproxyapi` 系统服务。
-
-**版本选择**（`run.sh --tag`）：
-
-- `sudo /home/cpac/run.sh --tag`：列出所有高于当前部署版本的 GitHub Releases，在交互终端中选择后升级；非交互环境只展示候选版本，不会自动升级；
-- `sudo /home/cpac/run.sh --tag v2.0.0`：固定或切换到指定 Release；
-- Tag 只用于选择对应的 GitHub Release，缺少完整 Release 附件的孤立 Git Tag 不会被部署。
-
-脚本与历史版本均可在 [Releases](https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest) 页面获取。完整前置条件与验收步骤见[部署文档](./docs/deployment.md)。
 
 <a id="features"></a>
 
@@ -134,17 +103,6 @@ flowchart LR
 
 控制数据与高频用量分别存储，Gateway 只读取原子发布的鉴权、额度和路由快照。完整设计见[架构文档](./docs/architecture.md)。
 
-## 入口模式
-
-| 模式 | 适用场景 | 脚本行为 |
-| --- | --- | --- |
-| 使用现有反向代理 | 已有 Nginx、Caddy、Traefik 或统一网关 | 不安装、不启动、不修改 Nginx/Certbot；输出反向代理要求 |
-| CPAC 托管 | 全新服务器，希望自动配置公网 HTTPS | 按需安装 Nginx/Certbot，创建 CPAC 专属站点并申请证书 |
-
-- 入口模式只在首次安装时选择；
-- 后续升级复用已有设置；
-- 不会静默接管或改写现有站点。
-
 <a id="documentation"></a>
 
 ## 文档
@@ -169,18 +127,6 @@ npm ci --prefix tools/openapi
 make verify
 ```
 
-- React 浏览器矩阵：`npm --prefix frontend run test:e2e`；
-- 隔离数据面演练（鉴权、模型请求、SSE、故障和蓝绿排空）：`make test-build test-up test-smoke test-faults test-down`；
-- 详细流程见[贡献指南](./CONTRIBUTING.md)。
-
-## 安全
-
-- Admin 挂载 Docker Socket 管理账号容器，请部署在可信主机并保护好管理入口。
-- 容器健康检查不能替代真实 API Key 的非流式和 SSE 业务验收。
-- 向本仓库贡献代码时，不要提交 API Key、OAuth、Webhook、SQLite、日志、备份或运行快照，完整要求见[贡献指南](./CONTRIBUTING.md)。
-
-安全漏洞请通过 [GitHub Private Vulnerability Reporting](https://github.com/Alfonsxh/codex-cpa-cluster/security/advisories/new) 私下报告，详见[安全策略](./SECURITY.md)。
-
 ## License
 
-本项目基于 [MIT License](./LICENSE) 发布。
+[MIT License](./LICENSE)

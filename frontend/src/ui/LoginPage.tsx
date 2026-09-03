@@ -59,7 +59,6 @@ export function LoginPage({ notice = "", onAuthenticated }: { notice?: string; o
         />
         <h1>进入管理中心</h1>
         <p className="eyebrow">CONTROL PLANE</p>
-        <p className="auth-copy">业务 CPA、用户管理、OAuth 授权和容器维护集中在一个界面。管理操作需要 CPA 管理密钥。</p>
         <form
           className="auth-form"
           onSubmit={form.handleSubmit(() => {

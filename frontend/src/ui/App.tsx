@@ -197,9 +197,8 @@ export function AdminShell({
     mutationFn: () => readReleaseStatus(true),
     onSuccess: (status) => {
       queryClient.setQueryData(["admin-release-status"], status);
-      showToast(status.status === "ok"
-        ? status.available ? "检测到可用新版本" : "当前已是最新版本"
-        : "版本检查暂不可用，请稍后重试", status.status === "ok" ? "success" : "error");
+      const feedback = releaseStatusFeedback(status);
+      showToast(feedback.message, feedback.success ? "success" : "error");
     },
     onError: (error) => showToast(error instanceof Error ? error.message : "版本检查暂不可用，请稍后重试", "error")
   });
@@ -284,12 +283,15 @@ export function AdminShell({
           </div>
         </section>
         <div className="side-nav-footer">
-          <span className="status-dot" aria-hidden="true" />
-          <span>管理 API 已鉴权</span>
+          <div className="side-nav-auth-status">
+            <span className="status-dot" aria-hidden="true" />
+            <span>管理 API 已鉴权</span>
+          </div>
           <ReleaseVersionIndicator
             className="side-nav-release"
             status={releaseStatus.data}
-            checking={releaseCheck.isPending}
+            checking={releaseStatus.isFetching || releaseCheck.isPending}
+            failed={releaseStatus.isError}
             onCheck={() => releaseCheck.mutate()}
           />
         </div>
@@ -311,9 +313,9 @@ export function AdminShell({
             <ReleaseVersionIndicator
               className="mobile-release-indicator"
               status={releaseStatus.data}
-              checking={releaseCheck.isPending}
+              checking={releaseStatus.isFetching || releaseCheck.isPending}
+              failed={releaseStatus.isError}
               onCheck={() => releaseCheck.mutate()}
-              showCurrent={false}
             />
             <ThemeToggle />
             <button
@@ -342,26 +344,24 @@ function ReleaseVersionIndicator({
   className,
   status,
   checking,
-  onCheck,
-  showCurrent = true
+  failed,
+  onCheck
 }: {
   className?: string;
   status?: ReleaseStatus;
   checking: boolean;
+  failed: boolean;
   onCheck: () => void;
-  showCurrent?: boolean;
 }) {
-  if (!status?.current_version) return null;
-  if (!status.available) {
-    return showCurrent
-      ? <span className={["release-version-current", className].filter(Boolean).join(" ")}>当前版本 {status.current_version}</span>
-      : null;
-  }
+  const display = releaseStatusDisplay(status, checking, failed);
+  const currentVersion = status?.current_version || "—";
   const content = (
     <section className="release-version-popover" aria-label="应用版本详情">
-      <div><span>当前版本</span><strong>{status.current_version}</strong></div>
-      <div><span>最新版本</span><strong>{status.latest_version || "未知"}</strong></div>
-      <div><span>检查时间</span><time>{formatReleaseCheckTime(status.checked_at)}</time></div>
+      <div><span>当前版本</span><strong>{status?.current_version || "未知"}</strong></div>
+      <div><span>最新版本</span><strong>{status?.latest_version || "未知"}</strong></div>
+      <div><span>检查状态</span><strong>{display.label}</strong></div>
+      <div><span>检查时间</span><time>{formatReleaseCheckTime(status?.checked_at)}</time></div>
+      <div><span>版本 Revision</span><strong>{formatReleaseRevision(status?.latest_revision)}</strong></div>
       <p>请由授权操作者在部署环境拉取并应用所选版本；此处只检查版本，不执行部署。</p>
       <button className="button release-check-button" type="button" disabled={checking} onClick={onCheck}>
         {checking ? "正在检查…" : "重新检查"}
@@ -370,13 +370,51 @@ function ReleaseVersionIndicator({
   );
   return (
     <Popover content={content} placement="topLeft" trigger="click" arrow>
-      <button className={["release-version-update", className].filter(Boolean).join(" ")} type="button" aria-label={`发现新版本 ${status.latest_version || "未知"}，查看详情`}>
-        <span><strong>发现新版本</strong><b>{status.latest_version || "未知"}</b></span>
-        <small>当前版本 {status.current_version}</small>
-        <span className="release-version-arrow" aria-hidden="true">⌃</span>
+      <button
+        className={["release-version-card", `is-${display.tone}`, className].filter(Boolean).join(" ")}
+        type="button"
+        aria-label={`CPAC 当前版本 ${status?.current_version || "未知"}，${display.label}，查看版本详情`}
+      >
+        <span className="release-version-card-head">
+          <strong>CPAC</strong>
+          <b>{currentVersion}</b>
+        </span>
+        <span className="release-version-card-state">
+          <span className="release-version-state-copy">
+            <i aria-hidden="true">{display.icon}</i>
+            <span>{display.label}</span>
+          </span>
+          <span className="release-version-arrow" aria-hidden="true">›</span>
+        </span>
       </button>
     </Popover>
   );
+}
+
+function releaseStatusDisplay(status: ReleaseStatus | undefined, checking: boolean, failed: boolean) {
+  if (checking) return { tone: "checking", icon: "·", label: "正在检查" };
+  if (failed) return { tone: "error", icon: "!", label: "更新检查失败" };
+  if (!status) return { tone: "unknown", icon: "?", label: "版本状态未知" };
+  if (status.status === "ok" && status.available) {
+    return { tone: "available", icon: "↑", label: `可更新至 ${status.latest_version || "新版本"}` };
+  }
+  if (status.status === "ok") return { tone: "current", icon: "✓", label: "当前已是最新" };
+  if (status.status === "disabled") return { tone: "disabled", icon: "—", label: "更新检查已关闭" };
+  if (status.status === "current_version_unavailable") {
+    return { tone: "unknown", icon: "?", label: "版本信息缺失" };
+  }
+  if (status.status === "invalid_configuration") {
+    return { tone: "error", icon: "!", label: "更新通道无效" };
+  }
+  return { tone: "error", icon: "!", label: "更新检查失败" };
+}
+
+function releaseStatusFeedback(status: ReleaseStatus) {
+  const display = releaseStatusDisplay(status, false, false);
+  return {
+    message: display.label,
+    success: status.status === "ok" || status.status === "disabled"
+  };
 }
 
 function formatReleaseCheckTime(timestamp?: number) {
@@ -389,6 +427,12 @@ function formatReleaseCheckTime(timestamp?: number) {
     minute: "2-digit",
     hour12: false
   }).format(new Date(timestamp * 1000));
+}
+
+function formatReleaseRevision(revision?: string) {
+  const value = revision?.trim();
+  if (!value) return "未知";
+  return value.length > 12 ? value.slice(0, 12) : value;
 }
 
 function PageLoading() {

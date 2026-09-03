@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -293,7 +295,57 @@ func TestAdminOverviewUsageSinceResetUsesOfficialQuotaPeriods(t *testing.T) {
 	}
 }
 
-func TestAdminReleaseStatusUsesValidatedMetadataAndFreshBypassesCache(t *testing.T) {
+func TestAdminReleaseStatusUsesDeploymentMarkerDefaultChannelAndFreshBypassesCache(t *testing.T) {
+	base, store := newTestAdmin(t)
+	base.Close()
+	root := t.TempDir()
+	marker := filepath.Join(root, deploymentVersionMarker)
+	if err := os.WriteFile(marker, []byte("version=v1.1.0\n"), 0o600); err != nil {
+		t.Fatalf("write deployment marker: %v", err)
+	}
+	release := &fakeReleaseCatalog{labels: map[string]string{
+		"io.codex-cpa.component":            "release",
+		"org.opencontainers.image.version":  "v1.2.0",
+		"org.opencontainers.image.revision": strings.Repeat("a", 80),
+	}}
+	server, err := New(Config{
+		Root: root, Store: store, Release: release, Now: func() time.Time { return time.Unix(2_000_000, 0) },
+	})
+	if err != nil {
+		t.Fatalf("New release Admin: %v", err)
+	}
+	t.Cleanup(server.Close)
+	first, err := server.releaseStatus(context.Background(), false)
+	if err != nil || !first.Configured || first.CurrentVersion != "v1.1.0" || !first.Available ||
+		first.LatestVersion != "v1.2.0" || first.Status != "ok" || len(first.LatestRevision) != 64 {
+		t.Fatalf("first release status = %#v, err=%v", first, err)
+	}
+	if _, err := server.releaseStatus(context.Background(), false); err != nil {
+		t.Fatalf("read cached release status: %v", err)
+	}
+	if err := os.WriteFile(marker, []byte("version=v1.3.0\n"), 0o600); err != nil {
+		t.Fatalf("update deployment marker: %v", err)
+	}
+	newerCurrent, err := server.releaseStatus(context.Background(), false)
+	if err != nil || newerCurrent.CurrentVersion != "v1.3.0" || newerCurrent.Available {
+		t.Fatalf("release status after marker update = %#v, err=%v", newerCurrent, err)
+	}
+	if release.calls != 1 {
+		t.Fatalf("marker refresh should reuse remote metadata cache, calls = %d", release.calls)
+	}
+	if _, err := server.releaseStatus(context.Background(), true); err != nil {
+		t.Fatalf("force release refresh: %v", err)
+	}
+	if release.calls != 2 || len(release.images) != 2 ||
+		release.images[0] != defaultReleaseMetadataImage || release.images[1] != defaultReleaseMetadataImage {
+		t.Fatalf("release metadata calls = %d, images = %#v", release.calls, release.images)
+	}
+	if normalizedSemver("v1.2.0-rc.2") == "" || normalizedSemver("v1.2.0-rc.01") != "" {
+		t.Fatal("release semver validation does not match strict prerelease ordering")
+	}
+}
+
+func TestAdminReleaseStatusSupportsLegacyFallbackDisabledAndFailureStates(t *testing.T) {
 	base, store := newTestAdmin(t)
 	base.Close()
 	if err := store.WriteRuntimeState(context.Background(), "deployment", map[string]any{
@@ -302,37 +354,119 @@ func TestAdminReleaseStatusUsesValidatedMetadataAndFreshBypassesCache(t *testing
 		t.Fatalf("write deployment state: %v", err)
 	}
 	if err := store.UpdateSettings(context.Background(), map[string]any{
-		"delivery.release_metadata_image": "ghcr.io/example/cpa-release:latest",
+		"delivery.release_metadata_image": "",
 	}); err != nil {
-		t.Fatalf("write release settings: %v", err)
+		t.Fatalf("disable release checks: %v", err)
 	}
-	release := &fakeReleaseCatalog{labels: map[string]string{
-		"io.codex-cpa.component":            "release",
-		"org.opencontainers.image.version":  "v1.2.0",
-		"org.opencontainers.image.revision": strings.Repeat("a", 80),
-	}}
-	server, err := New(Config{
-		Store: store, Release: release, Now: func() time.Time { return time.Unix(2_000_000, 0) },
-	})
+	release := &fakeReleaseCatalog{err: errors.New("registry unavailable")}
+	server, err := New(Config{Root: t.TempDir(), Store: store, Release: release})
 	if err != nil {
 		t.Fatalf("New release Admin: %v", err)
 	}
 	t.Cleanup(server.Close)
-	headers := map[string]string{"X-Management-Key": "test-management-key"}
-	for _, path := range []string{"/admin/api/release", "/admin/api/release", "/admin/api/release?fresh=1"} {
-		response := performAdminRequest(server, http.MethodGet, path, nil, headers, nil)
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"available":true`) ||
-			!strings.Contains(response.Body.String(), `"latest_version":"v1.2.0"`) ||
-			strings.Contains(response.Body.String(), strings.Repeat("a", 65)) {
-			t.Fatalf("release status %s = %d %s", path, response.Code, response.Body.String())
+	disabled, err := server.releaseStatus(context.Background(), true)
+	if err != nil || disabled.Configured || disabled.CurrentVersion != "v1.1.0" ||
+		disabled.Status != "disabled" || disabled.CheckedAt != 0 || release.calls != 0 {
+		t.Fatalf("disabled release status = %#v, calls=%d, err=%v", disabled, release.calls, err)
+	}
+
+	if err := store.UpdateSettings(context.Background(), map[string]any{
+		"delivery.release_metadata_image": defaultReleaseMetadataImage,
+	}); err != nil {
+		t.Fatalf("enable release checks: %v", err)
+	}
+	unavailable, err := server.releaseStatus(context.Background(), true)
+	if err != nil || !unavailable.Configured || unavailable.CurrentVersion != "v1.1.0" ||
+		unavailable.Status != "unavailable" || unavailable.CheckedAt == 0 || release.calls != 1 {
+		t.Fatalf("unavailable release status = %#v, calls=%d, err=%v", unavailable, release.calls, err)
+	}
+
+	if err := store.UpdateSettings(context.Background(), map[string]any{
+		"delivery.release_metadata_image": 42,
+	}); err != nil {
+		t.Fatalf("write invalid release setting: %v", err)
+	}
+	invalid, err := server.releaseStatus(context.Background(), true)
+	if err != nil || invalid.Status != "invalid_configuration" || invalid.CurrentVersion != "v1.1.0" ||
+		release.calls != 1 {
+		t.Fatalf("invalid release status = %#v, calls=%d, err=%v", invalid, release.calls, err)
+	}
+}
+
+func TestAdminReleaseStatusRejectsInvalidMarkerWithoutReportingStaleFallback(t *testing.T) {
+	base, store := newTestAdmin(t)
+	base.Close()
+	if err := store.WriteRuntimeState(context.Background(), "deployment", map[string]any{
+		"applied": map[string]any{"version": "v9.9.9"},
+	}); err != nil {
+		t.Fatalf("write deployment state: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, deploymentVersionMarker), []byte("version=not-semver\n"), 0o600); err != nil {
+		t.Fatalf("write invalid marker: %v", err)
+	}
+	release := &fakeReleaseCatalog{labels: map[string]string{
+		"io.codex-cpa.component":           "release",
+		"org.opencontainers.image.version": "v10.0.0",
+	}}
+	server, err := New(Config{Root: root, Store: store, Release: release})
+	if err != nil {
+		t.Fatalf("New release Admin: %v", err)
+	}
+	t.Cleanup(server.Close)
+	status, err := server.releaseStatus(context.Background(), false)
+	if err != nil || status.CurrentVersion != "" || status.Status != "current_version_unavailable" ||
+		status.Available || release.calls != 0 {
+		t.Fatalf("invalid marker release status = %#v, calls=%d, err=%v", status, release.calls, err)
+	}
+}
+
+func TestReadDeploymentVersionMarkerValidatesFileBoundaryAndContent(t *testing.T) {
+	t.Run("missing", func(t *testing.T) {
+		version, present, err := readDeploymentVersionMarker(t.TempDir())
+		if err != nil || present || version != "" {
+			t.Fatalf("missing marker = (%q, %v, %v)", version, present, err)
 		}
+	})
+	t.Run("valid", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, deploymentVersionMarker), []byte("version=v2.0.0-rc.29\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		version, present, err := readDeploymentVersionMarker(root)
+		if err != nil || !present || version != "v2.0.0-rc.29" {
+			t.Fatalf("valid marker = (%q, %v, %v)", version, present, err)
+		}
+	})
+	for name, content := range map[string]string{
+		"duplicate":        "version=v1.0.0\nversion=v1.0.1\n",
+		"invalid semver":   "version=v1.0\n",
+		"unexpected entry": "version=v1.0.0\ndomain=example.com\n",
+		"oversized":        strings.Repeat("x", deploymentVersionMarkerLimit+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, deploymentVersionMarker), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, present, err := readDeploymentVersionMarker(root); !present || err == nil {
+				t.Fatalf("unsafe marker present=%v err=%v", present, err)
+			}
+		})
 	}
-	if release.calls != 2 {
-		t.Fatalf("release metadata calls = %d", release.calls)
-	}
-	if normalizedSemver("v1.2.0-rc.2") == "" || normalizedSemver("v1.2.0-rc.01") != "" {
-		t.Fatal("release semver validation does not match strict prerelease ordering")
-	}
+	t.Run("symlink", func(t *testing.T) {
+		root := t.TempDir()
+		target := filepath.Join(root, "target")
+		if err := os.WriteFile(target, []byte("version=v1.0.0\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(root, deploymentVersionMarker)); err != nil {
+			t.Fatal(err)
+		}
+		if _, present, err := readDeploymentVersionMarker(root); !present || err == nil {
+			t.Fatalf("symlink marker present=%v err=%v", present, err)
+		}
+	})
 }
 
 func TestAdminTeamAPIUsesFineGrainedContractWithoutTags(t *testing.T) {
@@ -2523,10 +2657,12 @@ type fakeReleaseCatalog struct {
 	labels map[string]string
 	err    error
 	calls  int
+	images []string
 }
 
-func (catalog *fakeReleaseCatalog) PullReleaseMetadata(context.Context, string) (map[string]string, error) {
+func (catalog *fakeReleaseCatalog) PullReleaseMetadata(_ context.Context, image string) (map[string]string, error) {
 	catalog.calls++
+	catalog.images = append(catalog.images, image)
 	return catalog.labels, catalog.err
 }
 

@@ -176,7 +176,7 @@ type Server struct {
 	configurationApplier    ConfigurationApplier
 	configurationLock       sync.Locker
 	releaseStatusMu         sync.Mutex
-	releaseStatusCache      *releaseStatusResponse
+	releaseStatusCache      *releaseMetadataStatus
 	releaseStatusCacheKey   string
 	releaseStatusCacheUntil time.Time
 	sessionGeneration       atomic.Int64

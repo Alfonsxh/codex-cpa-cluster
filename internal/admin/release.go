@@ -3,7 +3,10 @@ package admin
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -14,10 +17,19 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const releaseStatusCacheTTL = 15 * time.Minute
+const (
+	releaseStatusCacheTTL        = 15 * time.Minute
+	defaultReleaseMetadataImage  = "ghcr.io/alfonsxh/codex-cpa-release:latest"
+	deploymentVersionMarker      = ".deploy-initialized"
+	deploymentVersionMarkerLimit = 4 * 1024
+)
 
 var releaseMetadataImagePattern = regexp.MustCompile(
 	`^[A-Za-z0-9.-]+(?::[0-9]+)?/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$`,
+)
+
+var strictReleaseSemverPattern = regexp.MustCompile(
+	`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`,
 )
 
 type ReleaseCatalog interface {
@@ -34,6 +46,20 @@ type releaseStatusResponse struct {
 	CheckedAt      int64  `json:"checked_at,omitempty"`
 }
 
+type releaseConfigurationState struct {
+	currentVersion     string
+	metadataImage      string
+	updateCheckEnabled bool
+	metadataImageValid bool
+}
+
+type releaseMetadataStatus struct {
+	Status         string
+	LatestVersion  string
+	LatestRevision string
+	CheckedAt      int64
+}
+
 func (server *Server) readReleaseStatus(c *gin.Context) {
 	payload, err := server.releaseStatus(c.Request.Context(), c.Query("fresh") == "1")
 	if err != nil {
@@ -44,42 +70,66 @@ func (server *Server) readReleaseStatus(c *gin.Context) {
 }
 
 func (server *Server) releaseStatus(ctx context.Context, force bool) (releaseStatusResponse, error) {
-	currentVersion, metadataImage, err := server.releaseConfiguration(ctx)
+	configuration, err := server.releaseConfiguration(ctx)
 	if err != nil {
 		return releaseStatusResponse{}, err
 	}
-	if currentVersion == "" || metadataImage == "" {
-		return releaseStatusResponse{Configured: false, CurrentVersion: currentVersion, Available: false}, nil
+	base := releaseStatusResponse{
+		Configured:     configuration.updateCheckEnabled,
+		CurrentVersion: configuration.currentVersion,
+		Available:      false,
 	}
-	if !releaseMetadataImagePattern.MatchString(metadataImage) {
-		return releaseStatusResponse{
-			Configured: true, CurrentVersion: currentVersion, Available: false,
-			Status: "invalid_configuration",
-		}, nil
+	if !configuration.updateCheckEnabled {
+		base.Status = "disabled"
+		return base, nil
 	}
-	cacheKey := currentVersion + "\x00" + metadataImage
+	if !configuration.metadataImageValid || !releaseMetadataImagePattern.MatchString(configuration.metadataImage) {
+		base.Status = "invalid_configuration"
+		base.CheckedAt = server.now().Unix()
+		return base, nil
+	}
+	if normalizedSemver(configuration.currentVersion) == "" {
+		base.CurrentVersion = ""
+		base.Status = "current_version_unavailable"
+		base.CheckedAt = server.now().Unix()
+		return base, nil
+	}
+
+	metadata := server.cachedReleaseMetadata(ctx, configuration.metadataImage, force)
+	base.Status = metadata.Status
+	base.LatestVersion = metadata.LatestVersion
+	base.LatestRevision = metadata.LatestRevision
+	base.CheckedAt = metadata.CheckedAt
+	if metadata.Status == "ok" {
+		base.Available = semver.Compare(
+			normalizedSemver(metadata.LatestVersion),
+			normalizedSemver(configuration.currentVersion),
+		) > 0
+	}
+	return base, nil
+}
+
+func (server *Server) cachedReleaseMetadata(
+	ctx context.Context,
+	metadataImage string,
+	force bool,
+) releaseMetadataStatus {
 	now := server.now()
 	server.releaseStatusMu.Lock()
 	defer server.releaseStatusMu.Unlock()
-	if !force && server.releaseStatusCache != nil && server.releaseStatusCacheKey == cacheKey &&
+	if !force && server.releaseStatusCache != nil && server.releaseStatusCacheKey == metadataImage &&
 		now.Before(server.releaseStatusCacheUntil) {
-		return *server.releaseStatusCache, nil
+		return *server.releaseStatusCache
 	}
-	payload := releaseStatusResponse{
-		Configured: true, CurrentVersion: currentVersion, Available: false,
-		Status: "unavailable", CheckedAt: now.Unix(),
-	}
+	payload := releaseMetadataStatus{Status: "unavailable", CheckedAt: now.Unix()}
 	if server.release != nil {
 		labels, pullErr := server.release.PullReleaseMetadata(ctx, metadataImage)
 		if pullErr == nil && labels["io.codex-cpa.component"] == "release" {
 			latestVersion := strings.TrimSpace(labels["org.opencontainers.image.version"])
-			currentSemver := normalizedSemver(currentVersion)
-			latestSemver := normalizedSemver(latestVersion)
-			if currentSemver != "" && latestSemver != "" {
+			if normalizedSemver(latestVersion) != "" {
 				payload.Status = "ok"
 				payload.LatestVersion = latestVersion
 				payload.LatestRevision = boundedReleaseRevision(labels["org.opencontainers.image.revision"])
-				payload.Available = semver.Compare(latestSemver, currentSemver) > 0
 			} else {
 				pullErr = fmt.Errorf("release metadata contains an invalid version")
 			}
@@ -91,34 +141,118 @@ func (server *Server) releaseStatus(ctx context.Context, force bool) (releaseSta
 		}
 	}
 	server.releaseStatusCache = &payload
-	server.releaseStatusCacheKey = cacheKey
+	server.releaseStatusCacheKey = metadataImage
 	server.releaseStatusCacheUntil = now.Add(releaseStatusCacheTTL)
-	return payload, nil
+	return payload
 }
 
-func (server *Server) releaseConfiguration(ctx context.Context) (string, string, error) {
-	deployment := make(map[string]any)
-	if _, err := server.store.ReadRuntimeState(ctx, "deployment", &deployment); err != nil {
-		return "", "", fmt.Errorf("read applied deployment: %w", err)
+func (server *Server) releaseConfiguration(ctx context.Context) (releaseConfigurationState, error) {
+	configuration := releaseConfigurationState{
+		metadataImage:      defaultReleaseMetadataImage,
+		updateCheckEnabled: true,
+		metadataImageValid: true,
 	}
-	applied := deployment
-	if value, ok := deployment["applied"].(map[string]any); ok {
-		applied = value
-	} else if _, hasPending := deployment["pending"]; hasPending {
-		applied = map[string]any{}
+	currentVersion, markerPresent, markerErr := readDeploymentVersionMarker(server.root)
+	if markerErr != nil {
+		server.logger.Warn(
+			"deployment version marker unavailable",
+			zap.String("error", runtimeops.Sanitize(markerErr.Error())),
+		)
+	} else if markerPresent {
+		configuration.currentVersion = currentVersion
 	}
-	currentVersion, _ := applied["version"].(string)
+	if !markerPresent {
+		deployment := make(map[string]any)
+		if _, err := server.store.ReadRuntimeState(ctx, "deployment", &deployment); err != nil {
+			return releaseConfigurationState{}, fmt.Errorf("read applied deployment: %w", err)
+		}
+		applied := deployment
+		if value, ok := deployment["applied"].(map[string]any); ok {
+			applied = value
+		} else if _, hasPending := deployment["pending"]; hasPending {
+			applied = map[string]any{}
+		}
+		legacyVersion, _ := applied["version"].(string)
+		if normalizedSemver(legacyVersion) != "" {
+			configuration.currentVersion = strings.TrimSpace(legacyVersion)
+		}
+	}
+
 	settings, err := server.store.ReadSettings(ctx)
 	if err != nil {
-		return "", "", fmt.Errorf("read release configuration: %w", err)
+		return releaseConfigurationState{}, fmt.Errorf("read release configuration: %w", err)
 	}
-	metadataImage, _ := settings["delivery.release_metadata_image"].(string)
-	return strings.TrimSpace(currentVersion), strings.TrimSpace(metadataImage), nil
+	value, configured := settings["delivery.release_metadata_image"]
+	if !configured {
+		return configuration, nil
+	}
+	metadataImage, valid := value.(string)
+	configuration.metadataImageValid = valid
+	configuration.metadataImage = strings.TrimSpace(metadataImage)
+	configuration.updateCheckEnabled = !valid || configuration.metadataImage != ""
+	return configuration, nil
+}
+
+func readDeploymentVersionMarker(root string) (string, bool, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", false, nil
+	}
+	path := filepath.Join(root, deploymentVersionMarker)
+	before, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", true, fmt.Errorf("inspect %s: %w", deploymentVersionMarker, err)
+	}
+	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
+		return "", true, fmt.Errorf("%s must be a regular file", deploymentVersionMarker)
+	}
+	if before.Size() > deploymentVersionMarkerLimit {
+		return "", true, fmt.Errorf("%s exceeds %d bytes", deploymentVersionMarker, deploymentVersionMarkerLimit)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", true, fmt.Errorf("open %s: %w", deploymentVersionMarker, err)
+	}
+	defer file.Close()
+	after, err := file.Stat()
+	if err != nil {
+		return "", true, fmt.Errorf("stat opened %s: %w", deploymentVersionMarker, err)
+	}
+	if !after.Mode().IsRegular() || !os.SameFile(before, after) {
+		return "", true, fmt.Errorf("%s changed while it was read", deploymentVersionMarker)
+	}
+	content, err := io.ReadAll(io.LimitReader(file, deploymentVersionMarkerLimit+1))
+	if err != nil {
+		return "", true, fmt.Errorf("read %s: %w", deploymentVersionMarker, err)
+	}
+	if len(content) > deploymentVersionMarkerLimit {
+		return "", true, fmt.Errorf("%s exceeds %d bytes", deploymentVersionMarker, deploymentVersionMarkerLimit)
+	}
+	version := ""
+	versionLines := 0
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "version=") {
+			return "", true, fmt.Errorf("%s contains an unsupported entry", deploymentVersionMarker)
+		}
+		versionLines++
+		version = strings.TrimSpace(strings.TrimPrefix(line, "version="))
+	}
+	if versionLines != 1 || normalizedSemver(version) == "" {
+		return "", true, fmt.Errorf("%s must contain one valid semantic version", deploymentVersionMarker)
+	}
+	return version, true, nil
 }
 
 func normalizedSemver(value string) string {
 	value = strings.TrimSpace(value)
-	if value == "" {
+	if !strictReleaseSemverPattern.MatchString(value) {
 		return ""
 	}
 	if !strings.HasPrefix(value, "v") {

@@ -223,7 +223,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		simple("runtime.cliproxy_image", "CLIProxyAPI 镜像", "image", runtimeops.DefaultCPAImageUpdateChannel, "deployment"),
 	)
 	definitions = append(definitions,
-		simple("delivery.release_metadata_image", "发布更新通道", "optional_image", "", "live"),
+		simple("delivery.release_metadata_image", "发布更新通道", "optional_image", defaultReleaseMetadataImage, "live"),
 	)
 	return definitions
 }

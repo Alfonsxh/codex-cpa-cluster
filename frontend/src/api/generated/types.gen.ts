@@ -1259,7 +1259,7 @@ export type ReleaseStatus = {
     configured: boolean;
     current_version: string;
     available: boolean;
-    status?: 'ok' | 'unavailable' | 'invalid_configuration';
+    status?: 'ok' | 'unavailable' | 'invalid_configuration' | 'current_version_unavailable' | 'disabled';
     latest_version?: string;
     latest_revision?: string;
     checked_at?: number;

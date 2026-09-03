@@ -4041,7 +4041,7 @@ components:
         configured: { type: boolean }
         current_version: { type: string }
         available: { type: boolean }
-        status: { type: string, enum: [ok, unavailable, invalid_configuration] }
+        status: { type: string, enum: [ok, unavailable, invalid_configuration, current_version_unavailable, disabled] }
         latest_version: { type: string }
         latest_revision: { type: string, maxLength: 64 }
         checked_at: { type: integer, format: int64 }

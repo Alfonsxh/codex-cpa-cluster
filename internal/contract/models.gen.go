@@ -1083,14 +1083,20 @@ func (e RebalanceAllRequestConfirm) Valid() bool {
 
 // Defines values for ReleaseStatusStatus.
 const (
-	ReleaseStatusStatusInvalidConfiguration ReleaseStatusStatus = "invalid_configuration"
-	ReleaseStatusStatusOk                   ReleaseStatusStatus = "ok"
-	ReleaseStatusStatusUnavailable          ReleaseStatusStatus = "unavailable"
+	ReleaseStatusStatusCurrentVersionUnavailable ReleaseStatusStatus = "current_version_unavailable"
+	ReleaseStatusStatusDisabled                  ReleaseStatusStatus = "disabled"
+	ReleaseStatusStatusInvalidConfiguration      ReleaseStatusStatus = "invalid_configuration"
+	ReleaseStatusStatusOk                        ReleaseStatusStatus = "ok"
+	ReleaseStatusStatusUnavailable               ReleaseStatusStatus = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the ReleaseStatusStatus enum.
 func (e ReleaseStatusStatus) Valid() bool {
 	switch e {
+	case ReleaseStatusStatusCurrentVersionUnavailable:
+		return true
+	case ReleaseStatusStatusDisabled:
+		return true
 	case ReleaseStatusStatusInvalidConfiguration:
 		return true
 	case ReleaseStatusStatusOk:

@@ -296,7 +296,7 @@ describe("UsageDashboard", () => {
     expect(within(quotaTooltip).getByText("剩余额度")).toBeInTheDocument();
     expect(within(quotaTooltip).getByText("17 M Token")).toBeInTheDocument();
     await user.unhover(quotaHelp);
-    await user.click(screen.getByRole("button", { name: "展开账号明细" }));
+    await user.click(screen.getByRole("button", { name: "查看账号明细" }));
     for (const heading of ["序号", "当前账号", "CPA 账号", "账号周额度", "活跃用户", "账号状态", "我的请求", "我的 Token", "最后使用"]) {
       expect(screen.getByRole("columnheader", { name: new RegExp(heading) })).toBeInTheDocument();
     }
@@ -315,6 +315,19 @@ describe("UsageDashboard", () => {
     await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
     expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/usage-breakdown?window=today&account=beta")).toBe(true);
+    const effortSegment = screen.getByRole("button", { name: "查看 gpt-5.6 high 推理强度 Token 明细" });
+    await user.hover(effortSegment);
+    await waitFor(() => expect(document.querySelector(".usage-model-effort-tooltip")).toBeInTheDocument());
+    const effortDetail = document.querySelector(".usage-model-effort-tooltip")?.closest("[role=tooltip]");
+    if (!(effortDetail instanceof HTMLElement)) throw new Error("模型推理强度 Tooltip 未渲染");
+    expect(within(effortDetail).getByText("gpt-5.6 · high")).toBeInTheDocument();
+    expect(within(effortDetail).getByText("统计范围")).toBeInTheDocument();
+    expect(within(effortDetail).getByText("今日")).toBeInTheDocument();
+    expect(within(effortDetail).getByText("该模型加权占比")).toBeInTheDocument();
+    expect(within(effortDetail).getByText("100%")).toBeInTheDocument();
+    expect(within(effortDetail).getByText("加权 Token")).toBeInTheDocument();
+    expect(within(effortDetail).getByText("180")).toBeInTheDocument();
+    await user.unhover(effortSegment);
     await user.click(screen.getByRole("button", { name: "收起使用明细" }));
     expect(screen.queryByText("gpt-5.6")).not.toBeInTheDocument();
 
@@ -374,7 +387,9 @@ describe("UsageDashboard", () => {
     renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
 
     expect(await screen.findByRole("heading", { name: "每日用量趋势" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "展开每日用量趋势" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "查看每日用量趋势" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /^展开$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^收起$/ })).not.toBeInTheDocument();
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toEqual([
       "/usage/me/usage-trend?window=30d&dimension=total"
     ]));
@@ -398,7 +413,7 @@ describe("UsageDashboard", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
 
     expect(screen.queryByLabelText("趋势图例")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "展开账号明细" }));
+    await user.click(screen.getByRole("button", { name: "查看账号明细" }));
     expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
     expect(screen.getByText("7天")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /CPA 账号/ })).toBeInTheDocument();
@@ -406,11 +421,11 @@ describe("UsageDashboard", () => {
     await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
     expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
     const beforeExpand = requestPaths(fetchMock, "/usage/me/usage-trend?").length;
-    await user.click(screen.getByRole("button", { name: "展开每日用量趋势" }));
+    await user.click(screen.getByRole("button", { name: "查看每日用量趋势" }));
     expect(await screen.findByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeInTheDocument();
     expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toHaveLength(beforeExpand);
     expect(screen.getByRole("button", { name: "模型 + 推理强度" })).toHaveAttribute("aria-pressed", "true");
-    await user.click(screen.getByRole("button", { name: "展开账号明细" }));
+    await user.click(screen.getByRole("button", { name: "查看账号明细" }));
     expect(screen.getByRole("button", { name: "7 天" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("gpt-5.6")).toBeInTheDocument();
   });

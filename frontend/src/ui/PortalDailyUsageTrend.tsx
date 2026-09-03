@@ -46,11 +46,9 @@ const directCombinationLimit = 9;
 
 export function PortalDailyUsageTrend({
   expanded,
-  onExpandedChange,
   onSessionExpired
 }: {
   expanded: boolean;
-  onExpandedChange: (expanded: boolean) => void;
   onSessionExpired: () => void;
 }) {
   const [window, setWindow] = useState<PortalUsageTrendWindow>("30d");
@@ -108,9 +106,6 @@ export function PortalDailyUsageTrend({
               ))}
             </div>
           ) : <strong className="usage-trend-current-window">{trendWindowLabel(window)}</strong>}
-          <button className="usage-trend-collapse" type="button" aria-expanded={expanded} aria-controls="usage-trend-body" onClick={() => onExpandedChange(!expanded)}>
-            {expanded ? "收起" : "展开"}<span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
-          </button>
         </div>
       </header>
 

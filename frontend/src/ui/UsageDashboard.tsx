@@ -255,7 +255,6 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       <div className={`usage-detail-sections ${primarySection === "trend" ? "trend-primary" : "accounts-primary"}`}>
         <PortalDailyUsageTrend
           expanded={primarySection === "trend"}
-          onExpandedChange={(next) => setPrimarySection(next ? "trend" : "accounts")}
           onSessionExpired={onSessionExpired}
         />
 
@@ -317,11 +316,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
           </NativeTableViewport>
         ) : null}
       </section>
-
-        <nav className="usage-section-switcher" aria-label="切换主要内容区域">
-          <Button type="text" icon={<ArrowUpOutlined aria-hidden="true" />} aria-label="展开每日用量趋势" aria-pressed={primarySection === "trend"} onClick={() => setPrimarySection("trend")} />
-          <Button type="text" icon={<ArrowDownOutlined aria-hidden="true" />} aria-label="展开账号明细" aria-pressed={primarySection === "accounts"} onClick={() => setPrimarySection("accounts")} />
-        </nav>
+        <UsageSectionSwitcher section={primarySection} onChange={setPrimarySection} />
       </div>
 
       <Modal title={`切换到 ${switchTarget ? accountLabel(switchTarget) : "目标账号"}`} open={Boolean(switchTarget)} okText="确认切换" cancelText="取消" confirmLoading={accountSwitch.isPending} onCancel={() => !accountSwitch.isPending && setSwitchTarget(null)} onOk={() => switchTarget && accountSwitch.mutate(switchTarget)} destroyOnHidden>
@@ -362,6 +357,15 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   );
 }
 
+function UsageSectionSwitcher({ section, onChange }: { section: PrimarySection; onChange: (section: PrimarySection) => void }) {
+  return (
+    <nav className="usage-section-switcher" aria-label="切换主要内容区域">
+      <Button type="text" icon={<ArrowUpOutlined aria-hidden="true" />} aria-pressed={section === "trend"} onClick={() => onChange("trend")}><span className="sr-only">查看每日用量趋势</span></Button>
+      <Button type="text" icon={<ArrowDownOutlined aria-hidden="true" />} aria-pressed={section === "accounts"} onClick={() => onChange("accounts")}><span className="sr-only">查看账号明细</span></Button>
+    </nav>
+  );
+}
+
 function CurrentAccountSummary({ account, loading }: { account?: PortalAccount; loading: boolean }) {
   const used = account ? accountUsedPercent(account) : 0;
   const remaining = account?.status.remaining_percent ?? (account ? Math.max(0, 100 - used) : 0);
@@ -369,7 +373,7 @@ function CurrentAccountSummary({ account, loading }: { account?: PortalAccount; 
     <div className="usage-current-account" aria-labelledby="current-account-label">
       <div className="usage-current-account-head">
         <span className="usage-current-account-label" id="current-account-label">当前账号</span>
-        {loading && !account ? <span className="usage-status degraded">读取中</span> : account ? <StatusTag account={account} /> : <span className="usage-status degraded">待选择</span>}
+        {loading && !account ? <span className="usage-status usage-summary-tag degraded">读取中</span> : account ? <StatusTag account={account} summary /> : <span className="usage-status usage-summary-tag degraded">待选择</span>}
       </div>
       <strong className="usage-current-account-name" title={account ? accountLabel(account) : undefined}>{account ? accountLabel(account) : loading ? "正在读取" : "尚未选择"}</strong>
       <div className={`usage-current-quota ${used >= 100 ? "exhausted" : used >= 80 ? "warning" : ""}`.trim()}>
@@ -395,7 +399,7 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
   ) : null;
   return (
     <div className="usage-personal-overview" aria-labelledby="personal-usage-label">
-      <div className="usage-personal-overview-head"><span id="personal-usage-label">个人用量</span><small>{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
+      <div className="usage-personal-overview-head"><span id="personal-usage-label">个人用量</span><small className="usage-summary-tag">{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
       {error ? (
         <div className="usage-current-quota degraded">
           <div><span>个人周额度读取失败</span><button className="usage-inline-retry" type="button" onClick={onRetry}>重试</button></div>
@@ -498,7 +502,7 @@ function UsageBreakdownRow({ account, window }: { account: PortalAccount; window
           </div>
           <section className="account-model-usage" aria-label="我的模型与推理强度 Token 明细">
             <div className="account-model-usage-title"><span>我的模型 × 推理强度 Token 明细</span><small>{windowLabel(window)}</small></div>
-            {query.isError ? <div className="account-model-usage-message error" role="alert"><span>{errorMessage(query.error)}</span><button className="usage-breakdown-retry" type="button" onClick={() => void query.refetch()}>重试</button></div> : query.data ? <ModelBreakdown data={query.data} /> : <div className="account-model-usage-skeleton" aria-label="正在加载我的模型 Token 明细"><span /><span /></div>}
+            {query.isError ? <div className="account-model-usage-message error" role="alert"><span>{errorMessage(query.error)}</span><button className="usage-breakdown-retry" type="button" onClick={() => void query.refetch()}>重试</button></div> : query.data ? <ModelBreakdown data={query.data} window={window} /> : <div className="account-model-usage-skeleton" aria-label="正在加载我的模型 Token 明细"><span /><span /></div>}
           </section>
         </div>
       </td>
@@ -540,7 +544,7 @@ function formatQuotaToken(value: number) {
   return `${formatTokenAmount(value)} Token`;
 }
 
-function ModelBreakdown({ data }: { data: UsageBreakdown }) {
+function ModelBreakdown({ data, window }: { data: UsageBreakdown; window: PortalUsageWindow }) {
   const models = groupModelCombinations(data.combinations);
   if (models.length === 0) return <div className="account-model-usage-message">当前范围暂无我的模型与推理强度 Token 数据。</div>;
   return (
@@ -550,9 +554,17 @@ function ModelBreakdown({ data }: { data: UsageBreakdown }) {
           <div className="account-model-usage-head"><strong title={model.name}>{model.name}</strong><span>{formatTokens(model.total)}</span></div>
           <div className="account-model-progress" role="group" aria-label={`${model.name} 各推理强度 Token 占比`}>
             {model.efforts.map((effort) => (
-              <button className={`account-model-progress-segment account-model-effort-${effortColorKey(effort.reasoning_effort)} ${effort.share < 18 ? "compact" : ""}`.trim()} style={{ flexGrow: Math.max(1, Math.round(effort.share)) }} type="button" key={effort.reasoning_effort} title={effortTooltip(model.name, effort)} aria-label={effortTooltip(model.name, effort)}>
-                <span>{effort.reasoning_effort}</span><em>{formatPercent(effort.share)}</em>
-              </button>
+              <Tooltip
+                key={effort.reasoning_effort}
+                title={<ModelEffortTooltip model={model.name} effort={effort} window={window} />}
+                trigger={["hover", "focus"]}
+                placement="top"
+                rootClassName="usage-model-effort-popup"
+              >
+                <button className={`account-model-progress-segment account-model-effort-${effortColorKey(effort.reasoning_effort)} ${effort.share < 18 ? "compact" : ""}`.trim()} style={{ flexGrow: Math.max(1, Math.round(effort.share)) }} type="button" aria-label={`查看 ${model.name} ${effort.reasoning_effort} 推理强度 Token 明细`}>
+                  <span>{effort.reasoning_effort}</span><em>{formatPercent(effort.share)}</em>
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>
@@ -570,8 +582,21 @@ function groupModelCombinations(combinations: UsageCombination[]) {
   }).sort((left, right) => right.total - left.total || left.name.localeCompare(right.name));
 }
 
-function effortTooltip(model: string, effort: UsageCombination & { share: number }) {
-  return [`${model} · ${effort.reasoning_effort}`, `调用：${formatNumber(effort.request_count)}`, `输入：${formatNumber(effort.input_tokens)}`, `输出：${formatNumber(effort.output_tokens)}`, `推理：${formatNumber(effort.reasoning_tokens)}`, `缓存：${formatNumber(effort.cached_tokens)}`, `总 Token：${formatNumber(effort.total_tokens)}`, `加权 Token：${formatNumber(effort.weighted_tokens ?? effort.total_tokens)}`].join("，");
+function ModelEffortTooltip({ model, effort, window }: { model: string; effort: UsageCombination & { share: number }; window: PortalUsageWindow }) {
+  return (
+    <div className="usage-model-effort-tooltip">
+      <strong>{model} · {effort.reasoning_effort}</strong>
+      <span><b>统计范围</b><em>{windowLabel(window)}</em></span>
+      <span><b>该模型加权占比</b><em>{formatPercent(effort.share)}</em></span>
+      <span><b>调用</b><em>{formatNumber(effort.request_count)}</em></span>
+      <span><b>输入 Token</b><em>{formatNumber(effort.input_tokens)}</em></span>
+      <span><b>输出 Token</b><em>{formatNumber(effort.output_tokens)}</em></span>
+      <span><b>推理 Token</b><em>{formatNumber(effort.reasoning_tokens)}</em></span>
+      <span><b>缓存 Token</b><em>{formatNumber(effort.cached_tokens)}</em></span>
+      <span><b>未加权 Token</b><em>{formatNumber(effort.total_tokens)}</em></span>
+      <span><b>加权 Token</b><em>{formatNumber(effort.weighted_tokens ?? effort.total_tokens)}</em></span>
+    </div>
+  );
 }
 
 function TokenPair({ metrics }: { metrics: UsageMetrics }) {
@@ -592,9 +617,9 @@ function TokenValue({ value }: { value: number }) {
   );
 }
 
-function StatusTag({ account }: { account: PortalAccount }) {
+function StatusTag({ account, summary = false }: { account: PortalAccount; summary?: boolean }) {
   const className = account.status.tone === "success" ? "available" : account.status.tone === "warning" ? "warning" : account.status.tone === "danger" ? "unavailable" : "degraded";
-  return <span className={`usage-status ${className}`} title={account.status.reason}>{account.status.label}</span>;
+  return <span className={`usage-status ${summary ? "usage-summary-tag " : ""}${className}`} title={account.status.reason}>{account.status.label}</span>;
 }
 
 function UsageTableSkeleton() {

@@ -362,7 +362,7 @@ for (const state of ["loading", "empty", "error"] as const) {
     const page = await context.newPage();
     await installUsageVisualBackend(page, state);
     await page.goto("/usage/");
-    await page.getByRole("button", { name: "展开账号明细" }).click();
+    await page.getByRole("button", { name: "查看账号明细" }).click();
     if (state === "loading") await expect(page.locator(".usage-skeleton-row").first()).toBeVisible();
     if (state === "empty") await expect(page.getByText("暂无可用账号", { exact: true })).toBeVisible();
     if (state === "error") await expect(page.getByText("账号与用量加载失败", { exact: true })).toBeVisible();
@@ -388,19 +388,37 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   const trendCardRect = await page.locator(".usage-trend-card").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - trendCardRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - trendCardRect.right)).toBeLessThanOrEqual(1);
+  const summaryTags = await page.locator(".usage-current-account-head .usage-summary-tag, .usage-personal-overview-head .usage-summary-tag").evaluateAll((tags) => tags.map((tag) => {
+    const style = getComputedStyle(tag);
+    const rect = tag.getBoundingClientRect();
+    return {
+      height: rect.height,
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      paddingTop: style.paddingTop,
+      paddingBottom: style.paddingBottom,
+      borderRadius: style.borderRadius,
+      alignItems: style.alignItems
+    };
+  }));
+  expect(summaryTags).toHaveLength(2);
+  expect(summaryTags[0]).toEqual(summaryTags[1]);
   const sectionButtons = await page.locator(".usage-section-switcher button").evaluateAll((buttons) => buttons.map((button) => {
     const rect = button.getBoundingClientRect();
-    return { top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height, borderRadius: getComputedStyle(button).borderRadius };
+    return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height, borderRadius: getComputedStyle(button).borderRadius };
   }));
   expect(sectionButtons).toHaveLength(2);
   expect(Math.abs(sectionButtons[0].width - sectionButtons[0].height)).toBeLessThanOrEqual(1);
   expect(Math.abs(sectionButtons[1].width - sectionButtons[1].height)).toBeLessThanOrEqual(1);
   expect(sectionButtons[1].top - sectionButtons[0].bottom).toBeGreaterThanOrEqual(7);
   expect(sectionButtons.map((button) => button.borderRadius)).toEqual(["50%", "50%"]);
+  expect(Math.abs((sectionButtons[0].left + sectionButtons[0].right) / 2 - trendCardRect.right)).toBeLessThanOrEqual(1);
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
-  await expect(page.getByRole("button", { name: "展开每日用量趋势" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "查看每日用量趋势" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "展开", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "收起", exact: true })).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toHaveCount(0);
   await expect(page.getByLabel("趋势图例")).toHaveCount(0);
   await page.getByRole("button", { name: "7天", exact: true }).click();
@@ -464,12 +482,28 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   expect(tooltipRect.top).toBeGreaterThanOrEqual(0);
   expect(tooltipRect.bottom).toBeLessThanOrEqual(900);
   await expect(tooltip).toHaveScreenshot("react-usage-trend-tooltip-model-reasoning.png");
-  await page.getByRole("button", { name: "展开账号明细" }).click();
+  await page.getByRole("button", { name: "查看账号明细" }).click();
   await expect(chart).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();
   const accountFrameRect = await page.locator(".usage-table-wrap").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - accountFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - accountFrameRect.right)).toBeLessThanOrEqual(1);
+  const accountSwitcherCenter = await page.locator(".usage-section-switcher button").first().evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left + rect.width / 2;
+  });
+  expect(Math.abs(accountSwitcherCenter - accountFrameRect.right)).toBeLessThanOrEqual(1);
+  await page.getByRole("button", { name: "使用明细" }).click();
+  const compactEffort = page.getByRole("button", { name: "查看 gpt-5.6-sol max 推理强度 Token 明细" });
+  await compactEffort.hover();
+  const effortTooltip = page.locator(".usage-model-effort-tooltip");
+  await expect(effortTooltip).toBeVisible();
+  await expect(effortTooltip).toContainText("gpt-5.6-sol · max");
+  await expect(effortTooltip).toContainText("该模型加权占比0.5%");
+  await expect(effortTooltip).toContainText("加权 Token652,500");
+  const effortPopup = page.locator(".ant-tooltip:has(.usage-model-effort-tooltip)");
+  await expect(effortPopup.getByRole("tooltip")).toHaveCSS("background-color", "rgb(23, 29, 43)");
+  await expect(effortPopup).toHaveScreenshot("react-usage-model-effort-tooltip.png");
 });
 
 test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
@@ -478,7 +512,10 @@ test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
-  await page.getByRole("button", { name: "展开账号明细" }).click();
+  await page.getByRole("button", { name: "查看账号明细" }).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(page.locator(".ant-tooltip")).toHaveCount(0);
   await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toHaveCount(0);
   await expect(page.getByText("账号明细", { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot("react-usage-trend-collapsed-desktop-light.png", { fullPage: false });
@@ -501,7 +538,7 @@ test("个人使用中心移动端可滚动到账号明细", async ({ page }) => 
   await setTheme(page, "light");
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
-  await page.getByRole("button", { name: "展开账号明细" }).click();
+  await page.getByRole("button", { name: "查看账号明细" }).click();
 
   const header = page.locator(".usage-center-head");
   const content = page.locator(".usage-center-content");
@@ -1336,6 +1373,67 @@ function usageQuotaFixture() {
   };
 }
 
+function usageBreakdownFixture(window: string, account: string) {
+  const totals = {
+    request_count: 916,
+    success_count: 915,
+    failed_count: 1,
+    input_tokens: 129_700_000,
+    output_tokens: 485_000,
+    reasoning_tokens: 238_000,
+    cached_tokens: 121_000_000,
+    total_tokens: 130_153_327,
+    weighted_tokens: 130_500_000,
+    last_used_at: 1_787_500_700
+  };
+  const xhigh = {
+    request_count: 911,
+    success_count: 910,
+    failed_count: 1,
+    input_tokens: 129_080_000,
+    output_tokens: 465_000,
+    reasoning_tokens: 225_500,
+    cached_tokens: 120_500_000,
+    total_tokens: 129_513_327,
+    weighted_tokens: 129_847_500,
+    last_used_at: 1_787_500_700
+  };
+  const maximum = {
+    request_count: 5,
+    success_count: 5,
+    failed_count: 0,
+    input_tokens: 620_000,
+    output_tokens: 20_000,
+    reasoning_tokens: 12_500,
+    cached_tokens: 500_000,
+    total_tokens: 640_000,
+    weighted_tokens: 652_500,
+    last_used_at: 1_787_500_600
+  };
+  return {
+    generated_at: 1_787_500_800,
+    window,
+    window_seconds: 86_400,
+    window_start_at: 1_787_472_000,
+    window_end_at: 1_787_500_800,
+    collection_started_at: 1_787_472_000,
+    effective_start_at: 1_787_472_000,
+    definition: "视觉回归账号明细",
+    account,
+    user: "alice@example.com",
+    totals,
+    models: [{ model: "gpt-5.6-sol", ...totals }],
+    reasoning_efforts: [
+      { reasoning_effort: "xhigh", ...xhigh },
+      { reasoning_effort: "max", ...maximum }
+    ],
+    combinations: [
+      { account, model: "gpt-5.6-sol", reasoning_effort: "xhigh", ...xhigh },
+      { account, model: "gpt-5.6-sol", reasoning_effort: "max", ...maximum }
+    ]
+  };
+}
+
 function usageTrendFixture(window: string, dimension: string) {
   const windowDays = window === "7d" ? 7 : window === "90d" ? 90 : 30;
   const end = Date.UTC(2026, 7, 29) / 1000;
@@ -1432,6 +1530,13 @@ async function installUsageVisualBackend(page: Page, state: "normal" | "loading"
       await fulfillJSON(route, usageTrendFixture(
         url.searchParams.get("window") ?? "30d",
         url.searchParams.get("dimension") ?? "total"
+      ));
+      return;
+    }
+    if (path === "/usage/me/usage-breakdown") {
+      await fulfillJSON(route, usageBreakdownFixture(
+        url.searchParams.get("window") ?? "today",
+        url.searchParams.get("account") ?? "alpha"
       ));
       return;
     }

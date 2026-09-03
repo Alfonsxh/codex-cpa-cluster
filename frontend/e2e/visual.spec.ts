@@ -371,7 +371,7 @@ for (const state of ["loading", "empty", "error"] as const) {
   });
 }
 
-test("个人使用中心每日趋势默认展开，按范围和组合维度独立请求并可切换", async ({ page }) => {
+test("个人使用中心每日用量默认展开，图表撑满内容区并可切换", async ({ page }) => {
   await page.setViewportSize({ width: 1086, height: 900 });
   await setTheme(page, "light");
   const trendRequests: string[] = [];
@@ -388,6 +388,10 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   const detailFrameRect = await page.locator(".usage-detail-sections").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - detailFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - detailFrameRect.right)).toBeLessThanOrEqual(1);
+  const chartCanvasRect = await page.locator(".usage-trend-chart-canvas").evaluate((element) => element.getBoundingClientRect().toJSON());
+  expect(chartCanvasRect.height).toBeGreaterThan(300);
+  expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeGreaterThanOrEqual(0);
+  expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeLessThanOrEqual(16);
   const summaryTags = await page.locator(".usage-current-account-head .usage-summary-tag, .usage-personal-overview-head .usage-summary-tag").evaluateAll((tags) => tags.map((tag) => {
     const style = getComputedStyle(tag);
     const rect = tag.getBoundingClientRect();
@@ -423,7 +427,7 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
-  await expect(page.getByRole("tab", { name: "每日用量趋势" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("button", { name: "展开", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "收起", exact: true })).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toHaveCount(0);
@@ -504,6 +508,25 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
     return Boolean(navigation && action.top >= navigation.top && action.bottom <= navigation.bottom && action.right <= navigation.right);
   })).toBe(true);
   await page.getByRole("button", { name: "使用明细" }).click();
+  const detailMetricsLayout = await page.locator(".usage-detail-panel").evaluate((panel) => {
+    const heading = panel.querySelector<HTMLElement>(".usage-detail-heading");
+    const cacheHead = panel.querySelector<HTMLElement>(".usage-cache-head");
+    const cacheLabel = cacheHead?.querySelector<HTMLElement>("span");
+    const cacheRate = cacheHead?.querySelector<HTMLElement>("small");
+    if (!heading || !cacheHead || !cacheLabel || !cacheRate) return null;
+    const headingRect = heading.getBoundingClientRect();
+    const cacheRect = cacheHead.getBoundingClientRect();
+    const rateRect = cacheRate.getBoundingClientRect();
+    return {
+      headingWidth: headingRect.width,
+      labelClipped: cacheLabel.scrollWidth > cacheLabel.clientWidth,
+      rateInside: rateRect.left >= cacheRect.left && rateRect.right <= cacheRect.right
+    };
+  });
+  expect(detailMetricsLayout).not.toBeNull();
+  expect(detailMetricsLayout?.headingWidth).toBeLessThanOrEqual(130);
+  expect(detailMetricsLayout?.labelClipped).toBe(false);
+  expect(detailMetricsLayout?.rateInside).toBe(true);
   const compactEffort = page.getByRole("button", { name: "查看 gpt-5.6-sol max 推理强度 Token 明细" });
   await compactEffort.hover();
   const effortTooltip = page.locator(".usage-model-effort-tooltip");
@@ -633,7 +656,7 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
     await page.goto("http://127.0.0.1:5194/usage/");
 
     for (const section of ["trend", "accounts"] as const) {
-      await page.getByRole("tab", { name: section === "trend" ? "每日用量趋势" : "账号明细" }).click();
+      await page.getByRole("tab", { name: section === "trend" ? "每日用量" : "账号明细" }).click();
       const surface = page.locator(".usage-detail-sections");
       await expect(surface).toBeVisible();
       const geometry = await page.evaluate(() => {
@@ -664,7 +687,7 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
       expect(geometry.tabs[1].left).toBeGreaterThanOrEqual(geometry.tabs[0].right);
       expect(geometry.tabs.every((tab) => tab.left >= geometry.contentLeft && tab.right <= geometry.contentRight)).toBe(true);
       expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
-      await expect(page.getByRole("tab", { name: section === "trend" ? "每日用量趋势" : "账号明细" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByRole("tab", { name: section === "trend" ? "每日用量" : "账号明细" })).toHaveAttribute("aria-selected", "true");
       await expect(page.locator(viewport.width <= 900
         ? `.usage-mobile-panel-actions.${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`
         : `.ant-tabs-extra-content .${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`)).toBeVisible();

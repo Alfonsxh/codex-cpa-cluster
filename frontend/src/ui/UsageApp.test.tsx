@@ -386,7 +386,7 @@ describe("UsageDashboard", () => {
     const user = userEvent.setup();
     renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
 
-    expect(await screen.findByRole("tab", { name: "每日用量趋势" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "false");
     expect(screen.queryByRole("button", { name: /^展开$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^收起$/ })).not.toBeInTheDocument();
@@ -420,7 +420,7 @@ describe("UsageDashboard", () => {
     await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
     expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
     const beforeExpand = requestPaths(fetchMock, "/usage/me/usage-trend?").length;
-    await user.click(screen.getByRole("tab", { name: "每日用量趋势" }));
+    await user.click(screen.getByRole("tab", { name: "每日用量" }));
     expect(await screen.findByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeInTheDocument();
     expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toHaveLength(beforeExpand);
     expect(screen.getByRole("button", { name: "模型 + 推理强度" })).toHaveAttribute("aria-pressed", "true");

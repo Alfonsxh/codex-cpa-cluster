@@ -75,7 +75,7 @@ export function PortalDailyUsageTrend({
   const partial = Boolean(query.data?.days.some((day) => day.collection_state !== "complete"));
 
   return (
-    <section className={`usage-trend-card${expanded ? "" : " collapsed"}`} aria-label="每日用量趋势">
+    <section className={`usage-trend-card${expanded ? "" : " collapsed"}`} aria-label="每日用量">
       <header className="usage-trend-header">
         <div className="usage-trend-heading">
           <div className="usage-trend-dimensions" role="group" aria-label="趋势统计维度">
@@ -101,7 +101,7 @@ export function PortalDailyUsageTrend({
           {query.isPending ? <TrendSkeleton /> : null}
           {query.isError ? (
             <div className="usage-trend-state error" role="alert">
-              <span><strong>每日用量趋势加载失败</strong> · {errorMessage(query.error)}</span>
+              <span><strong>每日用量加载失败</strong> · {errorMessage(query.error)}</span>
               <button type="button" onClick={() => void query.refetch()}>重试</button>
             </div>
           ) : null}
@@ -122,7 +122,7 @@ export function PortalDailyUsageTrend({
 
 function TrendSkeleton() {
   return (
-    <div className="usage-trend-skeleton" aria-label="正在加载每日用量趋势">
+    <div className="usage-trend-skeleton" aria-label="正在加载每日用量">
       <span /><span /><span /><span />
     </div>
   );

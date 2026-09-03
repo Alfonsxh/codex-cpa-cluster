@@ -281,7 +281,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
           items={[
             {
               key: "trend",
-              label: <span className="usage-primary-tab-label"><span className="usage-primary-tab-dot" aria-hidden="true" />每日用量趋势</span>,
+              label: <span className="usage-primary-tab-label"><span className="usage-primary-tab-dot" aria-hidden="true" />每日用量</span>,
               children: (
                 <>
                   {compactTabs ? <TrendWindowControl className="usage-mobile-panel-actions" window={trendWindow} onChange={setTrendWindow} /> : null}

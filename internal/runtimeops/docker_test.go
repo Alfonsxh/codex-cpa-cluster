@@ -149,9 +149,6 @@ func TestReadOnlyDockerClientCannotExposeMutationInterfaces(t *testing.T) {
 	if _, ok := candidate.(AccountLifecycleDockerClient); ok {
 		t.Fatal("read-only Docker client unexpectedly implements account lifecycle operations")
 	}
-	if _, ok := candidate.(releaseDockerClient); ok {
-		t.Fatal("read-only Docker client unexpectedly implements image pull operations")
-	}
 	if _, ok := candidate.(imageDockerClient); !ok {
 		t.Fatal("read-only Docker client must retain image inspection")
 	}

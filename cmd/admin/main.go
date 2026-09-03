@@ -436,7 +436,7 @@ func runOwnedAdmin(
 		Users:                userManager,
 		Runtime:              runtimeManager,
 		Images:               runtimeManager,
-		Release:              runtimeManager,
+		Release:              adminapi.NewGitHubReleaseCatalog(nil),
 		RuntimeJobs:          runtimeJobs,
 		AccountLifecycle:     accountManager,
 		QuotaResetter:        quotaResetter,

@@ -176,8 +176,7 @@ type Server struct {
 	configurationApplier    ConfigurationApplier
 	configurationLock       sync.Locker
 	releaseStatusMu         sync.Mutex
-	releaseStatusCache      *releaseMetadataStatus
-	releaseStatusCacheKey   string
+	releaseStatusCache      *releaseLookupStatus
 	releaseStatusCacheUntil time.Time
 	sessionGeneration       atomic.Int64
 	router                  *gin.Engine
@@ -393,7 +392,6 @@ func (server *Server) registerRoutes() {
 func (server *Server) clearConfigurationCaches() {
 	server.releaseStatusMu.Lock()
 	server.releaseStatusCache = nil
-	server.releaseStatusCacheKey = ""
 	server.releaseStatusCacheUntil = time.Time{}
 	server.releaseStatusMu.Unlock()
 }

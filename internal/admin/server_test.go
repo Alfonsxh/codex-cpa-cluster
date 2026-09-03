@@ -295,7 +295,7 @@ func TestAdminOverviewUsageSinceResetUsesOfficialQuotaPeriods(t *testing.T) {
 	}
 }
 
-func TestAdminReleaseStatusUsesDeploymentMarkerDefaultChannelAndFreshBypassesCache(t *testing.T) {
+func TestAdminReleaseStatusUsesDeploymentMarkerAndFreshBypassesCache(t *testing.T) {
 	base, store := newTestAdmin(t)
 	base.Close()
 	root := t.TempDir()
@@ -303,11 +303,12 @@ func TestAdminReleaseStatusUsesDeploymentMarkerDefaultChannelAndFreshBypassesCac
 	if err := os.WriteFile(marker, []byte("version=v1.1.0\n"), 0o600); err != nil {
 		t.Fatalf("write deployment marker: %v", err)
 	}
-	release := &fakeReleaseCatalog{labels: map[string]string{
-		"io.codex-cpa.component":            "release",
-		"org.opencontainers.image.version":  "v1.2.0",
-		"org.opencontainers.image.revision": strings.Repeat("a", 80),
-	}}
+	if err := store.UpdateSettings(context.Background(), map[string]any{
+		"delivery.release_metadata_image": "",
+	}); err != nil {
+		t.Fatalf("write retired release image setting: %v", err)
+	}
+	release := &fakeReleaseCatalog{version: "v1.2.0"}
 	server, err := New(Config{
 		Root: root, Store: store, Release: release, Now: func() time.Time { return time.Unix(2_000_000, 0) },
 	})
@@ -317,7 +318,7 @@ func TestAdminReleaseStatusUsesDeploymentMarkerDefaultChannelAndFreshBypassesCac
 	t.Cleanup(server.Close)
 	first, err := server.releaseStatus(context.Background(), false)
 	if err != nil || !first.Configured || first.CurrentVersion != "v1.1.0" || !first.Available ||
-		first.LatestVersion != "v1.2.0" || first.Status != "ok" || len(first.LatestRevision) != 64 {
+		first.LatestVersion != "v1.2.0" || first.Status != "ok" {
 		t.Fatalf("first release status = %#v, err=%v", first, err)
 	}
 	if _, err := server.releaseStatus(context.Background(), false); err != nil {
@@ -336,9 +337,8 @@ func TestAdminReleaseStatusUsesDeploymentMarkerDefaultChannelAndFreshBypassesCac
 	if _, err := server.releaseStatus(context.Background(), true); err != nil {
 		t.Fatalf("force release refresh: %v", err)
 	}
-	if release.calls != 2 || len(release.images) != 2 ||
-		release.images[0] != defaultReleaseMetadataImage || release.images[1] != defaultReleaseMetadataImage {
-		t.Fatalf("release metadata calls = %d, images = %#v", release.calls, release.images)
+	if release.calls != 2 {
+		t.Fatalf("GitHub Release calls = %d", release.calls)
 	}
 	if normalizedSemver("v1.2.0-rc.2") == "" || normalizedSemver("v1.2.0-rc.01") != "" {
 		t.Fatal("release semver validation does not match strict prerelease ordering")
@@ -353,43 +353,27 @@ func TestAdminReleaseStatusSupportsLegacyFallbackDisabledAndFailureStates(t *tes
 	}); err != nil {
 		t.Fatalf("write deployment state: %v", err)
 	}
-	if err := store.UpdateSettings(context.Background(), map[string]any{
-		"delivery.release_metadata_image": "",
-	}); err != nil {
-		t.Fatalf("disable release checks: %v", err)
+	disabledServer, err := New(Config{Root: t.TempDir(), Store: store})
+	if err != nil {
+		t.Fatalf("New disabled release Admin: %v", err)
 	}
-	release := &fakeReleaseCatalog{err: errors.New("registry unavailable")}
+	t.Cleanup(disabledServer.Close)
+	disabled, err := disabledServer.releaseStatus(context.Background(), true)
+	if err != nil || disabled.Configured || disabled.CurrentVersion != "v1.1.0" ||
+		disabled.Status != "disabled" || disabled.CheckedAt != 0 {
+		t.Fatalf("disabled release status = %#v, err=%v", disabled, err)
+	}
+
+	release := &fakeReleaseCatalog{err: errors.New("GitHub unavailable")}
 	server, err := New(Config{Root: t.TempDir(), Store: store, Release: release})
 	if err != nil {
 		t.Fatalf("New release Admin: %v", err)
 	}
 	t.Cleanup(server.Close)
-	disabled, err := server.releaseStatus(context.Background(), true)
-	if err != nil || disabled.Configured || disabled.CurrentVersion != "v1.1.0" ||
-		disabled.Status != "disabled" || disabled.CheckedAt != 0 || release.calls != 0 {
-		t.Fatalf("disabled release status = %#v, calls=%d, err=%v", disabled, release.calls, err)
-	}
-
-	if err := store.UpdateSettings(context.Background(), map[string]any{
-		"delivery.release_metadata_image": defaultReleaseMetadataImage,
-	}); err != nil {
-		t.Fatalf("enable release checks: %v", err)
-	}
 	unavailable, err := server.releaseStatus(context.Background(), true)
 	if err != nil || !unavailable.Configured || unavailable.CurrentVersion != "v1.1.0" ||
 		unavailable.Status != "unavailable" || unavailable.CheckedAt == 0 || release.calls != 1 {
 		t.Fatalf("unavailable release status = %#v, calls=%d, err=%v", unavailable, release.calls, err)
-	}
-
-	if err := store.UpdateSettings(context.Background(), map[string]any{
-		"delivery.release_metadata_image": 42,
-	}); err != nil {
-		t.Fatalf("write invalid release setting: %v", err)
-	}
-	invalid, err := server.releaseStatus(context.Background(), true)
-	if err != nil || invalid.Status != "invalid_configuration" || invalid.CurrentVersion != "v1.1.0" ||
-		release.calls != 1 {
-		t.Fatalf("invalid release status = %#v, calls=%d, err=%v", invalid, release.calls, err)
 	}
 }
 
@@ -405,10 +389,7 @@ func TestAdminReleaseStatusRejectsInvalidMarkerWithoutReportingStaleFallback(t *
 	if err := os.WriteFile(filepath.Join(root, deploymentVersionMarker), []byte("version=not-semver\n"), 0o600); err != nil {
 		t.Fatalf("write invalid marker: %v", err)
 	}
-	release := &fakeReleaseCatalog{labels: map[string]string{
-		"io.codex-cpa.component":           "release",
-		"org.opencontainers.image.version": "v10.0.0",
-	}}
+	release := &fakeReleaseCatalog{version: "v10.0.0"}
 	server, err := New(Config{Root: root, Store: store, Release: release})
 	if err != nil {
 		t.Fatalf("New release Admin: %v", err)
@@ -2654,16 +2635,14 @@ type fakeUsageReader struct {
 }
 
 type fakeReleaseCatalog struct {
-	labels map[string]string
-	err    error
-	calls  int
-	images []string
+	version string
+	err     error
+	calls   int
 }
 
-func (catalog *fakeReleaseCatalog) PullReleaseMetadata(_ context.Context, image string) (map[string]string, error) {
+func (catalog *fakeReleaseCatalog) LatestRelease(_ context.Context) (string, error) {
 	catalog.calls++
-	catalog.images = append(catalog.images, image)
-	return catalog.labels, catalog.err
+	return catalog.version, catalog.err
 }
 
 func (reader *fakeUsageReader) TokenTimeSeries(

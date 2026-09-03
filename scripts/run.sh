@@ -589,6 +589,269 @@ validate_version() {
   printf '%s' "$1" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
 }
 
+extract_github_release_tags() {
+  LC_ALL=C awk '
+    {
+      remaining = $0
+      while (match(remaining, /"tag_name"[[:space:]]*:[[:space:]]*"/)) {
+        remaining = substr(remaining, RSTART + RLENGTH)
+        closing_quote = index(remaining, "\"")
+        if (closing_quote == 0) {
+          break
+        }
+        print substr(remaining, 1, closing_quote - 1)
+        remaining = substr(remaining, closing_quote + 1)
+      }
+    }
+  '
+}
+
+github_releases_response_kind() {
+  LC_ALL=C awk '
+    { content = content $0 }
+    END {
+      gsub(/[[:space:]]/, "", content)
+      if (content == "[]") {
+        print "empty"
+      } else if (substr(content, 1, 1) == "[" && substr(content, length(content), 1) == "]") {
+        print "nonempty"
+      } else {
+        exit 1
+      }
+    }
+  '
+}
+
+sort_newer_release_tags() {
+  current_version=$1
+  LC_ALL=C awk -v current="$current_version" '
+    function valid(version) {
+      return version ~ /^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$/
+    }
+    function numeric_value(value) {
+      sub(/^0+/, "", value)
+      return value == "" ? "0" : value
+    }
+    function numeric_compare(left, right, normalized_left, normalized_right) {
+      normalized_left = numeric_value(left)
+      normalized_right = numeric_value(right)
+      if (length(normalized_left) != length(normalized_right)) {
+        return length(normalized_left) < length(normalized_right) ? -1 : 1
+      }
+      if (normalized_left == normalized_right) {
+        return 0
+      }
+      return normalized_left < normalized_right ? -1 : 1
+    }
+    function core_component(version, position, body, count, parts, patch_separator) {
+      body = substr(version, 2)
+      count = split(body, parts, ".")
+      if (position == 1 || position == 2) {
+        return parts[position]
+      }
+      patch_separator = index(parts[3], "-")
+      return patch_separator == 0 ? parts[3] : substr(parts[3], 1, patch_separator - 1)
+    }
+    function prerelease(version, body, count, parts, patch_separator, value, index_value) {
+      body = substr(version, 2)
+      count = split(body, parts, ".")
+      patch_separator = index(parts[3], "-")
+      if (patch_separator > 0) {
+        value = substr(parts[3], patch_separator + 1)
+        for (index_value = 4; index_value <= count; index_value++) {
+          value = value "." parts[index_value]
+        }
+        return value
+      }
+      if (count <= 3) {
+        return ""
+      }
+      value = parts[4]
+      for (index_value = 5; index_value <= count; index_value++) {
+        value = value "." parts[index_value]
+      }
+      return value
+    }
+    function prerelease_compare(left, right, left_count, right_count, left_parts, right_parts, index_value, left_numeric, right_numeric, result) {
+      if (left == right) {
+        return 0
+      }
+      if (left == "") {
+        return 1
+      }
+      if (right == "") {
+        return -1
+      }
+      left_count = split(left, left_parts, ".")
+      right_count = split(right, right_parts, ".")
+      for (index_value = 1; index_value <= left_count && index_value <= right_count; index_value++) {
+        if (left_parts[index_value] == right_parts[index_value]) {
+          continue
+        }
+        left_numeric = left_parts[index_value] ~ /^[0-9]+$/
+        right_numeric = right_parts[index_value] ~ /^[0-9]+$/
+        if (left_numeric && right_numeric) {
+          result = numeric_compare(left_parts[index_value], right_parts[index_value])
+          if (result != 0) {
+            return result
+          }
+          continue
+        }
+        if (left_numeric != right_numeric) {
+          return left_numeric ? -1 : 1
+        }
+        return left_parts[index_value] < right_parts[index_value] ? -1 : 1
+      }
+      if (left_count == right_count) {
+        return 0
+      }
+      return left_count < right_count ? -1 : 1
+    }
+    function version_compare(left, right, position, result) {
+      for (position = 1; position <= 3; position++) {
+        result = numeric_compare(core_component(left, position), core_component(right, position))
+        if (result != 0) {
+          return result
+        }
+      }
+      return prerelease_compare(prerelease(left), prerelease(right))
+    }
+    BEGIN {
+      if (!valid(current)) {
+        exit 2
+      }
+    }
+    {
+      tag = $0
+      if (valid(tag) && version_compare(tag, current) > 0 && !seen[tag]++) {
+        tags[++tag_count] = tag
+      }
+    }
+    END {
+      for (left_index = 1; left_index <= tag_count; left_index++) {
+        for (right_index = left_index + 1; right_index <= tag_count; right_index++) {
+          comparison = version_compare(tags[left_index], tags[right_index])
+          if (comparison < 0 || (comparison == 0 && tags[left_index] < tags[right_index])) {
+            temporary = tags[left_index]
+            tags[left_index] = tags[right_index]
+            tags[right_index] = temporary
+          }
+        }
+      }
+      for (left_index = 1; left_index <= tag_count; left_index++) {
+        print tags[left_index]
+      }
+    }
+  '
+}
+
+query_github_release_tags() {
+  repository=$1
+  output_file=$2
+  printf '%s' "$repository" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
+    || die "GitHub 仓库标识无效：$repository"
+  query_directory=$(mktemp -d "${TMPDIR:-/var/tmp}/cpac-releases.XXXXXX") \
+    || die "创建 Release 查询目录失败"
+  : >"$output_file"
+  page=1
+  while [ "$page" -le 60 ]; do
+    response_file="$query_directory/releases-$page.json"
+    page_tags="$query_directory/tags-$page.txt"
+    if ! curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 \
+      -H 'Accept: application/vnd.github+json' \
+      -H 'X-GitHub-Api-Version: 2022-11-28' \
+      "https://api.github.com/repos/$repository/releases?per_page=100&page=$page" \
+      -o "$response_file"; then
+      rm -rf -- "$query_directory"
+      die "查询 GitHub Releases 失败"
+    fi
+    if ! response_kind=$(github_releases_response_kind <"$response_file"); then
+      rm -rf -- "$query_directory"
+      die "GitHub Releases 返回了无效响应"
+    fi
+    extract_github_release_tags <"$response_file" >"$page_tags"
+    release_count=$(awk 'END { print NR + 0 }' "$page_tags")
+    if [ "$response_kind" = nonempty ] && [ "$release_count" -eq 0 ]; then
+      rm -rf -- "$query_directory"
+      die "GitHub Releases 响应不包含版本信息"
+    fi
+    [ "$release_count" -gt 0 ] || break
+    awk '{ print }' "$page_tags" >>"$output_file"
+    [ "$release_count" -eq 100 ] || break
+    page=$((page + 1))
+  done
+  if [ "$page" -gt 60 ]; then
+    rm -rf -- "$query_directory"
+    die "GitHub Releases 数量超过安全查询上限"
+  fi
+  rm -rf -- "$query_directory"
+}
+
+choose_upgrade_release() {
+  deploy_root=$1
+  repository=$2
+  current_version=$(deployment_marker_version "$deploy_root/.deploy-initialized" 2>/dev/null) \
+    || die "未检测到有效的当前部署版本；请使用 --tag TAG 指定 Release，或不带 --tag 使用 Latest Release"
+  release_directory=$(mktemp -d "${TMPDIR:-/var/tmp}/cpac-release-choice.XXXXXX") \
+    || die "创建 Release 选择目录失败"
+  all_tags="$release_directory/all-tags.txt"
+  candidate_tags="$release_directory/candidates.txt"
+  ui_step "检查可升级 Release"
+  query_github_release_tags "$repository" "$all_tags"
+  if ! sort_newer_release_tags "$current_version" <"$all_tags" >"$candidate_tags"; then
+    rm -rf -- "$release_directory"
+    die "比较 Release 版本失败"
+  fi
+  candidate_count=$(awk 'END { print NR + 0 }' "$candidate_tags")
+  ui_note "当前部署  $current_version"
+  if [ "$candidate_count" -eq 0 ]; then
+    ui_done "没有比当前部署更新的 GitHub Release"
+    rm -rf -- "$release_directory"
+    return 2
+  fi
+  ui_done "发现 $candidate_count 个可升级 Release"
+  printf '\n可升级版本：\n'
+  candidate_number=0
+  while IFS= read -r candidate_tag; do
+    candidate_number=$((candidate_number + 1))
+    if [ "$candidate_number" -eq 1 ]; then
+      printf '  %d) %s  (最新)\n' "$candidate_number" "$candidate_tag"
+    else
+      printf '  %d) %s\n' "$candidate_number" "$candidate_tag"
+    fi
+  done <"$candidate_tags"
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    ui_note "非交互模式仅展示版本，不执行升级；请重新运行 --tag TAG"
+    rm -rf -- "$release_directory"
+    return 2
+  fi
+  while :; do
+    printf '\n请选择升级版本序号（q 取消）: ' >&2
+    if ! IFS= read -r selected_number; then
+      ui_note "未读取到选择，已取消升级"
+      rm -rf -- "$release_directory"
+      return 2
+    fi
+    case "$selected_number" in
+      q|Q)
+        ui_note "已取消升级"
+        rm -rf -- "$release_directory"
+        return 2
+        ;;
+      ''|*[!0-9]*) ui_error "请输入 1 到 $candidate_count 的序号，或输入 q 取消" ;;
+      *)
+        if [ "$selected_number" -ge 1 ] && [ "$selected_number" -le "$candidate_count" ]; then
+          SELECTED_RELEASE_TAG=$(awk -v line="$selected_number" 'NR == line { print; exit }' "$candidate_tags")
+          rm -rf -- "$release_directory"
+          ui_done "已选择 $SELECTED_RELEASE_TAG"
+          return 0
+        fi
+        ui_error "请输入 1 到 $candidate_count 的序号，或输入 q 取消"
+        ;;
+    esac
+  done
+}
+
 release_value() {
   release_file=$1
   release_key=$2
@@ -647,17 +910,17 @@ install_prerequisites() {
 
 download_release() {
   repository=$1
-  requested_version=$2
+  requested_tag=$2
   output_directory=$3
-  if [ -n "$requested_version" ]; then
-    selected_version=$requested_version
+  if [ -n "$requested_tag" ]; then
+    selected_version=$requested_tag
   else
     latest_url=$(curl -fsSL --retry 3 -o /dev/null -w '%{url_effective}' \
       "https://github.com/$repository/releases/latest") \
       || die "查询最新发布版本失败"
     selected_version=${latest_url##*/}
   fi
-  validate_version "$selected_version" || die "无效发布版本：$selected_version"
+  validate_version "$selected_version" || die "无效 Release Tag：$selected_version"
   mkdir -p -- "$output_directory" || die "创建发布下载目录失败"
   base_url="https://github.com/$repository/releases/download/$selected_version"
   for asset in \
@@ -1400,11 +1663,39 @@ run_install_or_upgrade() {
   explicit_domain=${CPAC_DOMAIN:-}
   explicit_ingress_mode=${CPAC_INGRESS_MODE:-}
   version=
+  tag_menu_requested=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --domain) [ "$#" -ge 2 ] || die "--domain 缺少参数"; explicit_domain=$2; shift 2 ;;
       --ingress) [ "$#" -ge 2 ] || die "--ingress 缺少参数"; explicit_ingress_mode=$2; shift 2 ;;
-      --version) [ "$#" -ge 2 ] || die "--version 缺少参数"; version=$2; shift 2 ;;
+      --tag)
+        case "${2:-}" in
+          ''|--*)
+            [ -z "$version" ] || die "--tag 无参数不能与显式 Release Tag 同时使用"
+            tag_menu_requested=true
+            shift
+            ;;
+          *)
+            [ "$tag_menu_requested" = false ] \
+              || die "--tag 无参数不能与显式 Release Tag 同时使用"
+            if [ -n "$version" ] && [ "$version" != "$2" ]; then
+              die "--tag 与 --version 不能指定不同版本"
+            fi
+            version=$2
+            shift 2
+            ;;
+        esac
+        ;;
+      --version)
+        [ "$#" -ge 2 ] || die "--version 缺少参数"
+        [ "$tag_menu_requested" = false ] \
+          || die "--tag 无参数不能与 --version 同时使用"
+        if [ -n "$version" ] && [ "$version" != "$2" ]; then
+          die "--tag 与 --version 不能指定不同版本"
+        fi
+        version=$2
+        shift 2
+        ;;
       --config) [ "$#" -ge 2 ] || die "--config 缺少参数"; config_file=$2; shift 2 ;;
       *) die "未知 run 参数：$1" ;;
     esac
@@ -1413,6 +1704,18 @@ run_install_or_upgrade() {
   case "$deploy_root" in /*) ;; *) die "CPAC_DEPLOY_ROOT 必须是绝对路径" ;; esac
   [ "$deploy_root" != / ] || die "CPAC_DEPLOY_ROOT 不能是文件系统根目录"
   ui_banner
+  if [ -n "$version" ]; then
+    validate_version "$version" || die "无效 Release Tag：$version"
+  fi
+  if [ "$tag_menu_requested" = true ]; then
+    if choose_upgrade_release "$deploy_root" "$repository"; then
+      version=$SELECTED_RELEASE_TAG
+    else
+      selection_status=$?
+      [ "$selection_status" -eq 2 ] || return "$selection_status"
+      return 0
+    fi
+  fi
   migrate_legacy_operator_state "$config_file"
   domain=$(resolve_deploy_domain "$config_file" "$explicit_domain")
   ingress_mode=$(resolve_deploy_ingress_mode \
@@ -1472,7 +1775,7 @@ run_install_or_upgrade() {
   extract_directory="$work_directory/release"
   ui_run "下载发布文件" download_release "$repository" "$version" "$download_directory"
   selected_version=$(cat "$download_directory/VERSION")
-  ui_note "版本  $selected_version"
+  ui_note "Release Tag  $selected_version"
   ui_run "校验发布文件" verify_release "$download_directory" "$selected_version"
 
   ui_step "同步统一部署脚本"
@@ -1482,7 +1785,7 @@ run_install_or_upgrade() {
     trap - EXIT HUP INT TERM
     exec 9>&-
     exec "$SCRIPT_PATH" run --domain "$domain" --ingress "$ingress_mode" \
-      --version "$selected_version" --config "$config_file"
+      --tag "$selected_version" --config "$config_file"
   fi
   ui_done "部署脚本已是当前版本"
 
@@ -1697,8 +2000,8 @@ operator_usage() {
   curl -fsSL $RUN_ASSET_URL | sudo sh
 
 高级管理：
-  sudo $SCRIPT_PATH
-  sudo $SCRIPT_PATH run [--domain DOMAIN] [--ingress managed|external] [--version VERSION]
+  sudo $SCRIPT_PATH --tag [RELEASE_TAG]
+  sudo $SCRIPT_PATH run [--domain DOMAIN] [--ingress managed|external] [--tag [RELEASE_TAG]]
   sudo $SCRIPT_PATH domain set DOMAIN
   sudo $SCRIPT_PATH ingress set managed|external
   sudo $SCRIPT_PATH admin-key claim
@@ -1712,6 +2015,10 @@ if [ "$STDIN_BOOTSTRAP" != true ]; then
       ;;
     run)
       [ "$#" -eq 0 ] || shift
+      run_install_or_upgrade "$@"
+      exit 0
+      ;;
+    --domain|--ingress|--tag|--version|--config)
       run_install_or_upgrade "$@"
       exit 0
       ;;

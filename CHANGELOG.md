@@ -16,6 +16,8 @@
 - 目标机统一入口由 `deploy.sh` 更名为 `run.sh`；README 提前提供一条可同时用于安装和升级的 `curl` 命令，发布附件、自更新、测试与内部 `make run` 入口同步更名。
 - `run.sh` 支持 `curl | sudo sh` 管道启动：内部原子安装脚本并重新连接交互终端，README 不再要求用户管理部署目录。
 - README 重构为 GitHub 项目首页，增加主题自适应品牌、状态徽章、产品预览、快速开始、核心能力、精简架构和文档导航。
+- `run.sh` 新增 `--tag` Release 选择入口：无参数时列出高于当前部署版本的正式 Releases 并支持交互选择，指定 Tag 时直接选择对应 Release；保留 `--version` 兼容参数。
+- CPAC 版本提醒改为只比较本地部署版本与 GitHub Latest Release Tag，不再拉取或发布 GHCR release metadata 镜像。
 
 ## v1.1.4 - 2026-08-19
 

@@ -19,13 +19,8 @@ import (
 
 const (
 	releaseStatusCacheTTL        = 15 * time.Minute
-	defaultReleaseMetadataImage  = "ghcr.io/alfonsxh/codex-cpa-release:latest"
 	deploymentVersionMarker      = ".deploy-initialized"
 	deploymentVersionMarkerLimit = 4 * 1024
-)
-
-var releaseMetadataImagePattern = regexp.MustCompile(
-	`^[A-Za-z0-9.-]+(?::[0-9]+)?/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$`,
 )
 
 var strictReleaseSemverPattern = regexp.MustCompile(
@@ -33,7 +28,7 @@ var strictReleaseSemverPattern = regexp.MustCompile(
 )
 
 type ReleaseCatalog interface {
-	PullReleaseMetadata(context.Context, string) (map[string]string, error)
+	LatestRelease(context.Context) (string, error)
 }
 
 type releaseStatusResponse struct {
@@ -42,22 +37,17 @@ type releaseStatusResponse struct {
 	Available      bool   `json:"available"`
 	Status         string `json:"status,omitempty"`
 	LatestVersion  string `json:"latest_version,omitempty"`
-	LatestRevision string `json:"latest_revision,omitempty"`
 	CheckedAt      int64  `json:"checked_at,omitempty"`
 }
 
 type releaseConfigurationState struct {
-	currentVersion     string
-	metadataImage      string
-	updateCheckEnabled bool
-	metadataImageValid bool
+	currentVersion string
 }
 
-type releaseMetadataStatus struct {
-	Status         string
-	LatestVersion  string
-	LatestRevision string
-	CheckedAt      int64
+type releaseLookupStatus struct {
+	Status        string
+	LatestVersion string
+	CheckedAt     int64
 }
 
 func (server *Server) readReleaseStatus(c *gin.Context) {
@@ -75,17 +65,12 @@ func (server *Server) releaseStatus(ctx context.Context, force bool) (releaseSta
 		return releaseStatusResponse{}, err
 	}
 	base := releaseStatusResponse{
-		Configured:     configuration.updateCheckEnabled,
+		Configured:     server.release != nil,
 		CurrentVersion: configuration.currentVersion,
 		Available:      false,
 	}
-	if !configuration.updateCheckEnabled {
+	if server.release == nil {
 		base.Status = "disabled"
-		return base, nil
-	}
-	if !configuration.metadataImageValid || !releaseMetadataImagePattern.MatchString(configuration.metadataImage) {
-		base.Status = "invalid_configuration"
-		base.CheckedAt = server.now().Unix()
 		return base, nil
 	}
 	if normalizedSemver(configuration.currentVersion) == "" {
@@ -95,10 +80,9 @@ func (server *Server) releaseStatus(ctx context.Context, force bool) (releaseSta
 		return base, nil
 	}
 
-	metadata := server.cachedReleaseMetadata(ctx, configuration.metadataImage, force)
+	metadata := server.cachedLatestRelease(ctx, force)
 	base.Status = metadata.Status
 	base.LatestVersion = metadata.LatestVersion
-	base.LatestRevision = metadata.LatestRevision
 	base.CheckedAt = metadata.CheckedAt
 	if metadata.Status == "ok" {
 		base.Available = semver.Compare(
@@ -109,49 +93,37 @@ func (server *Server) releaseStatus(ctx context.Context, force bool) (releaseSta
 	return base, nil
 }
 
-func (server *Server) cachedReleaseMetadata(
+func (server *Server) cachedLatestRelease(
 	ctx context.Context,
-	metadataImage string,
 	force bool,
-) releaseMetadataStatus {
+) releaseLookupStatus {
 	now := server.now()
 	server.releaseStatusMu.Lock()
 	defer server.releaseStatusMu.Unlock()
-	if !force && server.releaseStatusCache != nil && server.releaseStatusCacheKey == metadataImage &&
-		now.Before(server.releaseStatusCacheUntil) {
+	if !force && server.releaseStatusCache != nil && now.Before(server.releaseStatusCacheUntil) {
 		return *server.releaseStatusCache
 	}
-	payload := releaseMetadataStatus{Status: "unavailable", CheckedAt: now.Unix()}
+	payload := releaseLookupStatus{Status: "unavailable", CheckedAt: now.Unix()}
 	if server.release != nil {
-		labels, pullErr := server.release.PullReleaseMetadata(ctx, metadataImage)
-		if pullErr == nil && labels["io.codex-cpa.component"] == "release" {
-			latestVersion := strings.TrimSpace(labels["org.opencontainers.image.version"])
-			if normalizedSemver(latestVersion) != "" {
-				payload.Status = "ok"
-				payload.LatestVersion = latestVersion
-				payload.LatestRevision = boundedReleaseRevision(labels["org.opencontainers.image.revision"])
-			} else {
-				pullErr = fmt.Errorf("release metadata contains an invalid version")
-			}
-		} else if pullErr == nil {
-			pullErr = fmt.Errorf("release metadata labels are invalid")
+		latestVersion, releaseErr := server.release.LatestRelease(ctx)
+		latestVersion = strings.TrimSpace(latestVersion)
+		if releaseErr == nil && normalizedSemver(latestVersion) != "" {
+			payload.Status = "ok"
+			payload.LatestVersion = latestVersion
+		} else if releaseErr == nil {
+			releaseErr = fmt.Errorf("latest GitHub Release contains an invalid version")
 		}
-		if pullErr != nil {
-			server.logger.Warn("release metadata refresh unavailable", zap.String("error", runtimeops.Sanitize(pullErr.Error())))
+		if releaseErr != nil {
+			server.logger.Warn("GitHub Release refresh unavailable", zap.String("error", runtimeops.Sanitize(releaseErr.Error())))
 		}
 	}
 	server.releaseStatusCache = &payload
-	server.releaseStatusCacheKey = metadataImage
 	server.releaseStatusCacheUntil = now.Add(releaseStatusCacheTTL)
 	return payload
 }
 
 func (server *Server) releaseConfiguration(ctx context.Context) (releaseConfigurationState, error) {
-	configuration := releaseConfigurationState{
-		metadataImage:      defaultReleaseMetadataImage,
-		updateCheckEnabled: true,
-		metadataImageValid: true,
-	}
+	configuration := releaseConfigurationState{}
 	currentVersion, markerPresent, markerErr := readDeploymentVersionMarker(server.root)
 	if markerErr != nil {
 		server.logger.Warn(
@@ -177,19 +149,6 @@ func (server *Server) releaseConfiguration(ctx context.Context) (releaseConfigur
 			configuration.currentVersion = strings.TrimSpace(legacyVersion)
 		}
 	}
-
-	settings, err := server.store.ReadSettings(ctx)
-	if err != nil {
-		return releaseConfigurationState{}, fmt.Errorf("read release configuration: %w", err)
-	}
-	value, configured := settings["delivery.release_metadata_image"]
-	if !configured {
-		return configuration, nil
-	}
-	metadataImage, valid := value.(string)
-	configuration.metadataImageValid = valid
-	configuration.metadataImage = strings.TrimSpace(metadataImage)
-	configuration.updateCheckEnabled = !valid || configuration.metadataImage != ""
 	return configuration, nil
 }
 
@@ -260,14 +219,6 @@ func normalizedSemver(value string) string {
 	}
 	if !semver.IsValid(value) {
 		return ""
-	}
-	return value
-}
-
-func boundedReleaseRevision(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) > 64 {
-		return value[:64]
 	}
 	return value
 }

@@ -1085,7 +1085,6 @@ func (e RebalanceAllRequestConfirm) Valid() bool {
 const (
 	ReleaseStatusStatusCurrentVersionUnavailable ReleaseStatusStatus = "current_version_unavailable"
 	ReleaseStatusStatusDisabled                  ReleaseStatusStatus = "disabled"
-	ReleaseStatusStatusInvalidConfiguration      ReleaseStatusStatus = "invalid_configuration"
 	ReleaseStatusStatusOk                        ReleaseStatusStatus = "ok"
 	ReleaseStatusStatusUnavailable               ReleaseStatusStatus = "unavailable"
 )
@@ -1096,8 +1095,6 @@ func (e ReleaseStatusStatus) Valid() bool {
 	case ReleaseStatusStatusCurrentVersionUnavailable:
 		return true
 	case ReleaseStatusStatusDisabled:
-		return true
-	case ReleaseStatusStatusInvalidConfiguration:
 		return true
 	case ReleaseStatusStatusOk:
 		return true
@@ -3121,7 +3118,6 @@ type ReleaseStatus struct {
 	CheckedAt      *int64               `json:"checked_at,omitempty"`
 	Configured     bool                 `json:"configured"`
 	CurrentVersion string               `json:"current_version"`
-	LatestRevision *string              `json:"latest_revision,omitempty"`
 	LatestVersion  *string              `json:"latest_version,omitempty"`
 	Status         *ReleaseStatusStatus `json:"status,omitempty"`
 }

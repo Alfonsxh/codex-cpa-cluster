@@ -1259,9 +1259,8 @@ export type ReleaseStatus = {
     configured: boolean;
     current_version: string;
     available: boolean;
-    status?: 'ok' | 'unavailable' | 'invalid_configuration' | 'current_version_unavailable' | 'disabled';
+    status?: 'ok' | 'unavailable' | 'current_version_unavailable' | 'disabled';
     latest_version?: string;
-    latest_revision?: string;
     checked_at?: number;
 };
 
@@ -3318,7 +3317,7 @@ export type GetAdminReleaseStatusError = GetAdminReleaseStatusErrors[keyof GetAd
 
 export type GetAdminReleaseStatusResponses = {
     /**
-     * Current and latest validated semantic release metadata
+     * Current deployment and latest GitHub Release semantic versions
      */
     200: ReleaseStatus;
 };

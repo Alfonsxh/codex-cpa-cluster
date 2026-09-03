@@ -95,6 +95,7 @@ var retiredConfigurationKeys = map[string]struct{}{
 	"gateway.listen_address": {}, "gateway.port": {}, "gateway.internal_port": {},
 	"management.listen_address": {}, "management.port": {},
 	"delivery.gateway_drain_timeout_seconds": {},
+	"delivery.release_metadata_image":        {},
 }
 
 // The control-plane settings table is shared by the configuration catalog and
@@ -221,9 +222,6 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		integer("accounts.port_end", "新账号端口终点", 18999, 1024, 65535, "future"),
 		simple("accounts.listen_address", "业务 CPA 监听地址", "ip", "127.0.0.1", "deployment"),
 		simple("runtime.cliproxy_image", "CLIProxyAPI 镜像", "image", runtimeops.DefaultCPAImageUpdateChannel, "deployment"),
-	)
-	definitions = append(definitions,
-		simple("delivery.release_metadata_image", "发布更新通道", "optional_image", defaultReleaseMetadataImage, "live"),
 	)
 	return definitions
 }

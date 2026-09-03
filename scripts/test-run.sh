@@ -159,10 +159,21 @@ fi
 for removed in "$ROOT_DIR/scripts/cpac" "$ROOT_DIR/scripts/install-cpac.sh" "$ROOT_DIR/scripts/deploy-target.sh"; do
   [ ! -e "$removed" ] || { echo "removed deployment entry still exists: $removed" >&2; exit 1; }
 done
-sh "$ROOT_DIR/scripts/run.sh" help | grep -Fq "sudo $ROOT_DIR/scripts/run.sh"
+sh "$ROOT_DIR/scripts/run.sh" help | grep -Fq "sudo $ROOT_DIR/scripts/run.sh --tag [RELEASE_TAG]"
 sh "$ROOT_DIR/scripts/run.sh" help | grep -Fq "sudo $ROOT_DIR/scripts/run.sh run [--domain DOMAIN]"
+sh "$ROOT_DIR/scripts/run.sh" help | grep -Fq -- "--tag [RELEASE_TAG]"
 if run_operator_script deploy >/dev/null 2>&1; then
   echo "run.sh still accepted the removed deploy command" >&2
+  exit 1
+fi
+
+if VERSION=2.0.0 sh "$ROOT_DIR/scripts/release-images.sh" build >/dev/null 2>&1; then
+  echo "image publication accepted a Release Tag without the required v prefix" >&2
+  exit 1
+fi
+if VERSION=2.0.0 IMAGE_PREFIX=ghcr.io/fixture \
+  sh "$ROOT_DIR/scripts/local-release.sh" check >/dev/null 2>&1; then
+  echo "GitHub release accepted a Release Tag without the required v prefix" >&2
   exit 1
 fi
 

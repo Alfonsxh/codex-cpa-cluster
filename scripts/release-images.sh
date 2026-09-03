@@ -10,11 +10,11 @@ ALLOW_DIRTY=${ALLOW_DIRTY:-false}
 RELEASE_COMPONENTS="control web gateway edge"
 
 case "$VERSION" in
-  v[0-9]*.[0-9]*.[0-9]*|[0-9]*.[0-9]*.[0-9]*) ;;
-  *) echo "VERSION 必须是语义化版本，例如 v1.2.3：$VERSION" >&2; exit 1 ;;
+  v[0-9]*.[0-9]*.[0-9]*) ;;
+  *) echo "VERSION 必须是带 v 前缀的语义化 Tag，例如 v1.2.3：$VERSION" >&2; exit 1 ;;
 esac
-if ! printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
-  echo "VERSION 必须是语义化版本，例如 v1.2.3：$VERSION" >&2
+if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+  echo "VERSION 必须是带 v 前缀的语义化 Tag，例如 v1.2.3：$VERSION" >&2
   exit 1
 fi
 case "$PLATFORM" in
@@ -35,7 +35,6 @@ if [ "$ALLOW_DIRTY" != true ] && [ -n "$(git -C "$ROOT_DIR" status --porcelain)"
 fi
 
 REVISION=$(git -C "$ROOT_DIR" rev-parse HEAD)
-SAFE_VERSION=$(printf '%s' "$VERSION" | tr '/:' '--')
 if [ "$ACTION" = publish ]; then
   TAG_REVISION=$(git -C "$ROOT_DIR" rev-parse "$VERSION^{commit}" 2>/dev/null || true)
   if [ -z "$TAG_REVISION" ] || [ "$TAG_REVISION" != "$REVISION" ]; then
@@ -75,15 +74,6 @@ build_component control Dockerfile control
 build_component web Dockerfile web
 build_component gateway Dockerfile gateway
 build_component edge Dockerfile edge
-docker buildx build \
-  --platform "$PLATFORM" \
-  --load \
-  --target release \
-  --build-arg "RELEASE_VERSION=$VERSION" \
-  --build-arg "RELEASE_REVISION=$REVISION" \
-  -t "codex-cpa-release:build-$SAFE_VERSION" \
-  -f "$ROOT_DIR/Dockerfile" \
-  "$ROOT_DIR"
 
 [ "$ACTION" = publish ] || exit 0
 
@@ -99,16 +89,6 @@ validate_component_image() {
     || [ "$(image_label "$IMAGE" io.codex-cpa.component-digest)" != "$DIGEST" ] \
     || [ "$(image_label "$IMAGE" io.codex-cpa.source-digest)" != "$DIGEST" ]; then
     echo "已存在的镜像与组件指纹不匹配：$IMAGE" >&2
-    exit 1
-  fi
-}
-
-validate_release_image() {
-  IMAGE=$1
-  if [ "$(image_label "$IMAGE" io.codex-cpa.component)" != release ] \
-    || [ "$(image_label "$IMAGE" org.opencontainers.image.version)" != "$VERSION" ] \
-    || [ "$(image_label "$IMAGE" org.opencontainers.image.revision)" != "$REVISION" ]; then
-    echo "已存在的发布元数据与版本或 revision 不匹配：$IMAGE" >&2
     exit 1
   fi
 }
@@ -133,11 +113,6 @@ for PREFIX in $IMAGE_PREFIXES; do
       validate_component_image "$VERSION_IMAGE" "$COMPONENT" "$DIGEST"
     fi
   done
-  RELEASE_VERSION_IMAGE="$PREFIX/codex-cpa-release:$VERSION"
-  if docker manifest inspect "$RELEASE_VERSION_IMAGE" >/dev/null 2>&1; then
-    docker pull "$RELEASE_VERSION_IMAGE"
-    validate_release_image "$RELEASE_VERSION_IMAGE"
-  fi
 done
 
 for PREFIX in $IMAGE_PREFIXES; do
@@ -165,13 +140,6 @@ for PREFIX in $IMAGE_PREFIXES; do
       docker push "$VERSION_IMAGE"
     fi
   done
-  RELEASE_VERSION_IMAGE="$PREFIX/codex-cpa-release:$VERSION"
-  if docker manifest inspect "$RELEASE_VERSION_IMAGE" >/dev/null 2>&1; then
-    echo "版本标签已存在且验证一致，跳过：$RELEASE_VERSION_IMAGE"
-  else
-    docker tag "codex-cpa-release:build-$SAFE_VERSION" "$RELEASE_VERSION_IMAGE"
-    docker push "$RELEASE_VERSION_IMAGE"
-  fi
 done
 
 # 所有 Registry 的不可变版本标签均已写入或验证后，才移动 latest，避免
@@ -187,13 +155,6 @@ for PREFIX in $IMAGE_PREFIXES; do
     docker tag "$VERSION_IMAGE" "$PREFIX/codex-cpa-$COMPONENT:latest"
     docker push "$PREFIX/codex-cpa-$COMPONENT:latest"
   done
-  RELEASE_VERSION_IMAGE="$PREFIX/codex-cpa-release:$VERSION"
-  if ! docker image inspect "$RELEASE_VERSION_IMAGE" >/dev/null 2>&1; then
-    docker pull "$RELEASE_VERSION_IMAGE"
-  fi
-  validate_release_image "$RELEASE_VERSION_IMAGE"
-  docker tag "$RELEASE_VERSION_IMAGE" "$PREFIX/codex-cpa-release:latest"
-  docker push "$PREFIX/codex-cpa-release:latest"
 done
 
 echo "镜像发布完成：version=$VERSION revision=$REVISION prefixes=$IMAGE_PREFIXES"

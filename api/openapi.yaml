@@ -1222,7 +1222,7 @@ paths:
           schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
-          description: Current and latest validated semantic release metadata
+          description: Current deployment and latest GitHub Release semantic versions
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReleaseStatus" }
@@ -4041,9 +4041,8 @@ components:
         configured: { type: boolean }
         current_version: { type: string }
         available: { type: boolean }
-        status: { type: string, enum: [ok, unavailable, invalid_configuration, current_version_unavailable, disabled] }
+        status: { type: string, enum: [ok, unavailable, current_version_unavailable, disabled] }
         latest_version: { type: string }
-        latest_revision: { type: string, maxLength: 64 }
         checked_at: { type: integer, format: int64 }
     WeightedUsageMetrics:
       allOf:

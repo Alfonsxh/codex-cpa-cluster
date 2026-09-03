@@ -14,8 +14,8 @@ import (
 )
 
 func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
-	if len(configurationDefinitions) != 68 {
-		t.Fatalf("configuration definition count = %d, want 68", len(configurationDefinitions))
+	if len(configurationDefinitions) != 67 {
+		t.Fatalf("configuration definition count = %d, want 67", len(configurationDefinitions))
 	}
 	if len(configurationPresentationByKey) != len(configurationDefinitions) {
 		t.Fatalf("configuration presentation count = %d, want %d", len(configurationPresentationByKey), len(configurationDefinitions))
@@ -74,7 +74,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	}
 	var catalog configurationCatalogResponse
 	decodeAdminResponse(t, response, &catalog)
-	if catalog.Version != 1 || catalog.FieldCount != 68 || len(catalog.Groups) != 10 || catalog.GeneratedAt <= 0 {
+	if catalog.Version != 2 || catalog.FieldCount != 67 || len(catalog.Groups) != 10 || catalog.GeneratedAt <= 0 {
 		t.Fatalf("configuration catalog summary = %#v", catalog)
 	}
 
@@ -87,7 +87,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 			fields[field.Key] = field
 		}
 	}
-	if len(fields) != 68 {
+	if len(fields) != 67 {
 		t.Fatalf("configuration catalog fields = %d", len(fields))
 	}
 	proxy := fields["cpa.proxy_url"]
@@ -314,6 +314,7 @@ func TestConfigurationUpdateMigratesObserveAndLegacyProxyOutOfSettings(t *testin
 	if err := store.WriteSettings(ctx, map[string]any{
 		"account_failover.mode": "observe", "cpa.proxy_url": legacyProxy, "gost.enabled": false,
 		"gateway.port": int64(18317), "delivery.gateway_drain_timeout_seconds": int64(3600),
+		"delivery.release_metadata_image": "ghcr.io/alfonsxh/codex-cpa-release:latest",
 	}); err != nil {
 		t.Fatalf("write legacy settings: %v", err)
 	}
@@ -338,7 +339,9 @@ func TestConfigurationUpdateMigratesObserveAndLegacyProxyOutOfSettings(t *testin
 	if _, found := settings["gost.enabled"]; found {
 		t.Fatalf("retired setting remains: %#v", settings)
 	}
-	for _, key := range []string{"gateway.port", "delivery.gateway_drain_timeout_seconds"} {
+	for _, key := range []string{
+		"gateway.port", "delivery.gateway_drain_timeout_seconds", "delivery.release_metadata_image",
+	} {
 		if _, found := settings[key]; found {
 			t.Fatalf("retired deployment setting %s remains: %#v", key, settings)
 		}

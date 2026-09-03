@@ -480,6 +480,22 @@ chmod 0755 "$RELEASE_SERVER/run.sh"
     "release-$RELEASE_VERSION.env" \
     run.sh >SHA256SUMS
 )
+cat >"$RELEASE_SERVER/releases.json" <<'EOF'
+[
+  {"tag_name":"v9.9.7"},
+  {"tag_name":"v9.9.10-rc.2"},
+  {"tag_name":"not-a-release"},
+  {"tag_name":"v10.0.0-alpha.1"},
+  {"tag_name":"v9.9.9"},
+  {"tag_name":"v9.9.10"},
+  {"tag_name":"v9.9.8"},
+  {"tag_name":"v9.10.0-rc.1"},
+  {"tag_name":"v9.9.10-rc.10"},
+  {"tag_name":"v9.9.9"}
+]
+EOF
+printf '%s\n' '{"message":"unexpected response"}' \
+  >"$RELEASE_SERVER/releases-malformed.json"
 printf '%s\n' certificate >"$TEST_ROOT/certificates/qdata.example.com/fullchain.pem"
 printf '%s\n' private-key >"$TEST_ROOT/certificates/qdata.example.com/privkey.pem"
 
@@ -507,6 +523,10 @@ for argument in "$@"; do
   fi
 done
 case "$url" in
+  https://api.github.com/repos/*/releases\?per_page=100\&page=*)
+    [ -n "$output" ] && [ "$output" != /dev/null ] || exit 2
+    cp "${FAKE_RELEASES_FILE:-$FAKE_RELEASE_DIR/releases.json}" "$output"
+    ;;
   */releases/latest)
     [ "$output" = /dev/null ] || exit 2
     printf 'https://github.example.test/releases/tag/%s' "$FAKE_RELEASE_VERSION"
@@ -579,8 +599,30 @@ run_operator_deploy() {
     CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
     CPAC_ACME_ROOT="$TEST_ROOT/acme" \
     sh "$OPERATOR_ROOT/run.sh" run \
-      --domain qdata.example.com --ingress managed --version "$RELEASE_VERSION"
+      --domain qdata.example.com --ingress managed --tag "$RELEASE_VERSION"
 }
+
+run_release_choice() {
+  PATH="$FAKE_BIN:$PATH" \
+    FAKE_RELEASE_DIR="$RELEASE_SERVER" \
+    FAKE_RELEASES_FILE="${FAKE_RELEASES_FILE:-$RELEASE_SERVER/releases.json}" \
+    CPAC_ALLOW_NON_ROOT=true \
+    CPAC_STAGING_ROOT="$OPERATOR_ROOT" \
+    CPAC_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
+    CPAC_CONFIG_FILE="$OPERATOR_CONFIG" \
+    sh "$OPERATOR_ROOT/run.sh" --tag
+}
+
+if sh "$OPERATOR_ROOT/run.sh" --tag v9.9.9 --version v9.9.8 \
+  >"$OPERATOR_ROOT/conflicting-release-tag.log" 2>&1; then
+  echo "operator deploy accepted conflicting --tag and --version values" >&2
+  exit 1
+fi
+grep -Fq -- "--tag 与 --version 不能指定不同版本" \
+  "$OPERATOR_ROOT/conflicting-release-tag.log" || {
+    echo "operator deploy did not explain conflicting Release selectors" >&2
+    exit 1
+  }
 
 INSTALL_OUTPUT="$OPERATOR_ROOT/install-output.log"
 run_operator_deploy >"$INSTALL_OUTPUT"
@@ -650,6 +692,62 @@ cmp -s "$OPERATOR_ROOT/run.sh" "$RELEASE_SERVER/run.sh" \
   || { echo "fresh deploy did not persist its domain" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/deploy.sh" ] \
   || { echo "run.sh did not remove the recognized legacy operator script" >&2; exit 1; }
+
+cp "$OPERATOR_CONFIG" "$OPERATOR_ROOT/config-before-release-choice.env"
+cp "$OPERATOR_ROOT/runtime/.deploy-initialized" "$OPERATOR_ROOT/deploy-marker-before-release-choice"
+printf '%s\n' 'version=v9.9.8' >"$OPERATOR_ROOT/runtime/.deploy-initialized"
+chmod 0600 "$OPERATOR_ROOT/runtime/.deploy-initialized"
+: >"$COMMAND_LOG"
+: >"$SYSTEM_LOG"
+RELEASE_CHOICE_OUTPUT="$OPERATOR_ROOT/release-choice-output.log"
+run_release_choice </dev/null >"$RELEASE_CHOICE_OUTPUT"
+grep -Fq '当前部署  v9.9.8' "$RELEASE_CHOICE_OUTPUT" \
+  || { echo "release choice did not report the current deployed version" >&2; cat "$RELEASE_CHOICE_OUTPUT" >&2; exit 1; }
+grep -Fq '非交互模式仅展示版本，不执行升级' "$RELEASE_CHOICE_OUTPUT" \
+  || { echo "non-interactive release choice did not remain read-only" >&2; cat "$RELEASE_CHOICE_OUTPUT" >&2; exit 1; }
+selected_release_tags=$(sed -n 's/^  [0-9][0-9]*) \([^ ]*\).*/\1/p' "$RELEASE_CHOICE_OUTPUT")
+expected_release_tags=$(printf '%s\n' \
+  v10.0.0-alpha.1 \
+  v9.10.0-rc.1 \
+  v9.9.10 \
+  v9.9.10-rc.10 \
+  v9.9.10-rc.2 \
+  v9.9.9)
+[ "$selected_release_tags" = "$expected_release_tags" ] || {
+  echo "release choices were not filtered, de-duplicated and sorted by version" >&2
+  printf 'expected:\n%s\nactual:\n%s\n' "$expected_release_tags" "$selected_release_tags" >&2
+  exit 1
+}
+cmp -s "$OPERATOR_CONFIG" "$OPERATOR_ROOT/config-before-release-choice.env" \
+  || { echo "release choice changed the operator configuration" >&2; exit 1; }
+[ ! -s "$COMMAND_LOG" ] && [ ! -s "$SYSTEM_LOG" ] \
+  || { echo "release choice invoked deployment or system commands" >&2; exit 1; }
+
+printf '%s\n' 'version=v10.0.0' >"$OPERATOR_ROOT/runtime/.deploy-initialized"
+run_release_choice </dev/null >"$OPERATOR_ROOT/no-release-update.log"
+grep -Fq '没有比当前部署更新的 GitHub Release' "$OPERATOR_ROOT/no-release-update.log" \
+  || { echo "release choice did not report the no-update state" >&2; cat "$OPERATOR_ROOT/no-release-update.log" >&2; exit 1; }
+
+rm -f -- "$OPERATOR_ROOT/runtime/.deploy-initialized"
+if run_release_choice </dev/null >"$OPERATOR_ROOT/missing-release-marker.log" 2>&1; then
+  echo "release choice accepted a missing deployed-version marker" >&2
+  exit 1
+fi
+grep -Fq '未检测到有效的当前部署版本' "$OPERATOR_ROOT/missing-release-marker.log" \
+  || { echo "release choice did not explain the missing deployed version" >&2; cat "$OPERATOR_ROOT/missing-release-marker.log" >&2; exit 1; }
+mv "$OPERATOR_ROOT/deploy-marker-before-release-choice" \
+  "$OPERATOR_ROOT/runtime/.deploy-initialized"
+
+printf '%s\n' 'version=v9.9.8' >"$OPERATOR_ROOT/runtime/.deploy-initialized"
+if FAKE_RELEASES_FILE="$RELEASE_SERVER/releases-malformed.json" \
+  run_release_choice </dev/null >"$OPERATOR_ROOT/malformed-releases.log" 2>&1; then
+  echo "release choice accepted a malformed GitHub response" >&2
+  exit 1
+fi
+grep -Fq 'GitHub Releases 返回了无效响应' "$OPERATOR_ROOT/malformed-releases.log" \
+  || { echo "release choice did not explain a malformed GitHub response" >&2; cat "$OPERATOR_ROOT/malformed-releases.log" >&2; exit 1; }
+printf '%s\n' "version=$RELEASE_VERSION" >"$OPERATOR_ROOT/runtime/.deploy-initialized"
+chmod 0600 "$OPERATOR_ROOT/runtime/.deploy-initialized"
 
 EXTERNAL_OPERATOR_ROOT="$TEST_ROOT/home/external-cpac"
 EXTERNAL_CONFIG="$EXTERNAL_OPERATOR_ROOT/config.env"

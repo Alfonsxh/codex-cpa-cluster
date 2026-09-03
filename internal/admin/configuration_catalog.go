@@ -129,7 +129,7 @@ func (server *Server) readConfiguration(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, configurationCatalogResponse{
-		Version: 1, GeneratedAt: time.Now().Unix(), FieldCount: len(configurationDefinitions), Groups: groups,
+		Version: 2, GeneratedAt: time.Now().Unix(), FieldCount: len(configurationDefinitions), Groups: groups,
 	})
 }
 
@@ -224,5 +224,4 @@ var configurationPresentationByKey = map[string]configurationPresentation{
 	"accounts.port_end":                                  {Group: "账号供应", Description: "只影响后续新建 CPA，必须不小于端口起点。"},
 	"accounts.listen_address":                            {Group: "账号与发布", Description: "固定为宿主机回环地址；业务 CPA 只能由本机发布检查或 Docker 内网访问。"},
 	"runtime.cliproxy_image":                             {Group: "账号与发布", Description: "作为业务 CPA 更新通道；账号管理拉取后识别真实版本，验证通过才固定为不可变镜像。"},
-	"delivery.release_metadata_image":                    {Group: "账号与发布", Description: "Admin 只读检查项目新版本所使用的 metadata 镜像；默认使用官方 GHCR 通道，可留空关闭提醒。"},
 }

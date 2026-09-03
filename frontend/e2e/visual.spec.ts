@@ -846,7 +846,6 @@ test("仅在存在更新时显示心跳入口、悬停展示精简版本信息",
     configured: true,
     current_version: "v1.0.0",
     latest_version: "v1.1.0",
-    latest_revision: "1234567890abcdef",
     available: true,
     checked_at: 1_787_500_800,
     status: "ok"

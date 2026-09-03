@@ -20,8 +20,8 @@ case "$ACTION" in
   check|publish) ;;
   *) echo "动作必须是 check 或 publish：$ACTION" >&2; exit 1 ;;
 esac
-if ! printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
-  echo "VERSION 必须是语义化版本：$VERSION" >&2
+if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+  echo "VERSION 必须是带 v 前缀的语义化 Tag：$VERSION" >&2
   exit 1
 fi
 if ! printf '%s' "$IMAGE_PREFIX" | grep -Eq '^[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._/-]+$'; then

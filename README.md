@@ -48,6 +48,8 @@ curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/downloa
 
 首次运行会引导你输入域名，并选择复用现有反向代理，或由 CPAC 配置 Nginx 与 HTTPS。安装成功后，终端会显示管理员登录地址和仅出现一次的管理密钥；再次执行同一条命令即可安全升级。
 
+已安装环境执行 `sudo /home/cpac/run.sh --tag` 会列出所有高于当前部署版本的 GitHub Releases，并在交互终端中选择后升级；非交互环境只展示候选版本，不会自动升级。也可以直接执行 `sudo /home/cpac/run.sh --tag v2.0.0` 固定或切换到指定 Release。Tag 只用于选择对应的 GitHub Release；缺少完整 Release 附件的孤立 Git Tag 不会被部署。
+
 ## 核心能力
 
 | 能力 | 说明 |

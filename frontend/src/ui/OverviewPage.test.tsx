@@ -4,9 +4,15 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-import { OverviewPage } from "./OverviewPage";
+import { formatOverviewUsageRange, OverviewPage } from "./OverviewPage";
 
 describe("OverviewPage legacy dashboard contract", () => {
+  it("formats an exact custom range without dropping the exclusive end minute", () => {
+    const startAt = Math.floor(new Date(2026, 8, 3, 10, 0).getTime() / 1000);
+    const endAt = Math.floor(new Date(2026, 8, 3, 11, 0).getTime() / 1000);
+    expect(formatOverviewUsageRange(startAt, endAt)).toMatch(/10:00\s*—\s*11:00（共 1 小时）/);
+  });
+
   it("uses fine-grained APIs while restoring the legacy metrics, monitor, tables, and activity layout", async () => {
     const summary = {
       generated_at: 1_800_000_000,
@@ -121,6 +127,15 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getByRole("tablist", { name: "Token 使用数据视角" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "全部账号" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "overview-token-tab-aggregate");
+    expect(screen.getByRole("tabpanel")).toHaveClass("overview-token-data-scroll");
+    expect(screen.getByText("实际统计范围")).toBeInTheDocument();
+    expect(screen.getByText(formatOverviewUsageRange(usage.window_start_at, usage.generated_at))).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Token 使用数据视角" }).closest("header"))
+      .not.toContainElement(screen.getByLabelText("全部账号未加权 Token 使用量汇总值"));
+    expect(screen.getByLabelText("全部账号统计摘要")).toContainElement(
+      screen.getByLabelText("全部账号未加权 Token 使用量汇总值")
+    );
+    expect(screen.getByLabelText("CPA用量明细表格")).toHaveTextContent("alpha");
     expect(screen.queryByRole("heading", { name: /Token 使用量|Token 使用趋势/ })).not.toBeInTheDocument();
     expect(screen.getByTitle("200 未加权 Token")).toBeInTheDocument();
     expect(screen.getByText("重启 alpha")).toBeInTheDocument();

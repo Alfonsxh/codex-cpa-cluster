@@ -257,8 +257,8 @@ export function OverviewPage() {
 
       <AccountQuotaOverview quota={status.data.account_quota} />
 
-      <section className="overview-legacy-monitor" aria-labelledby="overview-token-monitor-title">
-        <div className="overview-legacy-toolbar overview-legacy-panel">
+      <section className="overview-legacy-monitor overview-token-monitor-card" aria-labelledby="overview-token-monitor-title">
+        <div className="overview-legacy-toolbar overview-token-monitor-toolbar">
           <div className="overview-legacy-toolbar-title usage-monitor-title">
             <h3 id="overview-token-monitor-title">Token 使用</h3>
             <p className="section-kicker">TOKEN MONITOR</p>
@@ -360,12 +360,21 @@ export function OverviewPage() {
                 <span aria-hidden="true">↻</span><span>刷新</span>
               </button>
             </div>
-          </div>
-          <div className="overview-legacy-monitor-meta">
-            <span className={`overview-status-chip ${collectorState(usage.data?.collector.status).tone}`}>
-              {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
-            </span>
-            <time>{usage.data ? `更新于 ${formatTimestamp(usage.data.generated_at)}` : "—"}</time>
+            <div className="overview-token-window-range" aria-live="polite">
+              <span className="overview-token-window-label">实际统计范围</span>
+              <strong>{usage.data
+                ? formatOverviewUsageRange(
+                    usage.data.window_start_at,
+                    usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at
+                  )
+                : "正在读取统计边界…"}</strong>
+              <div className="overview-legacy-monitor-meta">
+                <span className={`overview-status-chip ${collectorState(usage.data?.collector.status).tone}`}>
+                  {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
+                </span>
+                <time>{usage.data ? `更新于 ${formatTimestamp(usage.data.generated_at)}` : "—"}</time>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -390,7 +399,7 @@ export function OverviewPage() {
         ) : null}
 
         {usage.isPending ? (
-          <div className="overview-legacy-panel overview-legacy-loading"><Spin /><span>正在读取所选范围的 Token 桶</span></div>
+          <div className="overview-legacy-loading"><Spin /><span>正在读取所选范围的 Token 桶</span></div>
         ) : usage.data ? (
           <UsageDashboard
             payload={usage.data}
@@ -475,12 +484,10 @@ function UsageDashboard({
   const modeLabel = tokenMode === "weighted" ? "加权" : "未加权";
   const viewLabel = view === "aggregate" ? "全部账号" : view === "account" ? "CPA 账号" : "用户";
   const activeViewTabID = `overview-token-tab-${view}`;
-  const subjectLabel = view === "account" ? "CPA" : "用户";
-  const statuses = view === "account" ? accountStatuses : userStatuses;
   const emptyText = view === "user" ? "所选范围内没有用户 Token 数据" : "所选范围内没有账号 Token 数据";
   const context = `${scope} · ${windowLabel} · 聚合间隔 ${interval}${view === "user" ? ` · Top ${payload.user_limit}` : ""}`;
   return (
-    <article className="overview-legacy-panel overview-legacy-usage-panel overview-token-workspace">
+    <article className="overview-legacy-usage-panel overview-token-workspace">
       <header className="overview-token-workspace-header">
         <div className="overview-token-view-region">
           <div className="overview-token-view-switch" role="tablist" aria-label="Token 使用数据视角">
@@ -488,17 +495,27 @@ function UsageDashboard({
             <button id="overview-token-tab-account" type="button" role="tab" aria-selected={view === "account"} aria-controls="overview-token-series" onClick={() => onViewChange("account")}>按 CPA</button>
             <button id="overview-token-tab-user" type="button" role="tab" aria-selected={view === "user"} aria-controls="overview-token-series" onClick={() => onViewChange("user")}>按用户</button>
           </div>
-          <small>{context}</small>
         </div>
+      </header>
+
+      <section className="overview-token-summary-region" aria-label={`${viewLabel}统计摘要`}>
+        <small>{context}</small>
         <dl className="overview-token-summary-metrics" aria-label={`${viewLabel}${modeLabel} Token 使用量汇总值`}>
           <WorkspaceMetric label="当前值" value={metrics.current} modeLabel={modeLabel} />
           <WorkspaceMetric label="范围内总量" value={metrics.total} modeLabel={modeLabel} />
           <WorkspaceMetric label="平均值" value={metrics.average} modeLabel={modeLabel} />
           <WorkspaceMetric label="最大值" value={metrics.maximum} modeLabel={modeLabel} />
         </dl>
-      </header>
+      </section>
 
-      <section id="overview-token-series" role="tabpanel" aria-labelledby={activeViewTabID}>
+      <section
+        id="overview-token-series"
+        className="overview-token-data-scroll"
+        role="tabpanel"
+        aria-labelledby={activeViewTabID}
+        aria-label={`${viewLabel} Token 趋势与明细`}
+        tabIndex={0}
+      >
         {chartSeries.length ? (
           <UsageChartLoader
             buckets={payload.buckets}
@@ -519,15 +536,13 @@ function UsageDashboard({
           </div>
           <span>单位：{modeLabel} Token / {interval}</span>
         </footer>
-        {view !== "aggregate" ? (
-          <SeriesTable
-            subjectLabel={subjectLabel}
-            series={baseSeries}
-            emptyText={emptyText}
-            statuses={statuses}
-            tokenMode={tokenMode}
-          />
-        ) : null}
+        <SeriesTable
+          subjectLabel={view === "user" ? "用户" : "CPA"}
+          series={view === "user" ? payload.users : payload.accounts}
+          emptyText={emptyText}
+          statuses={view === "user" ? userStatuses : accountStatuses}
+          tokenMode={tokenMode}
+        />
       </section>
     </article>
   );
@@ -875,6 +890,36 @@ function actionLabel(action: RuntimeJob["action"]) {
 function windowDisplayLabel(window: OverviewUsageWindow, customRange: CustomUsageRange | null) {
   if (window === "custom") return customRange ? formatCustomUsageRange(customRange) : "自定义";
   return standardWindows.find((item) => item.value === window)?.label ?? window;
+}
+
+export function formatOverviewUsageRange(startAt: number, endAt: number) {
+  if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || startAt <= 0 || endAt < startAt) return "统计边界暂不可用";
+  const start = new Date(startAt * 1000);
+  const end = new Date(endAt * 1000);
+  const sameDay = start.getFullYear() === end.getFullYear()
+    && start.getMonth() === end.getMonth()
+    && start.getDate() === end.getDate();
+  const fullFormatter = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+  });
+  const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit", minute: "2-digit", hour12: false
+  });
+  const duration = formatUsageRangeDuration(endAt - startAt);
+  return `${fullFormatter.format(start)} — ${sameDay ? timeFormatter.format(end) : fullFormatter.format(end)}（${duration}）`;
+}
+
+function formatUsageRangeDuration(seconds: number) {
+  if (seconds < 60) return `共 ${Math.max(0, Math.round(seconds))} 秒`;
+  if (seconds < 3600) return `共 ${Math.round(seconds / 60)} 分钟`;
+  if (seconds < 86400 && seconds % 3600 === 0) return `共 ${seconds / 3600} 小时`;
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.round((seconds % 3600) / 60);
+    return `共 ${hours} 小时 ${minutes} 分钟`;
+  }
+  if (seconds % 86400 === 0) return `共 ${seconds / 86400} 天`;
+  return `共 ${Math.round(seconds / 3600)} 小时`;
 }
 
 function formatBucketInterval(seconds: number) {

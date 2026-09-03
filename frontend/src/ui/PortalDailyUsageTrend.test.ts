@@ -19,10 +19,19 @@ describe("PortalDailyUsageTrend", () => {
       { name: "未加权 Token", values: [null, 100, 200] },
       { name: "加权 Token", values: [null, 125, 250] }
     ]);
-    expect(summarizePortalTrend(trend, "total").items.map((item) => item.values?.map((value) => value.value))).toEqual([
-      ["300 Token", "375 Token"],
-      ["10 Token", "13 Token"],
-      ["200 Token", "250 Token"]
+    const summary = summarizePortalTrend(trend, "total");
+    expect(summary.items.map((item) => item.values?.map((value) => value.value))).toEqual([
+      ["375 Token", "300 Token"],
+      ["13 Token", "10 Token"],
+      ["250 Token", "200 Token"]
+    ]);
+    expect(summary.items.map((item) => item.values?.map((value) => value.label))).toEqual([
+      ["加权", "未加权"],
+      ["加权", "未加权"],
+      ["加权", "未加权"]
+    ]);
+    expect(summary.items[0]?.values?.map((value) => value.title)).toEqual([
+      "375", "300"
     ]);
   });
 
@@ -44,9 +53,9 @@ describe("PortalDailyUsageTrend", () => {
     const rawSeries = buildPortalTrendSeries(trend, "model_reasoning", "total");
     expect(rawSeries[0]).toEqual({ name: "gpt-5.6-sol · xhigh", values: [1_200] });
     const summary = summarizePortalTrend(trend, "model_reasoning");
-    expect(summary.items[0]?.values?.map((value) => value.value)).toEqual(["7.8 K", "9.8 K"]);
+    expect(summary.items[0]?.values?.map((value) => value.value)).toEqual(["9.8 K", "7.8 K"]);
     expect(summary.items[1]?.value).toBe("gpt-5.6-sol · xhigh");
-    expect(summary.items[1]?.values?.map((value) => value.value)).toEqual(["1.2 K", "1.5 K"]);
+    expect(summary.items[1]?.values?.map((value) => value.value)).toEqual(["1.5 K", "1.2 K"]);
     expect(summary.items[2]?.value).toBe("12");
 
     const tooltip = renderPortalTrendTooltip(series.map((item, index) => ({

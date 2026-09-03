@@ -435,6 +435,36 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
   await expect(trendSummary.getByText("30天用量", { exact: true })).toBeVisible();
   await expect(trendSummary.getByText("未加权", { exact: true })).toHaveCount(3);
   await expect(trendSummary.getByText("加权", { exact: true })).toHaveCount(3);
+  const summaryMetricLayout = await trendSummary.locator(".usage-trend-summary-value").evaluateAll((rows) => rows.map((row) => {
+    const marker = row.querySelector<HTMLElement>(".usage-trend-summary-value-marker");
+    const label = row.querySelector<HTMLElement>("small span");
+    const card = row.closest<HTMLElement>(".has-metrics");
+    const values = row.closest<HTMLElement>(".usage-trend-summary-values");
+    const heading = card?.querySelector<HTMLElement>(":scope > span");
+    if (!marker || !label || !card || !values || !heading) return null;
+    const markerRect = marker.getBoundingClientRect();
+    const labelRect = label.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const valuesRect = values.getBoundingClientRect();
+    const headingRect = heading.getBoundingClientRect();
+    return {
+      label: label.textContent,
+      markerVisible: markerRect.width === 6 && markerRect.height === 6 && getComputedStyle(marker).backgroundColor !== "rgba(0, 0, 0, 0)",
+      centerDelta: Math.abs((markerRect.top + markerRect.height / 2) - (labelRect.top + labelRect.height / 2)),
+      valuesAtRight: valuesRect.left >= headingRect.right + 4 && valuesRect.right <= cardRect.right + 1
+    };
+  }));
+  expect(summaryMetricLayout).toHaveLength(6);
+  expect(summaryMetricLayout.every((metric) => metric?.markerVisible && metric.centerDelta <= 1 && metric.valuesAtRight)).toBe(true);
+  expect(summaryMetricLayout.map((metric) => metric?.label)).toEqual([
+    "加权", "未加权", "加权", "未加权", "加权", "未加权"
+  ]);
+  const weightedSummaryMetric = trendSummary.locator('.usage-trend-summary-value[data-metric="weighted"]').first();
+  await weightedSummaryMetric.hover();
+  const summaryTooltip = page.locator(".usage-trend-summary-popup [role=tooltip]");
+  await expect(summaryTooltip).toBeVisible();
+  await expect(summaryTooltip).toHaveText(/^\d{1,3}(?:,\d{3})+$/);
+  await expect(summaryTooltip).not.toContainText("Token");
   await expect(page.getByLabel("趋势图例")).toContainText("未加权 Token");
   await expect(page.getByLabel("趋势图例")).toContainText("加权 Token");
   await page.getByRole("button", { name: "7天", exact: true }).click();
@@ -978,6 +1008,73 @@ test("共享表格视口保持动态高度、右侧滚动槽和正确边界阴�
     before: getComputedStyle(element, "::before").opacity,
     after: getComputedStyle(element, "::after").opacity
   }))).toEqual({ gutter: "auto", before: "0", after: "0" });
+});
+
+test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明细", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "dark");
+  await page.route("**/admin/api/overview/usage?*", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json() as { accounts: Array<Record<string, unknown>> };
+    const source = payload.accounts;
+    payload.accounts = Array.from({ length: 18 }, (_, index) => ({
+      ...structuredClone(source[index % source.length]),
+      name: `cpa-token-${String(index + 1).padStart(2, "0")}`
+    }));
+    await route.fulfill({ response, json: payload });
+  });
+  await login(page, "/admin/overview", "Token 使用");
+
+  const card = page.locator(".overview-token-monitor-card");
+  const tabHeader = card.locator(".overview-token-workspace-header");
+  const tabs = tabHeader.getByRole("tab");
+  const summary = card.getByLabel("全部账号统计摘要");
+  const dataScroll = card.locator(".overview-token-data-scroll");
+  await expect(card.getByText("实际统计范围")).toBeVisible();
+  await expect(card.locator(".overview-token-window-range > strong")).toContainText(/—/);
+  await expect(tabs).toHaveCount(3);
+  await expect(dataScroll.locator(".overview-legacy-chart")).toBeVisible();
+  await expect(dataScroll.getByLabel("CPA用量明细表格")).toBeVisible();
+
+  const geometry = await card.evaluate((element) => {
+    const header = element.querySelector<HTMLElement>(".overview-token-workspace-header");
+    const summaryRegion = element.querySelector<HTMLElement>(".overview-token-summary-region");
+    const scroller = element.querySelector<HTMLElement>(".overview-token-data-scroll");
+    const chart = element.querySelector<HTMLElement>(".overview-legacy-chart");
+    const table = element.querySelector<HTMLElement>(".overview-legacy-table-wrap");
+    const tabButtons = [...element.querySelectorAll<HTMLElement>(".overview-token-view-switch [role=tab]")];
+    if (!header || !summaryRegion || !scroller || !chart || !table || tabButtons.length !== 3) {
+      throw new Error("Token 卡片几何锚点缺失");
+    }
+    const headerRect = header.getBoundingClientRect();
+    const summaryRect = summaryRegion.getBoundingClientRect();
+    const scrollRect = scroller.getBoundingClientRect();
+    const chartRect = chart.getBoundingClientRect();
+    const tableRect = table.getBoundingClientRect();
+    return {
+      tabsAboveSummary: headerRect.bottom <= summaryRect.top + 1,
+      summaryAboveData: summaryRect.bottom <= scrollRect.top + 1,
+      chartAboveTable: chartRect.bottom <= tableRect.top + 50,
+      tabWidths: tabButtons.map((button) => button.getBoundingClientRect().width),
+      overflowY: getComputedStyle(scroller).overflowY,
+      clientHeight: scroller.clientHeight,
+      scrollHeight: scroller.scrollHeight
+    };
+  });
+  expect(geometry.tabsAboveSummary).toBe(true);
+  expect(geometry.summaryAboveData).toBe(true);
+  expect(geometry.chartAboveTable).toBe(true);
+  expect(Math.max(...geometry.tabWidths) - Math.min(...geometry.tabWidths)).toBeLessThanOrEqual(1);
+  expect(geometry.overflowY).toBe("auto");
+  expect(geometry.clientHeight).toBeGreaterThanOrEqual(520);
+  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+
+  await tabs.filter({ hasText: "按 CPA" }).click();
+  await expect(card.getByLabel("CPA 账号统计摘要")).toBeVisible();
+  await expect(card.getByRole("tabpanel", { name: "按 CPA" }).getByLabel("CPA用量明细表格")).toBeVisible();
+  await tabs.filter({ hasText: "按用户" }).click();
+  await expect(card.getByLabel("用户统计摘要")).toBeVisible();
+  await expect(card.getByRole("tabpanel", { name: "按用户" }).getByLabel("用户用量明细表格")).toBeVisible();
 });
 
 test("仅在存在更新时显示心跳入口、悬停展示精简版本信息", async ({ page }) => {

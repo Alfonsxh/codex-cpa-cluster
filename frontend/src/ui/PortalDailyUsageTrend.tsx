@@ -11,6 +11,7 @@ import {
 import { SVGRenderer } from "echarts/renderers";
 import type { ComposeOption, EChartsType } from "echarts/core";
 import type { DefaultLabelFormatterCallbackParams as CallbackDataParams } from "echarts";
+import { Tooltip } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -104,16 +105,28 @@ export function PortalDailyUsageTrend({
 
         <div className={`usage-trend-summary${dimension === "model_reasoning" ? " model-reasoning" : ""}`} aria-label="趋势摘要">
           {summary.items.map((item) => (
-            <div className={item.label === "主要组合" ? "primary-combination" : undefined} key={item.label}>
+            <div className={[item.label === "主要组合" ? "primary-combination" : "", item.values ? "has-metrics" : ""].filter(Boolean).join(" ")} key={item.label}>
               <span>{item.label}</span>
               {item.value ? <strong title={item.title}>{query.isPending ? "—" : item.value}</strong> : null}
               {item.values ? (
                 <div className="usage-trend-summary-values">
                   {item.values.map((value) => (
-                    <div className="usage-trend-summary-value" data-metric={value.metric} key={value.metric}>
-                      <small>{value.label}</small>
-                      <strong title={value.title}>{query.isPending ? "—" : value.value}</strong>
-                    </div>
+                    <Tooltip
+                      key={value.metric}
+                      title={query.isPending ? undefined : value.title}
+                      placement="top"
+                      mouseEnterDelay={0.15}
+                      rootClassName="usage-trend-summary-popup"
+                    >
+                      <div
+                        className="usage-trend-summary-value"
+                        data-metric={value.metric}
+                        aria-label={`${value.label} Token，完整数量 ${query.isPending ? "正在读取" : value.title}`}
+                      >
+                        <small><i className="usage-trend-summary-value-marker" aria-hidden="true" /><span>{value.label}</span></small>
+                        <strong>{query.isPending ? "—" : value.value}</strong>
+                      </div>
+                    </Tooltip>
                   ))}
                 </div>
               ) : null}
@@ -420,8 +433,8 @@ export function summarizePortalTrend(
 
 function dualSummaryValues(raw: number, weighted: number): PortalTrendSummaryValue[] {
   return [
-    { label: "未加权", value: formatTokens(raw), title: `${raw.toLocaleString("en-US")} 未加权 Token`, metric: "total" },
-    { label: "加权", value: formatTokens(weighted), title: `${weighted.toLocaleString("en-US")} 加权 Token`, metric: "weighted" }
+    { label: "加权", value: formatTokens(weighted), title: weighted.toLocaleString("en-US"), metric: "weighted" },
+    { label: "未加权", value: formatTokens(raw), title: raw.toLocaleString("en-US"), metric: "total" }
   ];
 }
 

@@ -16,6 +16,46 @@ run_operator_script() {
     sh "$ROOT_DIR/scripts/run.sh" "$@"
 }
 
+PIPE_ROOT="$TEST_ROOT/pipe-cpac"
+PIPE_OUTPUT="$TEST_ROOT/pipe-help.log"
+curl -fsSL "file://$ROOT_DIR/scripts/run.sh" \
+  | CPAC_ALLOW_NON_ROOT=true \
+    CPAC_STAGING_ROOT="$PIPE_ROOT" \
+    CPAC_RUN_ASSET_URL="file://$ROOT_DIR/scripts/run.sh" \
+    sh -s -- help >"$PIPE_OUTPUT"
+[ -f "$PIPE_ROOT/run.sh" ] && [ ! -L "$PIPE_ROOT/run.sh" ] \
+  || { echo "stdin bootstrap did not install a regular run.sh" >&2; exit 1; }
+cmp -s "$ROOT_DIR/scripts/run.sh" "$PIPE_ROOT/run.sh" \
+  || { echo "stdin bootstrap changed the downloaded run.sh" >&2; exit 1; }
+grep -Fq "安装或升级：" "$PIPE_OUTPUT" \
+  || { echo "stdin bootstrap did not execute the downloaded run.sh" >&2; exit 1; }
+
+PRESERVED_ROOT="$TEST_ROOT/preserved-cpac"
+mkdir -p "$PRESERVED_ROOT"
+printf '%s\n' preserved >"$PRESERVED_ROOT/run.sh"
+if CPAC_ALLOW_NON_ROOT=true \
+  CPAC_STAGING_ROOT="$PRESERVED_ROOT" \
+  CPAC_RUN_ASSET_URL="file://$TEST_ROOT/missing-run.sh" \
+  sh -s -- help <"$ROOT_DIR/scripts/run.sh" >/dev/null 2>&1; then
+  echo "stdin bootstrap accepted a missing run.sh asset" >&2
+  exit 1
+fi
+[ "$(cat "$PRESERVED_ROOT/run.sh")" = preserved ] \
+  || { echo "failed stdin bootstrap replaced the existing run.sh" >&2; exit 1; }
+
+SYMLINK_ROOT="$TEST_ROOT/symlink-cpac"
+mkdir -p "$SYMLINK_ROOT"
+ln -s "$PRESERVED_ROOT/run.sh" "$SYMLINK_ROOT/run.sh"
+if CPAC_ALLOW_NON_ROOT=true \
+  CPAC_STAGING_ROOT="$SYMLINK_ROOT" \
+  CPAC_RUN_ASSET_URL="file://$ROOT_DIR/scripts/run.sh" \
+  sh -s -- help <"$ROOT_DIR/scripts/run.sh" >/dev/null 2>&1; then
+  echo "stdin bootstrap accepted a symbolic-link run.sh" >&2
+  exit 1
+fi
+[ "$(cat "$PRESERVED_ROOT/run.sh")" = preserved ] \
+  || { echo "stdin bootstrap followed and changed a run.sh symlink" >&2; exit 1; }
+
 run_operator_script domain set QData.Example.COM. --yes >/dev/null
 [ "$(cat "$CONFIG_FILE")" = "CPA_DOMAIN=qdata.example.com" ] || {
   echo "run.sh did not normalize and persist the domain" >&2

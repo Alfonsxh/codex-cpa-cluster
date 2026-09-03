@@ -5,7 +5,7 @@
 已经初始化的目标直接执行：
 
 ```sh
-sudo sh -c 'install -d -o root -g root -m 0755 /home/cpac && curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh -o /home/cpac/run.sh && chmod 0755 /home/cpac/run.sh && exec /home/cpac/run.sh'
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
 ```
 
 命令重新获取最新 `run.sh`，然后自动复用 `/home/cpac/config.env` 中的域名和入口模式，在 `/home/cpac/backups/` 创建 root-only 备份并执行正式蓝绿部署。升级成功后会删除旧版 `/home/cpac/deploy.sh` 入口。升级绝不因缺少 Nginx、证书或不同域名站点而改变既有入口模式：`external` 始终不触碰 Nginx/Certbot 且跳过公网检查；`managed` 只更新 CPAC 自己托管的站点。旧版无标记站点不会被自动认领，保留旧站点时应先执行 `sudo /home/cpac/run.sh ingress set external`。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会先安全迁移到 `/home/cpac/`。固定版本排障可使用 `sudo /home/cpac/run.sh run --version v2.0.0`。需要切换入口时必须显式确认 `sudo /home/cpac/run.sh ingress set managed|external`，再执行日常部署。

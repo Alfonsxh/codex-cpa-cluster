@@ -42,7 +42,7 @@ make test-down
 域名 DNS 需预先指向目标机。安装和以后每次升级都可以重复执行同一条命令：
 
 ```sh
-sudo sh -c 'install -d -o root -g root -m 0755 /home/cpac && curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh -o /home/cpac/run.sh && chmod 0755 /home/cpac/run.sh && exec /home/cpac/run.sh'
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
 ```
 
 首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 CPAC 管理 Nginx/TLS）；选择会与域名一起写入 `/home/cpac/config.env`。无交互环境必须使用例如 `sudo /home/cpac/run.sh run --domain qdata.example.com --ingress external`。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无 CPAC 托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。

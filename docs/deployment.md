@@ -16,10 +16,10 @@ Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入
 全新单机目标使用唯一的部署脚本，不要手工创建 SQLite、主密钥或快照：
 
 ```sh
-sudo sh -c 'install -d -o root -g root -m 0755 /home/cpac && curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh -o /home/cpac/run.sh && chmod 0755 /home/cpac/run.sh && exec /home/cpac/run.sh'
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
 ```
 
-`scripts/run.sh` 校验 GitHub Release 中的脚本、归档和机器可读发布环境，在 `/home/cpac/` 同一文件系统创建临时根目录，然后通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/cpac/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。
+管道入口会把 Release 中的 `run.sh` 原子安装到内部运维目录，再重新连接当前终端并执行，因此首次安装仍可交互输入域名和入口模式。`scripts/run.sh` 随后校验 GitHub Release 中的脚本、归档和机器可读发布环境，在 `/home/cpac/` 同一文件系统创建临时根目录，然后通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/cpac/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。
 
 交互执行使用分阶段终端界面：成功阶段隐藏底层命令噪声，失败阶段展开完整诊断；`managed` 模式的最终完成卡片显示 `https://<域名>/admin/`，`external` 模式明确要求从既有反向代理的入口访问 `/admin/`。`NO_COLOR=1` 仅关闭 ANSI 颜色，不改变步骤、错误或安全语义。
 

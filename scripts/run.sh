@@ -1,6 +1,88 @@
 #!/usr/bin/env sh
 set -eu
 
+DEFAULT_REPOSITORY=${CPAC_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}
+RUN_ASSET_URL=${CPAC_RUN_ASSET_URL:-https://github.com/$DEFAULT_REPOSITORY/releases/latest/download/run.sh}
+
+bootstrap_from_stdin() {
+  bootstrap_root=${CPAC_STAGING_ROOT:-/home/cpac}
+  case "$bootstrap_root" in
+    /*) ;;
+    *) printf 'ERROR  CPAC_STAGING_ROOT 必须是绝对路径\n' >&2; exit 1 ;;
+  esac
+  [ "$bootstrap_root" != / ] || {
+    printf 'ERROR  CPAC_STAGING_ROOT 不能是文件系统根目录\n' >&2
+    exit 1
+  }
+  if [ "$(id -u)" -ne 0 ] && [ "${CPAC_ALLOW_NON_ROOT:-false}" != true ]; then
+    printf 'ERROR  请通过 sudo 运行安装脚本\n' >&2
+    exit 1
+  fi
+  command -v curl >/dev/null 2>&1 || {
+    printf 'ERROR  缺少运行依赖：curl\n' >&2
+    exit 1
+  }
+  if [ -e "$bootstrap_root" ] || [ -L "$bootstrap_root" ]; then
+    [ -d "$bootstrap_root" ] && [ ! -L "$bootstrap_root" ] || {
+      printf 'ERROR  安装目录必须是普通目录且不能是符号链接\n' >&2
+      exit 1
+    }
+  else
+    mkdir -p -- "$bootstrap_root" || {
+      printf 'ERROR  无法创建安装目录\n' >&2
+      exit 1
+    }
+    chmod 0755 "$bootstrap_root" || {
+      printf 'ERROR  无法设置安装目录权限\n' >&2
+      exit 1
+    }
+  fi
+
+  bootstrap_destination="$bootstrap_root/run.sh"
+  if [ -e "$bootstrap_destination" ] || [ -L "$bootstrap_destination" ]; then
+    [ -f "$bootstrap_destination" ] && [ ! -L "$bootstrap_destination" ] || {
+      printf 'ERROR  已有安装入口不是普通文件，拒绝覆盖\n' >&2
+      exit 1
+    }
+  fi
+  bootstrap_temporary=$(mktemp "$bootstrap_root/.run.bootstrap.XXXXXX") || {
+    printf 'ERROR  无法创建安装脚本临时文件\n' >&2
+    exit 1
+  }
+  cleanup_stdin_bootstrap() {
+    [ -z "$bootstrap_temporary" ] || rm -f -- "$bootstrap_temporary"
+  }
+  trap cleanup_stdin_bootstrap EXIT HUP INT TERM
+  curl -fsSL --retry 3 --connect-timeout 15 --max-time 300 \
+    "$RUN_ASSET_URL" -o "$bootstrap_temporary" || {
+      printf 'ERROR  下载 run.sh 失败\n' >&2
+      exit 1
+    }
+  [ -s "$bootstrap_temporary" ] && sh -n "$bootstrap_temporary" || {
+    printf 'ERROR  下载的 run.sh 无效\n' >&2
+    exit 1
+  }
+  chmod 0755 "$bootstrap_temporary" \
+    && mv -f -- "$bootstrap_temporary" "$bootstrap_destination" || {
+      printf 'ERROR  无法安装 run.sh\n' >&2
+      exit 1
+    }
+  bootstrap_temporary=
+  trap - EXIT HUP INT TERM
+
+  if (: </dev/tty) 2>/dev/null; then
+    exec "$bootstrap_destination" "$@" </dev/tty
+  fi
+  exec "$bootstrap_destination" "$@" </dev/null
+}
+
+STDIN_BOOTSTRAP=false
+case "${0##*/}" in
+  sh|dash|bash|ksh|zsh)
+    [ -t 0 ] || STDIN_BOOTSTRAP=true
+    ;;
+esac
+
 SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 SCRIPT_PATH="$SCRIPT_DIRECTORY/$(basename -- "$0")"
 STAGING_ROOT=${CPAC_STAGING_ROOT:-$SCRIPT_DIRECTORY}
@@ -8,7 +90,6 @@ DEFAULT_DEPLOY_ROOT=${CPAC_DEPLOY_ROOT:-$STAGING_ROOT/runtime}
 DEFAULT_BACKUP_ROOT=${CPAC_BACKUP_DIR:-$STAGING_ROOT/backups}
 DEFAULT_CONFIG_FILE=${CPAC_CONFIG_FILE:-$STAGING_ROOT/config.env}
 LEGACY_CONFIG_FILE=${CPAC_LEGACY_CONFIG_FILE:-/etc/cpac/config.env}
-DEFAULT_REPOSITORY=${CPAC_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}
 ACME_ROOT=${CPAC_ACME_ROOT:-/var/www/letsencrypt}
 NGINX_AVAILABLE_DIRECTORY=${CPAC_NGINX_AVAILABLE_DIRECTORY:-/etc/nginx/sites-available}
 NGINX_ENABLED_DIRECTORY=${CPAC_NGINX_ENABLED_DIRECTORY:-/etc/nginx/sites-enabled}
@@ -1542,7 +1623,7 @@ run_install_or_upgrade() {
       ui_note "首次管理员凭据已安全保留；请在交互终端执行：sudo $SCRIPT_PATH admin-key claim"
     fi
   fi
-  ui_note "以后安装和升级都执行：sudo $SCRIPT_PATH"
+  ui_note "以后安装和升级都执行：curl -fsSL $RUN_ASSET_URL | sudo sh"
 }
 
 run_domain_set() {
@@ -1612,7 +1693,10 @@ run_ingress_set() {
 
 operator_usage() {
   cat <<EOF
-用法：
+安装或升级：
+  curl -fsSL $RUN_ASSET_URL | sudo sh
+
+高级管理：
   sudo $SCRIPT_PATH
   sudo $SCRIPT_PATH run [--domain DOMAIN] [--ingress managed|external] [--version VERSION]
   sudo $SCRIPT_PATH domain set DOMAIN
@@ -1622,52 +1706,55 @@ EOF
 }
 
 ENTRY_COMMAND=${1:-run}
-case "$ENTRY_COMMAND" in
-  __target)
-    ;;
-  run)
-    [ "$#" -eq 0 ] || shift
-    run_install_or_upgrade "$@"
-    exit 0
-    ;;
-  domain)
-    shift
-    subcommand=${1:-}
-    [ "$subcommand" = set ] || die "用法：sudo $SCRIPT_PATH domain set <新域名>"
-    shift
-    run_domain_set "$@"
-    exit 0
-    ;;
-  ingress)
-    shift
-    subcommand=${1:-}
-    [ "$subcommand" = set ] || die "用法：sudo $SCRIPT_PATH ingress set managed|external"
-    shift
-    run_ingress_set "$@"
-    exit 0
-    ;;
-  admin-key)
-    shift
-    subcommand=${1:-}
-    [ "$subcommand" = claim ] || die "用法：sudo $SCRIPT_PATH admin-key claim"
-    shift
-    [ "$#" -eq 0 ] || die "admin-key claim 不接受额外参数"
-    require_root admin-key claim
-    migrate_legacy_operator_state "$DEFAULT_CONFIG_FILE"
-    claim_admin_key "$DEFAULT_CONFIG_FILE"
-    exit 0
-    ;;
-  help|-h|--help)
-    operator_usage
-    exit 0
-    ;;
-  *)
-    die "未知命令：$ENTRY_COMMAND"
-    ;;
-esac
+if [ "$STDIN_BOOTSTRAP" != true ]; then
+  case "$ENTRY_COMMAND" in
+    __target)
+      ;;
+    run)
+      [ "$#" -eq 0 ] || shift
+      run_install_or_upgrade "$@"
+      exit 0
+      ;;
+    domain)
+      shift
+      subcommand=${1:-}
+      [ "$subcommand" = set ] || die "用法：sudo $SCRIPT_PATH domain set <新域名>"
+      shift
+      run_domain_set "$@"
+      exit 0
+      ;;
+    ingress)
+      shift
+      subcommand=${1:-}
+      [ "$subcommand" = set ] || die "用法：sudo $SCRIPT_PATH ingress set managed|external"
+      shift
+      run_ingress_set "$@"
+      exit 0
+      ;;
+    admin-key)
+      shift
+      subcommand=${1:-}
+      [ "$subcommand" = claim ] || die "用法：sudo $SCRIPT_PATH admin-key claim"
+      shift
+      [ "$#" -eq 0 ] || die "admin-key claim 不接受额外参数"
+      require_root admin-key claim
+      migrate_legacy_operator_state "$DEFAULT_CONFIG_FILE"
+      claim_admin_key "$DEFAULT_CONFIG_FILE"
+      exit 0
+      ;;
+    help|-h|--help)
+      operator_usage
+      exit 0
+      ;;
+    *)
+      die "未知命令：$ENTRY_COMMAND"
+      ;;
+  esac
+fi
 
-ROOT_DIR=${CPA_RELEASE_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
-ACTION=${2:-config}
+if [ "$STDIN_BOOTSTRAP" != true ]; then
+  ROOT_DIR=${CPA_RELEASE_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
+  ACTION=${2:-config}
 ENV_FILE=${CPA_ENV_FILE:-$ROOT_DIR/target.env}
 RELEASE_COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
 
@@ -2552,3 +2639,8 @@ case "$ACTION" in
     exit 1
     ;;
 esac
+fi
+
+if [ "$STDIN_BOOTSTRAP" = true ]; then
+  bootstrap_from_stdin "$@"
+fi

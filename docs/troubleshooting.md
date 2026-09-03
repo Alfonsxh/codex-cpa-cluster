@@ -28,7 +28,7 @@ docker compose --env-file /absolute/path/to/target.env -f docker-compose.yml \
 3. `web` 连接 Control 网络，Admin 健康。
 4. `state/edge/active-gateway.conf` 只选择 `blue` 或 `green` 对应配置。
 
-`deploy.sh` 的内部 `up-core` 动作会逐个启动并校验精确容器/服务标签、网络与端口；不要用手工连接未知容器作为长期修复。
+`run.sh` 的内部 `up-core` 动作会逐个启动并校验精确容器/服务标签、网络与端口；不要用手工连接未知容器作为长期修复。
 
 ## Gateway 返回 401、503 或 502
 

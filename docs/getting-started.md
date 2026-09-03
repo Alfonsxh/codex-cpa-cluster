@@ -1,6 +1,6 @@
 # 快速开始
 
-本分支只提供 Go 服务、React 前端和一个统一的 `scripts/deploy.sh`。目标机不安装额外 CLI；同一个脚本负责首次初始化、升级和必要的管理子命令。
+本分支只提供 Go 服务、React 前端和一个统一的 `scripts/run.sh`。目标机不安装额外 CLI；同一个脚本负责首次初始化、升级和必要的管理子命令。
 
 ## 开发依赖
 
@@ -39,24 +39,20 @@ make test-down
 
 ## 全新目标安装
 
-域名 DNS 需预先指向目标机。下载唯一部署脚本后执行：
+域名 DNS 需预先指向目标机。安装和以后每次升级都可以重复执行同一条命令：
 
 ```sh
-sudo install -d -o root -g root -m 0755 /home/cpac
-sudo curl -fL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/deploy.sh \
-  -o /home/cpac/deploy.sh
-sudo chmod 0755 /home/cpac/deploy.sh
-sudo /home/cpac/deploy.sh
+sudo sh -c 'install -d -o root -g root -m 0755 /home/cpac && curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh -o /home/cpac/run.sh && chmod 0755 /home/cpac/run.sh && exec /home/cpac/run.sh'
 ```
 
-首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 CPAC 管理 Nginx/TLS）；选择会与域名一起写入 `/home/cpac/config.env`。无交互环境必须使用例如 `sudo /home/cpac/deploy.sh deploy --domain qdata.example.com --ingress external`。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无 CPAC 托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 CPAC 管理 Nginx/TLS）；选择会与域名一起写入 `/home/cpac/config.env`。无交互环境必须使用例如 `sudo /home/cpac/run.sh run --domain qdata.example.com --ingress external`。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无 CPAC 托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
 
 日后如确需切换入口，先处理好宿主机站点归属，再执行并确认：
 
 ```sh
-sudo /home/cpac/deploy.sh ingress set managed
+sudo /home/cpac/run.sh ingress set managed
 # 或
-sudo /home/cpac/deploy.sh ingress set external
+sudo /home/cpac/run.sh ingress set external
 ```
 
 ### 首次管理员设置

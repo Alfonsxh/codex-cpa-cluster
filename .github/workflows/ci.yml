@@ -101,7 +101,7 @@ jobs:
           tar -tzf "$archive" | grep -Fx internal/gateway/server.go
           tar -tzf "$archive" | grep -Fx frontend/package.json
           tar -tzf "$archive" | grep -Fx tools/openapi/package.json
-          tar -tzf "$archive" | grep -Fx scripts/deploy.sh
+          tar -tzf "$archive" | grep -Fx scripts/run.sh
           if tar -tzf "$archive" | grep -Eq '^scripts/(cpac|install-cpac\.sh|deploy-target\.sh)$'; then
             echo "release archive contains a removed deployment entry" >&2
             exit 1

@@ -13,19 +13,19 @@ run_operator_script() {
   CPAC_ALLOW_NON_ROOT=true \
     CPAC_STAGING_ROOT="$OPERATOR_ROOT" \
     CPAC_LEGACY_CONFIG_FILE="$LEGACY_CONFIG_FILE" \
-    sh "$ROOT_DIR/scripts/deploy.sh" "$@"
+    sh "$ROOT_DIR/scripts/run.sh" "$@"
 }
 
 run_operator_script domain set QData.Example.COM. --yes >/dev/null
 [ "$(cat "$CONFIG_FILE")" = "CPA_DOMAIN=qdata.example.com" ] || {
-  echo "deploy.sh did not normalize and persist the domain" >&2
+  echo "run.sh did not normalize and persist the domain" >&2
   exit 1
 }
 mode=$(stat -c '%a' "$CONFIG_FILE" 2>/dev/null || stat -f '%Lp' "$CONFIG_FILE")
-[ "$mode" = 600 ] || { echo "deploy.sh config mode = $mode" >&2; exit 1; }
+[ "$mode" = 600 ] || { echo "run.sh config mode = $mode" >&2; exit 1; }
 
 if run_operator_script domain set invalid --yes >/dev/null 2>&1; then
-  echo "deploy.sh accepted an invalid FQDN" >&2
+  echo "run.sh accepted an invalid FQDN" >&2
   exit 1
 fi
 [ "$(cat "$CONFIG_FILE")" = "CPA_DOMAIN=qdata.example.com" ] || {
@@ -35,27 +35,27 @@ fi
 
 run_operator_script ingress set external --yes >/dev/null
 [ "$(cat "$CONFIG_FILE")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAC_INGRESS_MODE=external')" ] || {
-  echo "deploy.sh did not persist the external ingress mode" >&2
+  echo "run.sh did not persist the external ingress mode" >&2
   exit 1
 }
-if run_operator_script deploy --ingress managed </dev/null >/dev/null 2>&1; then
-  echo "deploy.sh silently switched a persisted ingress mode" >&2
+if run_operator_script run --ingress managed </dev/null >/dev/null 2>&1; then
+  echo "run.sh silently switched a persisted ingress mode" >&2
   exit 1
 fi
 run_operator_script ingress set managed --yes >/dev/null
 [ "$(cat "$CONFIG_FILE")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAC_INGRESS_MODE=managed')" ] || {
-  echo "deploy.sh did not persist the managed ingress mode" >&2
+  echo "run.sh did not persist the managed ingress mode" >&2
   exit 1
 }
 
 MISSING_CONFIG="$TEST_ROOT/missing/config.env"
 if CPAC_DEPLOY_ROOT="$TEST_ROOT/deploy" \
-  run_operator_script deploy --config "$MISSING_CONFIG" </dev/null >/dev/null 2>&1; then
+  run_operator_script run --config "$MISSING_CONFIG" </dev/null >/dev/null 2>&1; then
   echo "non-interactive first deploy accepted a missing domain" >&2
   exit 1
 fi
 if CPAC_DEPLOY_ROOT="$TEST_ROOT/deploy" \
-  run_operator_script deploy --domain qdata.example.com --config "$MISSING_CONFIG" \
+  run_operator_script run --domain qdata.example.com --config "$MISSING_CONFIG" \
     </dev/null >/dev/null 2>&1; then
   echo "non-interactive first deploy accepted no ingress selection" >&2
   exit 1
@@ -83,7 +83,7 @@ mkdir -p "$(dirname -- "$LEGACY_CONFIG_FILE")"
 printf '%s\n' 'CPA_DOMAIN=conflict.example.com' >"$LEGACY_CONFIG_FILE"
 chmod 0600 "$LEGACY_CONFIG_FILE"
 if run_operator_script domain set legacy.example.com --yes >/dev/null 2>&1; then
-  echo "deploy.sh accepted conflicting old and new domain configs" >&2
+  echo "run.sh accepted conflicting old and new domain configs" >&2
   exit 1
 fi
 [ "$(cat "$CONFIG_FILE")" = "$(printf 'CPA_DOMAIN=legacy.example.com\nCPAC_INGRESS_MODE=managed')" ] \
@@ -99,7 +99,7 @@ LEGACY_PENDING="$(dirname -- "$LEGACY_CONFIG_FILE")/bootstrap-admin.key"
 printf '%s\n' 'different-pending-secret' >"$LEGACY_PENDING"
 chmod 0600 "$LEGACY_PENDING"
 if run_operator_script domain set legacy.example.com --yes >/dev/null 2>&1; then
-  echo "deploy.sh accepted conflicting old and new pending admin keys" >&2
+  echo "run.sh accepted conflicting old and new pending admin keys" >&2
   exit 1
 fi
 [ "$(cat "$PENDING")" = 'pending-secret-must-remain' ] \
@@ -119,6 +119,11 @@ fi
 for removed in "$ROOT_DIR/scripts/cpac" "$ROOT_DIR/scripts/install-cpac.sh" "$ROOT_DIR/scripts/deploy-target.sh"; do
   [ ! -e "$removed" ] || { echo "removed deployment entry still exists: $removed" >&2; exit 1; }
 done
-sh "$ROOT_DIR/scripts/deploy.sh" help | grep -Fq "sudo $ROOT_DIR/scripts/deploy.sh"
+sh "$ROOT_DIR/scripts/run.sh" help | grep -Fq "sudo $ROOT_DIR/scripts/run.sh"
+sh "$ROOT_DIR/scripts/run.sh" help | grep -Fq "sudo $ROOT_DIR/scripts/run.sh run [--domain DOMAIN]"
+if run_operator_script deploy >/dev/null 2>&1; then
+  echo "run.sh still accepted the removed deploy command" >&2
+  exit 1
+fi
 
-printf '%s\n' 'single deploy.sh contract tests passed'
+printf '%s\n' 'single run.sh contract tests passed'

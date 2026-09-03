@@ -4,6 +4,16 @@ Codex CPA Cluster 是 CLIProxyAPI 多账号服务的 Go 控制平面与数据面
 
 所有正式组件与 Release Metadata 统一由仓库根目录 `Dockerfile` 的明确 Target 构建；仓库不保留第二份部署 Dockerfile。
 
+## 安装与升级
+
+域名 DNS 指向目标机后，安装和以后每次升级都执行同一条命令：
+
+```sh
+sudo sh -c 'install -d -o root -g root -m 0755 /home/cpac && curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh -o /home/cpac/run.sh && chmod 0755 /home/cpac/run.sh && exec /home/cpac/run.sh'
+```
+
+首次执行会提示输入域名并选择使用现有反向代理，或由 CPAC 配置 Nginx 与 HTTPS；后续执行会复用已有配置并自动升级。`run.sh` 是目标机唯一的安装、升级和管理入口。
+
 | 组件 | 技术 | 职责 |
 |---|---|---|
 | Control | Go、Gin、Cobra、Viper、SQLite、Zap | Admin API、Portal API、账号与用户生命周期、用量采集、额度、故障迁移、通知、日志维护 |
@@ -20,7 +30,7 @@ Codex CPA Cluster 是 CLIProxyAPI 多账号服务的 Go 控制平面与数据面
 - 账号故障迁移支持 `off` 与 `active`，批量迁移采用原子路由更新。
 - Edge 固定主机端口，Gateway 蓝绿切换；已有 SSE 请求在原槽排空，新请求进入新槽。
 - 四个镜像使用源码摘要和不可变标签发布，目标机本地拉取并校验镜像标签。
-- 单一 `deploy.sh` 可初始化全新单机目标，也可在保留 SQLite、主密钥、OAuth 和 API Key 的前提下原地升级。
+- 单一 `run.sh` 可初始化全新单机目标，也可在保留 SQLite、主密钥、OAuth 和 API Key 的前提下原地升级。
 
 ## 本地验证
 
@@ -50,25 +60,22 @@ make test-down
 
 ### 统一安装/升级入口
 
-目标机只保留一个运维入口 `/home/cpac/deploy.sh`。首次使用时从最新 GitHub Release 下载它：
+目标机只保留一个运维入口 `/home/cpac/run.sh`。安装和升级都可以直接重复执行以下命令：
 
 ```sh
-sudo install -d -o root -g root -m 0755 /home/cpac
-sudo curl -fL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/deploy.sh \
-  -o /home/cpac/deploy.sh
-sudo chmod 0755 /home/cpac/deploy.sh
+sudo sh -c 'install -d -o root -g root -m 0755 /home/cpac && curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh -o /home/cpac/run.sh && chmod 0755 /home/cpac/run.sh && exec /home/cpac/run.sh'
 ```
 
-初始化和以后每次升级都使用同一个命令：
+脚本下载完成后会固定保存在 `/home/cpac/run.sh`；需要再次执行时也可以直接运行：
 
 ```sh
-sudo /home/cpac/deploy.sh
+sudo /home/cpac/run.sh
 ```
 
 首次运行时，脚本检测不到本机配置，会提示输入访问域名，并检测本机是否已有 Nginx、同域名站点和证书，再让操作者选择入口方式：
 
 ```text
-$ sudo /home/cpac/deploy.sh
+$ sudo /home/cpac/run.sh
 请输入访问域名: qdata.example.com
   1) 使用现有反向代理（不修改 Nginx / Certbot）
   2) 由 CPAC 管理 Nginx 与 Let's Encrypt 证书
@@ -78,13 +85,13 @@ $ sudo /home/cpac/deploy.sh
 域名经过严格的 FQDN 格式校验和规范化后，与入口模式一同写入 `/home/cpac/config.env`：`CPA_DOMAIN=<域名>`、`CPAC_INGRESS_MODE=managed|external`。配置通过同目录临时文件原子替换，由 `root` 所有且权限为 `0600`，不会把任意用户输入作为 Shell 执行。后续执行自动读取两项配置并判断“首次初始化”或“原地升级”，不会静默改写入口模式。旧版本仅有域名的配置按兼容规则视为 `managed`；一旦成功升级便持久化该值。无交互环境首次运行必须显式传入域名和入口模式：
 
 ```sh
-sudo /home/cpac/deploy.sh deploy --domain qdata.example.com --ingress external
+sudo /home/cpac/run.sh run --domain qdata.example.com --ingress external
 ```
 
-如果配置尚不存在、标准输入也不是终端，并且没有同时提供 `--domain`、`--ingress`，脚本必须失败，不能猜测域名或接管宿主机入口。已有部署不能通过普通参数静默覆盖域名或入口模式；改域名需执行 `sudo /home/cpac/deploy.sh domain set <新域名>`，切换入口需执行 `sudo /home/cpac/deploy.sh ingress set managed|external` 并确认。
+如果配置尚不存在、标准输入也不是终端，并且没有同时提供 `--domain`、`--ingress`，脚本必须失败，不能猜测域名或接管宿主机入口。已有部署不能通过普通参数静默覆盖域名或入口模式；改域名需执行 `sudo /home/cpac/run.sh domain set <新域名>`，切换入口需执行 `sudo /home/cpac/run.sh ingress set managed|external` 并确认。
 
 ```text
-sudo /home/cpac/deploy.sh
+sudo /home/cpac/run.sh
         |
         +-- 没有已记录域名? -- 是 --> 提示输入并安全保存
         |                         \--> 无交互且未传 --domain：失败
@@ -100,7 +107,7 @@ sudo /home/cpac/deploy.sh
 
 ```text
 /home/cpac/
-├── deploy.sh
+├── run.sh
 ├── config.env
 ├── bootstrap-admin.key          # 仅在首次凭据待领取时存在
 ├── backups/                     # 首次安装时可不存在
@@ -123,11 +130,11 @@ Docker 数据和进程锁仍遵循宿主机系统目录；它们不是第二套 
 
 交互终端按阶段显示安装进度，成功时收起 `curl`、Docker、Nginx 等底层命令输出，失败时原样展开对应阶段的诊断日志。每个成功阶段会补充经过验证的结果；完成卡片会列出升级前后版本、四个组件镜像的更新或复用、Gateway 蓝绿切换与排空、核心及后台容器动作、升级备份、入口接管状态、站点、管理员登录地址 `https://<域名>/admin/` 和运行目录。首次管理员管理密钥紧随其后且只显示一次。自动化日志可设置标准环境变量 `NO_COLOR=1` 禁用颜色。
 
-首次安装没有固定的默认管理员密码。脚本通过 Control 镜像生成随机管理凭据并写入加密控制面；交互部署会在烟测成功后显示一次，自动化部署则保留在 root-only 待领取文件中，之后在交互终端执行 `sudo /home/cpac/deploy.sh admin-key claim`。升级不显示也不重置已有凭据。
+首次安装没有固定的默认管理员密码。脚本通过 Control 镜像生成随机管理凭据并写入加密控制面；交互部署会在烟测成功后显示一次，自动化部署则保留在 root-only 待领取文件中，之后在交互终端执行 `sudo /home/cpac/run.sh admin-key claim`。升级不显示也不重置已有凭据。
 
 首次使用管理密钥登录 `/admin/` 后，Web 管理中心会进入统一的首次配置页，可直接设置邮箱域、用户初始密码、公开地址、额度时区、默认周额度、通知、品牌和上游代理，并可随时返回运行总览。CPA 创建、OAuth 授权和用户创建保留在各自管理页面，不再作为初始化步骤。未处理的配置会在运行总览保留恢复入口；状态由控制面实时计算，Secret 不进入读取接口或浏览器持久化存储。
 
-`managed` 模式负责安装必要依赖、写入带 `# Managed by CPAC deploy.sh` 标记的 CPAC 专属站点，并申请或复用 Let's Encrypt 证书；若同域名站点不是该脚本托管，脚本拒绝覆盖。旧版无标记站点也不会被自动认领：保留它时应显式切换为 `external`。DNS 必须预先指向目标机。`external` 模式只部署本机监听于 `127.0.0.1:18317` 的 CPAC 服务，并输出反向代理要求：保留 `Host`、`X-Forwarded-*`，支持 WebSocket/SSE 和至少 3600 秒流式超时；操作者负责验证 `<既有入口>/__health` 返回 `200`。它不修改仓库范围外的代理拓扑或 `/opt/cliproxyapi`。
+`managed` 模式负责安装必要依赖、写入带 `# Managed by CPAC run.sh` 标记的 CPAC 专属站点，并申请或复用 Let's Encrypt 证书；若同域名站点不是该脚本托管，脚本拒绝覆盖。旧版无标记站点也不会被自动认领：保留它时应显式切换为 `external`。DNS 必须预先指向目标机。`external` 模式只部署本机监听于 `127.0.0.1:18317` 的 CPAC 服务，并输出反向代理要求：保留 `Host`、`X-Forwarded-*`，支持 WebSocket/SSE 和至少 3600 秒流式超时；操作者负责验证 `<既有入口>/__health` 返回 `200`。它不修改仓库范围外的代理拓扑或 `/opt/cliproxyapi`。
 
 ### 开发者底层入口
 
@@ -138,10 +145,10 @@ Docker 数据和进程锁仍遵循宿主机系统目录；它们不是第二套 
 5. 依次执行镜像拉取、标签校验、所有权激活、Gateway 蓝绿排空、Admin/Web、Writer 和烟测。
 
 ```sh
-make deploy TARGET_ENV=/absolute/path/to/target.env
+make run TARGET_ENV=/absolute/path/to/target.env
 ```
 
-`make deploy` 调用同一个 `scripts/deploy.sh` 的内部目标动作，只适用于已经初始化的开发/Test 目标；它不是第二个目标机运维入口。CI 和发布脚本不会连接 Production，目标选择只来自操作者提供的环境文件和本地 Harness 配置。
+`make run` 调用同一个 `scripts/run.sh` 的内部目标动作，只适用于已经初始化的开发/Test 目标；它不是第二个目标机运维入口。CI 和发布脚本不会连接 Production，目标选择只来自操作者提供的环境文件和本地 Harness 配置。
 Edge 持有唯一公开端口，镜像或 Compose 配置变化时必须额外确认维护窗口；普通 Control、Web、Gateway 发布不会重建 Edge。
 
 ## 安全边界

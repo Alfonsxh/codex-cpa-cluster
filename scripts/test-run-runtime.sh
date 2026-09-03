@@ -288,11 +288,11 @@ run_action() {
     FAKE_DOCKER_LOG="$COMMAND_LOG" \
     FAKE_DOCKER_SCENARIO="$scenario" \
     CPA_ENV_FILE="$ENV_FILE" \
-    sh "$ROOT_DIR/scripts/deploy.sh" __target "$action"
+    sh "$ROOT_DIR/scripts/run.sh" __target "$action"
 }
 
 if grep -Eq '^[[:space:]]+depends_on:' "$ROOT_DIR/docker-compose.yml"; then
-  echo "formal target Compose must leave dependency ordering to deploy.sh" >&2
+  echo "formal target Compose must leave dependency ordering to run.sh" >&2
   exit 1
 fi
 
@@ -449,7 +449,13 @@ mkdir -p \
   "$TEST_ROOT/nginx/enabled" \
   "$TEST_ROOT/certificates/qdata.example.com" \
   "$TEST_ROOT/acme"
-cp "$ROOT_DIR/scripts/deploy.sh" "$OPERATOR_ROOT/deploy.sh"
+cp "$ROOT_DIR/scripts/run.sh" "$OPERATOR_ROOT/run.sh"
+chmod 0755 "$OPERATOR_ROOT/run.sh"
+cat >"$OPERATOR_ROOT/deploy.sh" <<'LEGACY_OPERATOR'
+#!/usr/bin/env sh
+DEFAULT_REPOSITORY=${CPAC_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}
+ENTRY_COMMAND=${1:-deploy}
+LEGACY_OPERATOR
 chmod 0755 "$OPERATOR_ROOT/deploy.sh"
 cp "$ROOT_DIR/docker-compose.yml" "$RELEASE_CONTENT/docker-compose.yml"
 printf '%s\n' '{}' >"$RELEASE_CONTENT/release-manifest.json"
@@ -464,15 +470,15 @@ CPAC_WEB_IMAGE=registry.example.test/codex-cpa-web:sha256-$DIGEST
 CPAC_GATEWAY_IMAGE=registry.example.test/codex-cpa-gateway:sha256-$DIGEST
 CPAC_EDGE_IMAGE=registry.example.test/codex-cpa-edge:sha256-$DIGEST
 EOF
-cp "$ROOT_DIR/scripts/deploy.sh" "$RELEASE_SERVER/deploy.sh"
-printf '%s\n' '# verified self-update fixture' >>"$RELEASE_SERVER/deploy.sh"
-chmod 0755 "$RELEASE_SERVER/deploy.sh"
+cp "$ROOT_DIR/scripts/run.sh" "$RELEASE_SERVER/run.sh"
+printf '%s\n' '# verified self-update fixture' >>"$RELEASE_SERVER/run.sh"
+chmod 0755 "$RELEASE_SERVER/run.sh"
 (
   cd "$RELEASE_SERVER"
   sha256sum \
     "codex-cpa-cluster-$RELEASE_VERSION.tar.gz" \
     "release-$RELEASE_VERSION.env" \
-    deploy.sh >SHA256SUMS
+    run.sh >SHA256SUMS
 )
 printf '%s\n' certificate >"$TEST_ROOT/certificates/qdata.example.com/fullchain.pem"
 printf '%s\n' private-key >"$TEST_ROOT/certificates/qdata.example.com/privkey.pem"
@@ -572,7 +578,7 @@ run_operator_deploy() {
     CPAC_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
     CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
     CPAC_ACME_ROOT="$TEST_ROOT/acme" \
-    sh "$OPERATOR_ROOT/deploy.sh" deploy \
+    sh "$OPERATOR_ROOT/run.sh" run \
       --domain qdata.example.com --ingress managed --version "$RELEASE_VERSION"
 }
 
@@ -611,7 +617,7 @@ fi
 cp "$RELEASE_SERVER/SHA256SUMS" "$RELEASE_SERVER/SHA256SUMS.valid"
 while IFS= read -r checksum_line; do
   case "$checksum_line" in
-    *"  deploy.sh") printf '%064d  deploy.sh\n' 0 ;;
+    *"  run.sh") printf '%064d  run.sh\n' 0 ;;
     *) printf '%s\n' "$checksum_line" ;;
   esac
 done <"$RELEASE_SERVER/SHA256SUMS.valid" >"$RELEASE_SERVER/SHA256SUMS"
@@ -627,8 +633,8 @@ for expected_failure in "校验发布文件 失败" "发布文件 SHA256 校验�
   }
 done
 mv "$RELEASE_SERVER/SHA256SUMS.valid" "$RELEASE_SERVER/SHA256SUMS"
-cmp -s "$OPERATOR_ROOT/deploy.sh" "$RELEASE_SERVER/deploy.sh" \
-  || { echo "deploy.sh did not update itself from the verified release asset" >&2; exit 1; }
+cmp -s "$OPERATOR_ROOT/run.sh" "$RELEASE_SERVER/run.sh" \
+  || { echo "run.sh did not update itself from the verified release asset" >&2; exit 1; }
 [ -f "$OPERATOR_ROOT/runtime/.deploy-initialized" ] \
   || { echo "fresh deploy did not publish its version marker" >&2; exit 1; }
 [ -d "$OPERATOR_ROOT/runtime/management/config/static" ] \
@@ -642,12 +648,14 @@ cmp -s "$OPERATOR_ROOT/deploy.sh" "$RELEASE_SERVER/deploy.sh" \
   || { echo "fresh deploy published a second target-side script directory" >&2; exit 1; }
 [ "$(cat "$OPERATOR_CONFIG")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAC_INGRESS_MODE=managed')" ] \
   || { echo "fresh deploy did not persist its domain" >&2; exit 1; }
+[ ! -e "$OPERATOR_ROOT/deploy.sh" ] \
+  || { echo "run.sh did not remove the recognized legacy operator script" >&2; exit 1; }
 
 EXTERNAL_OPERATOR_ROOT="$TEST_ROOT/home/external-cpac"
 EXTERNAL_CONFIG="$EXTERNAL_OPERATOR_ROOT/config.env"
 mkdir -p "$EXTERNAL_OPERATOR_ROOT"
-cp "$ROOT_DIR/scripts/deploy.sh" "$EXTERNAL_OPERATOR_ROOT/deploy.sh"
-chmod 0755 "$EXTERNAL_OPERATOR_ROOT/deploy.sh"
+cp "$ROOT_DIR/scripts/run.sh" "$EXTERNAL_OPERATOR_ROOT/run.sh"
+chmod 0755 "$EXTERNAL_OPERATOR_ROOT/run.sh"
 : >"$SYSTEM_LOG"
 PATH="$FAKE_BIN:$PATH" \
   FAKE_DOCKER_LOG="$COMMAND_LOG" \
@@ -665,7 +673,7 @@ PATH="$FAKE_BIN:$PATH" \
   CPAC_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
   CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
   CPAC_ACME_ROOT="$TEST_ROOT/acme" \
-  sh "$EXTERNAL_OPERATOR_ROOT/deploy.sh" deploy \
+  sh "$EXTERNAL_OPERATOR_ROOT/run.sh" run \
     --domain existing.example.com --ingress external --version "$RELEASE_VERSION" \
     >"$EXTERNAL_OPERATOR_ROOT/install-output.log"
 [ "$(cat "$EXTERNAL_CONFIG")" = "$(printf 'CPA_DOMAIN=existing.example.com\nCPAC_INGRESS_MODE=external')" ] \
@@ -784,8 +792,16 @@ for database in state/control-plane.sqlite3 state/usage.sqlite3; do
 done
 
 site_file="$TEST_ROOT/nginx/available/qdata.example.com.conf"
+legacy_site="$TEST_ROOT/nginx/legacy-site.conf"
+sed 's/^# Managed by CPAC run\.sh$/# Managed by CPAC deploy.sh/' \
+  "$site_file" >"$legacy_site"
+mv "$legacy_site" "$site_file"
+run_operator_deploy >"$OPERATOR_ROOT/legacy-nginx-marker.log"
+grep -Fxq '# Managed by CPAC run.sh' "$site_file" \
+  || { echo "run.sh did not migrate the legacy Nginx ownership marker" >&2; exit 1; }
+
 site_without_marker="$TEST_ROOT/nginx/unmanaged-site.conf"
-sed '/^# Managed by CPAC deploy\.sh$/d' "$site_file" >"$site_without_marker"
+sed '/^# Managed by CPAC run\.sh$/d' "$site_file" >"$site_without_marker"
 mv "$site_without_marker" "$site_file"
 if run_operator_deploy >"$OPERATOR_ROOT/unmanaged-site.log" 2>&1; then
   echo "managed ingress overwrote an unmanaged same-domain site" >&2

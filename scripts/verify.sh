@@ -6,19 +6,19 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 printf '%s\n' '[1/7] 语法、格式与生成代码'
 sh -n \
   "$ROOT_DIR/scripts/check-generated-api.sh" \
-  "$ROOT_DIR/scripts/deploy.sh" \
+  "$ROOT_DIR/scripts/run.sh" \
   "$ROOT_DIR/scripts/generate-api.sh" \
   "$ROOT_DIR/scripts/local-release.sh" \
   "$ROOT_DIR/scripts/package-release.sh" \
   "$ROOT_DIR/scripts/release-images.sh" \
-  "$ROOT_DIR/scripts/test-deploy-runtime.sh" \
-  "$ROOT_DIR/scripts/test-deploy.sh" \
+  "$ROOT_DIR/scripts/test-run-runtime.sh" \
+  "$ROOT_DIR/scripts/test-run.sh" \
   "$ROOT_DIR/scripts/test-faults.sh" \
   "$ROOT_DIR/scripts/test-smoke.sh" \
   "$ROOT_DIR/scripts/verify.sh"
 (cd "$ROOT_DIR" && sh scripts/check-generated-api.sh)
-sh "$ROOT_DIR/scripts/test-deploy-runtime.sh"
-sh "$ROOT_DIR/scripts/test-deploy.sh"
+sh "$ROOT_DIR/scripts/test-run-runtime.sh"
+sh "$ROOT_DIR/scripts/test-run.sh"
 UNFORMATTED_GO=$(find "$ROOT_DIR/cmd" "$ROOT_DIR/internal" -type f -name '*.go' -exec gofmt -l {} +)
 if [ -n "$UNFORMATTED_GO" ]; then
   echo "Go 文件未格式化：" >&2

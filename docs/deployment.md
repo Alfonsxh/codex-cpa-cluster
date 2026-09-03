@@ -16,14 +16,14 @@ Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入
 全新单机目标使用唯一的部署脚本，不要手工创建 SQLite、主密钥或快照：
 
 ```sh
-sudo /home/cpac/deploy.sh
+sudo sh -c 'install -d -o root -g root -m 0755 /home/cpac && curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh -o /home/cpac/run.sh && chmod 0755 /home/cpac/run.sh && exec /home/cpac/run.sh'
 ```
 
-`scripts/deploy.sh` 校验 GitHub Release 中的脚本、归档和机器可读发布环境，在 `/home/cpac/` 同一文件系统创建临时根目录，然后通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/cpac/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。
+`scripts/run.sh` 校验 GitHub Release 中的脚本、归档和机器可读发布环境，在 `/home/cpac/` 同一文件系统创建临时根目录，然后通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/cpac/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。
 
 交互执行使用分阶段终端界面：成功阶段隐藏底层命令噪声，失败阶段展开完整诊断；`managed` 模式的最终完成卡片显示 `https://<域名>/admin/`，`external` 模式明确要求从既有反向代理的入口访问 `/admin/`。`NO_COLOR=1` 仅关闭 ANSI 颜色，不改变步骤、错误或安全语义。
 
-域名和入口模式写入 `/home/cpac/config.env`，待领取的首次管理员凭据临时写入 `/home/cpac/bootstrap-admin.key`。首次交互部署先检测 Nginx、同域名站点与证书，再选择 `managed` 或 `external`；无交互部署必须明确传入 `--ingress managed|external`。旧版本位于 `/etc/cpac/` 的两个文件会先经过一致性校验，再迁移到统一目录并删除旧副本；任何冲突都会停止部署。`managed` 模式才会安装/启动 Nginx 和 Certbot、把 CPAC 专属站点指向 `127.0.0.1:18317` 并申请或复用证书。该站点带 `# Managed by CPAC deploy.sh` 标记；同名未托管站点会失败关闭，绝不覆盖。`external` 模式不安装、不启动、不改动 Nginx/Certbot，不申请证书，也不对公网发起健康检查；操作者将既有反向代理指向 `127.0.0.1:18317`，保留 `Host`、`X-Forwarded-*`，支持 WebSocket/SSE 和 3600 秒流式超时，并自行验证 `<既有入口>/__health` 返回 `200`。
+域名和入口模式写入 `/home/cpac/config.env`，待领取的首次管理员凭据临时写入 `/home/cpac/bootstrap-admin.key`。首次交互部署先检测 Nginx、同域名站点与证书，再选择 `managed` 或 `external`；无交互部署必须明确传入 `--ingress managed|external`。旧版本位于 `/etc/cpac/` 的两个文件会先经过一致性校验，再迁移到统一目录并删除旧副本；任何冲突都会停止部署。`managed` 模式才会安装/启动 Nginx 和 Certbot、把 CPAC 专属站点指向 `127.0.0.1:18317` 并申请或复用证书。该站点带 `# Managed by CPAC run.sh` 标记；同名未托管站点会失败关闭，绝不覆盖。`external` 模式不安装、不启动、不改动 Nginx/Certbot，不申请证书，也不对公网发起健康检查；操作者将既有反向代理指向 `127.0.0.1:18317`，保留 `Host`、`X-Forwarded-*`，支持 WebSocket/SSE 和 3600 秒流式超时，并自行验证 `<既有入口>/__health` 返回 `200`。
 
 ## 底层目标前置条件
 
@@ -41,7 +41,7 @@ state/edge/active-gateway.conf
 logs/gateway/
 ```
 
-`docker-compose.yml` 与 `release-manifest.json` 必须来自本次选择的同一个发布包。主密钥必须与控制库匹配，`active-gateway.conf` 必须只选择 `blue` 或 `green`，`logs/gateway/` 必须允许镜像内 UID `10001` 写入。`deploy.sh` 的内部目标动作不会初始化新目标、导入退役 JSON、替换 OAuth，或沿符号链接读写运行数据；首次初始化只由同一脚本在未发布的临时根目录调用镜像内 `cpa-bootstrap` 完成。
+`docker-compose.yml` 与 `release-manifest.json` 必须来自本次选择的同一个发布包。主密钥必须与控制库匹配，`active-gateway.conf` 必须只选择 `blue` 或 `green`，`logs/gateway/` 必须允许镜像内 UID `10001` 写入。`run.sh` 的内部目标动作不会初始化新目标、导入退役 JSON、替换 OAuth，或沿符号链接读写运行数据；首次初始化只由同一脚本在未发布的临时根目录调用镜像内 `cpa-bootstrap` 完成。
 
 成功部署会在各阶段后报告可验证结果，并在带完整左右边框的完成卡片中汇总版本变化、Control/Web/Gateway/Edge 镜像更新或复用、Gateway 槽位切换和旧槽排空、Admin/Web/Edge 与四个 Writer 容器动作、升级备份及入口模式。`external` 入口会明确标记 Nginx/Certbot 未修改，同时仍给出按所记录域名生成的站点和管理员登录链接。
 

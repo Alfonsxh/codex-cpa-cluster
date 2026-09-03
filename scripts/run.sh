@@ -385,7 +385,7 @@ resolve_deploy_domain() {
   elif [ -n "$stored_domain" ]; then
     domain=$stored_domain
   else
-    [ -t 0 ] || die "首次部署必须提供域名：sudo $SCRIPT_PATH deploy --domain qdata.example.com"
+    [ -t 0 ] || die "首次部署必须提供域名：sudo $SCRIPT_PATH run --domain qdata.example.com"
     printf '请输入访问域名: ' >&2
     IFS= read -r entered_domain
     domain=$(normalize_domain "$entered_domain") || die "域名格式无效：$entered_domain"
@@ -448,7 +448,7 @@ inspect_existing_ingress() {
 
 choose_ingress_mode() {
   domain=$1
-  [ -t 0 ] || die "首次部署必须明确选择入口：sudo $SCRIPT_PATH deploy --ingress managed|external"
+  [ -t 0 ] || die "首次部署必须明确选择入口：sudo $SCRIPT_PATH run --ingress managed|external"
   printf '\n访问入口选择（仅首次选择，后续升级会复用）：\n' >&2
   inspect_existing_ingress "$domain"
   cat >&2 <<EOF
@@ -582,7 +582,7 @@ download_release() {
   for asset in \
     "codex-cpa-cluster-$selected_version.tar.gz" \
     "release-$selected_version.env" \
-    deploy.sh \
+    run.sh \
     SHA256SUMS
   do
     curl -fsSL --retry 3 --connect-timeout 15 --max-time 300 \
@@ -597,14 +597,14 @@ verify_release() {
   directory=$1
   version=$2
   sums="$directory/SHA256SUMS"
-  for asset in "codex-cpa-cluster-$version.tar.gz" "release-$version.env" deploy.sh; do
+  for asset in "codex-cpa-cluster-$version.tar.gz" "release-$version.env" run.sh; do
     grep -Eq "^[0-9a-f]{64}  $asset$" "$sums" || die "SHA256SUMS 缺少 $asset"
   done
   (
     cd "$directory"
     sha256sum -c --status --ignore-missing SHA256SUMS
   ) || die "发布文件 SHA256 校验失败"
-  sh -n "$directory/deploy.sh" || die "发布中的 deploy.sh 语法无效"
+  sh -n "$directory/run.sh" || die "发布中的 run.sh 语法无效"
 }
 
 extract_release() {
@@ -863,8 +863,13 @@ write_nginx_site() {
   if [ -e "$site_file" ] || [ -L "$site_file" ]; then
     [ -f "$site_file" ] && [ ! -L "$site_file" ] \
       || die "Nginx 站点必须是普通非符号链接文件：$site_file"
-    grep -Fxq '# Managed by CPAC deploy.sh' "$site_file" \
-      || die "Nginx 已有未托管的同名站点，拒绝覆盖：${site_file}；请改用 external 或手动处理"
+    if grep -Fxq '# Managed by CPAC run.sh' "$site_file"; then
+      :
+    elif grep -Fxq '# Managed by CPAC deploy.sh' "$site_file"; then
+      ui_note "检测到旧版 CPAC Nginx 标记，本次将迁移为 run.sh"
+    else
+      die "Nginx 已有未托管的同名站点，拒绝覆盖：${site_file}；请改用 external 或手动处理"
+    fi
     site_backup=$(mktemp "$available_directory/.cpa-site-backup.XXXXXX")
     cp -p -- "$site_file" "$site_backup"
     had_site=true
@@ -892,7 +897,7 @@ write_nginx_site() {
   nginx_tmp=$(mktemp "$available_directory/.cpa-site.XXXXXX")
   if [ "$mode" = http ]; then
     cat >"$nginx_tmp" <<EOF
-# Managed by CPAC deploy.sh
+# Managed by CPAC run.sh
 server {
     listen 80;
     server_name $domain;
@@ -909,7 +914,7 @@ server {
 EOF
   else
     cat >"$nginx_tmp" <<EOF
-# Managed by CPAC deploy.sh
+# Managed by CPAC run.sh
 server {
     listen 80;
     server_name $domain;
@@ -1043,13 +1048,33 @@ update_operator_script() {
   if cmp -s "$verified_script" "$SCRIPT_PATH"; then
     return 1
   fi
-  script_tmp=$(mktemp "$SCRIPT_DIRECTORY/.deploy.XXXXXX")
+  script_tmp=$(mktemp "$SCRIPT_DIRECTORY/.run.XXXXXX")
   if ! install -m 0755 "$verified_script" "$script_tmp" \
     || ! mv -f -- "$script_tmp" "$SCRIPT_PATH"; then
     rm -f -- "$script_tmp"
     die "更新部署入口失败：$SCRIPT_PATH"
   fi
   return 0
+}
+
+remove_legacy_operator_script() {
+  legacy_script="$STAGING_ROOT/deploy.sh"
+  [ "$legacy_script" != "$SCRIPT_PATH" ] || return 0
+  [ -e "$legacy_script" ] || [ -L "$legacy_script" ] || return 0
+  if [ ! -f "$legacy_script" ] || [ -L "$legacy_script" ]; then
+    ui_note "旧 deploy.sh 不是普通文件，已保留并等待人工检查"
+    return 0
+  fi
+  if grep -Fq 'DEFAULT_REPOSITORY=${CPAC_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}' "$legacy_script" \
+    && grep -Fq 'ENTRY_COMMAND=${1:-deploy}' "$legacy_script"; then
+    if rm -f -- "$legacy_script"; then
+      ui_note "已移除旧版 deploy.sh，仅保留 run.sh"
+    else
+      ui_note "无法移除旧版 deploy.sh，请完成后人工检查"
+    fi
+  else
+    ui_note "旧 deploy.sh 无法确认来源，已保留并等待人工检查"
+  fi
 }
 
 run_target_action() {
@@ -1287,7 +1312,7 @@ prune_legacy_release_payload() {
   done
 }
 
-run_deploy() {
+run_install_or_upgrade() {
   config_file=$DEFAULT_CONFIG_FILE
   deploy_root=$DEFAULT_DEPLOY_ROOT
   repository=$DEFAULT_REPOSITORY
@@ -1300,10 +1325,10 @@ run_deploy() {
       --ingress) [ "$#" -ge 2 ] || die "--ingress 缺少参数"; explicit_ingress_mode=$2; shift 2 ;;
       --version) [ "$#" -ge 2 ] || die "--version 缺少参数"; version=$2; shift 2 ;;
       --config) [ "$#" -ge 2 ] || die "--config 缺少参数"; config_file=$2; shift 2 ;;
-      *) die "未知 deploy 参数：$1" ;;
+      *) die "未知 run 参数：$1" ;;
     esac
   done
-  require_root deploy
+  require_root run
   case "$deploy_root" in /*) ;; *) die "CPAC_DEPLOY_ROOT 必须是绝对路径" ;; esac
   [ "$deploy_root" != / ] || die "CPAC_DEPLOY_ROOT 不能是文件系统根目录"
   ui_banner
@@ -1326,7 +1351,7 @@ run_deploy() {
   lock_file=${CPAC_LOCK_FILE:-/var/lock/cpa-deploy.lock}
   mkdir -p -- "$(dirname -- "$lock_file")"
   exec 9>"$lock_file"
-  flock -n 9 || die "另一个 deploy.sh 正在运行"
+  flock -n 9 || die "另一个 run.sh 正在运行"
 
   work_directory=$(mktemp -d "${TMPDIR:-/var/tmp}/cpa-deploy.XXXXXX")
   install_root=
@@ -1370,12 +1395,12 @@ run_deploy() {
   ui_run "校验发布文件" verify_release "$download_directory" "$selected_version"
 
   ui_step "同步统一部署脚本"
-  if update_operator_script "$download_directory/deploy.sh"; then
+  if update_operator_script "$download_directory/run.sh"; then
     ui_done "部署脚本已更新，继续执行"
     cleanup_files
     trap - EXIT HUP INT TERM
     exec 9>&-
-    exec "$SCRIPT_PATH" deploy --domain "$domain" --ingress "$ingress_mode" \
+    exec "$SCRIPT_PATH" run --domain "$domain" --ingress "$ingress_mode" \
       --version "$selected_version" --config "$config_file"
   fi
   ui_done "部署脚本已是当前版本"
@@ -1506,6 +1531,7 @@ run_deploy() {
   else
     ui_note "已跳过公网检查；请由现有反向代理验证 ${domain}/__health 返回 HTTP 200"
   fi
+  remove_legacy_operator_script
   ui_complete "$selected_version" "$domain" "$deploy_root" "$ingress_mode"
   [ -z "$backup" ] || ui_note "升级前备份  $backup"
   pending_key="$(dirname -- "$config_file")/bootstrap-admin.key"
@@ -1580,7 +1606,7 @@ run_ingress_set() {
   write_config "$config_file" "$domain" "$requested"
   printf '已记录入口模式：%s\n' "$requested"
   if [ "$requested" = external ]; then
-    printf '%s\n' 'CPAC 不会删除或修改既有 Nginx 站点；请先由你的反向代理接管该域名，再执行 deploy。'
+    printf '%s\n' 'CPAC 不会删除或修改既有 Nginx 站点；请先由你的反向代理接管该域名，再执行 run。'
   fi
 }
 
@@ -1588,20 +1614,20 @@ operator_usage() {
   cat <<EOF
 用法：
   sudo $SCRIPT_PATH
-  sudo $SCRIPT_PATH deploy [--domain DOMAIN] [--ingress managed|external] [--version VERSION]
+  sudo $SCRIPT_PATH run [--domain DOMAIN] [--ingress managed|external] [--version VERSION]
   sudo $SCRIPT_PATH domain set DOMAIN
   sudo $SCRIPT_PATH ingress set managed|external
   sudo $SCRIPT_PATH admin-key claim
 EOF
 }
 
-ENTRY_COMMAND=${1:-deploy}
+ENTRY_COMMAND=${1:-run}
 case "$ENTRY_COMMAND" in
   __target)
     ;;
-  deploy)
+  run)
     [ "$#" -eq 0 ] || shift
-    run_deploy "$@"
+    run_install_or_upgrade "$@"
     exit 0
     ;;
   domain)

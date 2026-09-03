@@ -26,7 +26,7 @@ state/edge/
 4. 同一批次复制匹配主密钥、OAuth、账号配置和 Gateway/Edge 状态。
 5. 将备份保存到不同故障域，并限制为操作者可读。
 
-统一的 `/home/cpac/deploy.sh` 在每次升级前自动执行上述数据库一致性步骤：使用 SQLite Backup API 生成两份独立副本，要求副本 `quick_check=ok`，不把运行中的 WAL/SHM 文件放入归档，再与同批主密钥、OAuth 和运行配置一起保存到 `/home/cpac/backups/`。这份升级前备份不替代异地灾备。
+统一的 `/home/cpac/run.sh` 在每次升级前自动执行上述数据库一致性步骤：使用 SQLite Backup API 生成两份独立副本，要求副本 `quick_check=ok`，不把运行中的 WAL/SHM 文件放入归档，再与同批主密钥、OAuth 和运行配置一起保存到 `/home/cpac/backups/`。这份升级前备份不替代异地灾备。
 
 账号重命名、删除和 OAuth 清理产生的可恢复目录位于 `backups/accounts/`，由 `internal/accountlifecycle` 管理；它们不是两份 SQLite 的完整灾备替代品。
 

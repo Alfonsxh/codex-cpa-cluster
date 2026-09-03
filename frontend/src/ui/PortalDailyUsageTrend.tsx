@@ -37,21 +37,17 @@ type PortalTrendSeries = {
   values: Array<number | null>;
 };
 
-const trendWindows: Array<{ value: PortalUsageTrendWindow; label: string }> = [
-  { value: "7d", label: "7天" },
-  { value: "30d", label: "30天" },
-  { value: "90d", label: "90天" }
-];
 const directCombinationLimit = 9;
 
 export function PortalDailyUsageTrend({
   expanded,
+  window,
   onSessionExpired
 }: {
   expanded: boolean;
+  window: PortalUsageTrendWindow;
   onSessionExpired: () => void;
 }) {
-  const [window, setWindow] = useState<PortalUsageTrendWindow>("30d");
   const [dimension, setDimension] = useState<PortalUsageTrendDimension>("total");
   const query = useQuery({
     queryKey: portalUsageTrendQueryKey(window, dimension),
@@ -79,10 +75,9 @@ export function PortalDailyUsageTrend({
   const partial = Boolean(query.data?.days.some((day) => day.collection_state !== "complete"));
 
   return (
-    <section className={`usage-trend-card${expanded ? "" : " collapsed"}`} aria-labelledby="usage-trend-title">
+    <section className={`usage-trend-card${expanded ? "" : " collapsed"}`} aria-label="每日用量趋势">
       <header className="usage-trend-header">
         <div className="usage-trend-heading">
-          <h2 id="usage-trend-title">每日用量趋势</h2>
           <div className="usage-trend-dimensions" role="group" aria-label="趋势统计维度">
             <button type="button" aria-pressed={dimension === "total"} onClick={() => setDimension("total")}>总用量</button>
             <button type="button" aria-pressed={dimension === "model_reasoning"} onClick={() => setDimension("model_reasoning")}>模型 + 推理强度</button>
@@ -98,15 +93,7 @@ export function PortalDailyUsageTrend({
           ))}
         </div>
 
-        <div className="usage-trend-actions">
-          {expanded ? (
-            <div className="usage-trend-windows" role="group" aria-label="每日趋势时间范围">
-              {trendWindows.map((option) => (
-                <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => setWindow(option.value)}>{option.label}</button>
-              ))}
-            </div>
-          ) : <strong className="usage-trend-current-window">{trendWindowLabel(window)}</strong>}
-        </div>
+        <time className="usage-trend-updated">{query.data ? `数据更新 ${formatTrendTimestamp(query.data.generated_at)}` : "正在读取趋势"}</time>
       </header>
 
       {expanded ? (
@@ -434,13 +421,20 @@ function combinationLabel(model: string, effort: string) {
   return `${model || "unknown"} · ${effort || "unknown"}`;
 }
 
-function trendWindowLabel(window: PortalUsageTrendWindow) {
-  return trendWindows.find((item) => item.value === window)?.label ?? "30天";
-}
-
 function formatTrendDate(date: string) {
   const [, month = "", day = ""] = date.split("-");
   return `${Number(month)}月${Number(day)}日`;
+}
+
+function formatTrendTimestamp(timestamp: number) {
+  if (!timestamp) return "—";
+  return new Date(timestamp * 1000).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
 }
 
 function errorMessage(error: unknown) {

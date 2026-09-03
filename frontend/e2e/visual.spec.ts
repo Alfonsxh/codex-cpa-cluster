@@ -338,7 +338,7 @@ for (const viewport of viewports) {
       const page = await context.newPage();
       await installUsageVisualBackend(page);
       await page.goto("/usage/");
-      await expect(page.getByText("账号明细", { exact: true })).toBeVisible();
+      await expect(page.getByRole("tab", { name: "账号明细" })).toBeVisible();
       await expect(page).toHaveScreenshot(`react-usage-${viewport.name}-${theme}.png`, {
         fullPage: false,
         // Keep mobile baselines resilient to macOS glyph antialiasing drift.
@@ -362,7 +362,7 @@ for (const state of ["loading", "empty", "error"] as const) {
     const page = await context.newPage();
     await installUsageVisualBackend(page, state);
     await page.goto("/usage/");
-    await page.getByRole("button", { name: "查看账号明细" }).click();
+    await page.getByRole("tab", { name: "账号明细" }).click();
     if (state === "loading") await expect(page.locator(".usage-skeleton-row").first()).toBeVisible();
     if (state === "empty") await expect(page.getByText("暂无可用账号", { exact: true })).toBeVisible();
     if (state === "error") await expect(page.getByText("账号与用量加载失败", { exact: true })).toBeVisible();
@@ -385,9 +385,9 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   const chart = page.getByRole("img", { name: /个人每日 Token 用量趋势/ });
   await expect(chart).toBeVisible();
   const topCardRect = await page.locator(".usage-key-card").evaluate((element) => element.getBoundingClientRect().toJSON());
-  const trendCardRect = await page.locator(".usage-trend-card").evaluate((element) => element.getBoundingClientRect().toJSON());
-  expect(Math.abs(topCardRect.left - trendCardRect.left)).toBeLessThanOrEqual(1);
-  expect(Math.abs(topCardRect.right - trendCardRect.right)).toBeLessThanOrEqual(1);
+  const detailFrameRect = await page.locator(".usage-detail-sections").evaluate((element) => element.getBoundingClientRect().toJSON());
+  expect(Math.abs(topCardRect.left - detailFrameRect.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(topCardRect.right - detailFrameRect.right)).toBeLessThanOrEqual(1);
   const summaryTags = await page.locator(".usage-current-account-head .usage-summary-tag, .usage-personal-overview-head .usage-summary-tag").evaluateAll((tags) => tags.map((tag) => {
     const style = getComputedStyle(tag);
     const rect = tag.getBoundingClientRect();
@@ -403,20 +403,27 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   }));
   expect(summaryTags).toHaveLength(2);
   expect(summaryTags[0]).toEqual(summaryTags[1]);
-  const sectionButtons = await page.locator(".usage-section-switcher button").evaluateAll((buttons) => buttons.map((button) => {
-    const rect = button.getBoundingClientRect();
-    return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height, borderRadius: getComputedStyle(button).borderRadius };
+  const sectionTabs = await page.locator(".usage-primary-tabs [role=tab]").evaluateAll((tabs) => tabs.map((tab) => {
+    const rect = tab.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
   }));
-  expect(sectionButtons).toHaveLength(2);
-  expect(Math.abs(sectionButtons[0].width - sectionButtons[0].height)).toBeLessThanOrEqual(1);
-  expect(Math.abs(sectionButtons[1].width - sectionButtons[1].height)).toBeLessThanOrEqual(1);
-  expect(sectionButtons[1].top - sectionButtons[0].bottom).toBeGreaterThanOrEqual(7);
-  expect(sectionButtons.map((button) => button.borderRadius)).toEqual(["50%", "50%"]);
-  expect(sectionButtons.every((button) => button.left >= trendCardRect.right + 8)).toBe(true);
+  expect(sectionTabs).toHaveLength(2);
+  expect(Math.abs(sectionTabs[0].top - sectionTabs[1].top)).toBeLessThanOrEqual(1);
+  expect(Math.abs(sectionTabs[0].bottom - sectionTabs[1].bottom)).toBeLessThanOrEqual(1);
+  expect(sectionTabs[1].left).toBeGreaterThanOrEqual(sectionTabs[0].right);
+  expect(sectionTabs.every((tab) => tab.left >= detailFrameRect.left && tab.right <= detailFrameRect.right)).toBe(true);
+  await expect(page.locator(".usage-section-switcher")).toHaveCount(0);
+  const trendTabActions = page.locator(".ant-tabs-extra-content .usage-trend-windows");
+  await expect(trendTabActions).toBeVisible();
+  expect(await trendTabActions.evaluate((element) => {
+    const action = element.getBoundingClientRect();
+    const navigation = element.closest(".ant-tabs-nav")?.getBoundingClientRect();
+    return Boolean(navigation && action.top >= navigation.top && action.bottom <= navigation.bottom && action.right <= navigation.right);
+  })).toBe(true);
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
-  await expect(page.getByRole("button", { name: "查看每日用量趋势" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("tab", { name: "每日用量趋势" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("button", { name: "展开", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "收起", exact: true })).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toHaveCount(0);
@@ -482,17 +489,20 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   expect(tooltipRect.top).toBeGreaterThanOrEqual(0);
   expect(tooltipRect.bottom).toBeLessThanOrEqual(900);
   await expect(tooltip).toHaveScreenshot("react-usage-trend-tooltip-model-reasoning.png");
-  await page.getByRole("button", { name: "查看账号明细" }).click();
+  await page.getByRole("tab", { name: "账号明细" }).click();
   await expect(chart).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();
-  const accountFrameRect = await page.locator(".usage-table-wrap").evaluate((element) => element.getBoundingClientRect().toJSON());
+  await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
+  const accountFrameRect = await page.locator(".usage-detail-sections").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - accountFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - accountFrameRect.right)).toBeLessThanOrEqual(1);
-  const accountSwitcherLeft = await page.locator(".usage-section-switcher button").first().evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.left;
-  });
-  expect(accountSwitcherLeft).toBeGreaterThanOrEqual(accountFrameRect.right + 8);
+  const accountTabActions = page.locator(".ant-tabs-extra-content .usage-tab-toolbar-actions");
+  await expect(accountTabActions).toBeVisible();
+  expect(await accountTabActions.evaluate((element) => {
+    const action = element.getBoundingClientRect();
+    const navigation = element.closest(".ant-tabs-nav")?.getBoundingClientRect();
+    return Boolean(navigation && action.top >= navigation.top && action.bottom <= navigation.bottom && action.right <= navigation.right);
+  })).toBe(true);
   await page.getByRole("button", { name: "使用明细" }).click();
   const compactEffort = page.getByRole("button", { name: "查看 gpt-5.6-sol max 推理强度 Token 明细" });
   await compactEffort.hover();
@@ -506,18 +516,18 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   await expect(effortPopup).toHaveScreenshot("react-usage-model-effort-tooltip.png");
 });
 
-test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
+test("个人使用中心账号明细 Tab 视觉基准", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setTheme(page, "light");
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
-  await page.getByRole("button", { name: "查看账号明细" }).click();
+  await page.getByRole("tab", { name: "账号明细" }).click();
   await page.mouse.move(0, 0);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await expect(page.locator(".ant-tooltip")).toHaveCount(0);
   await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toHaveCount(0);
-  await expect(page.getByText("账号明细", { exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveScreenshot("react-usage-trend-collapsed-desktop-light.png", { fullPage: false });
 });
 
@@ -538,7 +548,7 @@ test("个人使用中心移动端可滚动到账号明细", async ({ page }) => 
   await setTheme(page, "light");
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
-  await page.getByRole("button", { name: "查看账号明细" }).click();
+  await page.getByRole("tab", { name: "账号明细" }).click();
 
   const header = page.locator(".usage-center-head");
   const content = page.locator(".usage-center-content");
@@ -613,7 +623,7 @@ test("账号周额度卡片在窄屏与移动端不产生横向溢出", async ({
   }
 });
 
-test("使用中心切换按钮在桌面、窄屏与移动端始终位于内容右侧", async ({ page }) => {
+test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽度", async ({ page }) => {
   test.setTimeout(60_000);
   await setTheme(page, "light");
   await installUsageVisualBackend(page);
@@ -623,13 +633,13 @@ test("使用中心切换按钮在桌面、窄屏与移动端始终位于内容�
     await page.goto("http://127.0.0.1:5194/usage/");
 
     for (const section of ["trend", "accounts"] as const) {
-      await page.getByRole("button", { name: section === "trend" ? "查看每日用量趋势" : "查看账号明细" }).click();
-      const surface = page.locator(section === "trend" ? ".usage-trend-card" : ".usage-table-wrap");
+      await page.getByRole("tab", { name: section === "trend" ? "每日用量趋势" : "账号明细" }).click();
+      const surface = page.locator(".usage-detail-sections");
       await expect(surface).toBeVisible();
-      const geometry = await page.evaluate((surfaceSelector) => {
+      const geometry = await page.evaluate(() => {
         const topCard = document.querySelector<HTMLElement>(".usage-key-card");
-        const content = document.querySelector<HTMLElement>(surfaceSelector);
-        const buttons = [...document.querySelectorAll<HTMLElement>(".usage-section-switcher button")];
+        const content = document.querySelector<HTMLElement>(".usage-detail-sections");
+        const tabs = [...document.querySelectorAll<HTMLElement>(".usage-primary-tabs [role=tab]")];
         const topCardRect = topCard?.getBoundingClientRect();
         const contentRect = content?.getBoundingClientRect();
         return {
@@ -639,20 +649,27 @@ test("使用中心切换按钮在桌面、窄屏与移动端始终位于内容�
           contentRight: contentRect?.right ?? 0,
           viewportWidth: window.innerWidth,
           bodyScrollWidth: document.body.scrollWidth,
-          buttons: buttons.map((button) => {
-            const rect = button.getBoundingClientRect();
+          tabs: tabs.map((tab) => {
+            const rect = tab.getBoundingClientRect();
             return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
           })
         };
-      }, section === "trend" ? ".usage-trend-card" : ".usage-table-wrap");
+      });
 
-      expect(geometry.buttons).toHaveLength(2);
+      expect(geometry.tabs).toHaveLength(2);
       expect(Math.abs(geometry.topCardLeft - geometry.contentLeft)).toBeLessThanOrEqual(1);
       expect(Math.abs(geometry.topCardRight - geometry.contentRight)).toBeLessThanOrEqual(1);
-      expect(geometry.buttons.every((button) => button.left >= geometry.contentRight + 8)).toBe(true);
-      expect(geometry.buttons.every((button) => button.right <= geometry.viewportWidth)).toBe(true);
-      expect(geometry.buttons[1].top - geometry.buttons[0].bottom).toBeGreaterThanOrEqual(7);
+      expect(Math.abs(geometry.tabs[0].top - geometry.tabs[1].top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.tabs[0].bottom - geometry.tabs[1].bottom)).toBeLessThanOrEqual(1);
+      expect(geometry.tabs[1].left).toBeGreaterThanOrEqual(geometry.tabs[0].right);
+      expect(geometry.tabs.every((tab) => tab.left >= geometry.contentLeft && tab.right <= geometry.contentRight)).toBe(true);
       expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+      await expect(page.getByRole("tab", { name: section === "trend" ? "每日用量趋势" : "账号明细" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.locator(viewport.width <= 900
+        ? `.usage-mobile-panel-actions.${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`
+        : `.ant-tabs-extra-content .${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`)).toBeVisible();
+      await expect(page.locator(".usage-primary-tabs .ant-tabs-nav-operations")).toBeHidden();
+      await expect(page.locator(".usage-section-switcher")).toHaveCount(0);
     }
   }
 });

@@ -1,5 +1,5 @@
-import { Alert, App as AntApp, Button, Form, Input, Modal, Skeleton, Space, Tooltip } from "antd";
-import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Alert, App as AntApp, Button, Form, Input, Modal, Skeleton, Space, Tabs, Tooltip } from "antd";
+import { CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
@@ -23,6 +23,7 @@ import {
   switchPortalAccount,
   type PortalAccount,
   type PortalQuota,
+  type PortalUsageTrendWindow,
   type PortalUsageWindow
 } from "../api/portal";
 import type { UsageBreakdown, UsageCombination, UsageMetrics } from "../api/generated";
@@ -36,6 +37,11 @@ type SortState = { field: SortField; direction: "asc" | "desc"; pinCurrent: bool
 type PrimarySection = "trend" | "accounts";
 
 const defaultSort: SortState = { field: "quota", direction: "asc", pinCurrent: true };
+const portalTrendWindowOptions: Array<{ value: PortalUsageTrendWindow; label: string }> = [
+  { value: "7d", label: "7天" },
+  { value: "30d", label: "30天" },
+  { value: "90d", label: "90天" }
+];
 
 export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => void }) {
   const queryClient = useQueryClient();
@@ -44,6 +50,8 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const [sort, setSort] = useState<SortState>(defaultSort);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [primarySection, setPrimarySection] = useState<PrimarySection>("trend");
+  const [trendWindow, setTrendWindow] = useState<PortalUsageTrendWindow>("30d");
+  const compactTabs = useMediaQuery("(max-width: 900px)");
   const [showKey, setShowKey] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyValue, setKeyValue] = useState("");
@@ -253,70 +261,104 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       ) : null}
 
       <div className={`usage-detail-sections ${primarySection === "trend" ? "trend-primary" : "accounts-primary"}`}>
-        <PortalDailyUsageTrend
-          expanded={primarySection === "trend"}
-          onSessionExpired={onSessionExpired}
-        />
-
-      <section className={`usage-account-section${primarySection === "accounts" ? "" : " collapsed"}`} aria-labelledby="usage-account-section-title">
-        <div className="usage-section-toolbar">
-          <h2 id="usage-account-section-title">账号明细</h2>
-          {primarySection === "accounts" ? <div className="usage-toolbar-actions">
-            <div className="usage-window-switcher" role="group" aria-label="统计时间范围">
-              {portalWindowOptions.map((option) => (
-                <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => setWindow(option.value)}>{option.label}</button>
-              ))}
-            </div>
-            <button className="usage-refresh-button" type="button" disabled={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching} onClick={refresh}>
-              {accounts.isFetching && !accounts.isPending ? "刷新中…" : "刷新"}
-            </button>
-            <time className="usage-updated">额度更新 {formatTimestamp(accounts.data?.generated_at ?? quota.data?.generated_at ?? 0)}</time>
-          </div> : <span className="usage-account-summary">{accounts.isPending ? "正在读取账号" : `${sortedAccounts.length} 个账号`}</span>}
-        </div>
-
-        {primarySection === "accounts" && accounts.isError ? (
-          <div className="usage-error" role="alert">
-            <span><strong>账号与用量加载失败</strong> · {errorMessage(accounts.error)}</span>
-            <button className="usage-secondary-button" type="button" onClick={() => void accounts.refetch()}>重新加载</button>
-          </div>
-        ) : primarySection === "accounts" ? (
-          <NativeTableViewport className="usage-table-wrap" aria-label="账号明细表格">
-            <table className="usage-account-table">
-              <thead>
-                <tr>
-                  <th className="table-index-column" scope="col">序号</th>
-                  <SortableHeader field="current" label="当前账号" sort={sort} onSort={changeSort} />
-                  <SortableHeader field="account" label="CPA 账号" sort={sort} onSort={changeSort} />
-                  <SortableHeader field="quota" label="账号周额度" detail="所有用户共享 · 已用较少优先" sort={sort} onSort={changeSort} />
-                  <SortableHeader field="active_users" label="活跃用户" detail="近 1 小时" sort={sort} onSort={changeSort} />
-                  <SortableHeader field="status" label="账号状态" sort={sort} onSort={changeSort} />
-                  <SortableHeader field="requests" label="我的请求" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
-                  <SortableHeader className="usage-token-header" field="tokens" label="我的 Token" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
-                  <SortableHeader field="last_used" label="最后使用" detail="我的记录" sort={sort} onSort={changeSort} />
-                  <th scope="col"><span className="sr-only">使用明细</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.isPending ? <UsageTableSkeleton /> : null}
-                {!accounts.isPending && sortedAccounts.map((account, index) => (
-                  <AccountRows
-                    key={account.id}
-                    account={account}
-                    index={index}
-                    currentGroup={currentGroup}
-                    window={window}
-                    expanded={expanded.has(account.id)}
-                    onToggle={() => toggleExpanded(account.id)}
-                    onSwitch={() => { accountSwitch.reset(); setSwitchTarget(account); }}
+        <Tabs
+          className="usage-primary-tabs"
+          activeKey={primarySection}
+          destroyOnHidden={false}
+          onChange={(key) => setPrimarySection(key as PrimarySection)}
+          tabBarExtraContent={compactTabs ? undefined : primarySection === "trend" ? (
+            <TrendWindowControl window={trendWindow} onChange={setTrendWindow} />
+          ) : (
+            <AccountWindowControl
+              window={window}
+              onChange={setWindow}
+              refreshing={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
+              loading={accounts.isFetching && !accounts.isPending}
+              updatedAt={accounts.data?.generated_at ?? quota.data?.generated_at ?? 0}
+              onRefresh={refresh}
+            />
+          )}
+          items={[
+            {
+              key: "trend",
+              label: <span className="usage-primary-tab-label"><span className="usage-primary-tab-dot" aria-hidden="true" />每日用量趋势</span>,
+              children: (
+                <>
+                  {compactTabs ? <TrendWindowControl className="usage-mobile-panel-actions" window={trendWindow} onChange={setTrendWindow} /> : null}
+                  <PortalDailyUsageTrend
+                    expanded={primarySection === "trend"}
+                    window={trendWindow}
+                    onSessionExpired={onSessionExpired}
                   />
-                ))}
-              </tbody>
-            </table>
-            {!accounts.isPending && sortedAccounts.length === 0 ? <div className="usage-empty">暂无可用账号</div> : null}
-          </NativeTableViewport>
-        ) : null}
-      </section>
-        <UsageSectionSwitcher section={primarySection} onChange={setPrimarySection} />
+                </>
+              )
+            },
+            {
+              key: "accounts",
+              label: (
+                <span className="usage-primary-tab-label">
+                  <span className="usage-primary-tab-dot" aria-hidden="true" />
+                  账号明细
+                  <span className="usage-primary-tab-count" aria-hidden="true">{accounts.isPending ? "…" : sortedAccounts.length}</span>
+                </span>
+              ),
+              children: (
+                <section className="usage-account-section" aria-label="账号明细">
+                  {compactTabs ? <AccountWindowControl
+                    className="usage-mobile-panel-actions"
+                    window={window}
+                    onChange={setWindow}
+                    refreshing={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
+                    loading={accounts.isFetching && !accounts.isPending}
+                    updatedAt={accounts.data?.generated_at ?? quota.data?.generated_at ?? 0}
+                    onRefresh={refresh}
+                  /> : null}
+                  {primarySection === "accounts" && accounts.isError ? (
+                    <div className="usage-error" role="alert">
+                      <span><strong>账号与用量加载失败</strong> · {errorMessage(accounts.error)}</span>
+                      <button className="usage-secondary-button" type="button" onClick={() => void accounts.refetch()}>重新加载</button>
+                    </div>
+                  ) : primarySection === "accounts" ? (
+                    <NativeTableViewport className="usage-table-wrap" aria-label="账号明细表格">
+                      <table className="usage-account-table">
+                        <thead>
+                          <tr>
+                            <th className="table-index-column" scope="col">序号</th>
+                            <SortableHeader field="current" label="当前账号" sort={sort} onSort={changeSort} />
+                            <SortableHeader field="account" label="CPA 账号" sort={sort} onSort={changeSort} />
+                            <SortableHeader field="quota" label="账号周额度" detail="所有用户共享 · 已用较少优先" sort={sort} onSort={changeSort} />
+                            <SortableHeader field="active_users" label="活跃用户" detail="近 1 小时" sort={sort} onSort={changeSort} />
+                            <SortableHeader field="status" label="账号状态" sort={sort} onSort={changeSort} />
+                            <SortableHeader field="requests" label="我的请求" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
+                            <SortableHeader className="usage-token-header" field="tokens" label="我的 Token" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
+                            <SortableHeader field="last_used" label="最后使用" detail="我的记录" sort={sort} onSort={changeSort} />
+                            <th scope="col"><span className="sr-only">使用明细</span></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {accounts.isPending ? <UsageTableSkeleton /> : null}
+                          {!accounts.isPending && sortedAccounts.map((account, index) => (
+                            <AccountRows
+                              key={account.id}
+                              account={account}
+                              index={index}
+                              currentGroup={currentGroup}
+                              window={window}
+                              expanded={expanded.has(account.id)}
+                              onToggle={() => toggleExpanded(account.id)}
+                              onSwitch={() => { accountSwitch.reset(); setSwitchTarget(account); }}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                      {!accounts.isPending && sortedAccounts.length === 0 ? <div className="usage-empty">暂无可用账号</div> : null}
+                    </NativeTableViewport>
+                  ) : null}
+                </section>
+              )
+            }
+          ]}
+        />
       </div>
 
       <Modal title={`切换到 ${switchTarget ? accountLabel(switchTarget) : "目标账号"}`} open={Boolean(switchTarget)} okText="确认切换" cancelText="取消" confirmLoading={accountSwitch.isPending} onCancel={() => !accountSwitch.isPending && setSwitchTarget(null)} onOk={() => switchTarget && accountSwitch.mutate(switchTarget)} destroyOnHidden>
@@ -357,13 +399,67 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   );
 }
 
-function UsageSectionSwitcher({ section, onChange }: { section: PrimarySection; onChange: (section: PrimarySection) => void }) {
+function TrendWindowControl({
+  className = "",
+  window,
+  onChange
+}: {
+  className?: string;
+  window: PortalUsageTrendWindow;
+  onChange: (window: PortalUsageTrendWindow) => void;
+}) {
   return (
-    <nav className="usage-section-switcher" aria-label="切换主要内容区域">
-      <Button type="text" icon={<ArrowUpOutlined aria-hidden="true" />} aria-pressed={section === "trend"} onClick={() => onChange("trend")}><span className="sr-only">查看每日用量趋势</span></Button>
-      <Button type="text" icon={<ArrowDownOutlined aria-hidden="true" />} aria-pressed={section === "accounts"} onClick={() => onChange("accounts")}><span className="sr-only">查看账号明细</span></Button>
-    </nav>
+    <div className={`usage-trend-windows ${className}`.trim()} role="group" aria-label="每日趋势时间范围">
+      {portalTrendWindowOptions.map((option) => (
+        <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => onChange(option.value)}>{option.label}</button>
+      ))}
+    </div>
   );
+}
+
+function AccountWindowControl({
+  className = "",
+  window,
+  onChange,
+  refreshing,
+  loading,
+  updatedAt,
+  onRefresh
+}: {
+  className?: string;
+  window: PortalUsageWindow;
+  onChange: (window: PortalUsageWindow) => void;
+  refreshing: boolean;
+  loading: boolean;
+  updatedAt: number;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className={`usage-toolbar-actions usage-tab-toolbar-actions ${className}`.trim()}>
+      <div className="usage-window-switcher" role="group" aria-label="统计时间范围">
+        {portalWindowOptions.map((option) => (
+          <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => onChange(option.value)}>{option.label}</button>
+        ))}
+      </div>
+      <button className="usage-refresh-button" type="button" disabled={refreshing} onClick={onRefresh}>
+        {loading ? "刷新中…" : "刷新"}
+      </button>
+      <time className="usage-updated">额度更新 {formatTimestamp(updatedAt)}</time>
+    </div>
+  );
+}
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia?.(query).matches ?? false);
+  useEffect(() => {
+    const media = window.matchMedia?.(query);
+    if (!media) return;
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+  return matches;
 }
 
 function CurrentAccountSummary({ account, loading }: { account?: PortalAccount; loading: boolean }) {

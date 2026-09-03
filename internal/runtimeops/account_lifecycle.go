@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountconfig"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountlifecycle"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/containerd/errdefs"
@@ -64,6 +65,7 @@ type AccountRuntimeConfig struct {
 	ProbeTimeout   time.Duration
 	HTTPClient     *resty.Client
 	ImageProjector CPAImageProjector
+	Drainer        accountlifecycle.AccountDrainer
 }
 
 // AccountRuntime uses the same Moby client and exact Compose labels as the
@@ -80,6 +82,7 @@ type AccountRuntime struct {
 	http           *resty.Client
 	probeTimeout   time.Duration
 	imageProjector CPAImageProjector
+	drainer        accountlifecycle.AccountDrainer
 }
 
 func NewAccountRuntime(
@@ -123,7 +126,7 @@ func NewAccountRuntime(
 	return &AccountRuntime{
 		client: client, accounts: manager.accounts, project: manager.project, root: root, network: networkName,
 		instance: instanceName, store: store, http: httpClient,
-		probeTimeout: config.ProbeTimeout, imageProjector: config.ImageProjector,
+		probeTimeout: config.ProbeTimeout, imageProjector: config.ImageProjector, drainer: config.Drainer,
 	}, nil
 }
 
@@ -187,7 +190,7 @@ func (runtime *AccountRuntime) Login(
 	operationID := uuid.NewString()
 	options.Name = runtime.instance + "-oauth-" + accountID + "-" + operationID[:8]
 	options.Config.Cmd = []string{
-		"./CLIProxyAPI", "-config", "/CLIProxyAPI/configs/" + accountID + ".yaml",
+		"./CLIProxyAPI", "-config", accountconfig.ContainerFile,
 		"-codex-device-login", "-no-browser",
 	}
 	options.Config.AttachStdout = true
@@ -329,6 +332,155 @@ func (runtime *AccountRuntime) ReservedHostPorts(ctx context.Context) (map[int]s
 		}
 	}
 	return ports, nil
+}
+
+// MigrateLegacyConfigMounts replaces only account containers that still use
+// the old single-file bind mount. A directory bind observes atomic config-file
+// replacement by path, whereas Docker pins a single-file bind to the inode that
+// existed when the container was created. The legacy file is removed only
+// after the replacement container has loaded and passed its authenticated
+// probe; a failed replacement is rebuilt with the original image and mount.
+func (runtime *AccountRuntime) MigrateLegacyConfigMounts(ctx context.Context) ([]string, error) {
+	accounts, err := runtime.accounts.ReadAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read accounts for config mount migration: %w", err)
+	}
+	sort.Slice(accounts, func(left, right int) bool { return accounts[left].ID < accounts[right].ID })
+	migrated := make([]string, 0)
+	for _, account := range accounts {
+		container, found, err := runtime.findAccountContainer(ctx, account.ID)
+		if err != nil {
+			return migrated, err
+		}
+		if !found {
+			continue
+		}
+		inspection, err := runtime.client.ContainerInspect(ctx, container.dockerID, dockerclient.ContainerInspectOptions{})
+		if err != nil {
+			return migrated, fmt.Errorf("inspect account config mount for %s: %w", account.ID, err)
+		}
+		if imageID := strings.TrimSpace(inspection.Container.Image); imageID != "" {
+			// Recreate from the exact already-running image content, not from a
+			// mutable tag that may have moved since this container was created.
+			container.Image = imageID
+		} else if inspection.Container.Config != nil && strings.TrimSpace(inspection.Container.Config.Image) != "" {
+			container.Image = strings.TrimSpace(inspection.Container.Config.Image)
+		}
+		layout, err := runtime.detectConfigMountLayout(account.ID, inspection.Container.Mounts)
+		if err != nil {
+			return migrated, err
+		}
+		if layout == configMountLegacyFile {
+			if container.State == string(containertypes.StateRunning) {
+				if runtime.drainer == nil {
+					return migrated, fmt.Errorf("migrate account config mount for %s: %w", account.ID, accountlifecycle.ErrRouteEvacuationUnavailable)
+				}
+				if err := runtime.drainer.WaitAccountDrained(ctx, account.ID); err != nil {
+					return migrated, fmt.Errorf("migrate account config mount for %s: %w", account.ID, err)
+				}
+			}
+			if err := runtime.recreateLegacyConfigContainer(ctx, account, container); err != nil {
+				return migrated, err
+			}
+			migrated = append(migrated, account.ID)
+		}
+		if err := removeLegacyConfigFile(runtime.root, account.ID); err != nil {
+			return migrated, err
+		}
+	}
+	return migrated, nil
+}
+
+func (runtime *AccountRuntime) detectConfigMountLayout(
+	accountID string,
+	mounts []containertypes.MountPoint,
+) (accountConfigMountLayout, error) {
+	expectedDirectory := filepath.Clean(accountconfig.Directory(runtime.root, accountID))
+	expectedLegacy := filepath.Clean(accountconfig.LegacyFile(runtime.root, accountID))
+	legacyTarget := filepath.Clean("/CLIProxyAPI/configs/" + accountID + ".yaml")
+	currentFound := false
+	legacyFound := false
+	for _, mounted := range mounts {
+		target := filepath.Clean(mounted.Destination)
+		if target != filepath.Clean(accountconfig.ContainerDirectory) && target != legacyTarget {
+			continue
+		}
+		if mounted.Type != mount.TypeBind || mounted.RW {
+			return configMountDirectory, fmt.Errorf("%w: account %s config mount is not a read-only bind", ErrRuntimeConflict, accountID)
+		}
+		source := filepath.Clean(mounted.Source)
+		switch target {
+		case filepath.Clean(accountconfig.ContainerDirectory):
+			if source != expectedDirectory {
+				return configMountDirectory, fmt.Errorf("%w: account %s config directory source is %s", ErrRuntimeConflict, accountID, source)
+			}
+			currentFound = true
+		case legacyTarget:
+			if source != expectedLegacy {
+				return configMountDirectory, fmt.Errorf("%w: account %s legacy config source is %s", ErrRuntimeConflict, accountID, source)
+			}
+			legacyFound = true
+		}
+	}
+	if currentFound == legacyFound {
+		return configMountDirectory, fmt.Errorf("%w: account %s has an ambiguous or missing config mount", ErrRuntimeConflict, accountID)
+	}
+	if legacyFound {
+		return configMountLegacyFile, nil
+	}
+	return configMountDirectory, nil
+}
+
+func (runtime *AccountRuntime) recreateLegacyConfigContainer(
+	ctx context.Context,
+	account controlplane.Account,
+	container Service,
+) error {
+	wasRunning := container.State == string(containertypes.StateRunning)
+	if err := runtime.removeContainer(ctx, container.dockerID); err != nil {
+		return fmt.Errorf("remove legacy config container %s: %w", account.ID, err)
+	}
+	newID, migrationError := runtime.createAccountContainerWithLayout(
+		ctx, account, wasRunning, container.Image, configMountDirectory,
+	)
+	if migrationError == nil && wasRunning {
+		migrationError = runtime.probeAccount(ctx, account.ID)
+		if migrationError != nil && newID != "" {
+			cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			migrationError = errors.Join(migrationError, runtime.removeContainer(cleanupContext, newID))
+			cancel()
+		}
+	}
+	if migrationError == nil {
+		return nil
+	}
+	rollbackContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	_, rollbackError := runtime.createAccountContainerWithLayout(
+		rollbackContext, account, wasRunning, container.Image, configMountLegacyFile,
+	)
+	return errors.Join(
+		fmt.Errorf("migrate account %s config mount: %w", account.ID, migrationError),
+		wrapRuntimeError("restore legacy account config mount", rollbackError),
+	)
+}
+
+func removeLegacyConfigFile(root, accountID string) error {
+	path := accountconfig.LegacyFile(root, accountID)
+	information, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect migrated legacy config for %s: %w", accountID, err)
+	}
+	if !information.Mode().IsRegular() || information.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: migrated legacy config is not a regular file: %s", ErrRuntimeConflict, path)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove migrated legacy config for %s: %w", accountID, err)
+	}
+	return nil
 }
 
 func (runtime *AccountRuntime) PrepareCreate(
@@ -553,7 +705,17 @@ func (runtime *AccountRuntime) createAccountContainerWithImage(
 	start bool,
 	imageReference string,
 ) (string, error) {
-	options, err := runtime.createOptionsWithImage(ctx, account, imageReference)
+	return runtime.createAccountContainerWithLayout(ctx, account, start, imageReference, configMountDirectory)
+}
+
+func (runtime *AccountRuntime) createAccountContainerWithLayout(
+	ctx context.Context,
+	account controlplane.Account,
+	start bool,
+	imageReference string,
+	layout accountConfigMountLayout,
+) (string, error) {
+	options, err := runtime.createOptionsWithImageAndLayout(ctx, account, imageReference, layout)
 	if err != nil {
 		return "", err
 	}
@@ -587,17 +749,52 @@ func (runtime *AccountRuntime) createOptionsWithImage(
 	account controlplane.Account,
 	imageReference string,
 ) (dockerclient.ContainerCreateOptions, error) {
+	return runtime.createOptionsWithImageAndLayout(ctx, account, imageReference, configMountDirectory)
+}
+
+type accountConfigMountLayout int
+
+const (
+	configMountDirectory accountConfigMountLayout = iota
+	configMountLegacyFile
+)
+
+func (runtime *AccountRuntime) createOptionsWithImageAndLayout(
+	ctx context.Context,
+	account controlplane.Account,
+	imageReference string,
+	layout accountConfigMountLayout,
+) (dockerclient.ContainerCreateOptions, error) {
 	accountID, err := controlplane.NormalizeAccountID(account.ID)
 	if err != nil || accountID != account.ID || account.Port < 1 || account.Port > 65535 {
 		return dockerclient.ContainerCreateOptions{}, fmt.Errorf("%w: invalid account container metadata", ErrRuntimeTarget)
 	}
+	configSource := accountconfig.Directory(runtime.root, account.ID)
+	configTarget := accountconfig.ContainerDirectory
+	configCommand := accountconfig.ContainerFile
+	if layout == configMountLegacyFile {
+		configSource = accountconfig.LegacyFile(runtime.root, account.ID)
+		configTarget = "/CLIProxyAPI/configs/" + account.ID + ".yaml"
+		configCommand = configTarget
+	} else if layout != configMountDirectory {
+		return dockerclient.ContainerCreateOptions{}, errors.New("unknown account config mount layout")
+	}
+	if layout == configMountDirectory {
+		if err := requireRuntimeDirectory(configSource); err != nil {
+			return dockerclient.ContainerCreateOptions{}, err
+		}
+		if err := requireRuntimeRegularFile(accountconfig.File(runtime.root, account.ID)); err != nil {
+			return dockerclient.ContainerCreateOptions{}, err
+		}
+	} else if err := requireRuntimeRegularFile(configSource); err != nil {
+		return dockerclient.ContainerCreateOptions{}, err
+	}
 	for _, path := range []string{
-		filepath.Join(runtime.root, "configs", account.ID+".yaml"),
 		filepath.Join(runtime.root, "management", "config", "static"),
 		filepath.Join(runtime.root, "auth", account.ID),
 		filepath.Join(runtime.root, "logs", account.ID),
 	} {
-		if err := requireRuntimePath(path); err != nil {
+		if err := requireRuntimeDirectory(path); err != nil {
 			return dockerclient.ContainerCreateOptions{}, err
 		}
 	}
@@ -628,7 +825,7 @@ func (runtime *AccountRuntime) createOptionsWithImage(
 		Name: runtime.instance + "-" + account.ID,
 		Config: &containertypes.Config{
 			Image:        image,
-			Cmd:          []string{"./CLIProxyAPI", "-config", "/CLIProxyAPI/configs/" + account.ID + ".yaml"},
+			Cmd:          []string{"./CLIProxyAPI", "-config", configCommand},
 			ExposedPorts: networktypes.PortSet{port: struct{}{}},
 			Labels:       labels,
 		},
@@ -642,7 +839,7 @@ func (runtime *AccountRuntime) createOptionsWithImage(
 				HostIP: hostAddress, HostPort: strconv.Itoa(account.Port),
 			}}},
 			Mounts: []mount.Mount{
-				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "configs", account.ID+".yaml"), Target: "/CLIProxyAPI/configs/" + account.ID + ".yaml", ReadOnly: true},
+				{Type: mount.TypeBind, Source: configSource, Target: configTarget, ReadOnly: true},
 				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "management", "config", "static"), Target: "/CLIProxyAPI/configs/static", ReadOnly: true},
 				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "auth", account.ID), Target: "/root/.cli-proxy-api"},
 				{Type: mount.TypeBind, Source: filepath.Join(runtime.root, "logs", account.ID), Target: "/CLIProxyAPI/logs"},
@@ -838,13 +1035,24 @@ func runtimeStringSetting(settings map[string]any, key, fallback string) (string
 	return value, nil
 }
 
-func requireRuntimePath(path string) error {
+func requireRuntimeDirectory(path string) error {
 	information, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("required account runtime path %s: %w", path, err)
 	}
-	if information.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("account runtime path must not be a symbolic link: %s", path)
+	if !information.IsDir() || information.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("account runtime path must be a real directory: %s", path)
+	}
+	return nil
+}
+
+func requireRuntimeRegularFile(path string) error {
+	information, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("required account runtime path %s: %w", path, err)
+	}
+	if !information.Mode().IsRegular() || information.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("account runtime path must be a regular file: %s", path)
 	}
 	return nil
 }

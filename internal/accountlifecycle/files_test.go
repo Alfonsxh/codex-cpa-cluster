@@ -19,13 +19,13 @@ func TestFileManagerCreateRollbackRemovesOnlyCreatedAccountPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareCreate: %v", err)
 	}
-	writeTestFile(t, filepath.Join(root, "configs", "alpha.yaml"), "generated")
+	writeTestFile(t, filepath.Join(root, "configs", "alpha", "config.yaml"), "generated")
 	writeTestFile(t, filepath.Join(root, "unrelated.txt"), "keep")
 	if err := transition.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
 	for _, path := range []string{
-		filepath.Join(root, "configs", "alpha.yaml"),
+		filepath.Join(root, "configs", "alpha"),
 		filepath.Join(root, "auth", "alpha"),
 		filepath.Join(root, "logs", "alpha"),
 	} {
@@ -55,12 +55,12 @@ func TestFileManagerRenameBacksUpMovesAndRollsBackExactly(t *testing.T) {
 	if exists(filepath.Join(root, "auth", "alpha")) || !exists(filepath.Join(root, "auth", "gamma")) {
 		t.Fatal("OAuth directory was not moved")
 	}
-	writeTestFile(t, filepath.Join(root, "configs", "gamma.yaml"), "new-config")
+	writeTestFile(t, filepath.Join(root, "configs", "gamma", "config.yaml"), "new-config")
 	if err := transition.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
 	if !exists(filepath.Join(root, "auth", "alpha")) || exists(filepath.Join(root, "auth", "gamma")) ||
-		exists(filepath.Join(root, "configs", "gamma.yaml")) {
+		exists(filepath.Join(root, "configs", "gamma")) {
 		t.Fatal("renamed paths were not restored exactly")
 	}
 	if got := readTestFile(t, filepath.Join(root, "auth", "alpha", "oauth.json")); got != "oauth-secret" {
@@ -86,13 +86,13 @@ func TestFileManagerDeleteCommitAndRollbackRestoresFromSecureBackup(t *testing.T
 	if err := transition.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if exists(filepath.Join(root, "configs", "alpha.yaml")) || exists(filepath.Join(root, "auth", "alpha")) {
+	if exists(filepath.Join(root, "configs", "alpha")) || exists(filepath.Join(root, "auth", "alpha")) {
 		t.Fatal("deleted account paths remain after commit")
 	}
 	if err := transition.Rollback(); err != nil {
 		t.Fatalf("Rollback committed delete: %v", err)
 	}
-	if got := readTestFile(t, filepath.Join(root, "configs", "alpha.yaml")); got != "old-config" {
+	if got := readTestFile(t, filepath.Join(root, "configs", "alpha", "config.yaml")); got != "old-config" {
 		t.Fatalf("config backup was not restored: %q", got)
 	}
 	if got := readTestFile(t, filepath.Join(root, "auth", "alpha", "oauth.json")); got != "oauth-secret" {
@@ -133,7 +133,7 @@ func TestFileManagerAuthClearRejectsSymlinkAndRestoresFiles(t *testing.T) {
 
 func TestFileManagerCreateRejectsStalePaths(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "configs", "alpha.yaml"), "stale")
+	writeTestFile(t, filepath.Join(root, "configs", "alpha", "config.yaml"), "stale")
 	manager := &FileManager{Root: root}
 	if _, err := manager.PrepareCreate(testLifecycleOperationID, "alpha"); err == nil {
 		t.Fatal("PrepareCreate unexpectedly accepted a stale account path")
@@ -142,7 +142,7 @@ func TestFileManagerCreateRejectsStalePaths(t *testing.T) {
 
 func seedAccountPaths(t *testing.T, root, accountID string) {
 	t.Helper()
-	writeTestFile(t, filepath.Join(root, "configs", accountID+".yaml"), "old-config")
+	writeTestFile(t, filepath.Join(root, "configs", accountID, "config.yaml"), "old-config")
 	writeTestFile(t, filepath.Join(root, "auth", accountID, "oauth.json"), "oauth-secret")
 	writeTestFile(t, filepath.Join(root, "logs", accountID, "main.log"), "runtime-log")
 }

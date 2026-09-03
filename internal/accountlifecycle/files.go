@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountconfig"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/google/renameio/v2"
 	"github.com/google/uuid"
@@ -90,7 +91,7 @@ func (manager *FileManager) PrepareCreate(operationID string, accountID string) 
 		return nil, err
 	}
 	paths := accountPaths(root, accountID)
-	for _, path := range []string{paths.config, paths.auth, paths.logs} {
+	for _, path := range []string{paths.config, paths.legacyConfig, paths.auth, paths.logs} {
 		if exists(path) {
 			return nil, fmt.Errorf("%w: account creation target already exists: %s", ErrUnsafeAccountPath, relativePath(root, path))
 		}
@@ -105,7 +106,7 @@ func (manager *FileManager) PrepareCreate(operationID string, accountID string) 
 	return &fileTransition{
 		commit: func() error { return nil },
 		rollback: func() error {
-			return errors.Join(removePath(paths.config), removePath(paths.auth), removePath(paths.logs))
+			return errors.Join(removePath(paths.config), removePath(paths.legacyConfig), removePath(paths.auth), removePath(paths.logs))
 		},
 	}, nil
 }
@@ -132,7 +133,7 @@ func (manager *FileManager) PrepareUpdate(
 	}
 	oldPaths := accountPaths(root, oldAccountID)
 	newPaths := accountPaths(root, newAccountID)
-	for _, target := range []string{newPaths.config, newPaths.auth, newPaths.logs} {
+	for _, target := range []string{newPaths.config, newPaths.legacyConfig, newPaths.auth, newPaths.logs} {
 		if exists(target) {
 			return nil, fmt.Errorf("%w: account rename target already exists: %s", ErrUnsafeAccountPath, relativePath(root, target))
 		}
@@ -163,10 +164,10 @@ func (manager *FileManager) PrepareUpdate(
 	return &fileTransition{
 		backup: relativePath(root, backup),
 		commit: func() error {
-			return removePath(oldPaths.config)
+			return errors.Join(removePath(oldPaths.config), removePath(oldPaths.legacyConfig))
 		},
 		rollback: func() error {
-			return errors.Join(removePath(newPaths.config), rollbackMoves(moved))
+			return errors.Join(removePath(newPaths.config), removePath(newPaths.legacyConfig), rollbackMoves(moved))
 		},
 	}, nil
 }
@@ -187,7 +188,7 @@ func (manager *FileManager) PrepareDelete(operationID string, accountID string, 
 	return &fileTransition{
 		backup: relativePath(root, backup),
 		commit: func() error {
-			return errors.Join(removePath(paths.config), removePath(paths.auth), removePath(paths.logs))
+			return errors.Join(removePath(paths.config), removePath(paths.legacyConfig), removePath(paths.auth), removePath(paths.logs))
 		},
 		rollback: func() error {
 			return restoreBackup(backup, paths, true, true, true)
@@ -259,7 +260,7 @@ func (manager *FileManager) Recover(operation Operation, desired *controlplane.A
 			if err := recoverMovedDirectory(root, accountPaths(root, accountID).logs, accountPaths(root, newAccountID).logs, filepath.Join(backup, "logs")); err != nil {
 				return err
 			}
-			return removePath(accountPaths(root, accountID).config)
+			return removeAccountConfigPaths(accountPaths(root, accountID))
 		}
 		if err := recoverMovedDirectory(root, accountPaths(root, newAccountID).auth, accountPaths(root, accountID).auth, filepath.Join(backup, "auth")); err != nil {
 			return err
@@ -267,7 +268,7 @@ func (manager *FileManager) Recover(operation Operation, desired *controlplane.A
 		if err := recoverMovedDirectory(root, accountPaths(root, newAccountID).logs, accountPaths(root, accountID).logs, filepath.Join(backup, "logs")); err != nil {
 			return err
 		}
-		return removePath(accountPaths(root, newAccountID).config)
+		return removeAccountConfigPaths(accountPaths(root, newAccountID))
 	case operationDelete:
 		backup := manager.operationBackupPath(root, operation, "deleted")
 		paths := accountPaths(root, accountID)
@@ -320,8 +321,8 @@ func recoverMovedDirectory(root, source, destination, backup string) error {
 
 func restoreMissingAccountPaths(backup string, paths accountFilePaths) error {
 	errorsFound := make([]error, 0, 3)
-	if !regularFile(paths.config) && regularFile(filepath.Join(backup, "config.yaml")) {
-		errorsFound = append(errorsFound, copyRegularFile(filepath.Join(backup, "config.yaml"), paths.config, 0o600))
+	if !regularFile(paths.configFile) && regularFile(filepath.Join(backup, "config.yaml")) {
+		errorsFound = append(errorsFound, copyRegularFile(filepath.Join(backup, "config.yaml"), paths.configFile, 0o600))
 	}
 	for _, item := range []struct{ source, destination string }{
 		{filepath.Join(backup, "auth"), paths.auth},
@@ -344,7 +345,11 @@ func ensureRuntimeDirectories(paths accountFilePaths) error {
 }
 
 func removeAccountPaths(paths accountFilePaths) error {
-	return errors.Join(removePath(paths.config), removePath(paths.auth), removePath(paths.logs))
+	return errors.Join(removePath(paths.config), removePath(paths.legacyConfig), removePath(paths.auth), removePath(paths.logs))
+}
+
+func removeAccountConfigPaths(paths accountFilePaths) error {
+	return errors.Join(removePath(paths.config), removePath(paths.legacyConfig))
 }
 
 func validateOperationID(operationID string) error {
@@ -356,16 +361,20 @@ func validateOperationID(operationID string) error {
 }
 
 type accountFilePaths struct {
-	config string
-	auth   string
-	logs   string
+	config       string
+	configFile   string
+	legacyConfig string
+	auth         string
+	logs         string
 }
 
 func accountPaths(root, accountID string) accountFilePaths {
 	return accountFilePaths{
-		config: filepath.Join(root, "configs", accountID+".yaml"),
-		auth:   filepath.Join(root, "auth", accountID),
-		logs:   filepath.Join(root, "logs", accountID),
+		config:       accountconfig.Directory(root, accountID),
+		configFile:   accountconfig.File(root, accountID),
+		legacyConfig: accountconfig.LegacyFile(root, accountID),
+		auth:         filepath.Join(root, "auth", accountID),
+		logs:         filepath.Join(root, "logs", accountID),
 	}
 }
 
@@ -405,8 +414,12 @@ func (manager *FileManager) createBackup(
 		return "", fmt.Errorf("write account backup Key rows: %w", err)
 	}
 	paths := accountPaths(root, accountID)
-	if includeConfig && regularFile(paths.config) {
-		if err := copyRegularFile(paths.config, filepath.Join(backup, "config.yaml"), 0o600); err != nil {
+	configSource := paths.configFile
+	if !regularFile(configSource) {
+		configSource = paths.legacyConfig
+	}
+	if includeConfig && regularFile(configSource) {
+		if err := copyRegularFile(configSource, filepath.Join(backup, "config.yaml"), 0o600); err != nil {
 			return "", err
 		}
 	}
@@ -434,7 +447,7 @@ func restoreBackup(
 	if includeConfig {
 		source := filepath.Join(backup, "config.yaml")
 		if regularFile(source) {
-			if err := copyRegularFile(source, paths.config, 0o600); err != nil {
+			if err := copyRegularFile(source, paths.configFile, 0o600); err != nil {
 				errorsFound = append(errorsFound, err)
 			}
 		}

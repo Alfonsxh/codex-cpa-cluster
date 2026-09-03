@@ -242,6 +242,7 @@ func runOwnedCollector(
 				"usage collector round completed",
 				zap.Int("received", result.Received), zap.Int("inserted", result.Inserted),
 				zap.Int("duplicate", result.Duplicate), zap.Int("unmapped", result.Unmapped),
+				zap.Int("missing_api_key", result.MissingAPIKey), zap.Int("unknown_api_key", result.UnknownAPIKey),
 				zap.Int("ignored", result.Ignored), zap.Strings("errors", result.Errors),
 			)
 		}

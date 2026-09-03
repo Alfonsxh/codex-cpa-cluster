@@ -581,6 +581,8 @@ describe("AccountsPage", () => {
     expect(taskMeta).not.toBeNull();
     expect(within(taskMeta!).getByText("alpha@example.com")).toBeInTheDocument();
     const authorizationPanel = screen.getByLabelText("OAuth 设备授权信息");
+    expect(within(authorizationPanel).queryByText("设备授权")).not.toBeInTheDocument();
+    expect(within(authorizationPanel).queryByRole("button", { name: "打开授权页" })).not.toBeInTheDocument();
     const addressCard = within(authorizationPanel).getByText("授权地址").closest<HTMLElement>("div");
     const codeCard = within(authorizationPanel).getByText("设备码").closest<HTMLElement>("div");
     expect(addressCard).not.toBeNull();

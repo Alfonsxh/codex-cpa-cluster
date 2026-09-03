@@ -81,11 +81,13 @@ type TeamIdentity struct {
 type Event map[string]any
 
 type IngestCounters struct {
-	Received  int `json:"received"`
-	Inserted  int `json:"inserted"`
-	Duplicate int `json:"duplicate"`
-	Unmapped  int `json:"unmapped"`
-	Ignored   int `json:"ignored"`
+	Received      int `json:"received"`
+	Inserted      int `json:"inserted"`
+	Duplicate     int `json:"duplicate"`
+	Unmapped      int `json:"unmapped"`
+	MissingAPIKey int `json:"missing_api_key"`
+	UnknownAPIKey int `json:"unknown_api_key"`
+	Ignored       int `json:"ignored"`
 }
 
 type WeeklyQuota struct {
@@ -387,9 +389,11 @@ func (writer *Writer) IngestEvents(
 			counters.Ignored++
 			continue
 		}
-		digest := keyHash(stringValue(event["api_key"]))
+		rawAPIKey := strings.TrimSpace(stringValue(event["api_key"]))
+		digest := keyHash(rawAPIKey)
 		if digest == "" {
 			counters.Unmapped++
+			counters.MissingAPIKey++
 			continue
 		}
 		prepared = append(prepared, preparedEvent{payload: event, keyDigest: digest})
@@ -419,6 +423,7 @@ func (writer *Writer) IngestEvents(
 		identity, found := identities[item.keyDigest]
 		if !found {
 			counters.Unmapped++
+			counters.UnknownAPIKey++
 			continue
 		}
 		event := normalizeEvent(account, item, identity, normalizedMultipliers, policyVersion, now)

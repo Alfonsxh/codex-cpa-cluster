@@ -36,7 +36,7 @@ paths:
       tags: [public-site]
       responses:
         "200":
-          description: Browser-safe branding and client export defaults
+          description: Browser-safe branding, accepted email suffixes and client export defaults
           content:
             application/json:
               schema:
@@ -1946,6 +1946,7 @@ components:
         - short_name
         - environment_label
         - public_base_url
+        - allowed_email_domains
         - provider_name
         - api_key_env
         - default_model
@@ -1956,6 +1957,10 @@ components:
         short_name: { type: string }
         environment_label: { type: string }
         public_base_url: { type: string }
+        allowed_email_domains:
+          type: array
+          description: Public email suffixes accepted by user creation and Usage Center login
+          items: { type: string }
         provider_name: { type: string }
         api_key_env: { type: string }
         default_model: { type: string }

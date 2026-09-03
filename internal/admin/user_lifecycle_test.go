@@ -283,7 +283,7 @@ func TestUserManagerProjectsStableCPAInternalKeysAcrossCreateRotateRevokeAndDele
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	configPath := filepath.Join(root, "configs", "alpha.yaml")
+	configPath := filepath.Join(root, "configs", "alpha", "config.yaml")
 	createdConfig, err := os.ReadFile(configPath)
 	if err != nil || !strings.Contains(string(createdConfig), "cpa_internal_") {
 		t.Fatalf("created CPA config = (%q, %v)", createdConfig, err)
@@ -352,7 +352,7 @@ func TestUserManagerExactlyRestoresInternalKeysAfterPartiallyAppliedProjectionFa
 	if readError != nil || len(keys) != 0 {
 		t.Fatalf("partial projection rollback internal Keys = (%#v, %v)", keys, readError)
 	}
-	config, readError := os.ReadFile(filepath.Join(root, "configs", "alpha.yaml"))
+	config, readError := os.ReadFile(filepath.Join(root, "configs", "alpha", "config.yaml"))
 	if readError != nil || strings.Contains(string(config), "cpa_internal_") {
 		t.Fatalf("partial projection rollback config = (%q, %v)", config, readError)
 	}

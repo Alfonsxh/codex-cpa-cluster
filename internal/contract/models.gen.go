@@ -2993,15 +2993,17 @@ type PublicGatewayUsageTotals struct {
 
 // PublicSiteConfiguration defines model for PublicSiteConfiguration.
 type PublicSiteConfiguration struct {
-	ApiKeyEnv        string                         `json:"api_key_env"`
-	DefaultModel     string                         `json:"default_model"`
-	EnvironmentLabel string                         `json:"environment_label"`
-	Logo             PublicSiteLogo                 `json:"logo"`
-	ProductName      string                         `json:"product_name"`
-	ProviderName     string                         `json:"provider_name"`
-	PublicBaseUrl    string                         `json:"public_base_url"`
-	ShortName        string                         `json:"short_name"`
-	Version          PublicSiteConfigurationVersion `json:"version"`
+	// AllowedEmailDomains Public email suffixes accepted by user creation and Usage Center login
+	AllowedEmailDomains []string                       `json:"allowed_email_domains"`
+	ApiKeyEnv           string                         `json:"api_key_env"`
+	DefaultModel        string                         `json:"default_model"`
+	EnvironmentLabel    string                         `json:"environment_label"`
+	Logo                PublicSiteLogo                 `json:"logo"`
+	ProductName         string                         `json:"product_name"`
+	ProviderName        string                         `json:"provider_name"`
+	PublicBaseUrl       string                         `json:"public_base_url"`
+	ShortName           string                         `json:"short_name"`
+	Version             PublicSiteConfigurationVersion `json:"version"`
 }
 
 // PublicSiteConfigurationVersion defines model for PublicSiteConfiguration.Version.

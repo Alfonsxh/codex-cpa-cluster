@@ -80,5 +80,7 @@ func addCounters(target *usage.IngestCounters, value usage.IngestCounters) {
 	target.Inserted += value.Inserted
 	target.Duplicate += value.Duplicate
 	target.Unmapped += value.Unmapped
+	target.MissingAPIKey += value.MissingAPIKey
+	target.UnknownAPIKey += value.UnknownAPIKey
 	target.Ignored += value.Ignored
 }

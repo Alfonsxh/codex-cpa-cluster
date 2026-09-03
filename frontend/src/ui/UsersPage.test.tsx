@@ -67,6 +67,8 @@ describe("UsersPage legacy parity", () => {
     expect(new Headers(assignment?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
 
     await user.click(screen.getByRole("button", { name: "添加用户" }));
+    expect(await screen.findByText("企业邮箱后缀：@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "用户邮箱" })).toHaveAttribute("placeholder", "name@example.com");
     await user.type(screen.getByRole("textbox", { name: "用户邮箱" }), "new@example.com");
     await user.click(screen.getByRole("button", { name: "创建用户" }));
     expect(await screen.findByText("保存新生成的凭据")).toBeInTheDocument();
@@ -156,6 +158,26 @@ function userFetchMock(override?: (path: string, init?: RequestInit) => Promise<
     const overridden = override?.(path, init);
     if (overridden) return overridden;
     if (path.startsWith("/admin/api/users?")) return Promise.resolve(jsonResponse(userCatalog()));
+    if (path === "/site-config.json") {
+      return Promise.resolve(jsonResponse({
+        version: 1,
+        product_name: "Codex CPA Cluster",
+        short_name: "Codex CPA",
+        environment_label: "Test",
+        public_base_url: "https://cpa.example.com",
+        allowed_email_domains: ["example.com"],
+        provider_name: "Codex CPA",
+        api_key_env: "CPA_API_KEY",
+        default_model: "gpt-5.6-sol",
+        logo: {
+          custom: false,
+          url: "/portal/assets/codex-cpa-cluster-logo.svg",
+          content_type: "image/svg+xml",
+          sha256: "",
+          updated_at: null
+        }
+      }));
+    }
     if (path.startsWith("/admin/api/teams/usage-breakdown?")) return Promise.resolve(jsonResponse(teamUsageBreakdown()));
     if (path.startsWith("/admin/api/teams/usage?")) return Promise.resolve(jsonResponse(teamUsageCatalog()));
     if (path.startsWith("/admin/api/users/detail?")) return Promise.resolve(jsonResponse(userDetail()));

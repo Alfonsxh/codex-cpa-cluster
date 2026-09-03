@@ -18,6 +18,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import {
+  emailDomainHint,
+  emailPlaceholder,
+  publicSiteQueryKey,
+  readPublicSiteConfiguration
+} from "../api/public-site";
+import {
   applyUserQuotaAction,
   assignUserTeam,
   assignUsersTeam,
@@ -208,6 +214,14 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
     enabled: usageWindow !== "custom" || customRange !== null,
     placeholderData: (previous) => previous,
     retry: false,
+    refetchOnWindowFocus: false
+  });
+  const siteConfiguration = useQuery({
+    queryKey: publicSiteQueryKey,
+    queryFn: ({ signal }) => readPublicSiteConfiguration(signal),
+    enabled: createOpen,
+    retry: false,
+    staleTime: 60_000,
     refetchOnWindowFocus: false
   });
   const teamUsage = useQuery({
@@ -667,6 +681,7 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
         open={createOpen}
         teams={teamOptions}
         initialTeamID={catalog?.teams.some((team) => team.id === teamID) ? teamID : ""}
+        emailDomains={siteConfiguration.data?.allowed_email_domains}
         pending={createMutation.isPending}
         error={createMutation.error}
         onCancel={() => setCreateOpen(false)}
@@ -1603,6 +1618,7 @@ function CreateUserModal({
   open,
   teams,
   initialTeamID,
+  emailDomains,
   pending,
   error,
   onCancel,
@@ -1611,6 +1627,7 @@ function CreateUserModal({
   open: boolean;
   teams: Array<{ value: string; label: string }>;
   initialTeamID: string;
+  emailDomains: readonly string[] | undefined;
   pending: boolean;
   error: unknown;
   onCancel: () => void;
@@ -1619,6 +1636,7 @@ function CreateUserModal({
   const [email, setEmail] = useState("");
   const [teamID, setTeamID] = useState("");
   const emailInputRef = useRef<HTMLInputElement>(null);
+  const domainHint = emailDomainHint(emailDomains);
   useEffect(() => {
     if (!open) return;
     setEmail("");
@@ -1656,12 +1674,13 @@ function CreateUserModal({
             type="email"
             ref={emailInputRef}
             aria-label="用户邮箱"
-            placeholder="name@example.com"
+            placeholder={emailPlaceholder(emailDomains)}
             value={email}
             autoFocus
             required
             onChange={(event) => setEmail(event.target.value)}
           />
+          {domainHint ? <small>{domainHint}</small> : null}
         </label>
         <label className="field add-user-team-field">
           <span>所属团队</span>

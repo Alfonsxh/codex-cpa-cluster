@@ -2,7 +2,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CheckOutlined,
   CopyOutlined,
-  ExportOutlined,
   SafetyCertificateOutlined
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
@@ -2073,16 +2072,6 @@ function TaskOutputModal({
       </div>
       {device.url || device.code ? (
         <section className="oauth-copy-panel" aria-label="OAuth 设备授权信息">
-          <div className="oauth-copy-head">
-            <div><strong>设备授权</strong><span>复制设备码，然后打开授权页面完成登录</span></div>
-            {device.url ? (
-              <Button
-                type="primary"
-                icon={<ExportOutlined aria-hidden="true" />}
-                onClick={() => window.open(device.url, "_blank", "noopener,noreferrer")}
-              >打开授权页</Button>
-            ) : null}
-          </div>
           <div className="oauth-copy-grid">
             <div>
               <span>授权地址</span>

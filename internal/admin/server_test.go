@@ -1496,11 +1496,12 @@ func TestPublicSiteConfigurationUsesExplicitSafeAllowlist(t *testing.T) {
 		"branding.short_name":            "P-CPA",
 		"branding.environment_label":     "Test only",
 		"branding.public_base_url":       "https://cpa.example.com",
-		"identity.allowed_email_domains": []string{"private.example.com"},
+		"identity.allowed_email_domains": []string{"Example.com", "staff.example.com"},
 		"identity.key_prefix":            "private_",
 		"portal.provider_name":           "Public Provider",
 		"portal.api_key_env":             "PUBLIC_API_KEY",
 		"portal.default_model":           "gpt-public",
+		"unrelated.private_setting":      "do-not-leak",
 	}); err != nil {
 		t.Fatalf("write public settings: %v", err)
 	}
@@ -1513,10 +1514,11 @@ func TestPublicSiteConfigurationUsesExplicitSafeAllowlist(t *testing.T) {
 	decodeAdminResponse(t, response, &configuration)
 	if configuration.ProductName != "Public CPA" || configuration.PublicBaseURL != "https://cpa.example.com" ||
 		configuration.ProviderName != "Public Provider" || configuration.Logo.Custom ||
-		configuration.Logo.URL != defaultPortalLogoURL || configuration.Logo.UpdatedAt != nil {
+		configuration.Logo.URL != defaultPortalLogoURL || configuration.Logo.UpdatedAt != nil ||
+		!slices.Equal(configuration.AllowedEmailDomains, []string{"example.com", "staff.example.com"}) {
 		t.Fatalf("public site configuration = %#v", configuration)
 	}
-	for _, forbidden := range []string{"private.example.com", "private_", "allowed_email_domains", "key_prefix"} {
+	for _, forbidden := range []string{"private_", "key_prefix", "do-not-leak", "private_setting"} {
 		if strings.Contains(response.Body.String(), forbidden) {
 			t.Fatalf("public site configuration leaks %q: %s", forbidden, response.Body.String())
 		}

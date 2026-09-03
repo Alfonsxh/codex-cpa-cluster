@@ -47,7 +47,7 @@ Go Admin 只打开既有目标。正式部署必须先存在两份 SQLite 和匹
 
 ## 品牌和公开配置
 
-`GET /site-config.json` 仅返回公开品牌与客户端导出字段，不包含允许邮箱域、Key 前缀、管理密钥或 Secret digest。自定义 Logo 通过 `/branding/logo` 输出；SVG 会拒绝脚本、事件处理器、外部资源、实体、`foreignObject` 和危险 URL。
+`GET /site-config.json` 仅返回公开品牌、允许登录的企业邮箱后缀与客户端导出字段，不包含 Key 前缀、管理密钥、Secret digest 或其他私有设置。邮箱后缀需要在未登录的使用中心登录页展示，因此属于显式公开白名单。自定义 Logo 通过 `/branding/logo` 输出；SVG 会拒绝脚本、事件处理器、外部资源、实体、`foreignObject` 和危险 URL。
 
 ## 验证
 

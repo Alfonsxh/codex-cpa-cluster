@@ -65,7 +65,7 @@ func TestManagerCreateSnapshotFailureRollsBackStateRuntimeSecretsFilesAndProject
 		t.Fatalf("created proxy remained after rollback: found=%v err=%v", found, readError)
 	}
 	for _, path := range []string{
-		filepath.Join(fixture.root, "configs", "gamma.yaml"),
+		filepath.Join(fixture.root, "configs", "gamma"),
 		filepath.Join(fixture.root, "auth", "gamma"),
 		filepath.Join(fixture.root, "logs", "gamma"),
 	} {
@@ -116,7 +116,7 @@ func TestManagerRenameMovesEncryptedProxyAndPathsWithoutRotatingKeys(t *testing.
 	}
 	if exists(filepath.Join(fixture.root, "auth", "alpha")) ||
 		readTestFile(t, filepath.Join(fixture.root, "auth", "gamma", "oauth.json")) != "oauth-secret" ||
-		exists(filepath.Join(fixture.root, "configs", "alpha.yaml")) {
+		exists(filepath.Join(fixture.root, "configs", "alpha")) {
 		t.Fatal("renamed account paths are inconsistent")
 	}
 	assertUnifiedKeyMatrix(t, fixture.store, map[string]string{
@@ -148,7 +148,7 @@ func TestManagerUpdateRuntimeFailureCompensatesRenameAndSnapshot(t *testing.T) {
 		t.Fatalf("accounts after update rollback = (%#v, %v)", accounts, readError)
 	}
 	if !exists(filepath.Join(fixture.root, "auth", "alpha")) || exists(filepath.Join(fixture.root, "auth", "gamma")) ||
-		exists(filepath.Join(fixture.root, "configs", "gamma.yaml")) {
+		exists(filepath.Join(fixture.root, "configs", "gamma")) {
 		t.Fatal("rename paths were not compensated")
 	}
 	if fixture.snapshots.calls != 2 {
@@ -173,7 +173,7 @@ func TestManagerDeletePublishesBeforeDestructiveCommitsAndKeepsBackup(t *testing
 		result.RemovedKeyRows != 2 || result.Backup == "" || result.SnapshotGeneration != "generation-1" {
 		t.Fatalf("result = %#v", result)
 	}
-	if exists(filepath.Join(fixture.root, "configs", "alpha.yaml")) || exists(filepath.Join(fixture.root, "auth", "alpha")) {
+	if exists(filepath.Join(fixture.root, "configs", "alpha")) || exists(filepath.Join(fixture.root, "auth", "alpha")) {
 		t.Fatal("deleted account paths remain")
 	}
 	if !exists(filepath.Join(fixture.root, filepath.FromSlash(result.Backup), "auth", "oauth.json")) {
@@ -713,7 +713,7 @@ func TestManagerRecoverInterruptedDeleteActivatesSnapshotBeforeCleanup(t *testin
 		)
 	}
 	for _, path := range []string{
-		filepath.Join(fixture.root, "configs", "alpha.yaml"),
+		filepath.Join(fixture.root, "configs", "alpha"),
 		filepath.Join(fixture.root, "auth", "alpha"),
 		filepath.Join(fixture.root, "logs", "alpha"),
 	} {

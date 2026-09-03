@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountconfig"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/google/renameio/v2"
 	"gopkg.in/yaml.v3"
@@ -119,6 +120,9 @@ func (renderer *Renderer) Render(ctx context.Context) (Result, error) {
 			return Result{}, err
 		}
 	}
+	if err := prepareAccountConfigDirectories(root, accounts); err != nil {
+		return Result{}, err
+	}
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		path := filepath.Join(root, filepath.FromSlash(file.relative))
@@ -155,7 +159,7 @@ func (renderer *Renderer) buildFiles(
 			return nil, fmt.Errorf("render CPA config for %s: %w", account.ID, err)
 		}
 		files = append(files, renderedFile{
-			relative: filepath.ToSlash(filepath.Join("configs", account.ID+".yaml")),
+			relative: filepath.ToSlash(filepath.Join("configs", account.ID, accountconfig.FileName)),
 			payload:  payload,
 			mode:     0o600,
 		})
@@ -465,11 +469,11 @@ func renderAccountsCompose(accounts []controlplane.Account) []byte {
 			"      options:",
 			"        max-size: \"20m\"",
 			"        max-file: \"3\"",
-			"    command: [\"./CLIProxyAPI\", \"-config\", \"/CLIProxyAPI/configs/"+account.ID+".yaml\"]",
+			"    command: [\"./CLIProxyAPI\", \"-config\", \""+accountconfig.ContainerFile+"\"]",
 			"    ports:",
 			"      - \"${BUSINESS_CPA_LISTEN_ADDRESS:?state/compose.env missing}:"+strconv.Itoa(account.Port)+":8317\"",
 			"    volumes:",
-			"      - ./configs/"+account.ID+".yaml:/CLIProxyAPI/configs/"+account.ID+".yaml:ro",
+			"      - ./configs/"+account.ID+":"+accountconfig.ContainerDirectory+":ro",
 			"      - ./management/config/static:/CLIProxyAPI/configs/static:ro",
 			"      - ./auth/"+account.ID+":/root/.cli-proxy-api",
 			"      - ./logs/"+account.ID+":/CLIProxyAPI/logs",
@@ -673,6 +677,44 @@ func (renderer *Renderer) root() (string, error) {
 		return "", fmt.Errorf("resolve account projection root: %w", err)
 	}
 	return filepath.Clean(root), nil
+}
+
+func prepareAccountConfigDirectories(root string, accounts []controlplane.Account) error {
+	configsRoot := filepath.Join(root, "configs")
+	if err := ensureRealDirectory(configsRoot, 0o700); err != nil {
+		return fmt.Errorf("prepare account config root: %w", err)
+	}
+	for _, account := range accounts {
+		legacy := accountconfig.LegacyFile(root, account.ID)
+		if information, err := os.Lstat(legacy); err == nil {
+			if !information.Mode().IsRegular() || information.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%w: legacy account config is not a regular file: %s", ErrInvalidProjection, legacy)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect legacy account config %s: %w", legacy, err)
+		}
+		if err := ensureRealDirectory(accountconfig.Directory(root, account.ID), 0o700); err != nil {
+			return fmt.Errorf("prepare account config directory for %s: %w", account.ID, err)
+		}
+	}
+	return nil
+}
+
+func ensureRealDirectory(path string, mode os.FileMode) error {
+	information, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.Mkdir(path, mode); err != nil {
+			return err
+		}
+		information, err = os.Lstat(path)
+	}
+	if err != nil {
+		return err
+	}
+	if !information.IsDir() || information.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: expected a real directory: %s", ErrInvalidProjection, path)
+	}
+	return os.Chmod(path, mode)
 }
 
 func writeAtomic(path string, payload []byte, mode os.FileMode) error {

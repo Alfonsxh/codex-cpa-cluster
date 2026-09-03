@@ -11,8 +11,8 @@ import (
 
 func TestServiceDecodesObjectsAndAggregatesBatches(t *testing.T) {
 	writer := &stubEventWriter{results: []usage.IngestCounters{
-		{Received: 1, Inserted: 1},
-		{Received: 1, Duplicate: 1},
+		{Received: 1, Inserted: 1, Unmapped: 1, MissingAPIKey: 1},
+		{Received: 1, Duplicate: 1, Unmapped: 1, UnknownAPIKey: 1},
 	}}
 	service := &Service{Writer: writer, Multipliers: map[string]float64{"max": 2}}
 	queue := stubDrainer{batches: [][][]byte{
@@ -24,7 +24,10 @@ func TestServiceDecodesObjectsAndAggregatesBatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DrainAccount: %v", err)
 	}
-	if counters != (usage.IngestCounters{Received: 2, Inserted: 1, Duplicate: 1}) {
+	if counters != (usage.IngestCounters{
+		Received: 2, Inserted: 1, Duplicate: 1, Unmapped: 2,
+		MissingAPIKey: 1, UnknownAPIKey: 1,
+	}) {
 		t.Fatalf("counters = %#v", counters)
 	}
 	if len(writer.events) != 2 || len(writer.events[0]) != 1 || len(writer.events[1]) != 1 {

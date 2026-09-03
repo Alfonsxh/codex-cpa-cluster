@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/go-resty/resty/v2"
 	containertypes "github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	networktypes "github.com/moby/moby/api/types/network"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -35,7 +37,7 @@ func TestAccountRuntimeAcceptsBootstrapManagementLayout(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	writeRuntimeTestFile(t, filepath.Join(root, "configs", "alpha.yaml"), "host: \"\"\nport: 8317\n")
+	writeRuntimeTestFile(t, filepath.Join(root, "configs", "alpha", "config.yaml"), "host: \"\"\nport: 8317\n")
 	for _, directory := range []string{filepath.Join(root, "auth", "alpha"), filepath.Join(root, "logs", "alpha")} {
 		if err := os.Mkdir(directory, 0o700); err != nil {
 			t.Fatalf("create account runtime directory: %v", err)
@@ -92,6 +94,10 @@ func TestAccountRuntimeCreatesExactMobySpecProbesAndRollsBackCandidate(t *testin
 		created.Config.Labels[composeServiceLabel] != "cliproxy-gamma" ||
 		created.HostConfig.NetworkMode != "fixture-backend" || len(created.HostConfig.Mounts) != 4 {
 		t.Fatalf("created options = %#v", created)
+	}
+	if mounted := created.HostConfig.Mounts[0]; mounted.Source != filepath.Join(root, "configs", "gamma") ||
+		mounted.Target != "/CLIProxyAPI/account-config" || !mounted.ReadOnly {
+		t.Fatalf("directory config mount = %#v", mounted)
 	}
 	port := created.HostConfig.PortBindings[networkPort(t, accountContainerPort)]
 	if len(port) != 1 || port[0].HostPort != "18320" || port[0].HostIP != netip.MustParseAddr("127.0.0.1") {
@@ -287,6 +293,75 @@ func TestAccountRuntimeReconcileReplacesInterruptedRenameCandidate(t *testing.T)
 	}
 }
 
+func TestAccountRuntimeMigratesLegacySingleFileMountAfterDrain(t *testing.T) {
+	root := newRuntimeRoot(t, "alpha")
+	legacy := filepath.Join(root, "configs", "alpha.yaml")
+	writeRuntimeTestFile(t, legacy, "legacy: true\n")
+	client := &fakeAccountLifecycleClient{
+		containers: []containertypes.Summary{
+			accountContainerSummary("old-alpha", "alpha", containertypes.StateRunning, 18318),
+		},
+		mounts: map[string][]containertypes.MountPoint{
+			"old-alpha": {{Type: mount.TypeBind, Source: legacy, Destination: "/CLIProxyAPI/configs/alpha.yaml", RW: false}},
+		},
+	}
+	manager := newRuntimeTestManager(t, client)
+	manager.accounts = staticAccountCatalog{accounts: []controlplane.Account{{ID: "alpha", Port: 18318}}}
+	runtime := newAccountRuntimeForTest(t, manager, root, &recordingRoundTripper{status: http.StatusOK})
+	drainer := &recordingAccountDrainer{}
+	runtime.drainer = drainer
+
+	migrated, err := runtime.MigrateLegacyConfigMounts(context.Background())
+	if err != nil {
+		t.Fatalf("MigrateLegacyConfigMounts: %v", err)
+	}
+	if len(migrated) != 1 || migrated[0] != "alpha" || len(drainer.accounts) != 1 || drainer.accounts[0] != "alpha" {
+		t.Fatalf("migration result=%#v drains=%#v", migrated, drainer.accounts)
+	}
+	if len(client.removed) != 1 || client.removed[0] != "old-alpha" || len(client.creates) != 1 {
+		t.Fatalf("migration runtime calls: removed=%#v creates=%#v", client.removed, client.creates)
+	}
+	mounted := client.creates[0].HostConfig.Mounts[0]
+	if mounted.Source != filepath.Join(root, "configs", "alpha") ||
+		mounted.Target != "/CLIProxyAPI/account-config" || !mounted.ReadOnly {
+		t.Fatalf("migrated config mount = %#v", mounted)
+	}
+	if _, err := os.Lstat(legacy); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy config remains after verified migration: %v", err)
+	}
+}
+
+func TestAccountRuntimeMigrationFailureRestoresLegacyContainerAndFile(t *testing.T) {
+	root := newRuntimeRoot(t, "alpha")
+	legacy := filepath.Join(root, "configs", "alpha.yaml")
+	writeRuntimeTestFile(t, legacy, "legacy: true\n")
+	client := &fakeAccountLifecycleClient{
+		containers: []containertypes.Summary{
+			accountContainerSummary("old-alpha", "alpha", containertypes.StateRunning, 18318),
+		},
+		mounts: map[string][]containertypes.MountPoint{
+			"old-alpha": {{Type: mount.TypeBind, Source: legacy, Destination: "/CLIProxyAPI/configs/alpha.yaml", RW: false}},
+		},
+		createErrors: map[int]error{1: errors.New("fixture directory mount create failure")},
+	}
+	manager := newRuntimeTestManager(t, client)
+	manager.accounts = staticAccountCatalog{accounts: []controlplane.Account{{ID: "alpha", Port: 18318}}}
+	runtime := newAccountRuntimeForTest(t, manager, root, &recordingRoundTripper{status: http.StatusOK})
+	runtime.drainer = &recordingAccountDrainer{}
+
+	if _, err := runtime.MigrateLegacyConfigMounts(context.Background()); err == nil ||
+		!strings.Contains(err.Error(), "fixture directory mount create failure") {
+		t.Fatalf("migration failure = %v", err)
+	}
+	if len(client.creates) != 1 || client.creates[0].HostConfig.Mounts[0].Source != legacy ||
+		client.creates[0].HostConfig.Mounts[0].Target != "/CLIProxyAPI/configs/alpha.yaml" {
+		t.Fatalf("legacy rollback create = %#v", client.creates)
+	}
+	if got, err := os.ReadFile(legacy); err != nil || string(got) != "legacy: true\n" {
+		t.Fatalf("legacy config after rollback = %q, %v", got, err)
+	}
+}
+
 func TestAccountRuntimeLoginUsesIsolatedOneOffContainerAndRequiresOAuthChange(t *testing.T) {
 	root := newRuntimeRoot(t, "alpha")
 	client := &fakeAccountLifecycleClient{
@@ -314,7 +389,7 @@ func TestAccountRuntimeLoginUsesIsolatedOneOffContainerAndRequiresOAuthChange(t 
 	created := client.creates[0]
 	if !strings.HasPrefix(created.Name, "fixture-oauth-alpha-") ||
 		created.Config.Image != "registry.example.com/cpa@sha256:immutable" ||
-		strings.Join(created.Config.Cmd, " ") != "./CLIProxyAPI -config /CLIProxyAPI/configs/alpha.yaml -codex-device-login -no-browser" {
+		strings.Join(created.Config.Cmd, " ") != "./CLIProxyAPI -config /CLIProxyAPI/account-config/config.yaml -codex-device-login -no-browser" {
 		t.Fatalf("OAuth create identity = %#v", created)
 	}
 	if created.Config.ExposedPorts != nil || len(created.HostConfig.PortBindings) != 0 ||
@@ -395,9 +470,9 @@ func newRuntimeRoot(t *testing.T, accounts ...string) string {
 	root := t.TempDir()
 	for _, account := range accounts {
 		for path, directory := range map[string]bool{
-			filepath.Join(root, "configs", account+".yaml"): false,
-			filepath.Join(root, "auth", account):            true,
-			filepath.Join(root, "logs", account):            true,
+			filepath.Join(root, "configs", account, "config.yaml"): false,
+			filepath.Join(root, "auth", account):                   true,
+			filepath.Join(root, "logs", account):                   true,
 		} {
 			if directory {
 				if err := os.MkdirAll(path, 0o700); err != nil {
@@ -428,7 +503,9 @@ func accountContainerSummary(id, account string, state containertypes.ContainerS
 
 type fakeAccountLifecycleClient struct {
 	containers     []containertypes.Summary
+	mounts         map[string][]containertypes.MountPoint
 	creates        []dockerclient.ContainerCreateOptions
+	createErrors   map[int]error
 	started        []string
 	stopped        []string
 	restarted      []string
@@ -453,12 +530,23 @@ func (client *fakeAccountLifecycleClient) ContainerCreate(
 	options dockerclient.ContainerCreateOptions,
 ) (dockerclient.ContainerCreateResult, error) {
 	client.createCount++
+	if err := client.createErrors[client.createCount]; err != nil {
+		return dockerclient.ContainerCreateResult{}, err
+	}
 	id := "created-" + strconv.Itoa(client.createCount)
 	client.creates = append(client.creates, options)
 	client.containers = append(client.containers, containertypes.Summary{
 		ID: id, Names: []string{"/" + options.Name}, Image: options.Config.Image,
 		State: containertypes.StateCreated, Status: "created", Labels: options.Config.Labels,
 	})
+	if client.mounts == nil {
+		client.mounts = make(map[string][]containertypes.MountPoint)
+	}
+	for _, mounted := range options.HostConfig.Mounts {
+		client.mounts[id] = append(client.mounts[id], containertypes.MountPoint{
+			Type: mounted.Type, Source: mounted.Source, Destination: mounted.Target, RW: !mounted.ReadOnly,
+		})
+	}
 	return dockerclient.ContainerCreateResult{ID: id}, nil
 }
 
@@ -470,7 +558,9 @@ func (client *fakeAccountLifecycleClient) ContainerInspect(
 	for _, candidate := range client.containers {
 		if candidate.ID == id {
 			return dockerclient.ContainerInspectResult{Container: containertypes.InspectResponse{
-				ID: id, State: &containertypes.State{Running: candidate.State == containertypes.StateRunning},
+				ID: id, Image: candidate.Image, Config: &containertypes.Config{Image: candidate.Image},
+				State:  &containertypes.State{Running: candidate.State == containertypes.StateRunning},
+				Mounts: append([]containertypes.MountPoint(nil), client.mounts[id]...),
 			}}, nil
 		}
 	}
@@ -558,6 +648,7 @@ func (client *fakeAccountLifecycleClient) ContainerRemove(
 		}
 	}
 	client.containers = filtered
+	delete(client.mounts, id)
 	return dockerclient.ContainerRemoveResult{}, nil
 }
 
@@ -607,6 +698,16 @@ type recordingRoundTripper struct {
 	status        int
 	authorization string
 	url           string
+}
+
+type recordingAccountDrainer struct {
+	accounts []string
+	err      error
+}
+
+func (drainer *recordingAccountDrainer) WaitAccountDrained(_ context.Context, accountID string) error {
+	drainer.accounts = append(drainer.accounts, accountID)
+	return drainer.err
 }
 
 func (transport *recordingRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {

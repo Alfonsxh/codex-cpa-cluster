@@ -48,7 +48,7 @@ flowchart LR
 | `state/control-plane.sqlite3` | Go Control | 账号、路由、外部 Key、团队、配置、加密秘密元数据和运行状态 |
 | `state/usage.sqlite3` | Go Collector/Portal/Quota | 高频用量事件、用户会话、额度策略和调整账本 |
 | `secrets/control-plane.key` | Go Control | 解密控制面秘密的 32 字节主密钥，必须与控制库成对恢复 |
-| `auth/<account>/`、`configs/<account>.yaml` | Go 账号生命周期管理器 / 上游账号进程 | OAuth 与上游运行配置，不进入镜像或发布包 |
+| `auth/<account>/`、`configs/<account>/config.yaml` | Go 账号生命周期管理器 / 上游账号进程 | OAuth 与上游运行配置；账号容器只读挂载自己的配置目录，使原子替换后的新文件立即可见，不进入镜像或发布包 |
 | `state/gateway/` | Go Collector/Failover | Gateway 只读鉴权、额度和心跳快照 |
 | `state/edge/active-gateway.conf` | 发布切换流程 | Edge 当前槽位；非法内容保持最后一个有效槽 |
 

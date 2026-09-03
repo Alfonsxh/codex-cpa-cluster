@@ -384,6 +384,19 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
 
   const chart = page.getByRole("img", { name: /个人每日 Token 用量趋势/ });
   await expect(chart).toBeVisible();
+  const topCardRect = await page.locator(".usage-key-card").evaluate((element) => element.getBoundingClientRect().toJSON());
+  const trendCardRect = await page.locator(".usage-trend-card").evaluate((element) => element.getBoundingClientRect().toJSON());
+  expect(Math.abs(topCardRect.left - trendCardRect.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(topCardRect.right - trendCardRect.right)).toBeLessThanOrEqual(1);
+  const sectionButtons = await page.locator(".usage-section-switcher button").evaluateAll((buttons) => buttons.map((button) => {
+    const rect = button.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height, borderRadius: getComputedStyle(button).borderRadius };
+  }));
+  expect(sectionButtons).toHaveLength(2);
+  expect(Math.abs(sectionButtons[0].width - sectionButtons[0].height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(sectionButtons[1].width - sectionButtons[1].height)).toBeLessThanOrEqual(1);
+  expect(sectionButtons[1].top - sectionButtons[0].bottom).toBeGreaterThanOrEqual(7);
+  expect(sectionButtons.map((button) => button.borderRadius)).toEqual(["50%", "50%"]);
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
@@ -454,6 +467,9 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   await page.getByRole("button", { name: "展开账号明细" }).click();
   await expect(chart).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();
+  const accountFrameRect = await page.locator(".usage-table-wrap").evaluate((element) => element.getBoundingClientRect().toJSON());
+  expect(Math.abs(topCardRect.left - accountFrameRect.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(topCardRect.right - accountFrameRect.right)).toBeLessThanOrEqual(1);
 });
 
 test("个人使用中心趋势收起态视觉基准", async ({ page }) => {
@@ -919,7 +935,7 @@ test("30 天图表 Tooltip 为单列 Top 10 且无滚动条", async ({ page }) =
   });
 });
 
-test("使用中心仅按需读取 API Key，关闭立即清除，刷新后只展示新 Key", async ({ page }) => {
+test("使用中心打开管理框即读取 API Key，关闭立即清除，刷新后只展示新 Key", async ({ page }) => {
   const oldKey = "old-e2e-api-key-1234";
   const newKey = "new-e2e-api-key-9876";
   let revealRequests = 0;
@@ -985,19 +1001,17 @@ test("使用中心仅按需读取 API Key，关闭立即清除，刷新后只展
   await page.getByRole("button", { name: "管理 API Key" }).click();
   const keyDialog = page.getByRole("dialog", { name: "管理 API Key" });
   await expect(keyDialog).toBeVisible();
-  await expect(keyDialog.getByRole("button", { name: "查看 API Key" })).toBeVisible();
-  expect(revealRequests).toBe(0);
-  await expect(page.locator("body")).not.toContainText(oldKey);
-
-  await keyDialog.getByRole("button", { name: "查看 API Key" }).click();
   const keyInput = page.getByLabel("API Key", { exact: true });
   await expect(keyInput).toHaveValue(oldKey);
+  await expect(keyDialog.getByRole("button", { name: "查看 API Key" })).toHaveCount(0);
   expect(revealRequests).toBe(1);
   await keyDialog.locator(".ant-modal-footer").getByRole("button", { name: "关闭" }).click();
   await expect(keyInput).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText(oldKey);
 
   await page.getByRole("button", { name: "管理 API Key" }).click();
+  await expect(keyInput).toHaveValue(oldKey);
+  expect(revealRequests).toBe(2);
   await page.getByRole("dialog", { name: "管理 API Key" }).getByRole("button", { name: "刷新 API Key", exact: true }).click();
   await page.getByRole("button", { name: "确认刷新并使旧 Key 失效" }).click();
   await expect(keyInput).toHaveValue(newKey);

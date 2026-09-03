@@ -24,7 +24,7 @@ Admin、Portal 与使用中心统一使用 React 组件层。页面、交互和�
 - 页面只请求当前视图需要的 API；不要用一个 Overview 响应承载账号、用户、用量、任务和日志全集。
 - `/overview/summary` 只从一个 SQLite 只读事务返回计数，不查询或返回账号邮箱、用户邮箱、Key、Secret digest、Docker、OAuth、Gateway 或用量事件。
 - `/settings/general` 只允许实时生效的品牌与身份字段，采用 SQLite 按键更新保留通知等无关设置；代理、配额和部署配置必须使用各自的专用流程。
-- `/site-config.json` 只返回公开品牌与客户端导出字段，明确排除邮箱域名和 Key Prefix；`/admin/api/native-accounts` 需要 Admin 身份且不返回独立端口或账号邮箱。
+- `/site-config.json` 只返回公开品牌、允许登录的企业邮箱后缀与客户端导出字段，明确排除 Key Prefix 和其他私有配置；`/admin/api/native-accounts` 需要 Admin 身份且不返回独立端口或账号邮箱。
 - `/users/quota` 只读取或修改一个用户的当前周额度策略，不并入分页用户响应；其 Query 与 Mutation
   均使用 `gcTime=0`，Gateway 生效状态以唯一 Collector 后续发布的额度快照为准。
 - Ant Design 负责通用表格、Modal、状态反馈和导航；不要在项目中再造同类基础组件。

@@ -112,7 +112,7 @@ sudo /home/cpac/deploy.sh
     ├── secrets/control-plane.key
     ├── state/
     ├── auth/
-    ├── configs/
+    ├── configs/<account>/config.yaml
     ├── management/config/static/
     └── logs/gateway/
 ```

@@ -40,8 +40,8 @@ func TestRendererBuildsCompatibleAtomicAccountProjectionsWithoutChangingExternal
 		}
 	}
 
-	alpha := readProjectionFile(t, root, "configs/alpha.yaml")
-	beta := readProjectionFile(t, root, "configs/beta.yaml")
+	alpha := readProjectionFile(t, root, "configs/alpha/config.yaml")
+	beta := readProjectionFile(t, root, "configs/beta/config.yaml")
 	for _, external := range []string{"cpa_external_alice", "cpa_external_bob"} {
 		if strings.Contains(alpha, external) || strings.Contains(beta, external) {
 			t.Fatalf("business CPA config leaked external Key %q", external)
@@ -83,6 +83,10 @@ func TestRendererBuildsCompatibleAtomicAccountProjectionsWithoutChangingExternal
 	if !strings.Contains(composeRaw, "${BUSINESS_CPA_LISTEN_ADDRESS:?state/compose.env missing}:18318:8317") {
 		t.Fatalf("generated Compose misses bounded host port: %s", composeRaw)
 	}
+	if !strings.Contains(composeRaw, "./configs/alpha:/CLIProxyAPI/account-config:ro") ||
+		!strings.Contains(composeRaw, `command: ["./CLIProxyAPI", "-config", "/CLIProxyAPI/account-config/config.yaml"]`) {
+		t.Fatalf("generated Compose misses atomic directory config mount: %s", composeRaw)
+	}
 
 	first := make(map[string]string, len(result.Paths))
 	for _, relative := range result.Paths {
@@ -96,6 +100,41 @@ func TestRendererBuildsCompatibleAtomicAccountProjectionsWithoutChangingExternal
 		if got := readProjectionFile(t, root, relative); got != first[relative] {
 			t.Fatalf("projection %s is not deterministic", relative)
 		}
+	}
+}
+
+func TestRendererKeepsLegacyFileForRuntimeMigrationAndRejectsUnsafeConfigDirectory(t *testing.T) {
+	root := t.TempDir()
+	store := newProjectionStore(t, root)
+	legacy := filepath.Join(root, "configs", "alpha.yaml")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o750); err != nil {
+		t.Fatalf("create legacy config root: %v", err)
+	}
+	if err := os.WriteFile(legacy, []byte("legacy\n"), 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	if _, err := (&Renderer{Root: root, Store: store}).Render(context.Background()); err != nil {
+		t.Fatalf("render with legacy config: %v", err)
+	}
+	if got := readProjectionFile(t, root, "configs/alpha.yaml"); got != "legacy\n" {
+		t.Fatalf("legacy config changed before runtime migration: %q", got)
+	}
+	if got := readProjectionFile(t, root, "configs/alpha/config.yaml"); !strings.Contains(got, "api-keys:") {
+		t.Fatalf("directory config was not rendered: %s", got)
+	}
+
+	unsafeRoot := t.TempDir()
+	unsafeStore := newProjectionStore(t, unsafeRoot)
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(unsafeRoot, "configs"), 0o750); err != nil {
+		t.Fatalf("create unsafe config root: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(unsafeRoot, "configs", "alpha")); err != nil {
+		t.Fatalf("create unsafe config symlink: %v", err)
+	}
+	if _, err := (&Renderer{Root: unsafeRoot, Store: unsafeStore}).Render(context.Background()); err == nil ||
+		!strings.Contains(err.Error(), "expected a real directory") {
+		t.Fatalf("unsafe account config directory error = %v", err)
 	}
 }
 

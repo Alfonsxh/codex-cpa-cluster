@@ -217,7 +217,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
             <code aria-label="API Key 安全状态">出于安全，仅在需要时读取</code>
           </div>
           <div className="usage-key-actions">
-            <button className="usage-secondary-button usage-credential-entry" type="button" onClick={() => setKeyOpen(true)}>管理 API Key</button>
+            <button className="usage-secondary-button usage-credential-entry" type="button" onClick={() => void revealKey()}>管理 API Key</button>
             <button className="usage-secondary-button" type="button" onClick={() => setClientConfigMode("codex")}>配置 Codex</button>
             <button className="usage-secondary-button" type="button" onClick={() => setClientConfigMode("claude")}>配置 Claude Code</button>
             <button className="usage-primary-button" type="button" onClick={() => setClientConfigMode("ccswitch")}>导入 CC Switch</button>
@@ -335,7 +335,6 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
         <Space orientation="vertical" size={16} className="portal-form-stack">
           {keyLoading ? <Skeleton.Input active block /> : null}
           {keyError ? <Alert type="error" showIcon title="API Key 读取失败" description={keyError} /> : null}
-          {!keyLoading && !keyValue ? <Button type="primary" onClick={() => void revealKey()}>查看 API Key</Button> : null}
           {keyValue ? (
             <Form.Item label="API Key">
               <Space.Compact block>

@@ -22,6 +22,10 @@ export type PublicSiteConfiguration = {
     short_name: string;
     environment_label: string;
     public_base_url: string;
+    /**
+     * Public email suffixes accepted by user creation and Usage Center login
+     */
+    allowed_email_domains: Array<string>;
     provider_name: string;
     api_key_env: string;
     default_model: string;
@@ -1674,7 +1678,7 @@ export type GetPublicSiteConfigurationError = GetPublicSiteConfigurationErrors[k
 
 export type GetPublicSiteConfigurationResponses = {
     /**
-     * Browser-safe branding and client export defaults
+     * Browser-safe branding, accepted email suffixes and client export defaults
      */
     200: PublicSiteConfiguration;
 };

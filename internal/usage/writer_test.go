@@ -48,17 +48,21 @@ func TestWriterIngestsSchemaV10WithoutPersistingKeys(t *testing.T) {
 	ignored := usageEvent(externalKey, "models", now.Unix()+30)
 	ignored["endpoint"] = "GET /v1/models"
 	unmapped := usageEvent("missing-key", "missing", now.Unix()+40)
+	missingAPIKey := usageEvent("", "missing-api-key", now.Unix()+50)
 
 	counters, err := writer.IngestEvents(
 		context.Background(),
 		"alpha",
-		[]Event{maxEvent, duplicate, highEvent, ignored, unmapped},
+		[]Event{maxEvent, duplicate, highEvent, ignored, unmapped, missingAPIKey},
 		map[string]float64{"high": 1.5},
 	)
 	if err != nil {
 		t.Fatalf("IngestEvents: %v", err)
 	}
-	if counters != (IngestCounters{Received: 5, Inserted: 2, Duplicate: 1, Unmapped: 1, Ignored: 1}) {
+	if counters != (IngestCounters{
+		Received: 6, Inserted: 2, Duplicate: 1, Unmapped: 2,
+		MissingAPIKey: 1, UnknownAPIKey: 1, Ignored: 1,
+	}) {
 		t.Fatalf("counters = %#v", counters)
 	}
 

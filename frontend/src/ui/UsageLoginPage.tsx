@@ -1,11 +1,17 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 
 import { ApiError } from "../api/client";
 import { loginPortal, portalSessionQueryKey } from "../api/portal";
+import {
+  emailDomainHint,
+  emailPlaceholder,
+  publicSiteQueryKey,
+  readPublicSiteConfiguration
+} from "../api/public-site";
 import { ThemeToggle, useTheme } from "./ThemeProvider";
 
 const loginSchema = z.object({
@@ -19,6 +25,15 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
   const { theme } = useTheme();
   const queryClient = useQueryClient();
   const [retrySeconds, setRetrySeconds] = useState(0);
+  const siteConfiguration = useQuery({
+    queryKey: publicSiteQueryKey,
+    queryFn: ({ signal }) => readPublicSiteConfiguration(signal),
+    retry: false,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false
+  });
+  const emailDomains = siteConfiguration.data?.allowed_email_domains;
+  const domainHint = emailDomainHint(emailDomains);
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" }
@@ -69,17 +84,21 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
             <span>用户邮箱</span>
             <input
               type="email"
+              aria-label="用户邮箱"
               autoComplete="username"
-              placeholder="name@example.com"
+              placeholder={emailPlaceholder(emailDomains)}
               aria-invalid={Boolean(form.formState.errors.email)}
+              aria-describedby={!form.formState.errors.email && domainHint ? "usage-login-email-domain-hint" : undefined}
               {...form.register("email")}
             />
             {form.formState.errors.email ? <small className="field-error">{form.formState.errors.email.message}</small> : null}
+            {!form.formState.errors.email && domainHint ? <small id="usage-login-email-domain-hint" className="field-hint">{domainHint}</small> : null}
           </label>
           <label className="field">
             <span>密码</span>
             <input
               type="password"
+              aria-label="密码"
               autoComplete="current-password"
               aria-invalid={Boolean(form.formState.errors.password)}
               {...form.register("password")}

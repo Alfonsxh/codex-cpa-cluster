@@ -16,6 +16,8 @@ state/edge/
 
 `control-plane.sqlite3` 中的秘密依赖 `control-plane.key`；缺少任一文件都不能视为可恢复备份。OAuth、Webhook、API Key、邮箱和私有地址不得进入仓库、发布包或公开日志。
 
+账号配置使用 `configs/<account>/config.yaml`。必须按目录层级恢复，不能改回单文件 Docker bind mount；单文件挂载会固定旧 inode，导致控制面原子替换配置后，运行中的账号容器仍读取旧 API Key 列表。
+
 ## 备份流程
 
 1. 记录当前四个不可变镜像引用、组件摘要、Compose 项目名和活动 Gateway 槽。

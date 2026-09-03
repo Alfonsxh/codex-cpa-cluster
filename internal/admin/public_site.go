@@ -25,15 +25,16 @@ type publicSiteLogo struct {
 }
 
 type publicSiteConfiguration struct {
-	Version          int            `json:"version"`
-	ProductName      string         `json:"product_name"`
-	ShortName        string         `json:"short_name"`
-	EnvironmentLabel string         `json:"environment_label"`
-	PublicBaseURL    string         `json:"public_base_url"`
-	ProviderName     string         `json:"provider_name"`
-	APIKeyEnv        string         `json:"api_key_env"`
-	DefaultModel     string         `json:"default_model"`
-	Logo             publicSiteLogo `json:"logo"`
+	Version             int            `json:"version"`
+	ProductName         string         `json:"product_name"`
+	ShortName           string         `json:"short_name"`
+	EnvironmentLabel    string         `json:"environment_label"`
+	PublicBaseURL       string         `json:"public_base_url"`
+	AllowedEmailDomains []string       `json:"allowed_email_domains"`
+	ProviderName        string         `json:"provider_name"`
+	APIKeyEnv           string         `json:"api_key_env"`
+	DefaultModel        string         `json:"default_model"`
+	Logo                publicSiteLogo `json:"logo"`
 }
 
 type nativeAccount struct {
@@ -77,15 +78,17 @@ func (server *Server) publicSiteConfiguration(c *gin.Context) {
 	c.JSON(http.StatusOK, publicSiteConfiguration{
 		Version: generalSettingsVersion, ProductName: values.ProductName,
 		ShortName: values.ShortName, EnvironmentLabel: values.EnvironmentLabel,
-		PublicBaseURL: values.PublicBaseURL, ProviderName: values.ProviderName,
-		APIKeyEnv: values.APIKeyEnv, DefaultModel: values.DefaultModel, Logo: logo,
+		PublicBaseURL: values.PublicBaseURL, AllowedEmailDomains: values.AllowedEmailDomains,
+		ProviderName: values.ProviderName, APIKeyEnv: values.APIKeyEnv,
+		DefaultModel: values.DefaultModel, Logo: logo,
 	})
 }
 
 // publicGeneralSettingsFromMap intentionally copies only browser-safe keys.
-// Identity domains and API Key prefixes are never parsed into the public
-// response, so adding a private setting to the general form cannot
-// accidentally widen /site-config.json.
+// Identity domains are explicitly public so unauthenticated login forms can
+// explain the accepted email suffixes. API Key prefixes and every other
+// setting remain excluded, so adding a private setting to the general form
+// cannot accidentally widen /site-config.json.
 func publicGeneralSettingsFromMap(settings map[string]any) (generalSettingsValues, error) {
 	values := defaultGeneralSettings()
 	var err error
@@ -99,6 +102,9 @@ func publicGeneralSettingsFromMap(settings map[string]any) (generalSettingsValue
 		return values, err
 	}
 	if values.PublicBaseURL, err = stringSettingValue(settings, "branding.public_base_url", values.PublicBaseURL); err != nil {
+		return values, err
+	}
+	if values.AllowedEmailDomains, err = stringListSettingValue(settings, "identity.allowed_email_domains", values.AllowedEmailDomains); err != nil {
 		return values, err
 	}
 	if values.ProviderName, err = stringSettingValue(settings, "portal.provider_name", values.ProviderName); err != nil {

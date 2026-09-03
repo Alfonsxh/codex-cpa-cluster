@@ -350,7 +350,7 @@ func runOwnedAdmin(
 				runtimeops.AccountRuntimeConfig{
 					Root: config.Root, NetworkName: config.DockerNetwork,
 					InstanceName: config.InstanceName, ProbeTimeout: config.SnapshotTimeout,
-					ImageProjector: composeEnvironmentProjector,
+					ImageProjector: composeEnvironmentProjector, Drainer: gatewayDrainer,
 				},
 			)
 			if accountRuntimeError != nil {
@@ -367,6 +367,19 @@ func runOwnedAdmin(
 				}
 				if err := accountManager.Recover(fenceContext); err != nil {
 					return fmt.Errorf("recover interrupted account lifecycle operation before Admin startup: %w", err)
+				}
+				identityOperationLock.Lock()
+				_, renderError := projectionRenderer.Render(fenceContext)
+				var migrated []string
+				if renderError == nil {
+					migrated, renderError = accountRuntime.MigrateLegacyConfigMounts(fenceContext)
+				}
+				identityOperationLock.Unlock()
+				if renderError != nil {
+					return fmt.Errorf("migrate account config mounts before Admin startup: %w", renderError)
+				}
+				if len(migrated) > 0 {
+					logger.Info("migrated account config mounts", zap.Strings("accounts", migrated))
 				}
 			}
 		}

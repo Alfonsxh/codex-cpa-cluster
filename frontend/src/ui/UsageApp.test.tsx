@@ -13,6 +13,25 @@ const profile = {
   generated_at: 10_000
 };
 
+const siteConfiguration = {
+  version: 1,
+  product_name: "Codex CPA Cluster",
+  short_name: "Codex CPA",
+  environment_label: "Test",
+  public_base_url: "https://cpa.example.com",
+  allowed_email_domains: ["example.com"],
+  provider_name: "Codex CPA",
+  api_key_env: "CPA_API_KEY",
+  default_model: "gpt-5.6-sol",
+  logo: {
+    custom: false,
+    url: "/portal/assets/codex-cpa-cluster-logo.svg",
+    content_type: "image/svg+xml",
+    sha256: "",
+    updated_at: null
+  }
+};
+
 const accounts = {
   generated_at: 10_000,
   window: {
@@ -150,6 +169,8 @@ describe("UsageApp", () => {
 
     expect(await screen.findByRole("heading", { name: "登录使用中心" })).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "登录使用中心" })).toBeInTheDocument();
+    expect(await screen.findByText("企业邮箱后缀：@example.com")).toBeInTheDocument();
+    expect(screen.getByLabelText("用户邮箱")).toHaveAttribute("placeholder", "name@example.com");
     expect(screen.getByText("账号明细")).toBeInTheDocument();
     expect(screen.getByText("我的 API Key")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "切换为深色主题" })).toBeInTheDocument();
@@ -298,14 +319,19 @@ describe("UsageDashboard", () => {
     expect(screen.queryByText("gpt-5.6")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "管理 API Key" }));
-    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
-    const unopenedKeyModal = await findModal("管理 API Key");
-    await user.click(within(unopenedKeyModal).getByRole("button", { name: "查看 API Key" }));
     const keyInput = await screen.findByLabelText("API Key");
     expect(keyInput).toHaveValue("old-secret-api-key-1234");
+    const keyReads = fetchMock.mock.calls.filter(([path]) => String(path) === "/usage/me/key");
+    expect(keyReads).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledWith("/usage/me/key", expect.objectContaining({ cache: "no-store" }));
     const keyModal = keyInput.closest(".ant-modal");
     if (!keyModal) throw new Error("API Key 弹框未渲染");
+    expect(within(keyModal as HTMLElement).queryByRole("button", { name: "查看 API Key" })).not.toBeInTheDocument();
+    expect(within(keyModal as HTMLElement).getByRole("button", { name: "复制" })).toBeInTheDocument();
+    const visibilityToggle = keyModal.querySelector<HTMLElement>(".ant-input-password-icon");
+    expect(visibilityToggle).not.toBeNull();
+    await user.click(visibilityToggle!);
+    expect(keyInput).toHaveAttribute("type", "text");
     await user.click(within(keyModal as HTMLElement).getByRole("button", { name: /关\s*闭/ }));
     expect(keyInput).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue("old-secret-api-key-1234")).not.toBeInTheDocument();
@@ -456,6 +482,7 @@ async function findModal(title: string) {
 }
 
 function portalReadResponse(path: string) {
+  if (path === "/site-config.json") return jsonResponse(siteConfiguration);
   if (path === "/usage/me/profile") return jsonResponse(profile);
   if (path === "/usage/me/key") return jsonResponse({ api_key: "old-secret-api-key-1234", generated_at: 10_000 });
   if (path === "/usage/me/route") return jsonResponse({ current_group: "alpha", generated_at: 10_000 });

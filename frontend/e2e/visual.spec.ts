@@ -841,8 +841,7 @@ test("共享表格视口保持动态高度、右侧滚动槽和正确边界阴�
   }))).toEqual({ gutter: "auto", before: "0", after: "0" });
 });
 
-test("版本状态常驻侧栏、支持重查并在移动端保留入口", async ({ page }) => {
-  let freshChecks = 0;
+test("仅在存在更新时显示心跳入口、悬停展示精简版本信息", async ({ page }) => {
   let releasePayload = {
     configured: true,
     current_version: "v1.0.0",
@@ -853,8 +852,6 @@ test("版本状态常驻侧栏、支持重查并在移动端保留入口", async
     status: "ok"
   };
   await page.route("**/admin/api/release*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get("fresh") === "1") freshChecks += 1;
     await fulfillJSON(route, releasePayload);
   });
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -862,45 +859,49 @@ test("版本状态常驻侧栏、支持重查并在移动端保留入口", async
   await login(page, "/admin/overview", "Token 使用");
 
   await expect(page.locator(".release-notice")).toHaveCount(0);
-  const desktopEntry = page.locator(".side-nav-footer .release-version-card");
+  const desktopEntry = page.locator(".side-nav-footer .release-version-indicator");
   await expect(desktopEntry).toBeVisible();
-  await expect(desktopEntry).toContainText("CPAC");
-  await expect(desktopEntry).toContainText("v1.0.0");
-  await expect(desktopEntry).toContainText("可更新至 v1.1.0");
-  await expect(desktopEntry).toContainText("v1.1.0");
-  await desktopEntry.click();
+  await expect(desktopEntry).toHaveText("发现新版本");
+  await expect(desktopEntry.locator(".release-version-heartbeat")).toBeVisible();
+  const footerOrder = await page.locator(".side-nav-footer").evaluate((footer) => {
+    const release = footer.querySelector<HTMLElement>(".release-version-indicator");
+    const auth = footer.querySelector<HTMLElement>(".side-nav-auth-status");
+    return {
+      releaseTop: release?.getBoundingClientRect().top ?? 0,
+      authTop: auth?.getBoundingClientRect().top ?? 0
+    };
+  });
+  expect(footerOrder.releaseTop).toBeLessThan(footerOrder.authTop);
+  await desktopEntry.hover();
   const details = page.getByRole("region", { name: "应用版本详情" });
   await expect(details).toBeVisible();
   await expect(details).toContainText("当前版本v1.0.0");
   await expect(details).toContainText("最新版本v1.1.0");
-  await expect(details).toContainText("版本 Revision1234567890ab");
-  await details.getByRole("button", { name: "重新检查" }).click();
-  await expect.poll(() => freshChecks).toBe(1);
+  await expect(details).not.toContainText("检查时间");
+  await expect(details).not.toContainText("版本 Revision");
+  await expect(details.getByRole("button")).toHaveCount(0);
 
   releasePayload = { ...releasePayload, latest_version: "v1.0.0", available: false };
-  await details.getByRole("button", { name: "重新检查" }).click();
-  await expect(desktopEntry).toContainText("当前已是最新");
+  await page.reload();
+  await expect(page.locator(".release-version-indicator")).toHaveCount(0);
 
-  releasePayload = { ...releasePayload, latest_version: "", latest_revision: "", status: "unavailable" };
-  await details.getByRole("button", { name: "重新检查" }).click();
-  await expect(desktopEntry).toContainText("更新检查失败");
+  releasePayload = { ...releasePayload, latest_version: "v1.1.0", available: true, status: "unavailable" };
+  await page.reload();
+  await expect(page.locator(".release-version-indicator")).toHaveCount(0);
 
-  releasePayload = { ...releasePayload, current_version: "", status: "current_version_unavailable" };
-  await details.getByRole("button", { name: "重新检查" }).click();
-  await expect(desktopEntry).toContainText("版本信息缺失");
-  await expect(desktopEntry).toContainText("—");
-
-  releasePayload = { ...releasePayload, current_version: "v1.0.0", configured: false, status: "disabled" };
-  await details.getByRole("button", { name: "重新检查" }).click();
-  await expect(desktopEntry).toContainText("更新检查已关闭");
-  await expect.poll(() => freshChecks).toBe(5);
-  await page.keyboard.press("Escape");
-  await expect(details).toBeHidden();
-
+  releasePayload = { ...releasePayload, available: true, status: "ok" };
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
   await expect(page.locator(".side-nav-footer")).toBeHidden();
-  await expect(page.locator(".mobile-release-indicator")).toBeVisible();
+  const mobileEntry = page.locator(".mobile-release-indicator");
+  await expect(mobileEntry).toBeVisible();
+  await mobileEntry.click();
+  await expect(page.getByRole("region", { name: "应用版本详情" })).toBeVisible();
   await expect(page.locator(".main-surface")).not.toHaveCSS("overflow-x", "scroll");
+
+  releasePayload = { ...releasePayload, latest_version: "v1.0.0", available: false };
+  await page.reload();
+  await expect(page.locator(".mobile-release-indicator")).toHaveCount(0);
 });
 
 test("30 天图表 Tooltip 为单列 Top 10 且无滚动条", async ({ page }) => {

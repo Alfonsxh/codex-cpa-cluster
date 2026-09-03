@@ -412,7 +412,7 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   expect(Math.abs(sectionButtons[1].width - sectionButtons[1].height)).toBeLessThanOrEqual(1);
   expect(sectionButtons[1].top - sectionButtons[0].bottom).toBeGreaterThanOrEqual(7);
   expect(sectionButtons.map((button) => button.borderRadius)).toEqual(["50%", "50%"]);
-  expect(Math.abs((sectionButtons[0].left + sectionButtons[0].right) / 2 - trendCardRect.right)).toBeLessThanOrEqual(1);
+  expect(sectionButtons.every((button) => button.left >= trendCardRect.right + 8)).toBe(true);
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
@@ -488,11 +488,11 @@ test("个人使用中心每日趋势默认展开，按范围和组合维度独�
   const accountFrameRect = await page.locator(".usage-table-wrap").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - accountFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - accountFrameRect.right)).toBeLessThanOrEqual(1);
-  const accountSwitcherCenter = await page.locator(".usage-section-switcher button").first().evaluate((element) => {
+  const accountSwitcherLeft = await page.locator(".usage-section-switcher button").first().evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    return rect.left + rect.width / 2;
+    return rect.left;
   });
-  expect(Math.abs(accountSwitcherCenter - accountFrameRect.right)).toBeLessThanOrEqual(1);
+  expect(accountSwitcherLeft).toBeGreaterThanOrEqual(accountFrameRect.right + 8);
   await page.getByRole("button", { name: "使用明细" }).click();
   const compactEffort = page.getByRole("button", { name: "查看 gpt-5.6-sol max 推理强度 Token 明细" });
   await compactEffort.hover();
@@ -592,19 +592,68 @@ test("账号周额度卡片在窄屏与移动端不产生横向溢出", async ({
     const geometry = await card.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       const metrics = element.querySelector<HTMLElement>(".overview-account-quota-metrics");
+      const values = [...element.querySelectorAll<HTMLElement>(".overview-account-quota-metrics dd")];
       return {
         viewportWidth: window.innerWidth,
         bodyScrollWidth: document.body.scrollWidth,
         left: bounds.left,
         right: bounds.right,
         metricsClientWidth: metrics?.clientWidth ?? 0,
-        metricsScrollWidth: metrics?.scrollWidth ?? 0
+        metricsScrollWidth: metrics?.scrollWidth ?? 0,
+        valueFontSizes: values.map((value) => Number.parseFloat(getComputedStyle(value).fontSize)),
+        valuesFit: values.every((value) => value.scrollWidth <= value.clientWidth)
       };
     });
     expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
     expect(geometry.left).toBeGreaterThanOrEqual(0);
     expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
     expect(geometry.metricsScrollWidth).toBeLessThanOrEqual(geometry.metricsClientWidth);
+    expect(geometry.valueFontSizes.every((size) => size >= 16)).toBe(true);
+    expect(geometry.valuesFit).toBe(true);
+  }
+});
+
+test("使用中心切换按钮在桌面、窄屏与移动端始终位于内容右侧", async ({ page }) => {
+  test.setTimeout(60_000);
+  await setTheme(page, "light");
+  await installUsageVisualBackend(page);
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto("http://127.0.0.1:5194/usage/");
+
+    for (const section of ["trend", "accounts"] as const) {
+      await page.getByRole("button", { name: section === "trend" ? "查看每日用量趋势" : "查看账号明细" }).click();
+      const surface = page.locator(section === "trend" ? ".usage-trend-card" : ".usage-table-wrap");
+      await expect(surface).toBeVisible();
+      const geometry = await page.evaluate((surfaceSelector) => {
+        const topCard = document.querySelector<HTMLElement>(".usage-key-card");
+        const content = document.querySelector<HTMLElement>(surfaceSelector);
+        const buttons = [...document.querySelectorAll<HTMLElement>(".usage-section-switcher button")];
+        const topCardRect = topCard?.getBoundingClientRect();
+        const contentRect = content?.getBoundingClientRect();
+        return {
+          topCardLeft: topCardRect?.left ?? 0,
+          topCardRight: topCardRect?.right ?? 0,
+          contentLeft: contentRect?.left ?? 0,
+          contentRight: contentRect?.right ?? 0,
+          viewportWidth: window.innerWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          buttons: buttons.map((button) => {
+            const rect = button.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+          })
+        };
+      }, section === "trend" ? ".usage-trend-card" : ".usage-table-wrap");
+
+      expect(geometry.buttons).toHaveLength(2);
+      expect(Math.abs(geometry.topCardLeft - geometry.contentLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.topCardRight - geometry.contentRight)).toBeLessThanOrEqual(1);
+      expect(geometry.buttons.every((button) => button.left >= geometry.contentRight + 8)).toBe(true);
+      expect(geometry.buttons.every((button) => button.right <= geometry.viewportWidth)).toBe(true);
+      expect(geometry.buttons[1].top - geometry.buttons[0].bottom).toBeGreaterThanOrEqual(7);
+      expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+    }
   }
 });
 

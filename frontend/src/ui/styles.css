@@ -1788,7 +1788,7 @@ a { color: inherit; text-decoration: none; }
 .overview-account-quota-metrics > div { min-width: 0; padding: 4px 14px; text-align: center; }
 .overview-account-quota-metrics > div + div { border-left: 1px solid var(--line); }
 .overview-account-quota-metrics dt { overflow: hidden; color: var(--faint); font: 8px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.overview-account-quota-metrics dd { margin: 9px 0 0; overflow: hidden; color: var(--ink); font: 700 13px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.overview-account-quota-metrics dd { margin: 9px 0 0; overflow: hidden; color: var(--ink); font: 700 16px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .overview-account-quota-metrics .tone-danger dd { color: var(--danger); }
 .overview-account-quota-metrics .tone-warning dd { color: var(--warning); }
 .overview-account-quota-metrics .tone-neutral dd { color: var(--muted); }

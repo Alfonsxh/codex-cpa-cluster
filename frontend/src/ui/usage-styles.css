@@ -50,10 +50,11 @@ body {
 
 .usage-center-shell {
   display: flex;
-  width: min(1480px, calc(100% - 48px));
+  width: auto;
+  max-width: 1480px;
   height: 100vh;
   height: 100dvh;
-  margin: 0 auto;
+  margin: 0 max(60px, calc((100vw - 1480px) / 2)) 0 max(24px, calc((100vw - 1480px) / 2));
   padding: 18px 0 0;
   overflow: hidden;
   flex-direction: column;
@@ -251,7 +252,7 @@ body {
 .usage-window-switcher button[aria-pressed="true"] { color: var(--ink); background: var(--surface); box-shadow: 0 1px 3px rgb(48 65 105 / 9%); }
 .usage-refresh-button { min-height: 34px; grid-area: refresh; }
 .usage-updated { min-width: 82px; grid-area: updated; justify-self: end; color: var(--faint); font: 10px/1 var(--mono); text-align: right; }
-.usage-section-switcher { position: fixed; top: 50%; right: max(6px, calc((100vw - 1480px) / 2 - 18px)); z-index: 20; display: flex; transform: translateY(-50%); flex-direction: column; gap: 12px; }
+.usage-section-switcher { position: fixed; top: 50%; right: max(12px, calc((100vw - 1480px) / 2 - 48px)); z-index: 20; display: flex; transform: translateY(-50%); flex-direction: column; gap: 12px; }
 .usage-section-switcher button.ant-btn { display: grid; width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; color: var(--muted); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 50%; box-shadow: var(--shadow-soft); cursor: pointer; place-items: center; }
 .usage-section-switcher button.ant-btn:hover { color: var(--accent); background: var(--surface-soft); }
 .usage-section-switcher button.ant-btn[aria-pressed="true"],
@@ -504,7 +505,7 @@ body {
 }
 
 @media (max-width: 680px) {
-  .usage-center-shell { width: min(100% - 20px, 1480px); padding: 10px 0 0; }
+  .usage-center-shell { width: auto; margin-right: 58px; margin-left: 10px; padding: 10px 0 0; }
   .usage-center-content { overflow-x: hidden; overflow-y: auto; padding-bottom: 10px; scrollbar-gutter: stable; }
   .usage-dashboard { flex: 0 0 auto; overflow: visible; }
   .usage-detail-sections { flex: 0 0 auto; min-height: auto; }
@@ -551,7 +552,7 @@ body {
   .usage-window-switcher button { min-width: 0; padding: 0 4px; }
   .usage-table-wrap { flex: 0 0 auto; overflow-x: hidden; overflow-y: visible; background: var(--surface); border: 1px solid var(--line); }
   .usage-detail-sections.accounts-primary .usage-table-wrap { padding-right: 0; }
-  .usage-section-switcher { position: fixed; top: 50%; right: 8px; z-index: 20; }
+  .usage-section-switcher { position: fixed; top: 50%; right: 10px; z-index: 20; }
   .usage-account-table,
   .usage-account-table tbody,
   .usage-account-table tr,

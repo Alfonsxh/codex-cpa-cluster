@@ -33,10 +33,11 @@ export type UsageChartProps = {
   series: TokenSeries[];
   summary?: boolean;
   includeDateLabels?: boolean;
+  valueLabel: string;
   ariaLabel: string;
 };
 
-export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, ariaLabel }: UsageChartProps) {
+export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, valueLabel, ariaLabel }: UsageChartProps) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
@@ -90,7 +91,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
           type: "line",
           lineStyle: { color: axisColor, type: "dashed", width: 1 }
         },
-        formatter: (parameters) => renderUsageTooltip(parameters, buckets)
+        formatter: (parameters) => renderUsageTooltip(parameters, buckets, valueLabel)
       },
       xAxis: {
         type: "category",
@@ -155,7 +156,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
       chart.dispose();
       if (chartRef.current === chart) chartRef.current = null;
     };
-  }, [ariaLabel, buckets, labels, series, summary, theme]);
+  }, [ariaLabel, buckets, labels, series, summary, theme, valueLabel]);
 
   const showBucket = (index: number) => {
     const chart = chartRef.current;
@@ -209,7 +210,8 @@ export function tooltipRows(parameters: CallbackDataParams | CallbackDataParams[
 
 export function renderUsageTooltip(
   parameters: CallbackDataParams | CallbackDataParams[],
-  buckets: number[]
+  buckets: number[],
+  valueLabel = ""
 ) {
   const values = Array.isArray(parameters) ? parameters : [parameters];
   const dataIndex = Number(values[0]?.dataIndex ?? 0);
@@ -219,7 +221,11 @@ export function renderUsageTooltip(
     + `<b title="${escapeAttribute(item.name)}">${escapeHtml(item.name)}</b>`
     + `<em>${escapeHtml(formatTokens(item.value))}</em></span>`
   )).join("");
-  return `<div class="overview-chart-tooltip" role="tooltip" data-active="true" data-layout="single-column" data-list="${values.length > 1}"><strong>${escapeHtml(timestamp)}</strong>${rows}</div>`;
+  const escapedValueLabel = escapeHtml(valueLabel);
+  const heading = escapedValueLabel
+    ? `<strong><span>${escapeHtml(timestamp)}</span><small>${escapedValueLabel}</small></strong>`
+    : `<strong>${escapeHtml(timestamp)}</strong>`;
+  return `<div class="overview-chart-tooltip" role="tooltip" data-active="true" data-layout="single-column" data-list="${values.length > 1}">${heading}${rows}</div>`;
 }
 
 function chartValue(value: CallbackDataParams["value"]) {

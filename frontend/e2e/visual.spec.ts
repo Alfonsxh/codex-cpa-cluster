@@ -934,6 +934,7 @@ test("共享表格视口保持动态高度、右侧滚动槽和正确边界阴�
   expect(Math.abs(layout.finalColumnRightDelta - compactColumn.bodyRightDelta)).toBeLessThanOrEqual(1);
 
   await page.goto("/admin/overview");
+  await page.getByRole("tab", { name: "按 CPA" }).click();
   const naturalTable = page.locator(".overview-legacy-table-wrap").first();
   await expect(naturalTable).toHaveAttribute("data-scroll-overflow", "false");
   await expect(naturalTable).not.toHaveClass(/can-scroll-up|can-scroll-down/);
@@ -1035,7 +1036,8 @@ test("30 天图表 Tooltip 为单列 Top 10 且无滚动条", async ({ page }) =
   // The SQLite query itself keeps the stricter 500 ms gate in tests.test_usage_store.
   expect(Date.now() - started).toBeLessThan(1_000);
 
-  const chart = page.locator(".overview-legacy-chart").nth(2);
+  await page.getByRole("tab", { name: "按用户" }).click();
+  const chart = page.locator(".overview-legacy-chart").first();
   await expect(chart).toBeVisible();
   await chart.scrollIntoViewIfNeeded();
   await expect(chart.locator("svg")).toBeVisible();
@@ -1046,6 +1048,7 @@ test("30 天图表 Tooltip 为单列 Top 10 且无滚动条", async ({ page }) =
   const tooltip = page.locator(".overview-chart-tooltip[data-active=true]");
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toHaveAttribute("data-layout", "single-column");
+  await expect(tooltip).toContainText("未加权");
   const rows = tooltip.locator(":scope > span");
   await expect(rows).toHaveCount(10);
   await expect(rows.first().locator("b")).toHaveText("user-12@example.com");

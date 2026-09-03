@@ -17,10 +17,11 @@ describe("UsageChart tooltip contract", () => {
     expect(rows[0]).toMatchObject({ name: "cpa-02", value: 2_000_000 });
     expect(rows.some((row) => row.name === "cpa-01")).toBe(false);
 
-    const html = renderUsageTooltip(parameters as never, [1_799_996_400, 1_799_997_300]);
+    const html = renderUsageTooltip(parameters as never, [1_799_996_400, 1_799_997_300], "加权");
     expect(html).toContain('data-layout="single-column"');
-    expect(html.match(/<span>/g)).toHaveLength(10);
+    expect(html.match(/<span><i/g)).toHaveLength(10);
     expect(html).toContain("2 M");
+    expect(html).toContain("加权");
     expect(html).not.toContain("overflow");
   });
 

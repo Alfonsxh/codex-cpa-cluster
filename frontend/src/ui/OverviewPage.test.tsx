@@ -116,11 +116,13 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getByText("47.5%")).toBeInTheDocument();
     expect(screen.getByText("1.6 个账号")).toBeInTheDocument();
 
-    expect(await screen.findByRole("heading", { name: "所有账号未加权 Token 使用量" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "CPA 账号未加权 Token 使用趋势" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "用户加权 Token 使用趋势" })).toBeInTheDocument();
-    expect(screen.getAllByText("alpha")).not.toHaveLength(0);
-    expect(screen.getAllByText("alice@example.com")).not.toHaveLength(0);
+    expect(await screen.findByRole("heading", { name: "Token 使用" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Token 统计口径" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Token 使用数据视角" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "全部账号" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "overview-token-tab-aggregate");
+    expect(screen.queryByRole("heading", { name: /Token 使用量|Token 使用趋势/ })).not.toBeInTheDocument();
+    expect(screen.getByTitle("200 未加权 Token")).toBeInTheDocument();
     expect(screen.getByText("重启 alpha")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "全部用户" }));
@@ -131,15 +133,44 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/catalog")).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/release"))).toBe(false);
 
-    expect(await screen.findByRole("img", { name: /所有账号未加权 Token 使用趋势/ })).toBeInTheDocument();
-    expect(await screen.findByRole("img", { name: /分项未加权 Token 使用趋势：alpha/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /全部账号未加权 Token 使用趋势/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^加权$/ }));
+    const aggregateWeightedSummary = screen.getByLabelText("全部账号加权 Token 使用量汇总值");
+    expect(within(aggregateWeightedSummary).getByText("当前值").closest("div")).toHaveTextContent("250 Token加权");
+    expect(await screen.findByRole("img", { name: /全部账号加权 Token 使用趋势/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^未加权$/ }));
+
+    await user.click(screen.getByRole("tab", { name: "按 CPA" }));
+    expect(screen.getByRole("tab", { name: "按 CPA" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "overview-token-tab-account");
+    expect(await screen.findByRole("img", { name: /CPA 账号未加权 Token 使用趋势：alpha/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("CPA用量明细表格")).toHaveTextContent("alpha");
+
+    await user.click(screen.getByRole("button", { name: /^加权$/ }));
+    expect(await screen.findByRole("img", { name: /CPA 账号加权 Token 使用趋势：alpha/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^未加权$/ }));
+
+    await user.click(screen.getByRole("tab", { name: "按用户" }));
+    expect(screen.getByRole("tab", { name: "按用户" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "overview-token-tab-user");
+    expect(await screen.findByRole("img", { name: /用户未加权 Token 使用趋势：alice@example.com/ })).toBeInTheDocument();
 
     const userTable = screen.getByLabelText("用户用量明细表格");
     const userRows = within(userTable).getAllByRole("row");
-    expect(userRows[1]).toHaveTextContent("alice@example.com");
-    expect(userRows[2]).toHaveTextContent("bob@example.com");
-    expect(within(userRows[1]).getAllByText("加权")).toHaveLength(4);
+    expect(userRows[1]).toHaveTextContent("bob@example.com");
+    expect(userRows[2]).toHaveTextContent("alice@example.com");
     expect(within(userRows[1]).getAllByText("未加权")).toHaveLength(4);
+
+    await user.click(screen.getByRole("button", { name: /^加权$/ }));
+    expect(screen.getByRole("button", { name: /^加权$/ })).toHaveAttribute("aria-pressed", "true");
+    const weightedSummary = screen.getByLabelText("用户加权 Token 使用量汇总值");
+    expect(within(weightedSummary).getByText("当前值").closest("div")).toHaveTextContent("550 Token加权");
+    expect(await screen.findByRole("img", { name: /用户加权 Token 使用趋势：alice@example.com/ })).toBeInTheDocument();
+    const weightedRows = within(userTable).getAllByRole("row");
+    expect(weightedRows[1]).toHaveTextContent("alice@example.com");
+    expect(within(weightedRows[1]).getAllByText("加权")).toHaveLength(4);
+    expect(within(weightedRows[1]).queryByText("未加权")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "6 小时" }));
     expect(await waitForRequest(fetchMock, "/admin/api/overview/usage?window=21600&user_limit=10")).toBe(true);
@@ -161,8 +192,8 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(customRequest.searchParams.get("user_limit")).toBe("10");
     expect(screen.queryByRole("button", { name: "自定义" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /范围内总量（按加权），当前降序/ }));
-    expect(screen.getByRole("button", { name: /范围内总量（按加权），当前升序/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /范围内总量（加权），当前降序/ }));
+    expect(screen.getByRole("button", { name: /范围内总量（加权），当前升序/ })).toBeInTheDocument();
   });
 });
 

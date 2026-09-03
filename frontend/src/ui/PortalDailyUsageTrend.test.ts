@@ -16,11 +16,13 @@ describe("PortalDailyUsageTrend", () => {
     ]);
     const series = buildPortalTrendSeries(trend, "total");
     expect(series).toEqual([
-      { name: "加权 Token", values: [null, 125, 250] },
-      { name: "未加权 Token", values: [null, 100, 200] }
+      { name: "未加权 Token", values: [null, 100, 200] },
+      { name: "加权 Token", values: [null, 125, 250] }
     ]);
-    expect(summarizePortalTrend(trend, "total").items.map((item) => item.value)).toEqual([
-      "375 Token", "13 Token", "250 Token"
+    expect(summarizePortalTrend(trend, "total").items.map((item) => item.values?.map((value) => value.value))).toEqual([
+      ["300 Token", "375 Token"],
+      ["10 Token", "13 Token"],
+      ["200 Token", "250 Token"]
     ]);
   });
 
@@ -39,8 +41,13 @@ describe("PortalDailyUsageTrend", () => {
     expect(series).toHaveLength(10);
     expect(series.at(-1)?.name).toBe("其他组合");
     expect(series[0]?.name).toBe("gpt-5.6-sol · xhigh");
-    expect(summarizePortalTrend(trend, "model_reasoning").items[1]?.value).toBe("gpt-5.6-sol · xhigh");
-    expect(summarizePortalTrend(trend, "model_reasoning").items[2]?.value).toBe("12");
+    const rawSeries = buildPortalTrendSeries(trend, "model_reasoning", "total");
+    expect(rawSeries[0]).toEqual({ name: "gpt-5.6-sol · xhigh", values: [1_200] });
+    const summary = summarizePortalTrend(trend, "model_reasoning");
+    expect(summary.items[0]?.values?.map((value) => value.value)).toEqual(["7.8 K", "9.8 K"]);
+    expect(summary.items[1]?.value).toBe("gpt-5.6-sol · xhigh");
+    expect(summary.items[1]?.values?.map((value) => value.value)).toEqual(["1.2 K", "1.5 K"]);
+    expect(summary.items[2]?.value).toBe("12");
 
     const tooltip = renderPortalTrendTooltip(series.map((item, index) => ({
       seriesName: item.name,
@@ -55,12 +62,21 @@ describe("PortalDailyUsageTrend", () => {
     expect(tooltip).toContain("其他组合");
     expect(tooltip).toContain("gpt-5.6-sol · xhigh");
     expect(tooltip).toContain("Token");
-    expect(tooltip).toContain("当日合计");
+    expect(tooltip).toContain("当日加权");
     expect(tooltip).toContain("background:#6374d8");
     expect(tooltip).toContain("background:#4b8ccf");
     expect(tooltip).not.toContain("background:#151b28");
     expect(tooltip).not.toContain("<small>");
     expect((tooltip.match(/<span/g) ?? [])).toHaveLength(11);
+
+    const rawTooltip = renderPortalTrendTooltip(rawSeries.map((item, index) => ({
+      seriesName: item.name,
+      value: item.values[0],
+      seriesIndex: index,
+      dataIndex: 0
+    })) as never, trend, "model_reasoning", "total");
+    expect(rawTooltip).toContain("当日未加权");
+    expect(rawTooltip).toContain("7.8 K Token");
   });
 });
 

@@ -37,6 +37,23 @@ type PortalTrendSeries = {
   values: Array<number | null>;
 };
 
+type PortalTrendMetric = "total" | "weighted";
+
+type PortalTrendSummaryValue = {
+  label: "未加权" | "加权";
+  value: string;
+  title: string;
+  metric: PortalTrendMetric;
+};
+
+type PortalTrendSummaryItem = {
+  label: string;
+  value?: string;
+  title?: string;
+  values?: PortalTrendSummaryValue[];
+  detail?: string;
+};
+
 const directCombinationLimit = 9;
 
 export function PortalDailyUsageTrend({
@@ -49,6 +66,7 @@ export function PortalDailyUsageTrend({
   onSessionExpired: () => void;
 }) {
   const [dimension, setDimension] = useState<PortalUsageTrendDimension>("total");
+  const [modelMetric, setModelMetric] = useState<PortalTrendMetric>("total");
   const query = useQuery({
     queryKey: portalUsageTrendQueryKey(window, dimension),
     queryFn: ({ signal }) => readPortalUsageTrend(window, dimension, signal),
@@ -68,8 +86,8 @@ export function PortalDailyUsageTrend({
     [dimension, query.data]
   );
   const series = useMemo(
-    () => buildPortalTrendSeries(query.data, dimension),
-    [dimension, query.data]
+    () => buildPortalTrendSeries(query.data, dimension, modelMetric),
+    [dimension, modelMetric, query.data]
   );
   const hasData = Boolean(query.data?.days.some((day) => day.request_count > 0 || day.weighted_tokens > 0 || day.total_tokens > 0));
   const partial = Boolean(query.data?.days.some((day) => day.collection_state !== "complete"));
@@ -88,7 +106,18 @@ export function PortalDailyUsageTrend({
           {summary.items.map((item) => (
             <div className={item.label === "主要组合" ? "primary-combination" : undefined} key={item.label}>
               <span>{item.label}</span>
-              <strong title={item.title}>{query.isPending ? "—" : item.value}</strong>
+              {item.value ? <strong title={item.title}>{query.isPending ? "—" : item.value}</strong> : null}
+              {item.values ? (
+                <div className="usage-trend-summary-values">
+                  {item.values.map((value) => (
+                    <div className="usage-trend-summary-value" data-metric={value.metric} key={value.metric}>
+                      <small>{value.label}</small>
+                      <strong title={value.title}>{query.isPending ? "—" : value.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {item.detail && !query.isPending ? <small className="usage-trend-summary-detail">{item.detail}</small> : null}
             </div>
           ))}
         </div>
@@ -111,7 +140,13 @@ export function PortalDailyUsageTrend({
           {query.data && hasData ? (
             <>
               {partial ? <p className="usage-trend-partial">浅色缺口表示该自然日尚未采集或只采集了部分时段。</p> : null}
-              <PortalTrendChart trend={query.data} series={series} dimension={dimension} />
+              <PortalTrendChart
+                trend={query.data}
+                series={series}
+                dimension={dimension}
+                modelMetric={modelMetric}
+                onModelMetricChange={setModelMetric}
+              />
             </>
           ) : null}
         </div>
@@ -131,11 +166,15 @@ function TrendSkeleton() {
 function PortalTrendChart({
   trend,
   series,
-  dimension
+  dimension,
+  modelMetric,
+  onModelMetricChange
 }: {
   trend: PortalUsageTrend;
   series: PortalTrendSeries[];
   dimension: PortalUsageTrendDimension;
+  modelMetric: PortalTrendMetric;
+  onModelMetricChange: (metric: PortalTrendMetric) => void;
 }) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -171,7 +210,7 @@ function PortalTrendChart({
         padding: 0,
         extraCssText: "z-index:10000;max-height:none;overflow:hidden;border-radius:9px;box-shadow:0 12px 28px rgb(8 12 22 / 28%);",
         axisPointer: { type: "line", lineStyle: { color: axisColor, type: "dashed", width: 1 } },
-        formatter: (parameters) => renderPortalTrendTooltip(parameters, trend, dimension)
+        formatter: (parameters) => renderPortalTrendTooltip(parameters, trend, dimension, modelMetric)
       },
       xAxis: {
         type: "category",
@@ -230,7 +269,7 @@ function PortalTrendChart({
       chart.dispose();
       if (chartRef.current === chart) chartRef.current = null;
     };
-  }, [dimension, labels, series, theme, trend]);
+  }, [dimension, labels, modelMetric, series, theme, trend]);
 
   const showDay = (index: number) => {
     if (!chartRef.current || trend.days.length === 0) return;
@@ -240,42 +279,62 @@ function PortalTrendChart({
   };
 
   return (
-    <div
-      className="usage-trend-chart"
-      role="img"
-      aria-label="个人每日 Token 用量趋势。鼠标悬停或使用左右方向键查看每日详情。"
-      tabIndex={0}
-      onFocus={() => showDay(trend.days.length - 1)}
-      onBlur={() => chartRef.current?.dispatchAction({ type: "hideTip" })}
-      onKeyDown={(event) => {
-        if (!trend.days.length || !["ArrowLeft", "ArrowRight", "Home", "End", "Escape"].includes(event.key)) return;
-        event.preventDefault();
-        if (event.key === "Escape") {
-          chartRef.current?.dispatchAction({ type: "hideTip" });
-          return;
-        }
-        const current = Number(containerRef.current?.getAttribute("data-active-index") ?? trend.days.length - 1);
-        const next = event.key === "Home" ? 0 : event.key === "End"
-          ? trend.days.length - 1
-          : current + (event.key === "ArrowLeft" ? -1 : 1);
-        showDay(next);
-      }}
-    >
-      <div className="usage-trend-chart-canvas" ref={containerRef} aria-hidden="true" />
+    <div className="usage-trend-chart">
+      <div className="usage-trend-chart-toolbar">
+        <div className="usage-trend-chart-legend" role="group" aria-label="趋势图例">
+          {series.map((item, index) => (
+            <span title={item.name} key={item.name}>
+              <i style={{ background: usageChartColors[index % usageChartColors.length] }} aria-hidden="true" />
+              <b>{item.name}</b>
+            </span>
+          ))}
+        </div>
+        {dimension === "model_reasoning" ? (
+          <div className="usage-trend-metric-switch" role="group" aria-label="模型趋势统计口径">
+            <span>趋势口径</span>
+            <button type="button" aria-pressed={modelMetric === "total"} onClick={() => onModelMetricChange("total")}>未加权</button>
+            <button type="button" aria-pressed={modelMetric === "weighted"} onClick={() => onModelMetricChange("weighted")}>加权</button>
+          </div>
+        ) : null}
+      </div>
+      <div
+        className="usage-trend-chart-plot"
+        role="img"
+        aria-label={`个人每日 Token 用量趋势${dimension === "model_reasoning" ? `，当前按${modelMetric === "total" ? "未加权" : "加权"}口径展示` : ""}。鼠标悬停或使用左右方向键查看每日详情。`}
+        tabIndex={0}
+        onFocus={() => showDay(trend.days.length - 1)}
+        onBlur={() => chartRef.current?.dispatchAction({ type: "hideTip" })}
+        onKeyDown={(event) => {
+          if (!trend.days.length || !["ArrowLeft", "ArrowRight", "Home", "End", "Escape"].includes(event.key)) return;
+          event.preventDefault();
+          if (event.key === "Escape") {
+            chartRef.current?.dispatchAction({ type: "hideTip" });
+            return;
+          }
+          const current = Number(containerRef.current?.getAttribute("data-active-index") ?? trend.days.length - 1);
+          const next = event.key === "Home" ? 0 : event.key === "End"
+            ? trend.days.length - 1
+            : current + (event.key === "ArrowLeft" ? -1 : 1);
+          showDay(next);
+        }}
+      >
+        <div className="usage-trend-chart-canvas" ref={containerRef} aria-hidden="true" />
+      </div>
     </div>
   );
 }
 
 export function buildPortalTrendSeries(
   trend: PortalUsageTrend | undefined,
-  dimension: PortalUsageTrendDimension
+  dimension: PortalUsageTrendDimension,
+  modelMetric: PortalTrendMetric = "weighted"
 ): PortalTrendSeries[] {
   if (!trend) return [];
   const visibleValue = (state: string, value: number) => state === "uncollected" ? null : value;
   if (dimension === "total") {
     return [
-      { name: "加权 Token", values: trend.days.map((day) => visibleValue(day.collection_state, day.weighted_tokens)) },
-      { name: "未加权 Token", values: trend.days.map((day) => visibleValue(day.collection_state, day.total_tokens)) }
+      { name: "未加权 Token", values: trend.days.map((day) => visibleValue(day.collection_state, day.total_tokens)) },
+      { name: "加权 Token", values: trend.days.map((day) => visibleValue(day.collection_state, day.weighted_tokens)) }
     ];
   }
 
@@ -295,18 +354,21 @@ export function buildPortalTrendSeries(
   ));
   const direct = ranked.slice(0, directCombinationLimit);
   const overflow = new Set(ranked.slice(directCombinationLimit).map(([key]) => key));
+  const metricValue = (item: PortalUsageTrend["days"][number]["combinations"][number]) => (
+    modelMetric === "total" ? item.total_tokens : item.weighted_tokens
+  );
   const result = direct.map(([key, identity]) => ({
     name: combinationLabel(identity.model, identity.effort),
     values: trend.days.map((day) => visibleValue(day.collection_state, day.combinations
       .filter((item) => combinationKey(item.model, item.reasoning_effort) === key)
-      .reduce((sum, item) => sum + item.weighted_tokens, 0)))
+      .reduce((sum, item) => sum + metricValue(item), 0)))
   }));
   if (overflow.size > 0) {
     result.push({
       name: "其他组合",
       values: trend.days.map((day) => visibleValue(day.collection_state, day.combinations
         .filter((item) => overflow.has(combinationKey(item.model, item.reasoning_effort)))
-        .reduce((sum, item) => sum + item.weighted_tokens, 0)))
+        .reduce((sum, item) => sum + metricValue(item), 0)))
     });
   }
   return result;
@@ -315,46 +377,64 @@ export function buildPortalTrendSeries(
 export function summarizePortalTrend(
   trend: PortalUsageTrend | undefined,
   dimension: PortalUsageTrendDimension
-) {
+): { items: PortalTrendSummaryItem[] } {
   if (!trend) {
     return { items: defaultSummaryItems(dimension) };
   }
-  const total = trend.days.reduce((sum, day) => sum + day.weighted_tokens, 0);
+  const weightedTotal = trend.days.reduce((sum, day) => sum + day.weighted_tokens, 0);
+  const rawTotal = trend.days.reduce((sum, day) => sum + day.total_tokens, 0);
   if (dimension === "total") {
-    const peak = trend.days.reduce((maximum, day) => Math.max(maximum, day.weighted_tokens), 0);
+    const weightedPeak = trend.days.reduce((maximum, day) => Math.max(maximum, day.weighted_tokens), 0);
+    const rawPeak = trend.days.reduce((maximum, day) => Math.max(maximum, day.total_tokens), 0);
     return { items: [
-      { label: `${trend.window_days}天加权`, value: formatTokens(total), title: `${total.toLocaleString("en-US")} 加权 Token` },
-      { label: "日均", value: formatTokens(Math.round(total / Math.max(1, trend.window_days))), title: "所选自然日范围的日均加权 Token" },
-      { label: "峰值", value: formatTokens(peak), title: `${peak.toLocaleString("en-US")} 加权 Token` }
+      { label: `${trend.window_days}天用量`, values: dualSummaryValues(rawTotal, weightedTotal) },
+      { label: "日均", values: dualSummaryValues(
+        Math.round(rawTotal / Math.max(1, trend.window_days)),
+        Math.round(weightedTotal / Math.max(1, trend.window_days))
+      ) },
+      { label: "峰值", values: dualSummaryValues(rawPeak, weightedPeak) }
     ] };
   }
-  const combinations = new Map<string, { label: string; total: number }>();
+  const combinations = new Map<string, { label: string; raw: number; weighted: number }>();
   for (const day of trend.days) {
     for (const item of day.combinations) {
       const key = combinationKey(item.model, item.reasoning_effort);
-      const current = combinations.get(key) ?? { label: combinationLabel(item.model, item.reasoning_effort), total: 0 };
-      current.total += item.weighted_tokens;
+      const current = combinations.get(key) ?? { label: combinationLabel(item.model, item.reasoning_effort), raw: 0, weighted: 0 };
+      current.raw += item.total_tokens;
+      current.weighted += item.weighted_tokens;
       combinations.set(key, current);
     }
   }
-  const primary = [...combinations.values()].sort((left, right) => right.total - left.total || left.label.localeCompare(right.label))[0];
+  const primary = [...combinations.values()].sort((left, right) => right.weighted - left.weighted || left.label.localeCompare(right.label))[0];
   return { items: [
-    { label: `${trend.window_days}天总量`, value: formatTokens(total), title: `${total.toLocaleString("en-US")} 加权 Token` },
-    { label: "主要组合", value: primary?.label ?? "—", title: primary?.label ?? "暂无组合" },
-    { label: "组合数", value: String(combinations.size), title: `${combinations.size} 个模型与推理强度组合` }
+    { label: `${trend.window_days}天用量`, values: dualSummaryValues(rawTotal, weightedTotal) },
+    {
+      label: "主要组合",
+      value: primary?.label ?? "—",
+      title: primary?.label ?? "暂无组合",
+      values: primary ? dualSummaryValues(primary.raw, primary.weighted) : dualSummaryValues(0, 0)
+    },
+    { label: "组合数", value: String(combinations.size), title: `${combinations.size} 个模型与推理强度组合`, detail: "按加权用量排序" }
   ] };
+}
+
+function dualSummaryValues(raw: number, weighted: number): PortalTrendSummaryValue[] {
+  return [
+    { label: "未加权", value: formatTokens(raw), title: `${raw.toLocaleString("en-US")} 未加权 Token`, metric: "total" },
+    { label: "加权", value: formatTokens(weighted), title: `${weighted.toLocaleString("en-US")} 加权 Token`, metric: "weighted" }
+  ];
 }
 
 function defaultSummaryItems(dimension: PortalUsageTrendDimension) {
   return dimension === "total"
     ? [
-      { label: "30天加权", value: "—", title: "正在读取" },
-      { label: "日均", value: "—", title: "正在读取" },
-      { label: "峰值", value: "—", title: "正在读取" }
+      { label: "30天用量", values: dualSummaryValues(0, 0) },
+      { label: "日均", values: dualSummaryValues(0, 0) },
+      { label: "峰值", values: dualSummaryValues(0, 0) }
     ]
     : [
-      { label: "30天总量", value: "—", title: "正在读取" },
-      { label: "主要组合", value: "—", title: "正在读取" },
+      { label: "30天用量", values: dualSummaryValues(0, 0) },
+      { label: "主要组合", value: "—", title: "正在读取", values: dualSummaryValues(0, 0) },
       { label: "组合数", value: "—", title: "正在读取" }
     ];
 }
@@ -362,7 +442,8 @@ function defaultSummaryItems(dimension: PortalUsageTrendDimension) {
 export function renderPortalTrendTooltip(
   parameters: CallbackDataParams | CallbackDataParams[],
   trend: PortalUsageTrend,
-  dimension: PortalUsageTrendDimension
+  dimension: PortalUsageTrendDimension,
+  modelMetric: PortalTrendMetric = "weighted"
 ) {
   const values = Array.isArray(parameters) ? parameters : [parameters];
   const index = Number(values[0]?.dataIndex ?? 0);
@@ -385,7 +466,7 @@ export function renderPortalTrendTooltip(
     .join("");
   const requestRow = dimension === "total"
     ? `<span class="usage-trend-tooltip-request"><b>请求</b><em>${day.request_count.toLocaleString("en-US")}</em></span>`
-    : `<span class="usage-trend-tooltip-total"><b>当日合计</b><em>${escapeHTML(`${formatTokenAmount(day.weighted_tokens)} Token`)}</em></span>`;
+    : `<span class="usage-trend-tooltip-total"><b>当日${modelMetric === "total" ? "未加权" : "加权"}</b><em>${escapeHTML(`${formatTokenAmount(modelMetric === "total" ? day.total_tokens : day.weighted_tokens)} Token`)}</em></span>`;
   return `<div class="overview-chart-tooltip usage-trend-tooltip" role="tooltip" data-active="true" data-layout="single-column"><strong>${escapeHTML(formatTrendDate(day.date))}</strong>${rows}${requestRow}</div>`;
 }
 

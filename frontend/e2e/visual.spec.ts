@@ -431,14 +431,22 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
   await expect(page.getByRole("button", { name: "展开", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "收起", exact: true })).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toHaveCount(0);
-  await expect(page.getByLabel("趋势图例")).toHaveCount(0);
+  const trendSummary = page.getByLabel("趋势摘要");
+  await expect(trendSummary.getByText("30天用量", { exact: true })).toBeVisible();
+  await expect(trendSummary.getByText("未加权", { exact: true })).toHaveCount(3);
+  await expect(trendSummary.getByText("加权", { exact: true })).toHaveCount(3);
+  await expect(page.getByLabel("趋势图例")).toContainText("未加权 Token");
+  await expect(page.getByLabel("趋势图例")).toContainText("加权 Token");
   await page.getByRole("button", { name: "7天", exact: true }).click();
   await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
   await expect.poll(() => trendRequests).toContain(
     "/usage/me/usage-trend?window=7d&dimension=model_reasoning"
   );
   await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
-  const primaryCombination = page.locator(".usage-trend-summary .primary-combination strong");
+  await expect(page.getByRole("button", { name: "未加权", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(trendSummary.getByText("未加权", { exact: true })).toHaveCount(2);
+  await expect(trendSummary.getByText("加权", { exact: true })).toHaveCount(2);
+  const primaryCombination = page.locator(".usage-trend-summary .primary-combination > strong");
   await expect(primaryCombination).toHaveText("gpt-5.6-sol · xhigh");
   expect(await primaryCombination.evaluate((element) => ({
     clipped: element.scrollWidth > element.clientWidth,
@@ -451,6 +459,7 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
   const tooltip = page.locator(".usage-trend-tooltip[data-active=true]");
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toHaveAttribute("data-layout", "single-column");
+  await expect(tooltip).toContainText("当日未加权");
   expect(await tooltip.evaluate((element) => ({
     overflowX: getComputedStyle(element).overflowX,
     overflowY: getComputedStyle(element).overflowY,
@@ -493,6 +502,9 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
   expect(tooltipRect.top).toBeGreaterThanOrEqual(0);
   expect(tooltipRect.bottom).toBeLessThanOrEqual(900);
   await expect(tooltip).toHaveScreenshot("react-usage-trend-tooltip-model-reasoning.png");
+  await page.getByRole("button", { name: "加权", exact: true }).click();
+  await expect(page.getByRole("button", { name: "加权", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(trendRequests.filter((path) => path.includes("dimension=model_reasoning"))).toHaveLength(1);
   await page.getByRole("tab", { name: "账号明细" }).click();
   await expect(chart).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();

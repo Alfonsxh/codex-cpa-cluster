@@ -395,7 +395,11 @@ describe("UsageDashboard", () => {
     ]));
     expect(await screen.findByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /CPA 账号/ })).not.toBeInTheDocument();
-    expect(screen.getByText("30天加权")).toBeInTheDocument();
+    const trendSummary = within(screen.getByLabelText("趋势摘要"));
+    expect(trendSummary.getByText("30天用量")).toBeInTheDocument();
+    expect(trendSummary.getAllByText("未加权")).toHaveLength(3);
+    expect(trendSummary.getAllByText("加权")).toHaveLength(3);
+    expect(screen.getByLabelText("趋势图例")).toBeInTheDocument();
     expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "7天" }));
@@ -408,11 +412,13 @@ describe("UsageDashboard", () => {
     ));
     expect(screen.getByText("主要组合")).toBeInTheDocument();
     expect(screen.getAllByText("gpt-5.4 · high").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "未加权" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "加权" }));
+    expect(screen.getByRole("button", { name: "加权" })).toHaveAttribute("aria-pressed", "true");
     expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("user="))).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
 
-    expect(screen.queryByLabelText("趋势图例")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "账号明细" }));
     expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /CPA 账号/ })).toBeInTheDocument();

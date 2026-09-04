@@ -883,12 +883,12 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
       if (section === "accounts") {
         const quotaUpdated = sectionActions.locator(".usage-updated");
         await expect(quotaUpdated).toHaveText(/额度更新 \d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
-        expect(await sectionActions.locator(".usage-refresh-stack").evaluate((stack) => {
-          const button = stack.querySelector<HTMLElement>(".usage-refresh-button")?.getBoundingClientRect();
-          const updated = stack.querySelector<HTMLElement>(".usage-updated")?.getBoundingClientRect();
+        expect(await sectionActions.evaluate((toolbar) => {
+          const button = toolbar.querySelector<HTMLElement>(".usage-refresh-button")?.getBoundingClientRect();
+          const updated = toolbar.querySelector<HTMLElement>(".usage-updated")?.getBoundingClientRect();
           return Boolean(button && updated
             && updated.top >= button.bottom
-            && Math.abs((button.left + button.right) / 2 - (updated.left + updated.right) / 2) <= 1);
+            && Math.abs(button.right - updated.right) <= 1);
         })).toBe(true);
       }
       const centeredControls = page.locator(section === "trend"
@@ -1196,44 +1196,76 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   const summary = card.getByLabel("全部账号统计摘要");
   const dataScroll = card.locator(".overview-token-data-scroll");
   await expect(card.getByText("实际统计范围")).toHaveCount(0);
-  await expect(card.locator(".overview-token-window-value")).toContainText(/—/);
+  await expect(card.locator(".overview-token-window-value")).toHaveCount(2);
+  await expect(card.locator(".overview-token-window-value").first()).toContainText(/起始时间\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/);
+  await expect(card.locator(".overview-token-window-value").last()).toContainText(/结束时间\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/);
   await expect(card.locator(".overview-collector-state")).toHaveText("采集正常");
-  await expect(card.locator(".overview-collector-meta time")).toHaveText(/\d{2}\/\d{2} \d{2}:\d{2}/);
+  await expect(card.locator(".overview-collector-meta time")).toHaveText(/\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
   const filterGeometry = await card.evaluate((element) => {
     const timeControls = element.querySelector<HTMLElement>(".overview-legacy-window-segments");
+    const startBoundary = element.querySelector<HTMLElement>(".overview-token-window-value:first-child");
+    const endBoundary = element.querySelector<HTMLElement>(".overview-token-window-value:last-child");
+    const headingRow = element.querySelector<HTMLElement>(".overview-token-heading-row");
+    const filters = element.querySelector<HTMLElement>(".usage-monitor-filters");
     const refreshSelect = element.querySelector<HTMLElement>(".usage-refresh-control .enhanced-select-trigger");
     const refreshButton = element.querySelector<HTMLElement>(".overview-legacy-refresh-button");
-    const refreshHeading = element.querySelector<HTMLElement>(".overview-refresh-heading");
     const collectorMeta = element.querySelector<HTMLElement>(".overview-collector-meta");
-    if (!timeControls || !refreshSelect || !refreshButton || !refreshHeading || !collectorMeta) {
+    const scopeFilters = element.querySelector<HTMLElement>(".overview-token-scope-filters");
+    if (!timeControls || !startBoundary || !endBoundary || !headingRow || !filters || !refreshSelect || !refreshButton || !collectorMeta || !scopeFilters) {
       throw new Error("Token 筛选栏几何锚点缺失");
     }
     const timeRect = timeControls.getBoundingClientRect();
+    const startRect = startBoundary.getBoundingClientRect();
+    const endRect = endBoundary.getBoundingClientRect();
     const selectRect = refreshSelect.getBoundingClientRect();
     const buttonRect = refreshButton.getBoundingClientRect();
-    const headingRect = refreshHeading.getBoundingClientRect();
     const collectorRect = collectorMeta.getBoundingClientRect();
+    const scopeRect = scopeFilters.getBoundingClientRect();
+    const headingRect = headingRow.getBoundingClientRect();
+    const filtersRect = filters.getBoundingClientRect();
     return {
       timeHeight: timeRect.height,
+      startHeight: startRect.height,
+      endHeight: endRect.height,
       selectHeight: selectRect.height,
       buttonHeight: buttonRect.height,
       controlsAligned: Math.abs(selectRect.top - buttonRect.top),
-      statusInHeading: collectorRect.top >= headingRect.top - 1 && collectorRect.bottom <= headingRect.bottom + 1
+      statusInHeading: collectorRect.top >= headingRect.top - 1 && collectorRect.bottom <= headingRect.bottom + 1,
+      headingAboveFilters: headingRect.bottom < filtersRect.top,
+      statusOnFirstRow: collectorRect.bottom <= scopeRect.top,
+      refreshOnSecondRow: selectRect.top >= scopeRect.top - 1 && buttonRect.bottom <= scopeRect.bottom + 1
     };
   });
+  expect(Math.abs(filterGeometry.timeHeight - filterGeometry.startHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(filterGeometry.startHeight - filterGeometry.endHeight)).toBeLessThanOrEqual(1);
   expect(Math.abs(filterGeometry.timeHeight - filterGeometry.selectHeight)).toBeLessThanOrEqual(1);
   expect(Math.abs(filterGeometry.selectHeight - filterGeometry.buttonHeight)).toBeLessThanOrEqual(1);
   expect(filterGeometry.controlsAligned).toBeLessThanOrEqual(1);
   expect(filterGeometry.statusInHeading).toBe(true);
+  expect(filterGeometry.headingAboveFilters).toBe(true);
+  expect(filterGeometry.statusOnFirstRow).toBe(true);
+  expect(filterGeometry.refreshOnSecondRow).toBe(true);
   await expect(tabs).toHaveCount(3);
-  await expect(summary).toBeVisible();
+  await expect(summary).toHaveCount(0);
   await expect(dataScroll.locator(".overview-legacy-chart")).toBeVisible();
+  await expect(dataScroll.locator(".overview-legacy-chart")).toHaveCSS("min-height", "320px");
+  await expect(dataScroll.locator(".overview-token-series-legend")).toHaveCount(0);
   await expect(dataScroll.getByLabel("CPA用量明细表格")).toHaveCount(0);
+  const aggregateChart = dataScroll.locator(".overview-legacy-chart");
+  await aggregateChart.hover({ position: { x: 540, y: 150 } });
+  const aggregateTooltip = page.locator(".overview-chart-tooltip[data-summary=true]");
+  await expect(aggregateTooltip).toBeVisible();
+  await expect(aggregateTooltip.locator(".overview-chart-mode-tag.unweighted")).toHaveText("未加权");
+  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("当前值");
+  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("范围内总量");
+  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("平均值");
+  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("最大值");
 
   await card.getByRole("tab", { name: "CPA 账号 Token 统计" }).click();
   await expect(summary).toHaveCount(0);
   const detailTable = dataScroll.getByLabel("CPA用量明细表格");
   await expect(detailTable).toBeVisible();
+  await expect(detailTable.locator(".usage-monitor-help")).toHaveCount(0);
   await expect(detailTable.locator("tbody tr")).toHaveCount(10);
 
   const geometry = await card.evaluate((element) => {

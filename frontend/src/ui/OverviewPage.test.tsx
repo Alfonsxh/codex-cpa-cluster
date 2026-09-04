@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-import { formatOverviewUsageRange, OverviewPage } from "./OverviewPage";
+import { formatOverviewUsageBoundary, formatOverviewUsageRange, OverviewPage } from "./OverviewPage";
 
 describe("OverviewPage legacy dashboard contract", () => {
   it("formats an exact custom range without dropping the exclusive end minute", () => {
@@ -13,6 +13,7 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(formatOverviewUsageRange(startAt, endAt)).toMatch(
       /2026\/09\/03 10:00\s*—\s*2026\/09\/03 11:00/
     );
+    expect(formatOverviewUsageBoundary(startAt)).toMatch(/2026\/09\/03 10:00/);
   });
 
   it("uses fine-grained APIs while restoring the legacy metrics, monitor, tables, and activity layout", async () => {
@@ -146,19 +147,26 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getByRole("tabpanel")).toHaveClass("overview-token-data-scroll");
     expect(screen.queryByText("实际统计范围")).not.toBeInTheDocument();
     const windowSegments = screen.getByRole("group", { name: "Token 使用时间范围" });
-    expect(windowSegments.closest(".overview-token-window-row")).toHaveTextContent(
-      formatOverviewUsageRange(usage.window_start_at, usage.generated_at)
+    const windowRow = windowSegments.closest(".overview-token-window-row") as HTMLElement;
+    expect(within(windowRow).getByText("起始时间").parentElement).toHaveTextContent(
+      formatOverviewUsageBoundary(usage.window_start_at)
     );
-    const refreshHeading = screen.getByText("自动刷新").closest(".overview-refresh-heading");
-    expect(refreshHeading).toHaveTextContent("采集正常");
-    expect(within(refreshHeading as HTMLElement).getByLabelText("最近采集时间")).toHaveTextContent(
-      /\d{2}\/\d{2} \d{2}:\d{2}/
+    expect(within(windowRow).getByText("结束时间").parentElement).toHaveTextContent(
+      formatOverviewUsageBoundary(usage.generated_at)
     );
-    expect(screen.getByRole("tablist", { name: "Token 使用数据视角" }).closest("header"))
-      .not.toContainElement(screen.getByLabelText("全部账号未加权 Token 使用量汇总值"));
-    expect(screen.getByLabelText("全部账号统计摘要")).toContainElement(
-      screen.getByLabelText("全部账号未加权 Token 使用量汇总值")
+    const collectorMeta = screen.getByLabelText("最近采集时间").closest(".overview-collector-meta") as HTMLElement;
+    expect(collectorMeta).toHaveTextContent("采集正常");
+    expect(within(collectorMeta).getByLabelText("最近采集时间")).toHaveTextContent(
+      /\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/
     );
+    expect(screen.getByRole("heading", { name: "Token 使用" }).closest(".overview-token-heading-row"))
+      .toContainElement(collectorMeta);
+    expect(document.querySelector(".usage-monitor-filters")).not.toContainElement(collectorMeta);
+    const refreshCluster = document.querySelector(".overview-legacy-refresh-cluster") as HTMLElement;
+    expect(screen.getByText("Token 口径").closest(".overview-token-scope-filters")).toContainElement(refreshCluster);
+    expect(screen.queryByLabelText("全部账号统计摘要")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("全部账号未加权 Token 使用量汇总值")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("全部账号图例")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("CPA用量明细表格")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /Token 使用量|Token 使用趋势/ })).not.toBeInTheDocument();
     expect(screen.getByText("重启 alpha")).toBeInTheDocument();
@@ -174,8 +182,7 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(await screen.findByRole("img", { name: /全部账号未加权 Token 使用趋势/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^加权$/ }));
-    const aggregateWeightedSummary = screen.getByLabelText("全部账号加权 Token 使用量汇总值");
-    expect(within(aggregateWeightedSummary).getByText("当前值").closest("div")).toHaveTextContent("加权250 Token");
+    expect(screen.queryByLabelText("全部账号加权 Token 使用量汇总值")).not.toBeInTheDocument();
     expect(await screen.findByRole("img", { name: /全部账号加权 Token 使用趋势/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^未加权$/ }));
 
@@ -186,6 +193,7 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.queryByLabelText("CPA 账号统计摘要")).not.toBeInTheDocument();
     const accountTable = screen.getByLabelText("CPA用量明细表格");
     expect(accountTable).toHaveTextContent("alpha");
+    expect(within(accountTable).queryByRole("button", { name: /说明/ })).not.toBeInTheDocument();
     expect(accountTable).not.toHaveTextContent("cpa-15");
     Object.defineProperties(accountTable, {
       clientHeight: { configurable: true, value: 300 },

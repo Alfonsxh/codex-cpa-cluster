@@ -263,10 +263,21 @@ export function OverviewPage() {
 
       <section className="overview-legacy-monitor overview-token-monitor-card" aria-labelledby="overview-token-monitor-title">
         <div className="overview-legacy-toolbar overview-token-monitor-toolbar">
-          <div className="overview-legacy-toolbar-title usage-monitor-title">
-            <h3 id="overview-token-monitor-title">Token 使用</h3>
-            <p className="section-kicker">TOKEN MONITOR</p>
-            <small>Dashboard</small>
+          <div className="overview-token-heading-row">
+            <div className="overview-legacy-toolbar-title usage-monitor-title">
+              <h3 id="overview-token-monitor-title">Token 使用</h3>
+              <small>按时间与使用主体查看趋势</small>
+            </div>
+            <div className="overview-collector-meta" aria-live="polite">
+              <span className={`overview-collector-state ${collectorState(usage.data?.collector.status).tone}`}>
+                {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
+              </span>
+              <time aria-label="最近采集时间">
+                {usage.data?.collector.heartbeat_at
+                  ? formatOverviewCollectorTime(usage.data.collector.heartbeat_at, overviewDisplayTimezone)
+                  : "—"}
+              </time>
+            </div>
           </div>
           <div className="overview-legacy-filters usage-monitor-filters" aria-label="Token Dashboard 变量">
             <fieldset className="overview-legacy-window-control usage-time-control">
@@ -292,58 +303,23 @@ export function OverviewPage() {
                     时间选择
                   </button>
                 </div>
-                <strong className="overview-token-window-value" aria-live="polite">
-                  {usage.data
-                    ? formatOverviewUsageRange(
-                        usage.data.window_start_at,
-                        usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
-                        overviewDisplayTimezone
-                      )
-                    : "—"}
-                </strong>
+                <div className="overview-token-window-boundaries" aria-label="Token 使用时间边界" aria-live="polite">
+                  <span className="overview-token-window-value">
+                    <small>起始时间</small>
+                    <strong>{usage.data ? formatOverviewUsageBoundary(usage.data.window_start_at, overviewDisplayTimezone) : "—"}</strong>
+                  </span>
+                  <span className="overview-token-window-value">
+                    <small>结束时间</small>
+                    <strong>{usage.data
+                      ? formatOverviewUsageBoundary(
+                          usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
+                          overviewDisplayTimezone
+                        )
+                      : "—"}</strong>
+                  </span>
+                </div>
               </div>
             </fieldset>
-            <div className="overview-legacy-refresh-cluster usage-refresh-cluster">
-              <div className="overview-refresh-heading">
-                <span className="overview-refresh-label">自动刷新</span>
-                <div className="overview-collector-meta" aria-live="polite">
-                  <span className={`overview-collector-state ${collectorState(usage.data?.collector.status).tone}`}>
-                    {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
-                  </span>
-                  <time aria-label="最近采集时间">
-                    {usage.data?.collector.heartbeat_at
-                      ? formatOverviewCollectorTime(usage.data.collector.heartbeat_at, overviewDisplayTimezone)
-                      : "—"}
-                  </time>
-                </div>
-              </div>
-              <div className="overview-refresh-actions">
-                <div className="overview-legacy-filter usage-variable-select usage-refresh-control">
-                  <span className="sr-only">刷新间隔</span>
-                  <LegacyEnhancedSelect
-                    label="自动刷新"
-                    value={String(refreshSeconds)}
-                    options={[
-                      { value: "0", label: "关闭" },
-                      { value: "10", label: "10 秒" },
-                      { value: "30", label: "30 秒" },
-                      { value: "60", label: "1 分钟" },
-                      { value: "300", label: "5 分钟" }
-                    ]}
-                    onChange={(nextValue) => setRefreshSeconds(Number(nextValue))}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="button ghost usage-monitor-refresh overview-legacy-refresh-button"
-                  disabled={usage.isFetching || usageRefresh.isPending}
-                  aria-label="刷新 Token Dashboard"
-                  onClick={() => usageRefresh.mutate()}
-                >
-                  <span aria-hidden="true">↻</span><span>刷新</span>
-                </button>
-              </div>
-            </div>
             <div className="overview-token-scope-filters">
               <fieldset className="overview-token-mode-control">
                 <legend>Token 口径</legend>
@@ -384,6 +360,35 @@ export function OverviewPage() {
                 error={catalog.isError}
                 onChange={setSelectedUsers}
               />
+              <div className="overview-legacy-refresh-cluster usage-refresh-cluster">
+                <span className="overview-refresh-label">自动刷新</span>
+                <div className="overview-refresh-actions">
+                  <div className="overview-legacy-filter usage-variable-select usage-refresh-control">
+                    <span className="sr-only">刷新间隔</span>
+                    <LegacyEnhancedSelect
+                      label="自动刷新"
+                      value={String(refreshSeconds)}
+                      options={[
+                        { value: "0", label: "关闭" },
+                        { value: "10", label: "10 秒" },
+                        { value: "30", label: "30 秒" },
+                        { value: "60", label: "1 分钟" },
+                        { value: "300", label: "5 分钟" }
+                      ]}
+                      onChange={(nextValue) => setRefreshSeconds(Number(nextValue))}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="button ghost usage-monitor-refresh overview-legacy-refresh-button"
+                    disabled={usage.isFetching || usageRefresh.isPending}
+                    aria-label="刷新 Token Dashboard"
+                    onClick={() => usageRefresh.mutate()}
+                  >
+                    <span aria-hidden="true">↻</span><span>刷新</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -492,6 +497,9 @@ function UsageDashboard({
   const metrics = tokenMode === "weighted" ? asWeightedSeries(aggregate) : aggregate;
   const modeLabel = tokenMode === "weighted" ? "加权" : "未加权";
   const viewLabel = view === "aggregate" ? "全部账号" : view === "account" ? "CPA 账号" : "用户";
+  const chartAriaDetails = view === "aggregate"
+    ? `当前值 ${formatTokens(metrics.current)}，范围内总量 ${formatTokens(metrics.total)}，平均值 ${formatTokens(metrics.average)}，最大值 ${formatTokens(metrics.maximum)}`
+    : chartSeries.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，");
   const activeViewTabID = `overview-token-tab-${view}`;
   const emptyText = view === "user" ? "所选范围内没有用户 Token 数据" : "所选范围内没有账号 Token 数据";
   return (
@@ -505,15 +513,6 @@ function UsageDashboard({
           </div>
         </div>
       </header>
-
-      {view === "aggregate" ? <section className="overview-token-summary-region" aria-label={`${viewLabel}统计摘要`}>
-        <dl className="overview-token-summary-metrics" aria-label={`${viewLabel}${modeLabel} Token 使用量汇总值`}>
-          <WorkspaceMetric label="当前值" value={metrics.current} mode={tokenMode} />
-          <WorkspaceMetric label="范围内总量" value={metrics.total} mode={tokenMode} />
-          <WorkspaceMetric label="平均值" value={metrics.average} mode={tokenMode} />
-          <WorkspaceMetric label="最大值" value={metrics.maximum} mode={tokenMode} />
-        </dl>
-      </section> : null}
 
       <section
         id="overview-token-series"
@@ -531,17 +530,13 @@ function UsageDashboard({
             includeDateLabels={includeDateLabels}
             valueLabel={modeLabel}
             timezone={payload.window_timezone}
-            ariaLabel={`${viewLabel}${modeLabel} Token 使用趋势：${chartSeries.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，")}`}
+            summaryMetrics={view === "aggregate" ? metrics : undefined}
+            ariaLabel={`${viewLabel}${modeLabel} Token 使用趋势：${chartAriaDetails}`}
           />
         ) : (
           <div className="overview-legacy-chart-empty"><strong>暂无趋势</strong><span>{emptyText}</span></div>
         )}
         <footer className="overview-legacy-summary-footer overview-token-workspace-footer">
-          <div className="overview-token-series-legend" aria-label={`${viewLabel}图例`}>
-            {chartSeries.slice(0, 10).map((item, index) => (
-              <span key={item.name}><i style={{ background: chartColors[index % chartColors.length] }} />{item.name}</span>
-            ))}
-          </div>
           <span>单位：{modeLabel} Token / {interval}</span>
         </footer>
         {view !== "aggregate" ? <SeriesTable
@@ -559,26 +554,14 @@ function UsageDashboard({
   );
 }
 
-function WorkspaceMetric({ label, value, mode }: { label: string; value: number; mode: TokenMode }) {
-  const modeLabel = mode === "weighted" ? "加权" : "未加权";
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd title={`${value.toLocaleString("en-US")} ${modeLabel} Token`}>
-        <i className={`overview-token-mode-dot ${mode}`} aria-hidden="true" />
-        <small>{modeLabel}</small><span>{formatTokens(value)}</span>
-      </dd>
-    </div>
-  );
-}
-
-function UsageChartLoader({ buckets, series, summary = false, includeDateLabels, valueLabel, timezone, ariaLabel }: {
+function UsageChartLoader({ buckets, series, summary = false, includeDateLabels, valueLabel, timezone, summaryMetrics, ariaLabel }: {
   buckets: number[];
   series: TokenSeries[];
   summary?: boolean;
   includeDateLabels: boolean;
   valueLabel: string;
   timezone: string;
+  summaryMetrics?: TokenSeries;
   ariaLabel: string;
 }) {
   return (
@@ -594,6 +577,7 @@ function UsageChartLoader({ buckets, series, summary = false, includeDateLabels,
         includeDateLabels={includeDateLabels}
         valueLabel={valueLabel}
         timezone={timezone}
+        summaryMetrics={summaryMetrics}
         ariaLabel={ariaLabel}
       />
     </Suspense>
@@ -652,27 +636,9 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode, can
           <tr>
             <SeriesTableHeader label={subjectLabel} sortKey="name" sort={sort} onSort={updateSort} />
             <SeriesTableHeader label="状态" sortKey="status" sort={sort} onSort={updateSort} />
-            <SeriesTableHeader
-              label="当前值"
-              sortKey="current"
-              sort={sort}
-              onSort={updateSort}
-              help={`${tokenMode === "unweighted" ? "未加权 Token" : "加权 Token"}；取所选时间范围内最新聚合间隔，该间隔可能尚未结束。`}
-            />
-            <SeriesTableHeader
-              label="平均值"
-              sortKey="average"
-              sort={sort}
-              onSort={updateSort}
-              help={`${tokenMode === "unweighted" ? "未加权 Token" : "加权 Token"}；取所选时间范围内各聚合间隔平均值，没有请求的间隔按 0 计算。`}
-            />
-            <SeriesTableHeader
-              label="最大值"
-              sortKey="maximum"
-              sort={sort}
-              onSort={updateSort}
-              help={`${tokenMode === "unweighted" ? "未加权 Token" : "加权 Token"}；取所选时间范围内单个聚合间隔的最高值。`}
-            />
+            <SeriesTableHeader label="当前值" sortKey="current" sort={sort} onSort={updateSort} />
+            <SeriesTableHeader label="平均值" sortKey="average" sort={sort} onSort={updateSort} />
+            <SeriesTableHeader label="最大值" sortKey="maximum" sort={sort} onSort={updateSort} />
             <SeriesTableHeader label="范围内总量" sortKey="total" sort={sort} onSort={updateSort} />
           </tr>
         </thead>
@@ -698,29 +664,17 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode, can
   );
 }
 
-function SeriesTableHeader({ label, sortKey, sort, onSort, help }: {
+function SeriesTableHeader({ label, sortKey, sort, onSort }: {
   label: string;
   sortKey: SeriesSortKey;
   sort: SortState;
   onSort: (key: SeriesSortKey) => void;
-  help?: string;
 }) {
   const active = sort.key === sortKey;
   const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
-  const button = <SortButton label={label} sortKey={sortKey} sort={sort} onSort={onSort} />;
   return (
     <th aria-sort={ariaSort}>
-      {help ? (
-        <span className="usage-monitor-heading">
-          {button}
-          <button
-            className="usage-monitor-help"
-            type="button"
-            data-tooltip={help}
-            aria-label={`${label}说明`}
-          >?</button>
-        </span>
-      ) : button}
+      <SortButton label={label} sortKey={sortKey} sort={sort} onSort={onSort} />
     </th>
   );
 }
@@ -926,19 +880,21 @@ function actionLabel(action: RuntimeJob["action"]) {
 
 export function formatOverviewUsageRange(startAt: number, endAt: number, timezone = overviewDisplayTimezone) {
   if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || startAt <= 0 || endAt < startAt) return "统计边界暂不可用";
-  const start = new Date(startAt * 1000);
-  const end = new Date(endAt * 1000);
-  const fullFormatter = new Intl.DateTimeFormat("zh-CN", {
+  return `${formatOverviewUsageBoundary(startAt, timezone)} — ${formatOverviewUsageBoundary(endAt, timezone)}`;
+}
+
+export function formatOverviewUsageBoundary(timestamp: number, timezone = overviewDisplayTimezone) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     ...(timezone ? { timeZone: timezone } : {})
-  });
-  return `${fullFormatter.format(start)} — ${fullFormatter.format(end)}`;
+  }).format(new Date(timestamp * 1000));
 }
 
 function formatOverviewCollectorTime(timestamp: number, timezone = overviewDisplayTimezone) {
   if (!timestamp) return "—";
   return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     ...(timezone ? { timeZone: timezone } : {})
   }).format(new Date(timestamp * 1000));
 }

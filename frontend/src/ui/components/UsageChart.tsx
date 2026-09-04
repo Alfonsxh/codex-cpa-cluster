@@ -35,14 +35,15 @@ export type UsageChartProps = {
   includeDateLabels?: boolean;
   valueLabel: string;
   timezone?: string;
+  summaryMetrics?: Pick<TokenSeries, "current" | "total" | "average" | "maximum">;
   ariaLabel: string;
 };
 
-export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, valueLabel, timezone, ariaLabel }: UsageChartProps) {
+export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, valueLabel, timezone, summaryMetrics, ariaLabel }: UsageChartProps) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
-  const height = summary ? 260 : 300;
+  const height = summary ? 320 : 360;
   const labels = useMemo(
     () => buckets.map((timestamp) => formatChartTime(timestamp, includeDateLabels, timezone)),
     [buckets, includeDateLabels, timezone]
@@ -70,10 +71,10 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
       grid: {
         // Frozen v1 renders non-summary SVGs in a fixed 1000px viewBox and
         // stretches them to the panel width. Scale its plot margins too.
-        left: summary ? chartWidth <= 520 ? 58 : 64 : chartWidth * 72 / 1_000,
+        left: summary ? chartWidth <= 520 ? 66 : 72 : chartWidth * 82 / 1_000,
         right: summary ? 16 : chartWidth * 20 / 1_000,
         top: 24,
-        bottom: 44,
+        bottom: 48,
         containLabel: false
       },
       tooltip: {
@@ -92,7 +93,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
           type: "line",
           lineStyle: { color: axisColor, type: "dashed", width: 1 }
         },
-        formatter: (parameters) => renderUsageTooltip(parameters, buckets, valueLabel, timezone)
+        formatter: (parameters) => renderUsageTooltip(parameters, buckets, valueLabel, timezone, summaryMetrics)
       },
       xAxis: {
         type: "category",
@@ -103,7 +104,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
         axisLabel: {
           color: axisColor,
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
-          fontSize: 9,
+          fontSize: 11,
           margin: 22,
           interval: (index: number) => xLabelIndexes.has(index),
           hideOverlap: true
@@ -120,7 +121,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
         axisLabel: {
           color: axisColor,
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
-          fontSize: 9,
+          fontSize: 11,
           margin: 12,
           formatter: (value: number) => formatTokens(value)
         },
@@ -157,7 +158,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
       chart.dispose();
       if (chartRef.current === chart) chartRef.current = null;
     };
-  }, [ariaLabel, buckets, labels, series, summary, theme, timezone, valueLabel]);
+  }, [ariaLabel, buckets, labels, series, summary, summaryMetrics, theme, timezone, valueLabel]);
 
   const showBucket = (index: number) => {
     const chart = chartRef.current;
@@ -202,7 +203,7 @@ export function tooltipRows(parameters: CallbackDataParams | CallbackDataParams[
     .map((item) => ({
       name: String(item.seriesName ?? ""),
       value: chartValue(item.value),
-      color: typeof item.color === "string" ? item.color : "#6374d8",
+      color: usageChartColors[Number(item.seriesIndex ?? 0) % usageChartColors.length],
       seriesIndex: Number(item.seriesIndex ?? 0)
     }))
     .sort((left, right) => right.value - left.value || left.name.localeCompare(right.name, "zh-CN", { numeric: true }))
@@ -213,21 +214,35 @@ export function renderUsageTooltip(
   parameters: CallbackDataParams | CallbackDataParams[],
   buckets: number[],
   valueLabel = "",
-  timezone?: string
+  timezone?: string,
+  summaryMetrics?: Pick<TokenSeries, "current" | "total" | "average" | "maximum">
 ) {
   const values = Array.isArray(parameters) ? parameters : [parameters];
   const dataIndex = Number(values[0]?.dataIndex ?? 0);
   const timestamp = formatTimestamp(buckets[dataIndex] ?? 0, timezone);
   const rows = tooltipRows(values).map((item) => (
     `<span><i style="background:${escapeAttribute(item.color)}"></i>`
-    + `<b title="${escapeAttribute(item.name)}">${escapeHtml(item.name)}</b>`
+    + `<b title="${escapeAttribute(item.name)}">${escapeHtml(summaryMetrics ? "悬停时段" : item.name)}</b>`
     + `<em>${escapeHtml(formatTokens(item.value))}</em></span>`
   )).join("");
   const escapedValueLabel = escapeHtml(valueLabel);
+  const modeTone = valueLabel === "加权" ? "weighted" : "unweighted";
   const heading = escapedValueLabel
-    ? `<strong><span>${escapeHtml(timestamp)}</span><small>${escapedValueLabel}</small></strong>`
+    ? `<strong><span>${escapeHtml(timestamp)}</span><small class="overview-chart-mode-tag ${modeTone}"><i></i>${escapedValueLabel}</small></strong>`
     : `<strong>${escapeHtml(timestamp)}</strong>`;
-  return `<div class="overview-chart-tooltip" role="tooltip" data-active="true" data-layout="single-column" data-list="${values.length > 1}">${heading}${rows}</div>`;
+  const metrics = summaryMetrics ? renderSummaryMetrics(summaryMetrics) : "";
+  return `<div class="overview-chart-tooltip" role="tooltip" data-active="true" data-layout="single-column" data-list="${values.length > 1}" data-summary="${Boolean(summaryMetrics)}">${heading}${rows}${metrics}</div>`;
+}
+
+function renderSummaryMetrics(metrics: Pick<TokenSeries, "current" | "total" | "average" | "maximum">) {
+  return `<dl class="overview-chart-tooltip-metrics">${[
+    ["当前值", metrics.current],
+    ["范围内总量", metrics.total],
+    ["平均值", metrics.average],
+    ["最大值", metrics.maximum]
+  ].map(([label, value]) => (
+    `<div><dt>${label}</dt><dd>${escapeHtml(formatTokens(Number(value)))}</dd></div>`
+  )).join("")}</dl>`;
 }
 
 function chartValue(value: CallbackDataParams["value"]) {

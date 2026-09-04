@@ -441,12 +441,10 @@ function AccountWindowControl({
           <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => onChange(option.value)}>{option.label}</button>
         ))}
       </div>
-      <div className="usage-refresh-stack">
-        <button className="usage-refresh-button" type="button" disabled={refreshing} onClick={onRefresh}>
-          {loading ? "刷新中…" : "刷新"}
-        </button>
-        <time className="usage-updated">额度更新 {formatServerTimestamp(updatedAt, { withSeconds: true })}</time>
-      </div>
+      <button className="usage-refresh-button" type="button" disabled={refreshing} onClick={onRefresh}>
+        {loading ? "刷新中…" : "刷新"}
+      </button>
+      <time className="usage-updated">额度更新 {formatServerTimestamp(updatedAt, { withSeconds: true })}</time>
     </div>
   );
 }

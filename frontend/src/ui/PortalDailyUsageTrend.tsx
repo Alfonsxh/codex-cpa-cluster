@@ -209,7 +209,7 @@ function PortalTrendChart({
     const option: DailyTrendOption = {
       animation: false,
       aria: { enabled: true, description: "个人每日 Token 用量趋势" },
-      grid: { left: 66, right: 18, top: 16, bottom: 38, containLabel: false },
+      grid: { left: 76, right: 18, top: 18, bottom: 44, containLabel: false },
       tooltip: {
         trigger: "axis",
         triggerOn: "mousemove|click|mousewheel",
@@ -235,7 +235,7 @@ function PortalTrendChart({
         axisLabel: {
           color: axisColor,
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
-          fontSize: 10,
+          fontSize: 12,
           margin: 17,
           interval: (index: number) => labelIndexes.has(index),
           hideOverlap: true
@@ -250,7 +250,7 @@ function PortalTrendChart({
         axisLabel: {
           color: axisColor,
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
-          fontSize: 11,
+          fontSize: 12,
           margin: 12,
           formatter: (value: number) => formatTokens(value)
         },

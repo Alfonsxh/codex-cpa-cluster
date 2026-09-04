@@ -428,6 +428,15 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   const detailFrameRect = await page.locator(".usage-detail-sections").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - detailFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - detailFrameRect.right)).toBeLessThanOrEqual(1);
+  const quotaHelp = page.getByRole("button", { name: "查看个人周额度 Token 说明" });
+  await quotaHelp.hover();
+  const quotaTooltip = page.locator(".usage-quota-tooltip");
+  await expect(quotaTooltip).toBeVisible();
+  const quotaTooltipText = await quotaTooltip.innerText();
+  expect(quotaTooltipText).toMatch(/\d{1,3}(?:,\d{3})+/);
+  expect(quotaTooltipText).not.toMatch(/\b(?:Token|[KMB])\b/);
+  await page.mouse.move(0, 0);
+  await expect(quotaTooltip).toBeHidden();
   const summaryTags = await page.locator(".usage-current-account-head .usage-summary-tag, .usage-personal-overview-head .usage-summary-tag").evaluateAll((tags) => tags.map((tag) => {
     const style = getComputedStyle(tag);
     const rect = tag.getBoundingClientRect();
@@ -768,10 +777,112 @@ test("个人使用中心移动端可滚动到账号明细", async ({ page }) => 
   await expect(accountTable).toBeVisible();
 });
 
+test("CPA 镜像更新任务按账号展示完整结果并适配窄屏", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.clock.setFixedTime(new Date("2026-09-04T10:50:00.000Z"));
+  await page.setViewportSize({ width: 1100, height: 820 });
+  await setTheme(page, "dark");
+  await page.route("**/admin/api/images/cliproxy", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.outdated_count = 2;
+    payload.current_count = 1;
+    payload.accounts = payload.accounts.map((account: { account: string }) => ({
+      ...account,
+      using_target: account.account === "cpa-edge"
+    }));
+    await route.fulfill({ response, json: payload });
+  });
+  await page.route("**/admin/api/operations", async (route) => {
+    await fulfillJSON(route, {
+      message: "镜像更新任务已完成",
+      reused: false,
+      job: {
+        id: "visual-image-update",
+        name: "更新全部 CPA 镜像",
+        target: "all",
+        status: "succeeded",
+        created_at: 1_788_490_180,
+        started_at: 1_788_490_200,
+        finished_at: 1_788_490_248,
+        exit_code: 0,
+        output: [
+          "正在更新 cpa-main：sha256:9ad5f334ef30 -> sha256:d9db67a9de44",
+          "cpa-main 验证通过：运行探针",
+          "正在更新 cpa-lab：sha256:9ad5f334ef30 -> sha256:d9db67a9de44",
+          "cpa-lab 验证通过：运行探针",
+          "跳过 cpa-edge：已经运行目标镜像",
+          "CPA 镜像更新完成：2 个"
+        ]
+      }
+    });
+  });
+  await login(page, "/admin/accounts", "更新通道");
+
+  await page.getByRole("button", { name: "更新全部 CPA" }).click();
+  const confirmation = page.locator(".legacy-confirm-modal");
+  await expect(confirmation.getByText("更新 CPA 镜像？")).toBeVisible();
+  await confirmation.getByRole("button", { name: "更新全部 CPA" }).click();
+  const dialog = page.locator(".legacy-output-modal");
+  await expect(dialog.getByText("更新全部 CPA 镜像")).toBeVisible();
+  await expect(dialog.getByLabel("任务执行摘要")).toContainText("任务耗时48 秒");
+  await expect(dialog.getByLabel("镜像更新摘要")).toContainText("更新完成2");
+  await expect(dialog.getByRole("list", { name: "账号更新结果" }).getByRole("listitem")).toHaveCount(3);
+  await expect(dialog.locator(".image-update-raw-output")).not.toHaveAttribute("open");
+
+  const desktopCards = await dialog.locator(".image-update-account").evaluateAll((cards) => cards.map((card) => {
+    const rect = card.getBoundingClientRect();
+    return { top: rect.top, left: rect.left, right: rect.right, width: rect.width };
+  }));
+  expect(desktopCards).toHaveLength(3);
+  expect(Math.abs(desktopCards[0].top - desktopCards[1].top)).toBeLessThanOrEqual(1);
+  expect(desktopCards[1].left).toBeGreaterThan(desktopCards[0].right);
+  expect(desktopCards[0].width).toBeGreaterThan(300);
+  await expect(dialog).toHaveScreenshot("react-accounts-image-update-task-desktop-dark.png");
+
+  await dialog.getByText("查看原始输出").click();
+  await expect(dialog.locator(".image-update-raw-output")).toHaveAttribute("open", "");
+  await expect(dialog.locator(".image-update-raw-output pre")).toContainText("CPA 镜像更新完成：2 个");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileGeometry = await dialog.evaluate((element) => {
+    const cards = [...element.querySelectorAll<HTMLElement>(".image-update-account")]
+      .map((card) => card.getBoundingClientRect());
+    return {
+      bodyScrollWidth: document.body.scrollWidth,
+      viewportWidth: window.innerWidth,
+      cardLefts: cards.map((card) => card.left),
+      cardTops: cards.map((card) => card.top),
+      cardsFit: cards.every((card) => card.left >= 0 && card.right <= window.innerWidth)
+    };
+  });
+  expect(mobileGeometry.bodyScrollWidth).toBeLessThanOrEqual(mobileGeometry.viewportWidth);
+  expect(Math.max(...mobileGeometry.cardLefts) - Math.min(...mobileGeometry.cardLefts)).toBeLessThanOrEqual(1);
+  expect(new Set(mobileGeometry.cardTops).size).toBe(3);
+  expect(mobileGeometry.cardsFit).toBe(true);
+  await expect(dialog).toHaveScreenshot("react-accounts-image-update-task-mobile-dark.png", {
+    threshold: 0.3,
+    maxDiffPixelRatio: 0.02
+  });
+});
+
 test("账号展开区复用旧版四层信息结构", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setTheme(page, "dark");
   await login(page, "/admin/accounts", "更新通道");
+
+  const accountStatus = page.locator(".account-runtime-status").first();
+  await accountStatus.hover();
+  const statusTooltip = page.locator(".account-runtime-status-tooltip");
+  await expect(statusTooltip).toBeVisible();
+  expect(await statusTooltip.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0
+      && rect.right <= window.innerWidth
+      && element.closest(".account-legacy-table") === null;
+  })).toBe(true);
+  await page.mouse.move(0, 0);
+  await expect(statusTooltip).toBeHidden();
 
   await page.getByRole("row", { name: "展开 cpa-main" }).click();
   await expect(page.getByRole("region", { name: "模型与推理强度 Token 明细" })).toBeVisible();

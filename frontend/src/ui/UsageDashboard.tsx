@@ -487,10 +487,10 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
   const quotaTooltip = weekly ? (
     <div className="usage-quota-tooltip">
       <strong>个人周额度</strong>
-      <span><b>加权已用</b><em>{formatQuotaToken(weekly.weighted_used_tokens)}</em></span>
-      <span><b>未加权已用</b><em>{formatQuotaToken(weekly.raw_used_tokens)}</em></span>
-      <span><b>总额度</b><em>{weekly.unlimited ? "不限额" : formatQuotaToken(weekly.limit_tokens ?? 0)}</em></span>
-      <span><b>剩余额度</b><em>{weekly.unlimited ? "不限额" : formatQuotaToken(weekly.remaining_tokens ?? 0)}</em></span>
+      <span><b>加权已用</b><em>{formatNumber(weekly.weighted_used_tokens)}</em></span>
+      <span><b>未加权已用</b><em>{formatNumber(weekly.raw_used_tokens)}</em></span>
+      <span><b>总额度</b><em>{weekly.unlimited ? "不限额" : formatNumber(weekly.limit_tokens ?? 0)}</em></span>
+      <span><b>剩余额度</b><em>{weekly.unlimited ? "不限额" : formatNumber(weekly.remaining_tokens ?? 0)}</em></span>
     </div>
   ) : null;
   return (
@@ -629,10 +629,6 @@ function UsageHelp({ label, title }: { label: string; title: ReactNode }) {
       </button>
     </Tooltip>
   );
-}
-
-function formatQuotaToken(value: number) {
-  return `${formatTokenAmount(value)} Token`;
 }
 
 function ModelBreakdown({ data, window }: { data: UsageBreakdown; window: PortalUsageWindow }) {

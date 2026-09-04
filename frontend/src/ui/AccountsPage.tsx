@@ -17,6 +17,7 @@ import {
   Skeleton,
   Space,
   Tag,
+  Tooltip,
   Typography,
   type TableColumnsType
 } from "antd";
@@ -81,6 +82,7 @@ import {
   type UsageCombination
 } from "../api/usage";
 import { AdminTable } from "./components/AdminTable";
+import { ImageUpdateTaskReport, parseImageUpdateOutput } from "./components/ImageUpdateTaskReport";
 import {
   CustomUsageRangeModal,
   formatCustomUsageRange,
@@ -1518,6 +1520,33 @@ function formatCompactTimestamp(timestamp: number) {
   }).format(new Date(timestamp * 1000)).replace(/\//g, "/");
 }
 
+function formatTaskTimestamp(timestamp?: number | null) {
+  if (!timestamp) return "—";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date(timestamp * 1000));
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}/${value("month")}/${value("day")} ${value("hour")}:${value("minute")}:${value("second")}`;
+}
+
+function formatTaskDuration(startedAt?: number | null, finishedAt?: number | null, active = false) {
+  if (active) return "执行中";
+  if (!startedAt || !finishedAt) return "—";
+  const seconds = Math.max(0, finishedAt - startedAt);
+  if (seconds < 1) return "< 1 秒";
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`;
+}
+
 function formatAccountLastUsed(timestamp: number) {
   return timestamp ? formatCompactTimestamp(timestamp) : "从未使用";
 }
@@ -1998,9 +2027,15 @@ function TaskOutputModal({
     };
   }, [job?.id]);
   if (!job) return null;
-  const output = job.output || "任务正在排队…";
+  const rawOutput = job.output?.trim() ?? "";
+  const output = rawOutput || "任务正在排队…";
   const device = parseOAuthDeviceOutput(output);
+  const imageUpdateReport = /更新.*镜像|镜像.*更新/.test(job.name)
+    ? parseImageUpdateOutput(rawOutput, job.status)
+    : null;
   const active = isActiveRuntimeJob(job);
+  const startedAt = job.started_at || job.created_at;
+  const outputLineCount = rawOutput ? rawOutput.split(/\r?\n/).filter(Boolean).length : 0;
   const copy = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -2060,15 +2095,36 @@ function TaskOutputModal({
         <Button className="legacy-output-ghost" key="close" onClick={onClose}>关闭</Button>
       ]}
     >
-      <div className="oauth-task-meta">
-        <span className="oauth-task-account">
-          <span>{job.target}</span>
-          {accountEmail ? <span className="oauth-task-email">{accountEmail}</span> : null}
-        </span>
-        <Tag color={job.status === "succeeded" ? "success" : job.status === "failed" ? "error" : "processing"}>
-          {runtimeJobStatusLabels[job.status] ?? job.status}
-        </Tag>
-        <span>{formatCompactTimestamp(job.started_at || job.created_at)}</span>
+      <div className="oauth-task-meta task-output-meta" aria-label="任务执行摘要">
+        <div>
+          <span>执行范围</span>
+          <strong className="oauth-task-account">
+            <span>{job.target === "all" ? "全部 CPA" : job.target}</span>
+            {accountEmail ? <span className="oauth-task-email">{accountEmail}</span> : null}
+          </strong>
+        </div>
+        <div>
+          <span>执行状态</span>
+          <Tag color={job.status === "succeeded" ? "success" : job.status === "failed" ? "error" : active ? "processing" : "default"}>
+            {runtimeJobStatusLabels[job.status] ?? job.status}
+          </Tag>
+        </div>
+        <div>
+          <span>开始时间</span>
+          <time>{formatTaskTimestamp(startedAt)}</time>
+        </div>
+        <div>
+          <span>完成时间</span>
+          <time>{job.finished_at ? formatTaskTimestamp(job.finished_at) : active ? "执行中" : "—"}</time>
+        </div>
+        <div>
+          <span>任务耗时</span>
+          <strong>{formatTaskDuration(startedAt, job.finished_at, active)}</strong>
+        </div>
+        <div>
+          <span>输出记录</span>
+          <strong>{outputLineCount} 行</strong>
+        </div>
       </div>
       {device.url || device.code ? (
         <section className="oauth-copy-panel" aria-label="OAuth 设备授权信息">
@@ -2099,7 +2155,11 @@ function TaskOutputModal({
       {copyNotice ? <Alert className="page-alert" type="info" showIcon title={copyNotice} /> : null}
       {pollError ? <MutationError error={pollError} title="任务状态刷新失败，正在重试" /> : null}
       {job.error ? <Alert className="page-alert" type="error" showIcon title="任务执行失败" description={job.error} /> : null}
-      <pre className="oauth-task-output">{output}</pre>
+      {imageUpdateReport ? (
+        <ImageUpdateTaskReport output={rawOutput} status={job.status} />
+      ) : (
+        <pre className="oauth-task-output">{output}</pre>
+      )}
     </Modal>
   );
 }
@@ -2428,53 +2488,58 @@ function errorMessage(error: unknown, fallback = "请求失败，请稍后重试
 }
 
 function AccountStatus({ account }: { account: Account }) {
+  let label: string;
+  let tone: string;
+  let detail: string;
   if (account.operational_status) {
     const status = account.operational_status;
-    const detail = accountRuntimeDetail(account);
-    return (
-      <span
-        className={`status-chip ${status.tone} account-runtime-tag account-runtime-status`}
-        tabIndex={0}
-        data-tooltip={detail}
-        aria-label={`${status.label}：${detail}`}
-      >{status.label}</span>
-    );
-  }
-  let label = "暂不可迁入";
-  let tone = "neutral";
-  let detail = stateLabels[account.account_state.reason] ?? "CPA 当前不满足迁入条件";
-  if (!account.enabled) {
-    label = "已停用";
-    detail = "账号已停用，不再接收新用户";
-  } else if (account.runtime_state === "stopped") {
-    label = "已停止";
-    tone = "danger";
-    detail = "CPA 容器未运行";
-  } else if (!account.state_available) {
-    label = "状态未知";
-    detail = "CPA 运行或额度状态暂不可用";
-  } else if (account.account_state.exhausted) {
-    label = "额度耗尽";
-    tone = "danger";
-    detail = "官方周额度已经耗尽";
-  } else if (runtimeStateReasons.has(account.account_state.reason)) {
-    label = stateLabels[account.account_state.reason];
-    tone = account.account_state.reason === "credential_unavailable" ? "danger" : "warning";
-  } else if (account.account_state.eligible) {
-    label = "可用";
-    tone = "success";
-    detail = "CPA 原生凭据状态正常";
+    label = status.label;
+    tone = status.tone;
+    detail = accountRuntimeDetail(account);
   } else {
-    label = stateLabels[account.account_state.reason] ?? "暂不可迁入";
-    tone = account.account_state.reason === "quota_stale" ? "warning" : "neutral";
+    label = "暂不可迁入";
+    tone = "neutral";
+    detail = stateLabels[account.account_state.reason] ?? "CPA 当前不满足迁入条件";
+    if (!account.enabled) {
+      label = "已停用";
+      detail = "账号已停用，不再接收新用户";
+    } else if (account.runtime_state === "stopped") {
+      label = "已停止";
+      tone = "danger";
+      detail = "CPA 容器未运行";
+    } else if (!account.state_available) {
+      label = "状态未知";
+      detail = "CPA 运行或额度状态暂不可用";
+    } else if (account.account_state.exhausted) {
+      label = "额度耗尽";
+      tone = "danger";
+      detail = "官方周额度已经耗尽";
+    } else if (runtimeStateReasons.has(account.account_state.reason)) {
+      label = stateLabels[account.account_state.reason];
+      tone = account.account_state.reason === "credential_unavailable" ? "danger" : "warning";
+    } else if (account.account_state.eligible) {
+      label = "可用";
+      tone = "success";
+      detail = "CPA 原生凭据状态正常";
+    } else {
+      label = stateLabels[account.account_state.reason] ?? "暂不可迁入";
+      tone = account.account_state.reason === "quota_stale" ? "warning" : "neutral";
+    }
   }
   return (
-    <span
-      className={`status-chip ${tone} account-runtime-tag account-runtime-status`}
-      tabIndex={0}
-      data-tooltip={detail}
-      aria-label={`${label}：${detail}`}
-    >{label}</span>
+    <Tooltip
+      title={detail}
+      trigger={["hover", "focus"]}
+      placement="top"
+      mouseEnterDelay={0.1}
+      rootClassName="account-runtime-status-tooltip"
+    >
+      <span
+        className={`status-chip ${tone} account-runtime-tag account-runtime-status`}
+        tabIndex={0}
+        aria-label={`${label}：${detail}`}
+      >{label}</span>
+    </Tooltip>
   );
 }
 

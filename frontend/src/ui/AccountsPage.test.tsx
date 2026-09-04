@@ -398,7 +398,13 @@ describe("AccountsPage", () => {
         reused: false,
         job: legacyJob({
           id: "job-image-all", name: "更新 CPA 镜像", target: "all", status: "succeeded",
-          finished_at: 101, exit_code: 0, output: ["updated all"]
+          started_at: 100, finished_at: 103, exit_code: 0,
+          output: [
+            "正在更新 alpha：sha256:old-account -> sha256:target",
+            "alpha 验证通过：运行探针",
+            "跳过 beta：CPA 未运行；下次启动会使用目标镜像",
+            "CPA 镜像更新完成：1 个"
+          ]
         })
       }
     });
@@ -412,7 +418,24 @@ describe("AccountsPage", () => {
     expect(within(dialog).getByText("将使用已拉取并锁定版本与摘要的目标镜像逐个重建运行中的已启用 CPA，停用账号会跳过；失败时自动恢复原镜像。")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "更新全部 CPA" }));
 
-    expect(await screen.findByText("updated all")).toBeInTheDocument();
+    expect(await screen.findByLabelText("CPA 镜像更新详情")).toBeInTheDocument();
+    const taskSummary = screen.getByLabelText("任务执行摘要");
+    expect(taskSummary).toHaveTextContent("执行范围全部 CPA");
+    expect(taskSummary).toHaveTextContent("执行状态成功");
+    expect(taskSummary).toHaveTextContent("开始时间1970/01/01 08:01:40");
+    expect(taskSummary).toHaveTextContent("完成时间1970/01/01 08:01:43");
+    expect(taskSummary).toHaveTextContent("任务耗时3 秒");
+    expect(taskSummary).toHaveTextContent("输出记录4 行");
+    const imageSummary = screen.getByLabelText("镜像更新摘要");
+    expect(imageSummary).toHaveTextContent("目标镜像sha256:target");
+    expect(imageSummary).toHaveTextContent("涉及账号2");
+    expect(imageSummary).toHaveTextContent("更新完成1");
+    expect(imageSummary).toHaveTextContent("探针通过1");
+    expect(imageSummary).toHaveTextContent("已跳过1");
+    const accountResults = screen.getByRole("list", { name: "账号更新结果" });
+    expect(within(accountResults).getByText("alpha")).toBeInTheDocument();
+    expect(within(accountResults).getByText("beta")).toBeInTheDocument();
+    expect(screen.getByText("查看原始输出").closest("details")).not.toHaveAttribute("open");
     const mutation = requestsTo(fetchMock, "/admin/api/operations")[0];
     expect(JSON.parse(String(mutation[1]?.body))).toEqual({
       action: "image-update", target: "all"
@@ -896,6 +919,18 @@ describe("AccountsPage", () => {
       "aria-label",
       "已停止：CPA 容器未运行"
     );
+  });
+
+  it("renders account status details in a body-level tooltip instead of inside the clipped table", async () => {
+    vi.stubGlobal("fetch", accountPageFetchMock(catalog));
+    const user = userEvent.setup();
+    renderPage();
+
+    const status = await screen.findByText("已停止", { selector: ".account-runtime-status" });
+    await user.hover(status);
+    const tooltip = await screen.findByText("CPA 容器未运行", { selector: ".ant-tooltip-container" });
+    expect(tooltip).toHaveTextContent("CPA 容器未运行");
+    expect(tooltip.closest(".account-legacy-table")).toBeNull();
   });
 
   it("requests a fresh account catalog when the usage window changes", async () => {

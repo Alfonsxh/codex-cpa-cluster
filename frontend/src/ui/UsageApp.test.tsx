@@ -304,13 +304,14 @@ describe("UsageDashboard", () => {
     await user.hover(quotaHelp);
     const quotaTooltip = await screen.findByRole("tooltip");
     expect(within(quotaTooltip).getByText("加权已用")).toBeInTheDocument();
-    expect(within(quotaTooltip).getByText("3 M Token")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("3,000,000")).toBeInTheDocument();
     expect(within(quotaTooltip).getByText("未加权已用")).toBeInTheDocument();
-    expect(within(quotaTooltip).getByText("2.4 M Token")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("2,400,000")).toBeInTheDocument();
     expect(within(quotaTooltip).getByText("总额度")).toBeInTheDocument();
-    expect(within(quotaTooltip).getByText("20 M Token")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("20,000,000")).toBeInTheDocument();
     expect(within(quotaTooltip).getByText("剩余额度")).toBeInTheDocument();
-    expect(within(quotaTooltip).getByText("17 M Token")).toBeInTheDocument();
+    expect(within(quotaTooltip).getByText("17,000,000")).toBeInTheDocument();
+    expect(within(quotaTooltip).queryByText(/\b(?:Token|[KMB])\b/)).not.toBeInTheDocument();
     await user.unhover(quotaHelp);
     for (const heading of ["序号", "当前账号", "CPA 账号", "账号周额度", "活跃用户", "账号状态", "我的请求", "我的 Token", "最后使用"]) {
       expect(screen.getByRole("columnheader", { name: new RegExp(heading) })).toBeInTheDocument();

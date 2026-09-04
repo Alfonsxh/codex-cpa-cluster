@@ -175,6 +175,37 @@ func TestControllerSkipsRoundUntilConfiguredPollInterval(t *testing.T) {
 	}
 }
 
+func TestControllerChecksNewQuotaSnapshotBeforeConfiguredPollInterval(t *testing.T) {
+	store := seedRebalanceStore(t)
+	defer store.Close()
+	writeControllerSettings(t, store, "active")
+	now := time.Unix(500, 0)
+	state := DefaultRuntimeState()
+	state.Mode = ModeActive
+	state.HeartbeatAt = int64Pointer(now.Unix() - 10)
+	state.LastCheckAt = int64Pointer(now.Unix() - 10)
+	state.Accounts = map[string]AccountState{
+		"alpha": {Account: "alpha", ObservedAt: now.Unix() - 60},
+		"beta":  {Account: "beta", ObservedAt: now.Unix() - 60},
+	}
+	if err := store.WriteRuntimeState(context.Background(), RuntimeStateName, state); err != nil {
+		t.Fatalf("WriteRuntimeState: %v", err)
+	}
+	writeQuotaState(t, store, now, map[string]quota.AccountQuota{
+		"alpha": quotaAccount("alpha", 100, false),
+		"beta":  quotaAccount("beta", 20, false),
+	})
+	controller := Controller{
+		Store: store, Probe: &staticRuntimeProbe{running: map[string]bool{"alpha": true, "beta": true}},
+		Activity: &fakeActivity{}, Snapshots: &fakePublisher{}, Now: func() time.Time { return now },
+	}
+
+	result, err := controller.RunOnce(context.Background())
+	if err != nil || !result.Checked || result.MovedUsers != 4 {
+		t.Fatalf("new quota snapshot result = (%#v, %v)", result, err)
+	}
+}
+
 func TestHealthyRuntimeStateRequiresSuccessfulActiveCheck(t *testing.T) {
 	now := time.Unix(1_000, 0)
 	state := DefaultRuntimeState()

@@ -47,7 +47,7 @@ func BuildAccountStates(
 		}
 		exhausted := fresh && found && accountQuota.Status == "ok" &&
 			((accountQuota.LimitReached != nil && *accountQuota.LimitReached) ||
-				(weekly != nil && weekly.LimitReached))
+				(weekly != nil && (weekly.LimitReached || weekly.UsedPercent >= 100)))
 		headroom := 0.0
 		if remaining != nil {
 			headroom = math.Max(0, *remaining-reservePercent)

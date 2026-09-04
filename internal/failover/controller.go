@@ -12,7 +12,6 @@ import (
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -148,8 +147,11 @@ func (controller *Controller) run(ctx context.Context, force bool) (ControllerRe
 		}
 		return result, nil
 	}
+	quotaState, quotaFound, quotaError := quota.ReadState(ctx, controller.Store)
+	quotaChanged := quotaError == nil && quotaFound &&
+		quotaState.Snapshot.GeneratedAt > latestObservedAt(state.Accounts)
 	if !force && previousMode == mode && state.LastCheckAt != nil &&
-		nowUnix < *state.LastCheckAt+int64(pollInterval/time.Second) {
+		nowUnix < *state.LastCheckAt+int64(pollInterval/time.Second) && !quotaChanged {
 		if previousHeartbeatAge >= 60 {
 			if err := controller.writeState(ctx, state); err != nil {
 				return result, err
@@ -164,23 +166,11 @@ func (controller *Controller) run(ctx context.Context, force bool) (ControllerRe
 		)
 	}
 
-	var (
-		accounts   []controlplane.Account
-		quotaState quota.RuntimeState
-		quotaFound bool
-	)
-	group, groupContext := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		var readError error
-		accounts, readError = controller.Store.ReadAccounts(groupContext)
-		return readError
-	})
-	group.Go(func() error {
-		var readError error
-		quotaState, quotaFound, readError = quota.ReadState(groupContext, controller.Store)
-		return readError
-	})
-	if err := group.Wait(); err != nil {
+	if quotaError != nil {
+		return result, controller.recordError(ctx, state, nowUnix, pollInterval, fmt.Errorf("collect account failover inputs: %w", quotaError))
+	}
+	accounts, err := controller.Store.ReadAccounts(ctx)
+	if err != nil {
 		return result, controller.recordError(ctx, state, nowUnix, pollInterval, fmt.Errorf("collect account failover inputs: %w", err))
 	}
 	running, err := controller.Probe.ProbeAccounts(ctx, accounts)
@@ -332,6 +322,16 @@ func timestampAge(timestamp *int64, now int64) int64 {
 		return math.MaxInt64
 	}
 	return now - *timestamp
+}
+
+func latestObservedAt(states map[string]AccountState) int64 {
+	var latest int64
+	for _, state := range states {
+		if state.ObservedAt > latest {
+			latest = state.ObservedAt
+		}
+	}
+	return latest
 }
 
 func int64Pointer(value int64) *int64 {

@@ -14,6 +14,7 @@ func TestBuildAccountStatesRequiresFreshHealthyDefaultQuotaAndReserve(t *testing
 		{ID: "beta", GroupEnabled: true},
 		{ID: "gamma", GroupEnabled: true},
 		{ID: "delta", GroupEnabled: true},
+		{ID: "percent-only", GroupEnabled: true},
 		{ID: "disabled", GroupEnabled: false},
 	}
 	snapshot := quota.Snapshot{GeneratedAt: 1000, Accounts: []quota.AccountQuota{
@@ -21,9 +22,10 @@ func TestBuildAccountStatesRequiresFreshHealthyDefaultQuotaAndReserve(t *testing
 		accountQuota("beta", 10, false, "ok"),
 		accountQuota("gamma", 20, false, "auth_missing"),
 		accountQuota("delta", 95, false, "ok"),
+		accountQuota("percent-only", 100, false, "ok"),
 		accountQuota("disabled", 10, false, "ok"),
 	}}
-	running := map[string]bool{"alpha": true, "beta": true, "gamma": true, "delta": true, "disabled": true}
+	running := map[string]bool{"alpha": true, "beta": true, "gamma": true, "delta": true, "percent-only": true, "disabled": true}
 	states := BuildAccountStates(accounts, snapshot, running, time.Unix(1000, 0), 2*time.Minute, 5)
 	if !states["alpha"].Exhausted || states["alpha"].Eligible || states["alpha"].Reason != "quota_exhausted" {
 		t.Fatalf("alpha = %#v", states["alpha"])
@@ -36,6 +38,9 @@ func TestBuildAccountStatesRequiresFreshHealthyDefaultQuotaAndReserve(t *testing
 	}
 	if states["delta"].Reason != "reserve_reached" || states["delta"].Eligible {
 		t.Fatalf("delta = %#v", states["delta"])
+	}
+	if !states["percent-only"].Exhausted || states["percent-only"].Eligible || states["percent-only"].Reason != "quota_exhausted" {
+		t.Fatalf("percent-only = %#v", states["percent-only"])
 	}
 	if states["disabled"].Reason != "account_disabled" || states["disabled"].Eligible {
 		t.Fatalf("disabled = %#v", states["disabled"])

@@ -325,6 +325,7 @@ describe("UsageDashboard", () => {
     ]);
     await user.click(screen.getByRole("button", { name: "切换" }));
     expect(await findModal("切换到 alpha.cpa@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("现有 API Key 不会改变")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /取\s*消/ }));
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("usage-breakdown"))).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);

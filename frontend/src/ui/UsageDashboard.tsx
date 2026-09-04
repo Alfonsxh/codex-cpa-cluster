@@ -362,10 +362,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
       </div>
 
       <Modal title={`切换到 ${switchTarget ? accountLabel(switchTarget) : "目标账号"}`} open={Boolean(switchTarget)} okText="确认切换" cancelText="取消" confirmLoading={accountSwitch.isPending} onCancel={() => !accountSwitch.isPending && setSwitchTarget(null)} onOk={() => switchTarget && accountSwitch.mutate(switchTarget)} destroyOnHidden>
-        <Space orientation="vertical" size={16} className="portal-form-stack">
-          <Alert type="info" showIcon title="现有 API Key 不会改变" description="只更新你的目标 CPA。系统会原子写入路由、发布鉴权快照并等待 Gateway 确认；失败时自动恢复原路由。" />
-          {accountSwitch.isError ? <Alert type="error" showIcon title="账号切换失败" description={errorMessage(accountSwitch.error)} /> : null}
-        </Space>
+        {accountSwitch.isError ? <Alert type="error" showIcon title="账号切换失败" description={errorMessage(accountSwitch.error)} /> : null}
       </Modal>
 
       <Modal title="管理 API Key" open={keyOpen} footer={<Button onClick={closeKey}>关闭</Button>} onCancel={closeKey} destroyOnHidden>

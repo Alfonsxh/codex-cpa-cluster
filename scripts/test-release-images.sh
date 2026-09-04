@@ -118,6 +118,18 @@ case "${1:-}" in
           echo "forced imagetools create failure: $DESTINATION" >&2
           exit 92
         fi
+        if [ -n "${FAKE_CREATE_TRANSIENT_MATCH:-}" ] \
+          && printf '%s' "$DESTINATION" | grep -Fq "$FAKE_CREATE_TRANSIENT_MATCH"; then
+          FAILURE_COUNTER=$(reference_path "create-failures-$DESTINATION")
+          FAILURE_COUNT=0
+          [ ! -f "$FAILURE_COUNTER" ] || FAILURE_COUNT=$(cat "$FAILURE_COUNTER")
+          if [ "$FAILURE_COUNT" -lt "${FAKE_CREATE_TRANSIENT_FAILURES:-1}" ]; then
+            FAILURE_COUNT=$((FAILURE_COUNT + 1))
+            printf '%s\n' "$FAILURE_COUNT" >"$FAILURE_COUNTER"
+            echo "failed to do request: write: broken pipe" >&2
+            exit 1
+          fi
+        fi
         SOURCE_RECORD=$(reference_path "$SOURCE")
         [ -f "$SOURCE_RECORD" ] || { echo "fake create source missing: $SOURCE" >&2; exit 90; }
         cp "$SOURCE_RECORD" "$(reference_path "$DESTINATION")"
@@ -280,7 +292,7 @@ fi
 # transient outage could trigger an unnecessary build and overwrite mutable tags.
 reset_scenario
 put_registry "$PREFIX_A"
-if run_publish "$PREFIX_A" REGISTRY_INSPECT_RETRY_DELAY_SECONDS=0 \
+if run_publish "$PREFIX_A" REGISTRY_RETRY_DELAY_SECONDS=0 \
   FAKE_INSPECT_NETWORK_MATCH="codex-cpa-web:$VERSION" >/dev/null 2>&1; then
   echo "network inspection failure was accepted as a missing image" >&2
   exit 1
@@ -292,13 +304,25 @@ fi
 # moving immutable/latest tags.
 reset_scenario
 put_registry "$PREFIX_A"
-run_publish "$PREFIX_A" REGISTRY_INSPECT_RETRY_DELAY_SECONDS=0 \
+run_publish "$PREFIX_A" REGISTRY_RETRY_DELAY_SECONDS=0 \
   FAKE_INSPECT_TRANSIENT_MATCH="codex-cpa-web:$VERSION" \
   FAKE_INSPECT_TRANSIENT_FAILURES=2 >/dev/null
 [ "$(grep -F "codex-cpa-web:$VERSION" "$DOCKER_LOG" | grep -c 'imagetools inspect')" -eq 3 ] \
   || { echo "transient inspection failure did not use the bounded retry" >&2; exit 1; }
 ! grep -Fq 'buildx bake' "$DOCKER_LOG" || { echo "transient retry rebuilt images" >&2; exit 1; }
 ! grep -Fq 'imagetools create' "$DOCKER_LOG" || { echo "transient retry moved a remote tag" >&2; exit 1; }
+
+# Remote tag promotion is idempotent, so transient write failures are retried
+# without rebuilding any image layers.
+reset_scenario
+put_registry "$PREFIX_A"
+rm -f -- "$(state_path "$PREFIX_A/codex-cpa-web:$VERSION")" "$(state_path "$PREFIX_A/codex-cpa-web:latest")"
+run_publish "$PREFIX_A" REGISTRY_RETRY_DELAY_SECONDS=0 \
+  FAKE_CREATE_TRANSIENT_MATCH="$PREFIX_A/codex-cpa-web:$VERSION" \
+  FAKE_CREATE_TRANSIENT_FAILURES=2 >/dev/null
+[ "$(grep -F -- "--tag $PREFIX_A/codex-cpa-web:$VERSION" "$DOCKER_LOG" | grep -c 'imagetools create')" -eq 3 ] \
+  || { echo "transient tag failure did not use the bounded retry" >&2; exit 1; }
+! grep -Fq 'buildx bake' "$DOCKER_LOG" || { echo "transient tag retry rebuilt images" >&2; exit 1; }
 
 # Build failure leaves latest untouched.
 reset_scenario

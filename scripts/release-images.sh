@@ -9,8 +9,8 @@ IMAGE_PREFIXES=${IMAGE_PREFIXES:-}
 ALLOW_DIRTY=${ALLOW_DIRTY:-false}
 RELEASECTL=${RELEASECTL:-}
 RELEASE_COMPONENTS="control web gateway edge"
-REGISTRY_INSPECT_ATTEMPTS=${REGISTRY_INSPECT_ATTEMPTS:-4}
-REGISTRY_INSPECT_RETRY_DELAY_SECONDS=${REGISTRY_INSPECT_RETRY_DELAY_SECONDS:-1}
+REGISTRY_RETRY_ATTEMPTS=${REGISTRY_RETRY_ATTEMPTS:-4}
+REGISTRY_RETRY_DELAY_SECONDS=${REGISTRY_RETRY_DELAY_SECONDS:-1}
 TAB=$(printf '\t')
 
 case "$VERSION" in
@@ -26,11 +26,11 @@ case "$PLATFORM" in
   *) echo "PLATFORM 必须是单个 Linux 平台，例如 linux/amd64：$PLATFORM" >&2; exit 1 ;;
 esac
 case "$ALLOW_DIRTY" in true|false) ;; *) echo "ALLOW_DIRTY 只能为 true 或 false" >&2; exit 1 ;; esac
-case "$REGISTRY_INSPECT_ATTEMPTS" in
-  ''|*[!0-9]*|0) echo "REGISTRY_INSPECT_ATTEMPTS 必须是正整数" >&2; exit 1 ;;
+case "$REGISTRY_RETRY_ATTEMPTS" in
+  ''|*[!0-9]*|0) echo "REGISTRY_RETRY_ATTEMPTS 必须是正整数" >&2; exit 1 ;;
 esac
-case "$REGISTRY_INSPECT_RETRY_DELAY_SECONDS" in
-  ''|*[!0-9]*) echo "REGISTRY_INSPECT_RETRY_DELAY_SECONDS 必须是非负整数" >&2; exit 1 ;;
+case "$REGISTRY_RETRY_DELAY_SECONDS" in
+  ''|*[!0-9]*) echo "REGISTRY_RETRY_DELAY_SECONDS 必须是非负整数" >&2; exit 1 ;;
 esac
 case "$ACTION" in build|publish) ;; *) echo "未知动作：$ACTION" >&2; exit 1 ;; esac
 if [ "$ACTION" = publish ] && [ -z "$IMAGE_PREFIXES" ]; then
@@ -120,7 +120,7 @@ inspect_remote_image() {
   INSPECT_RAW="$INSPECT_OUTPUT.raw"
   INSPECT_ERROR="$INSPECT_OUTPUT.error"
   INSPECT_ATTEMPT=1
-  while [ "$INSPECT_ATTEMPT" -le "$REGISTRY_INSPECT_ATTEMPTS" ]; do
+  while [ "$INSPECT_ATTEMPT" -le "$REGISTRY_RETRY_ATTEMPTS" ]; do
     if docker buildx imagetools inspect --format '{{json .}}' "$INSPECT_REFERENCE" >"$INSPECT_RAW" 2>"$INSPECT_ERROR"; then
       if ! INSPECT_METADATA=$("$RELEASECTL_BIN" image-metadata --input "$INSPECT_RAW"); then
         echo "无法解析远端镜像元数据：$INSPECT_REFERENCE" >&2
@@ -133,18 +133,43 @@ inspect_remote_image() {
       printf '%s\n' missing >"$INSPECT_OUTPUT"
       return 0
     fi
-    if [ "$INSPECT_ATTEMPT" -ge "$REGISTRY_INSPECT_ATTEMPTS" ] \
+    if [ "$INSPECT_ATTEMPT" -ge "$REGISTRY_RETRY_ATTEMPTS" ] \
       || ! grep -Eqi 'broken pipe|connection reset|i/o timeout|timed out|unexpected EOF|TLS handshake|temporary failure|network is unreachable' "$INSPECT_ERROR"; then
       break
     fi
-    INSPECT_DELAY=$((INSPECT_ATTEMPT * REGISTRY_INSPECT_RETRY_DELAY_SECONDS))
+    INSPECT_DELAY=$((INSPECT_ATTEMPT * REGISTRY_RETRY_DELAY_SECONDS))
     printf '远端镜像检查暂时失败，%d 秒后重试（%d/%d）：%s\n' \
-      "$INSPECT_DELAY" "$INSPECT_ATTEMPT" "$REGISTRY_INSPECT_ATTEMPTS" "$INSPECT_REFERENCE" >&2
+      "$INSPECT_DELAY" "$INSPECT_ATTEMPT" "$REGISTRY_RETRY_ATTEMPTS" "$INSPECT_REFERENCE" >&2
     [ "$INSPECT_DELAY" -eq 0 ] || sleep "$INSPECT_DELAY"
     INSPECT_ATTEMPT=$((INSPECT_ATTEMPT + 1))
   done
   echo "检查远端镜像失败：$INSPECT_REFERENCE" >&2
   cat "$INSPECT_ERROR" >&2
+  return 1
+}
+
+create_remote_tag() {
+  CREATE_DESTINATION=$1
+  CREATE_SOURCE=$2
+  CREATE_ERROR="$WORK_DIR/create.error"
+  CREATE_ATTEMPT=1
+  while [ "$CREATE_ATTEMPT" -le "$REGISTRY_RETRY_ATTEMPTS" ]; do
+    if docker buildx imagetools create --prefer-index=false \
+      --tag "$CREATE_DESTINATION" "$CREATE_SOURCE" 2>"$CREATE_ERROR"; then
+      return 0
+    fi
+    if [ "$CREATE_ATTEMPT" -ge "$REGISTRY_RETRY_ATTEMPTS" ] \
+      || ! grep -Eqi 'broken pipe|connection reset|i/o timeout|timed out|unexpected EOF|TLS handshake|temporary failure|network is unreachable' "$CREATE_ERROR"; then
+      break
+    fi
+    CREATE_DELAY=$((CREATE_ATTEMPT * REGISTRY_RETRY_DELAY_SECONDS))
+    printf '远端镜像标签写入暂时失败，%d 秒后重试（%d/%d）：%s\n' \
+      "$CREATE_DELAY" "$CREATE_ATTEMPT" "$REGISTRY_RETRY_ATTEMPTS" "$CREATE_DESTINATION" >&2
+    [ "$CREATE_DELAY" -eq 0 ] || sleep "$CREATE_DELAY"
+    CREATE_ATTEMPT=$((CREATE_ATTEMPT + 1))
+  done
+  echo "创建远端镜像标签失败：$CREATE_DESTINATION <- $CREATE_SOURCE" >&2
+  cat "$CREATE_ERROR" >&2
   return 1
 }
 
@@ -268,10 +293,10 @@ done <"$INVENTORY_FILE"
 while IFS="$TAB" read -r PREFIX COMPONENT DIGEST CONTENT_IMAGE VERSION_IMAGE PLAN_ACTION CONTENT_METADATA VERSION_METADATA; do
   case "$PLAN_ACTION" in
     promote-version)
-      docker buildx imagetools create --prefer-index=false --tag "$VERSION_IMAGE" "$CONTENT_IMAGE"
+      create_remote_tag "$VERSION_IMAGE" "$CONTENT_IMAGE"
       ;;
     promote-content)
-      docker buildx imagetools create --prefer-index=false --tag "$CONTENT_IMAGE" "$VERSION_IMAGE"
+      create_remote_tag "$CONTENT_IMAGE" "$VERSION_IMAGE"
       ;;
   esac
 done <"$PUBLISH_PLAN"
@@ -381,7 +406,7 @@ while IFS="$TAB" read -r PREFIX COMPONENT DIGEST VERSION_IMAGE VERSION_MANIFEST 
     printf 'latest 已是目标版本，跳过：%s\n' "$LATEST_IMAGE"
     continue
   fi
-  docker buildx imagetools create --prefer-index=false --tag "$LATEST_IMAGE" "$VERSION_IMAGE"
+  create_remote_tag "$LATEST_IMAGE" "$VERSION_IMAGE"
   ensure_remote_exists "$LATEST_IMAGE" "$LATEST_METADATA"
   validate_existing_metadata "$LATEST_METADATA" "$LATEST_IMAGE" "$COMPONENT" "$DIGEST"
   if [ "$(metadata_manifest "$LATEST_METADATA")" != "$VERSION_MANIFEST" ]; then

@@ -52,6 +52,13 @@ const effectiveWeightedTokensSQL = `CASE
 	WHEN weight_policy_version = 'legacy-v1' AND weighted_tokens = 0 AND total_tokens > 0
 	THEN total_tokens ELSE weighted_tokens END`
 
+type TokenMode string
+
+const (
+	TokenModeUnweighted TokenMode = "unweighted"
+	TokenModeWeighted   TokenMode = "weighted"
+)
+
 func (store *Store) TokenTimeSeries(
 	ctx context.Context,
 	accounts []string,
@@ -61,6 +68,7 @@ func (store *Store) TokenTimeSeries(
 	endAt int64,
 	bucketSeconds int64,
 	userLimit int,
+	tokenMode TokenMode,
 	startAtByAccount map[string]int64,
 ) (TokenTrend, error) {
 	if startAt < 0 || endAt <= startAt || bucketSeconds <= 0 {
@@ -88,8 +96,11 @@ func (store *Store) TokenTimeSeries(
 	if userLimit < 1 {
 		userLimit = 1
 	}
-	if userLimit > 50 {
-		userLimit = 50
+	if userLimit > 500 {
+		userLimit = 500
+	}
+	if tokenMode != TokenModeUnweighted && tokenMode != TokenModeWeighted {
+		return TokenTrend{}, errors.New("token trend mode is invalid")
 	}
 	generatedAt := endAt - 1
 	firstBucket := (startAt / bucketSeconds) * bucketSeconds
@@ -170,6 +181,10 @@ func (store *Store) TokenTimeSeries(
 			Tokens         int64  `db:"total_tokens"`
 			WeightedTokens int64  `db:"weighted_tokens"`
 		}, 0, userLimit)
+		orderBy := "total_tokens DESC, weighted_tokens DESC, user_email"
+		if tokenMode == TokenModeWeighted {
+			orderBy = "weighted_tokens DESC, total_tokens DESC, user_email"
+		}
 		query := `
 			SELECT user_email, SUM(total_tokens) AS total_tokens,
 			       SUM(` + effectiveWeightedTokensSQL + `) AS weighted_tokens
@@ -178,7 +193,7 @@ func (store *Store) TokenTimeSeries(
 			   AND user_email IN (SELECT CAST(value AS TEXT) FROM json_each(?))
 			   AND ` + rangeSQL + `
 			 GROUP BY user_email
-			 ORDER BY weighted_tokens DESC, total_tokens DESC, user_email
+			 ORDER BY ` + orderBy + `
 			 LIMIT ?`
 		arguments := []any{string(accountsJSON), string(usersJSON)}
 		arguments = append(arguments, rangeArguments...)

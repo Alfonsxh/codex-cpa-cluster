@@ -38,6 +38,7 @@ type appConfig struct {
 	Root                  string
 	LogLevel              string
 	SessionTTL            time.Duration
+	SessionAbsoluteTTL    time.Duration
 	PortalSessionTTL      time.Duration
 	SecureCookies         bool
 	ShutdownTimeout       time.Duration
@@ -91,6 +92,7 @@ func newCommand() *cobra.Command {
 				Root:                  settings.GetString("root"),
 				LogLevel:              settings.GetString("log-level"),
 				SessionTTL:            settings.GetDuration("session-ttl"),
+				SessionAbsoluteTTL:    settings.GetDuration("session-absolute-ttl"),
 				PortalSessionTTL:      settings.GetDuration("portal-session-ttl"),
 				SecureCookies:         settings.GetBool("secure-cookies"),
 				ShutdownTimeout:       settings.GetDuration("shutdown-timeout"),
@@ -112,7 +114,8 @@ func newCommand() *cobra.Command {
 	flags.String("address", ":8318", "Admin API listen address")
 	flags.String("root", "/opt/codex-cpa-cluster", "existing CPA deployment root")
 	flags.String("log-level", "info", "Zap log level")
-	flags.Duration("session-ttl", 15*time.Minute, "Admin browser session lifetime")
+	flags.Duration("session-ttl", 30*time.Minute, "Admin browser inactivity timeout")
+	flags.Duration("session-absolute-ttl", 8*time.Hour, "Admin browser absolute session lifetime")
 	flags.Duration("portal-session-ttl", 12*time.Hour, "self-service browser session lifetime")
 	flags.Bool("secure-cookies", false, "always mark Admin session cookies Secure")
 	flags.Duration("shutdown-timeout", 30*time.Second, "maximum graceful shutdown wait")
@@ -159,6 +162,9 @@ func run(config appConfig) error {
 	}
 	if config.SessionTTL <= 0 {
 		return errors.New("Admin session TTL must be positive")
+	}
+	if config.SessionAbsoluteTTL < config.SessionTTL {
+		return errors.New("Admin session absolute TTL must not be shorter than idle TTL")
 	}
 	if config.PortalSessionTTL <= 0 || config.PortalSessionTTL > 30*24*time.Hour {
 		return errors.New("Portal session TTL must be positive and not exceed 30 days")
@@ -430,6 +436,7 @@ func runOwnedAdmin(
 		NotificationSender:   notificationSender,
 		Logger:               logger,
 		SessionTTL:           config.SessionTTL,
+		SessionAbsoluteTTL:   config.SessionAbsoluteTTL,
 		SecureCookies:        config.SecureCookies,
 		Rebalancer:           rebalancer,
 		Portal:               portalServer,

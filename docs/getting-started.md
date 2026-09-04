@@ -47,7 +47,7 @@ curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/downloa
 
 默认入口选择 GitHub Latest Release。已安装环境可以执行 `sudo /home/cpac/run.sh --tag`，按版本顺序查看高于当前部署版本的 GitHub Releases 并交互选择；非交互调用只打印候选，不执行升级。需要固定版本时使用 `sudo /home/cpac/run.sh --tag v2.0.0`；指定 Tag 必须存在对应 GitHub Release 及完整校验附件，脚本不会从孤立 Git Tag 或源码归档部署。
 
-首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 CPAC 管理 Nginx/TLS）；选择会与域名一起写入 `/home/cpac/config.env`。无交互环境必须使用例如 `sudo /home/cpac/run.sh run --domain qdata.example.com --ingress external`。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无 CPAC 托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 CPAC 管理 Nginx/TLS）；选择会与域名一起写入 `/home/cpac/config.env`。无交互环境必须使用例如 `sudo /home/cpac/run.sh run --domain qdata.example.com --ingress external`。部署会把宿主机和 CPAC 服务统一到 `Asia/Shanghai` 时区，额度自然周、每日统计和通知也默认使用该时区。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无 CPAC 托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
 
 日后如确需切换入口，先处理好宿主机站点归属，再执行并确认：
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -34,6 +34,7 @@ describe("OverviewPage legacy dashboard contract", () => {
       window: "today",
       window_seconds: null,
       window_start_at: 1_799_996_400,
+      window_timezone: "Asia/Shanghai",
       window_start_at_by_account: null,
       unavailable_accounts: [],
       bucket_seconds: 900,
@@ -45,7 +46,12 @@ describe("OverviewPage legacy dashboard contract", () => {
           : tokenSeries(`cpa-${String(index + 1).padStart(2, "0")}`, [0, 0], [0, 0])),
       users: [
         tokenSeries("alice@example.com", [100, 200], [300, 300]),
-        tokenSeries("bob@example.com", [200, 200], [250, 250])
+        tokenSeries("bob@example.com", [200, 200], [250, 250]),
+        ...Array.from({ length: 13 }, (_, index) => tokenSeries(
+          `user-${String(index + 3).padStart(2, "0")}@example.com`,
+          [0, 0],
+          [0, 0]
+        ))
       ],
       selected_account: null,
       selected_user: null,
@@ -83,14 +89,20 @@ describe("OverviewPage legacy dashboard contract", () => {
     const catalog = {
       generated_at: 1_800_000_000,
       accounts: usage.accounts.map((account) => ({ id: account.name, operational_status: { label: "可用", tone: "success" } })),
-      users: [
-        { email: "alice@example.com", status: "active" },
-        { email: "bob@example.com", status: "active" }
-      ]
+      users: usage.users.map((user) => ({ email: user.name, status: "active" }))
     };
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
       const path = String(input);
-      if (path.startsWith("/admin/api/overview/usage?")) return Promise.resolve(jsonResponse(usage));
+      if (path.startsWith("/admin/api/overview/usage?")) {
+        const requestURL = new URL(path, "http://preview.test");
+        const requestedLimit = Number(requestURL.searchParams.get("user_limit") ?? 10);
+        const weighted = requestURL.searchParams.get("token_mode") === "weighted";
+        const users = [...usage.users]
+          .sort((left, right) => (weighted ? right.weighted_total - left.weighted_total : right.total - left.total)
+            || left.name.localeCompare(right.name))
+          .slice(0, requestedLimit);
+        return Promise.resolve(jsonResponse({ ...usage, users, user_limit: requestedLimit }));
+      }
       if (path === "/admin/api/overview/summary") return Promise.resolve(jsonResponse(summary));
       if (path === "/admin/api/overview/catalog") return Promise.resolve(jsonResponse(catalog));
       if (path === "/admin/api/overview/status") return Promise.resolve(jsonResponse(status));
@@ -111,12 +123,14 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(await screen.findByText("1 个用户的统一 Key 账号矩阵不完整")).toBeInTheDocument();
     const metrics = screen.getByLabelText("关键指标");
     expect(within(metrics).getAllByRole("article")).toHaveLength(6);
-    expect(within(metrics).getByText("有效用户")).toBeInTheDocument();
-    expect(within(metrics).getByText("已授权 CPA")).toBeInTheDocument();
-    expect(within(metrics).getByText("运行服务")).toBeInTheDocument();
+    expect(within(metrics).getByText("CPA 账号")).toBeInTheDocument();
+    expect(within(metrics).getByText("用户状态")).toBeInTheDocument();
+    expect(within(metrics).getByText("Key 健康")).toBeInTheDocument();
+    expect(within(metrics).getByText("团队覆盖")).toBeInTheDocument();
+    expect(within(metrics).getByText("服务状态")).toBeInTheDocument();
     expect(within(metrics).getByText("5 分钟请求")).toBeInTheDocument();
-    expect(within(metrics).getByText("2/3")).toBeInTheDocument();
-    expect(within(metrics).getByText("7/8")).toBeInTheDocument();
+    expect(within(metrics).getByText("启用 2 · 已授权 2")).toBeInTheDocument();
+    expect(within(metrics).getAllByText("7/8")).toHaveLength(2);
     expect(within(metrics).getByText("74")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "账号周额度" })).toBeInTheDocument();
     expect(screen.getByText("47.5%")).toBeInTheDocument();
@@ -135,16 +149,15 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getByLabelText("全部账号统计摘要")).toContainElement(
       screen.getByLabelText("全部账号未加权 Token 使用量汇总值")
     );
-    expect(screen.getByLabelText("CPA用量明细表格")).toHaveTextContent("alpha");
+    expect(screen.queryByLabelText("CPA用量明细表格")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /Token 使用量|Token 使用趋势/ })).not.toBeInTheDocument();
-    expect(screen.getByTitle("200 未加权 Token")).toBeInTheDocument();
     expect(screen.getByText("重启 alpha")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "全部用户" }));
     expect(await screen.findByPlaceholderText("搜索用户邮箱")).toHaveFocus();
     expect(await screen.findByTitle("alice@example.com")).toBeVisible();
 
-    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/usage?window=today&user_limit=10")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/usage?window=today&user_limit=10&token_mode=unweighted")).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/overview/catalog")).toBe(true);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/release"))).toBe(false);
 
@@ -152,63 +165,80 @@ describe("OverviewPage legacy dashboard contract", () => {
 
     await user.click(screen.getByRole("button", { name: /^加权$/ }));
     const aggregateWeightedSummary = screen.getByLabelText("全部账号加权 Token 使用量汇总值");
-    expect(within(aggregateWeightedSummary).getByText("当前值").closest("div")).toHaveTextContent("250 Token加权");
+    expect(within(aggregateWeightedSummary).getByText("当前值").closest("div")).toHaveTextContent("加权250 Token");
     expect(await screen.findByRole("img", { name: /全部账号加权 Token 使用趋势/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^未加权$/ }));
 
-    await user.click(screen.getByRole("tab", { name: "按 CPA" }));
-    expect(screen.getByRole("tab", { name: "按 CPA" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "CPA 账号 Token 统计" }));
+    expect(screen.getByRole("tab", { name: "CPA 账号 Token 统计" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "overview-token-tab-account");
-    expect(await screen.findByRole("img", { name: /CPA 账号未加权 Token 使用趋势：alpha/ })).toBeInTheDocument();
-    expect(screen.getByLabelText("CPA用量明细表格")).toHaveTextContent("alpha");
+    expect(await screen.findByRole("img", { name: /CPA 账号未加权 Token 使用趋势：.*alpha/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText("CPA 账号统计摘要")).not.toBeInTheDocument();
+    const accountTable = screen.getByLabelText("CPA用量明细表格");
+    expect(accountTable).toHaveTextContent("alpha");
+    expect(accountTable).not.toHaveTextContent("cpa-15");
+    Object.defineProperties(accountTable, {
+      clientHeight: { configurable: true, value: 300 },
+      scrollHeight: { configurable: true, value: 900 },
+      scrollTop: { configurable: true, value: 600 }
+    });
+    fireEvent.scroll(accountTable);
+    expect(accountTable).toHaveTextContent("cpa-15");
+    expect(within(accountTable).getAllByText("200 Token").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /^加权$/ }));
-    expect(await screen.findByRole("img", { name: /CPA 账号加权 Token 使用趋势：alpha/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /CPA 账号加权 Token 使用趋势：.*alpha/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^未加权$/ }));
 
-    await user.click(screen.getByRole("tab", { name: "按用户" }));
-    expect(screen.getByRole("tab", { name: "按用户" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "用户 Token 统计" }));
+    expect(screen.getByRole("tab", { name: "用户 Token 统计" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "overview-token-tab-user");
-    expect(await screen.findByRole("img", { name: /用户未加权 Token 使用趋势：alice@example.com/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /用户未加权 Token 使用趋势：.*alice@example.com/ })).toBeInTheDocument();
 
     const userTable = screen.getByLabelText("用户用量明细表格");
     const userRows = within(userTable).getAllByRole("row");
     expect(userRows[1]).toHaveTextContent("bob@example.com");
     expect(userRows[2]).toHaveTextContent("alice@example.com");
-    expect(within(userRows[1]).getAllByText("未加权")).toHaveLength(4);
+    expect(within(userRows[1]).queryByText("未加权")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^加权$/ }));
     expect(screen.getByRole("button", { name: /^加权$/ })).toHaveAttribute("aria-pressed", "true");
-    const weightedSummary = screen.getByLabelText("用户加权 Token 使用量汇总值");
-    expect(within(weightedSummary).getByText("当前值").closest("div")).toHaveTextContent("550 Token加权");
-    expect(await screen.findByRole("img", { name: /用户加权 Token 使用趋势：alice@example.com/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText("用户加权 Token 使用量汇总值")).not.toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /用户加权 Token 使用趋势：.*alice@example.com/ })).toBeInTheDocument();
     const weightedRows = within(userTable).getAllByRole("row");
     expect(weightedRows[1]).toHaveTextContent("alice@example.com");
-    expect(within(weightedRows[1]).getAllByText("加权")).toHaveLength(4);
+    expect(within(weightedRows[1]).queryByText("加权")).not.toBeInTheDocument();
     expect(within(weightedRows[1]).queryByText("未加权")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "6 小时" }));
-    expect(await waitForRequest(fetchMock, "/admin/api/overview/usage?window=21600&user_limit=10")).toBe(true);
+    expect(await waitForRequest(fetchMock, "/admin/api/overview/usage?window=21600&user_limit=10&token_mode=weighted")).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "自定义" }));
-    expect(await screen.findByText("Token 趋势自定义统计范围")).toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("CUSTOM USAGE RANGE")).toBeInTheDocument();
-    expect(screen.getByText(/查询包含开始时刻，不包含结束时刻。/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "时间选择" }));
+    expect(await screen.findByRole("dialog", { name: "时间选择" })).toBeInTheDocument();
+    expect(screen.queryByText(/查询包含开始时刻，不包含结束时刻。/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /取\s*消/ }));
     expect(screen.getByRole("button", { name: "6 小时" })).toHaveAttribute("aria-pressed", "true");
     expect(usageRequests(fetchMock, "custom")).toHaveLength(0);
 
-    await user.click(screen.getByRole("button", { name: "自定义" }));
+    await user.click(screen.getByRole("button", { name: "时间选择" }));
     await user.click(await screen.findByRole("button", { name: "应用范围" }));
     await waitForUsageWindow(fetchMock, "custom");
     const customRequest = new URL(usageRequests(fetchMock, "custom")[0], "http://preview.test");
     expect(Number(customRequest.searchParams.get("start_at"))).toBeLessThan(Number(customRequest.searchParams.get("end_at")));
     expect(customRequest.searchParams.get("user_limit")).toBe("10");
-    expect(screen.queryByRole("button", { name: "自定义" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "时间选择" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /范围内总量（加权），当前降序/ }));
-    expect(screen.getByRole("button", { name: /范围内总量（加权），当前升序/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /范围内总量，当前降序/ }));
+    expect(screen.getByRole("button", { name: /范围内总量，当前升序/ })).toBeInTheDocument();
+
+    Object.defineProperties(userTable, {
+      clientHeight: { configurable: true, value: 300 },
+      scrollHeight: { configurable: true, value: 900 },
+      scrollTop: { configurable: true, value: 600 }
+    });
+    fireEvent.scroll(userTable);
+    expect(await waitForUsageLimit(fetchMock, 15)).toBe(true);
+    expect(await within(userTable).findByText("user-15@example.com")).toBeInTheDocument();
   });
 });
 
@@ -244,6 +274,17 @@ async function waitForUsageWindow(fetchMock: ReturnType<typeof vi.fn>, window: s
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`usage request for ${window} was not observed`);
+}
+
+async function waitForUsageLimit(fetchMock: ReturnType<typeof vi.fn>, limit: number) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (fetchMock.mock.calls.some(([path]) => {
+      const url = new URL(String(path), "http://preview.test");
+      return url.pathname === "/admin/api/overview/usage" && url.searchParams.get("user_limit") === String(limit);
+    })) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
 }
 
 function usageRequests(fetchMock: ReturnType<typeof vi.fn>, window: string) {

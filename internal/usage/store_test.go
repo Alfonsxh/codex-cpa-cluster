@@ -210,6 +210,7 @@ func TestReadOnlyStoreBuildsBoundedTokenTrendsAndPublicUsage(t *testing.T) {
 		6300,
 		300,
 		10,
+		TokenModeUnweighted,
 		nil,
 	)
 	if err != nil {
@@ -231,6 +232,7 @@ func TestReadOnlyStoreBuildsBoundedTokenTrendsAndPublicUsage(t *testing.T) {
 		6300,
 		300,
 		10,
+		TokenModeUnweighted,
 		map[string]int64{"alpha": 6050, "beta": 5500},
 	)
 	if err != nil {
@@ -285,6 +287,7 @@ func TestTokenTimeSeriesRanksUsersByWeightedTokens(t *testing.T) {
 		6300,
 		300,
 		10,
+		TokenModeWeighted,
 		nil,
 	)
 	if err != nil {
@@ -295,6 +298,25 @@ func TestTokenTimeSeriesRanksUsersByWeightedTokens(t *testing.T) {
 		trend.Users[1].Name != "raw-leader@example.com" || trend.Users[1].Total != 200 ||
 		trend.Users[1].WeightedTotal != 200 {
 		t.Fatalf("weighted user ranking = %#v", trend.Users)
+	}
+	rawTrend, err := store.TokenTimeSeries(
+		context.Background(),
+		[]string{"alpha"},
+		[]string{"raw-leader@example.com", "weighted-leader@example.com"},
+		nil,
+		5500,
+		6300,
+		300,
+		1,
+		TokenModeUnweighted,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unweighted TokenTimeSeries: %v", err)
+	}
+	if len(rawTrend.Users) != 1 || rawTrend.Users[0].Name != "raw-leader@example.com" ||
+		rawTrend.Users[0].Total != 200 {
+		t.Fatalf("unweighted user ranking = %#v", rawTrend.Users)
 	}
 }
 

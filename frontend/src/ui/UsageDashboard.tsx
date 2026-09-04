@@ -510,7 +510,7 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
               label="查看个人周额度 Token 说明"
               title={quotaTooltip}
             /> : null}</span>
-            <time>{weekly ? `重置：${formatBeijingTimestamp(weekly.week_end_at)}（北京时间）` : "—"}</time>
+            <time>{weekly ? `重置：${formatServerTimestamp(weekly.week_end_at)}` : "—"}</time>
           </div>
         </div>
       )}
@@ -562,7 +562,7 @@ function AccountRows({ account, index, currentGroup, window, expanded, onToggle,
           <div className={`usage-quota ${used >= 100 ? "exhausted" : used >= 80 ? "warning" : ""}`.trim()}>
             <div><strong>{formatPercent(used)}</strong><span>剩余 {formatPercent(remaining)}</span></div>
             <progress className="usage-quota-track" max="100" value={used} aria-label={`已使用 ${formatPercent(used)}`} />
-            <small>{account.status.reset_at ? `${formatBeijingTimestamp(account.status.reset_at)}（北京时间）重置` : "重置时间未知"}</small>
+            <small>{account.status.reset_at ? `${formatServerTimestamp(account.status.reset_at)} 重置` : "重置时间未知"}</small>
           </div>
         </td>
         <td data-label="活跃用户（近 1 小时）"><strong className="usage-cell-number">{formatNumber(account.active_users_1h)}</strong></td>
@@ -645,7 +645,10 @@ function ModelBreakdown({ data, window }: { data: UsageBreakdown; window: Portal
     <div className="account-model-usage-list">
       {models.map((model) => (
         <div className="account-model-usage-row" key={model.name}>
-          <div className="account-model-usage-head"><strong title={model.name}>{model.name}</strong><span>{formatTokens(model.total)}</span></div>
+          <div className="account-model-usage-head">
+            <strong className="account-model-name" title={model.name}>{model.name}</strong>
+            <span className="account-model-token">{formatTokens(model.total)}</span>
+          </div>
           <div className="account-model-progress" role="group" aria-label={`${model.name} 各推理强度 Token 占比`}>
             {model.efforts.map((effort) => (
               <Tooltip
@@ -808,7 +811,7 @@ function formatTimestamp(timestamp: number) {
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
 }
 
-export function formatBeijingTimestamp(timestamp: number) {
+export function formatServerTimestamp(timestamp: number) {
   if (!timestamp) return "—";
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Shanghai",

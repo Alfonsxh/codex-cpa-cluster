@@ -53,6 +53,8 @@ export type LoggedOutResponse = {
 export type AdminSession = {
     authenticated: true;
     csrf_token?: string;
+    idle_expires_at?: number;
+    absolute_expires_at?: number;
 };
 
 export type OverviewPayload = {
@@ -1105,6 +1107,7 @@ export type OverviewUsageResponse = {
     window: number | 'today' | 'custom' | 'since_reset';
     window_seconds: number | null;
     window_start_at: number;
+    window_timezone: string;
     window_start_at_by_account: {
         [key: string]: number;
     } | null;
@@ -1764,6 +1767,34 @@ export type CreateAdminSessionResponses = {
 };
 
 export type CreateAdminSessionResponse = CreateAdminSessionResponses[keyof CreateAdminSessionResponses];
+
+export type RefreshAdminSessionData = {
+    body?: never;
+    headers: {
+        'X-CSRF-Token': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/admin/api/session/refresh';
+};
+
+export type RefreshAdminSessionErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type RefreshAdminSessionError = RefreshAdminSessionErrors[keyof RefreshAdminSessionErrors];
+
+export type RefreshAdminSessionResponses = {
+    /**
+     * Authenticated Admin session
+     */
+    200: AdminSession;
+};
+
+export type RefreshAdminSessionResponse = RefreshAdminSessionResponses[keyof RefreshAdminSessionResponses];
 
 export type GetAdminOverviewSummaryData = {
     body?: never;
@@ -3167,6 +3198,7 @@ export type GetAdminOverviewUsageData = {
         account?: Array<string>;
         user?: Array<string>;
         user_limit?: number;
+        token_mode?: 'unweighted' | 'weighted';
     };
     url: '/admin/api/overview/usage';
 };

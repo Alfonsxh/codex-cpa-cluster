@@ -34,17 +34,18 @@ export type UsageChartProps = {
   summary?: boolean;
   includeDateLabels?: boolean;
   valueLabel: string;
+  timezone?: string;
   ariaLabel: string;
 };
 
-export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, valueLabel, ariaLabel }: UsageChartProps) {
+export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, valueLabel, timezone, ariaLabel }: UsageChartProps) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
   const height = summary ? 260 : 300;
   const labels = useMemo(
-    () => buckets.map((timestamp) => formatChartTime(timestamp, includeDateLabels)),
-    [buckets, includeDateLabels]
+    () => buckets.map((timestamp) => formatChartTime(timestamp, includeDateLabels, timezone)),
+    [buckets, includeDateLabels, timezone]
   );
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
           type: "line",
           lineStyle: { color: axisColor, type: "dashed", width: 1 }
         },
-        formatter: (parameters) => renderUsageTooltip(parameters, buckets, valueLabel)
+        formatter: (parameters) => renderUsageTooltip(parameters, buckets, valueLabel, timezone)
       },
       xAxis: {
         type: "category",
@@ -156,7 +157,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
       chart.dispose();
       if (chartRef.current === chart) chartRef.current = null;
     };
-  }, [ariaLabel, buckets, labels, series, summary, theme, valueLabel]);
+  }, [ariaLabel, buckets, labels, series, summary, theme, timezone, valueLabel]);
 
   const showBucket = (index: number) => {
     const chart = chartRef.current;
@@ -211,11 +212,12 @@ export function tooltipRows(parameters: CallbackDataParams | CallbackDataParams[
 export function renderUsageTooltip(
   parameters: CallbackDataParams | CallbackDataParams[],
   buckets: number[],
-  valueLabel = ""
+  valueLabel = "",
+  timezone?: string
 ) {
   const values = Array.isArray(parameters) ? parameters : [parameters];
   const dataIndex = Number(values[0]?.dataIndex ?? 0);
-  const timestamp = formatTimestamp(buckets[dataIndex] ?? 0);
+  const timestamp = formatTimestamp(buckets[dataIndex] ?? 0, timezone);
   const rows = tooltipRows(values).map((item) => (
     `<span><i style="background:${escapeAttribute(item.color)}"></i>`
     + `<b title="${escapeAttribute(item.name)}">${escapeHtml(item.name)}</b>`
@@ -238,25 +240,27 @@ function chartValue(value: CallbackDataParams["value"]) {
   return Number(value ?? 0);
 }
 
-function formatChartTime(timestamp: number, includeDate: boolean) {
+function formatChartTime(timestamp: number, includeDate: boolean, timezone?: string) {
   if (!timestamp) return "—";
-  const date = new Date(timestamp * 1000);
-  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  return includeDate
-    ? `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${time}`
-    : time;
+  const options: Intl.DateTimeFormatOptions = includeDate
+    ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }
+    : { hour: "2-digit", minute: "2-digit", hour12: false };
+  if (timezone) options.timeZone = timezone;
+  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
 }
 
-function formatTimestamp(timestamp: number) {
+function formatTimestamp(timestamp: number, timezone?: string) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  const options: Intl.DateTimeFormatOptions = {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false
-  }).format(new Date(timestamp * 1000));
+  };
+  if (timezone) options.timeZone = timezone;
+  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
 }
 
 function escapeHtml(value: string) {

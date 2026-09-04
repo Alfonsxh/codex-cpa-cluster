@@ -94,6 +94,7 @@ ACME_ROOT=${CPAC_ACME_ROOT:-/var/www/letsencrypt}
 NGINX_AVAILABLE_DIRECTORY=${CPAC_NGINX_AVAILABLE_DIRECTORY:-/etc/nginx/sites-available}
 NGINX_ENABLED_DIRECTORY=${CPAC_NGINX_ENABLED_DIRECTORY:-/etc/nginx/sites-enabled}
 CERTIFICATE_ROOT=${CPAC_CERTIFICATE_ROOT:-/etc/letsencrypt/live}
+SERVER_TIMEZONE=Asia/Shanghai
 
 UI_STEP_NUMBER=0
 UI_IS_TERMINAL=false
@@ -887,7 +888,7 @@ install_prerequisites() {
       || die "安装系统依赖失败：$*"
   fi
   for command in awk cmp cp curl docker flock getent grep install mktemp \
-    readlink sed sha256sum sqlite3 systemctl tar wc; do
+    readlink sed sha256sum sqlite3 systemctl tar timedatectl wc; do
     require_command "$command"
   done
   if [ "$ingress_mode" = managed ]; then
@@ -906,6 +907,19 @@ install_prerequisites() {
       || die "无法安装 Docker Compose v2"
   fi
   docker info >/dev/null 2>&1 || die "Docker 服务不可用"
+}
+
+configure_server_timezone() {
+  current_timezone=$(timedatectl show --property=Timezone --value 2>/dev/null) \
+    || die "读取服务器时区失败"
+  if [ "$current_timezone" != "$SERVER_TIMEZONE" ]; then
+    timedatectl set-timezone "$SERVER_TIMEZONE" \
+      || die "设置服务器时区失败：$SERVER_TIMEZONE"
+  fi
+  current_timezone=$(timedatectl show --property=Timezone --value 2>/dev/null) \
+    || die "校验服务器时区失败"
+  [ "$current_timezone" = "$SERVER_TIMEZONE" ] \
+    || die "服务器时区未生效：期望 $SERVER_TIMEZONE，实际 ${current_timezone:-未知}"
 }
 
 download_release() {
@@ -1034,6 +1048,7 @@ write_target_env() {
       'CPA_COMPOSE_PROJECT_NAME=codex-cpa' \
       'CPA_INSTANCE_NAME=codex-cpa' \
       'CPA_RUNTIME_OWNER=codex-cpa' \
+      'CPA_TIMEZONE=Asia/Shanghai' \
       'CPA_OWNERSHIP_ACTIVATION_TTL=2m'
     printf 'CPA_DEPLOY_ROOT=%s\nCPA_CONFIRM_DEPLOY_ROOT=%s\n' "$deploy_root" "$deploy_root"
     printf '%s\n' \
@@ -1789,6 +1804,8 @@ run_install_or_upgrade() {
   fi
   ui_done "部署脚本已是当前版本"
 
+  ui_run "统一服务器时区为 $SERVER_TIMEZONE" configure_server_timezone
+
   archive="$download_directory/codex-cpa-cluster-$selected_version.tar.gz"
   release_file="$download_directory/release-$selected_version.env"
   ui_run "解压发布元数据" extract_release "$archive" "$extract_directory"
@@ -2094,10 +2111,16 @@ set +a
 : "${CPA_ACCOUNT_COMPOSE_PROJECT:?CPA_ACCOUNT_COMPOSE_PROJECT is required}"
 : "${CPA_ACCOUNT_INSTANCE_NAME:?CPA_ACCOUNT_INSTANCE_NAME is required}"
 : "${CPA_RUNTIME_OWNER:=codex-cpa}"
+: "${CPA_TIMEZONE:=Asia/Shanghai}"
 : "${CPA_OWNERSHIP_ACTIVATION_TTL:=2m}"
 : "${CPA_ALLOW_EDGE_RECREATE:=false}"
 : "${CPA_GATEWAY_DRAIN_TIMEOUT_SECONDS:=3600}"
 : "${CPA_CONFIRM_DEPLOY_ROOT:?CPA_CONFIRM_DEPLOY_ROOT must exactly repeat CPA_DEPLOY_ROOT}"
+
+[ "$CPA_TIMEZONE" = "$SERVER_TIMEZONE" ] || {
+  echo "CPA_TIMEZONE must be $SERVER_TIMEZONE" >&2
+  exit 1
+}
 
 case "$CPA_DEPLOY_ROOT" in
   /*) ;;

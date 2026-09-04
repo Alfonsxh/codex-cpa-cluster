@@ -23,6 +23,8 @@ export class ApiError extends Error {
 export type UnauthorizedEvent = {
   path: string;
   scope: "admin" | "portal" | "unknown";
+  code: string;
+  message: string;
 };
 
 const unauthorizedListeners = new Set<(event: UnauthorizedEvent) => void>();
@@ -60,6 +62,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     if (response.status === 401) {
       const event: UnauthorizedEvent = {
         path,
+        code: error.code,
+        message: error.message,
         scope: path.startsWith("/admin/api/")
           ? "admin"
           : path.startsWith("/usage/")

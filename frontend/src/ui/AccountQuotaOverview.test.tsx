@@ -28,7 +28,7 @@ describe("AccountQuotaOverview", () => {
     expect(within(metrics).getByText("4 / 5")).toBeInTheDocument();
     expect(within(metrics).getAllByText("1")).toHaveLength(3);
     expect(screen.getByRole("progressbar", { name: "账号平均周额度已用" })).toHaveAttribute("aria-valuenow", "47.47");
-    expect(screen.getByText(/未知账号不参与平均/)).toBeInTheDocument();
+    expect(screen.queryByText(/未知账号不参与平均/)).not.toBeInTheDocument();
   });
 
   it("shows an empty state when no account is enabled", () => {

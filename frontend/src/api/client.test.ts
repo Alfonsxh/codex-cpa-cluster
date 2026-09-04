@@ -69,7 +69,12 @@ describe("fine-grained Admin API client", () => {
 
     await expect(createTeam({ name: "Platform", description: "" }, "expired-csrf"))
       .rejects.toMatchObject({ status: 401, code: "unauthorized" });
-    expect(listener).toHaveBeenCalledWith({ path: "/admin/api/teams", scope: "admin" });
+    expect(listener).toHaveBeenCalledWith({
+      path: "/admin/api/teams",
+      scope: "admin",
+      code: "unauthorized",
+      message: "管理会话已失效"
+    });
     unsubscribe();
   });
 });

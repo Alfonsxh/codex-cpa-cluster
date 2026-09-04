@@ -35,6 +35,7 @@ const (
 	defaultAccountListen       = "127.0.0.1"
 	defaultAccountProbeTimeout = 12 * time.Second
 	accountContainerPort       = "8317/tcp"
+	serviceTimezone            = "Asia/Shanghai"
 	maximumOAuthSnapshotBytes  = 2 * 1024 * 1024
 )
 
@@ -826,6 +827,7 @@ func (runtime *AccountRuntime) createOptionsWithImageAndLayout(
 		Config: &containertypes.Config{
 			Image:        image,
 			Cmd:          []string{"./CLIProxyAPI", "-config", configCommand},
+			Env:          []string{"TZ=" + serviceTimezone},
 			ExposedPorts: networktypes.PortSet{port: struct{}{}},
 			Labels:       labels,
 		},

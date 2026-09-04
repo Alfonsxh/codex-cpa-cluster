@@ -178,7 +178,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		integer("account_failover.stale_after_seconds", "额度数据失效时间", 120, 60, 7200, "live"),
 		{Key: "user_quota.default_weekly_tokens", Label: "用户周额度系统默认值", ValueType: "nullable_integer", ApplyMode: "quota", Default: nil, Minimum: 1, Maximum: 1_000_000_000_000, HasMinimum: true, HasMaximum: true},
 		boolean("user_quota.reset_personal_weekly_on_new_week", "新周恢复默认个人额度", true, "quota"),
-		simple("user_quota.timezone", "用户自然周时区", "timezone", "UTC", "collector"),
+		simple("user_quota.timezone", "用户自然周时区", "timezone", "Asia/Shanghai", "collector"),
 		integer("user_quota.fail_open_after_seconds", "额度故障放行等待", 300, 30, 3600, "quota"),
 	}
 	for _, effort := range []struct {
@@ -210,7 +210,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 	}
 	definitions = append(definitions,
 		boolean("notification.enabled", "启用企业微信通知", false, "live"),
-		simple("notification.timezone", "通知时区", "timezone", "UTC", "live"),
+		simple("notification.timezone", "通知时区", "timezone", "Asia/Shanghai", "live"),
 		simple("notification.daily_times", "每日发送时间", "time_list", "09:00,14:00,18:00", "live"),
 		integer("notification.schedule_grace_minutes", "定时补发窗口", 15, 0, 120, "live"),
 		boolean("notification.quota_alert_enabled", "启用周额度预警", true, "live"),
@@ -687,7 +687,7 @@ func changedConfigurationKeys(before, after, stored, requested map[string]any) [
 	for _, definition := range configurationDefinitions {
 		_, explicitlyRequested := requested[definition.Key]
 		_, alreadyStored := stored[definition.Key]
-		// Selecting the effective UTC default is still a durable onboarding decision;
+		// Selecting the effective timezone default is still a durable onboarding decision;
 		// without the row, the recommended timezone step would remain incomplete.
 		if !reflect.DeepEqual(before[definition.Key], after[definition.Key]) ||
 			(explicitlyRequested && !alreadyStored && definition.Key == "user_quota.timezone") {

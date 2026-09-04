@@ -19,7 +19,7 @@ func TestRuntimeAPIsRequireAdminAndUseFineGrainedCatalogAndLogs(t *testing.T) {
 	server.runtimeJobs = &fakeRuntimeJobs{}
 
 	response := performAdminRequest(server, http.MethodGet, "/admin/api/runtime/services", nil, nil, nil)
-	assertAdminError(t, response, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, response, http.StatusUnauthorized, "session_missing")
 	headers := map[string]string{"X-Management-Key": "test-management-key"}
 	response = performAdminRequest(server, http.MethodGet, "/admin/api/runtime/services", nil, headers, nil)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"service":"cliproxy-alpha"`) ||

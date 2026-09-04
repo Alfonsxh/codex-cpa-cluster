@@ -12,7 +12,7 @@ import (
 )
 
 func ParseConfig(settings map[string]any) (Config, error) {
-	timezoneName := stringSetting(settings["notification.timezone"], "UTC")
+	timezoneName := stringSetting(settings["notification.timezone"], "Asia/Shanghai")
 	location, err := time.LoadLocation(timezoneName)
 	if err != nil {
 		return Config{}, fmt.Errorf("通知时区无效: %w", err)

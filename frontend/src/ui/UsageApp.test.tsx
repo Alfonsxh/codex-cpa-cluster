@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UsageApp } from "./UsageApp";
-import { formatBeijingTimestamp, UsageDashboard } from "./UsageDashboard";
+import { formatServerTimestamp, UsageDashboard } from "./UsageDashboard";
 
 const profile = {
   user: "alice@example.com",
@@ -259,8 +259,8 @@ describe("UsageApp", () => {
 });
 
 describe("UsageDashboard", () => {
-  it("formats reset timestamps with the full Beijing date regardless of the host timezone", () => {
-    expect(formatBeijingTimestamp(20_000)).toBe("1970/01/01 13:33");
+  it("formats reset timestamps with the full server date regardless of the browser timezone", () => {
+    expect(formatServerTimestamp(20_000)).toBe("1970/01/01 13:33");
   });
 
   it("queries detail only while opened and replaces the in-memory key after confirmed rotation", async () => {
@@ -288,7 +288,7 @@ describe("UsageDashboard", () => {
     expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
     expect(screen.getByText("个人周用量")).toBeInTheDocument();
     expect(screen.getByText("加权已用 3 M / 20 M")).toBeInTheDocument();
-    expect(screen.getByText("重置：1970/01/01 13:33（北京时间）")).toBeInTheDocument();
+    expect(screen.getByText("重置：1970/01/01 13:33")).toBeInTheDocument();
     expect(screen.queryByText(/未加权累计/)).not.toBeInTheDocument();
     expect(screen.queryByText(/今日请求/)).not.toBeInTheDocument();
     const quotaHelp = screen.getByRole("button", { name: "查看个人周额度 Token 说明" });
@@ -319,7 +319,11 @@ describe("UsageDashboard", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("usage-breakdown"))).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);
     await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
-    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
+    const modelName = await screen.findByText("gpt-5.6");
+    expect(modelName).toHaveClass("account-model-name");
+    const modelHead = modelName.closest(".account-model-usage-head");
+    if (!(modelHead instanceof HTMLElement)) throw new Error("模型明细标题未渲染");
+    expect(within(modelHead).getByText("180 Token")).toHaveClass("account-model-token");
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/usage-breakdown?window=today&account=beta")).toBe(true);
     const effortSegment = screen.getByRole("button", { name: "查看 gpt-5.6 high 推理强度 Token 明细" });
     await user.hover(effortSegment);

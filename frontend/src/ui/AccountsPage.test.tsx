@@ -936,7 +936,7 @@ describe("AccountsPage", () => {
     await clickVisibleOption(user, "自定义…");
     expect(await screen.findByText("账号信息自定义统计范围")).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("CUSTOM USAGE RANGE")).toBeInTheDocument();
+    expect(screen.queryByText("CUSTOM USAGE RANGE")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /取\s*消/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(requestsMatching(fetchMock, "/admin/api/accounts", "custom")).toHaveLength(0);

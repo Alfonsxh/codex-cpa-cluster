@@ -1,5 +1,5 @@
 import { Alert, Button, Empty, Result, Skeleton, Spin, Typography } from "antd";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   lazy,
   Suspense,
@@ -26,7 +26,6 @@ import { useAdminToolbar } from "./AdminToolbarContext";
 import { AccountQuotaOverview } from "./AccountQuotaOverview";
 import {
   CustomUsageRangeModal,
-  formatCustomUsageRange,
   type CustomUsageRange
 } from "./components/CustomUsageRangeModal";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
@@ -111,24 +110,27 @@ export function OverviewPage() {
     accounts: selectedAccounts,
     users: selectedUsers,
     userLimit,
+    tokenMode,
     startAt: usageWindow === "custom" ? customRange?.startAt : undefined,
     endAt: usageWindow === "custom" ? customRange?.endAt : undefined
-  }), [customRange, selectedAccounts, selectedUsers, usageWindow, userLimit]);
+  }), [customRange, selectedAccounts, selectedUsers, tokenMode, usageWindow, userLimit]);
   const usageQueryKey = useMemo(() => [
       "overview-usage",
       usageWindow,
       selectedAccounts,
       selectedUsers,
       userLimit,
+      tokenMode,
       customRange?.startAt,
       customRange?.endAt
-    ] as const, [customRange?.endAt, customRange?.startAt, selectedAccounts, selectedUsers, usageWindow, userLimit]);
+    ] as const, [customRange?.endAt, customRange?.startAt, selectedAccounts, selectedUsers, tokenMode, usageWindow, userLimit]);
   const usage = useQuery({
     queryKey: usageQueryKey,
     queryFn: ({ signal }) => readOverviewUsage(usageOptions, signal),
     staleTime: 0,
     gcTime: 0,
     retry: false,
+    placeholderData: keepPreviousData,
     refetchInterval: refreshSeconds > 0 ? refreshSeconds * 1000 : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false
@@ -247,11 +249,11 @@ export function OverviewPage() {
       ) : null}
 
       <div className="overview-legacy-metrics" aria-label="关键指标">
-        <Metric label="有效用户" value={summary.active_users} detail="用户邮箱" />
-        <Metric label="业务 CPA" value={summary.accounts} detail="可继续扩展" />
-        <Metric label="有效 Key" value={summary.active_keys} detail={`跨 ${summary.accounts} 个 CPA`} />
-        <Metric label="已授权 CPA" value={`${status.data.authorized_accounts}/${summary.accounts}`} detail="OAuth 文件" />
-        <Metric label="运行服务" value={`${status.data.running_services}/${status.data.total_services}`} detail="Compose 服务" />
+        <Metric label="CPA 账号" value={summary.accounts} detail={`启用 ${summary.enabled_accounts} · 已授权 ${status.data.authorized_accounts}`} />
+        <Metric label="用户状态" value={`${summary.active_users}/${summary.users}`} detail={`已路由 ${summary.routed_users}`} />
+        <Metric label="Key 健康" value={summary.active_keys} detail={`矩阵异常 ${summary.incomplete_key_matrices}`} />
+        <Metric label="团队覆盖" value={summary.teams} detail={`未分配 ${summary.unassigned_users} 人`} />
+        <Metric label="服务状态" value={`${status.data.running_services}/${status.data.total_services}`} detail="Compose 服务" />
         <Metric label="5 分钟请求" value={status.data.requests_5m} detail="网关访问日志" />
       </div>
 
@@ -281,10 +283,10 @@ export function OverviewPage() {
                 <button
                   type="button"
                   aria-pressed={usageWindow === "custom"}
-                  title="选择自定义时间范围"
+                  title="选择时间范围"
                   onClick={() => setCustomOpen(true)}
                 >
-                  {usageWindow === "custom" && customRange ? formatCustomUsageRange(customRange) : "自定义"}
+                  时间选择
                 </button>
               </div>
             </fieldset>
@@ -293,14 +295,16 @@ export function OverviewPage() {
               <div className="overview-token-mode-segments" role="group" aria-label="Token 统计口径">
                 <button
                   type="button"
+                  className="unweighted"
                   aria-pressed={tokenMode === "unweighted"}
                   onClick={() => setTokenMode("unweighted")}
-                >未加权</button>
+                ><i aria-hidden="true" />未加权</button>
                 <button
                   type="button"
+                  className="weighted"
                   aria-pressed={tokenMode === "weighted"}
                   onClick={() => setTokenMode("weighted")}
-                >加权</button>
+                ><i aria-hidden="true" />加权</button>
               </div>
             </fieldset>
             <LegacyUsageMultiSelect
@@ -325,15 +329,6 @@ export function OverviewPage() {
               error={catalog.isError}
               onChange={setSelectedUsers}
             />
-            <label className="overview-legacy-filter usage-variable-select">
-              <span>用户范围</span>
-              <LegacyEnhancedSelect
-                label="用户范围"
-                value={String(userLimit)}
-                options={[10, 20, 50].map((value) => ({ value: String(value), label: `Top ${value}` }))}
-                onChange={(nextValue) => setUserLimit(Number(nextValue))}
-              />
-            </label>
             <div className="overview-legacy-refresh-cluster usage-refresh-cluster">
               <label className="overview-legacy-filter usage-variable-select usage-refresh-control">
                 <span>自动刷新</span>
@@ -365,14 +360,15 @@ export function OverviewPage() {
               <strong>{usage.data
                 ? formatOverviewUsageRange(
                     usage.data.window_start_at,
-                    usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at
+                    usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
+                    usage.data.window_timezone
                   )
                 : "正在读取统计边界…"}</strong>
               <div className="overview-legacy-monitor-meta">
                 <span className={`overview-status-chip ${collectorState(usage.data?.collector.status).tone}`}>
                   {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
                 </span>
-                <time>{usage.data ? `更新于 ${formatTimestamp(usage.data.generated_at)}` : "—"}</time>
+                <time>{usage.data ? `${formatOverviewUpdateTime(usage.data.generated_at, usage.data.window_timezone)} 更新` : "—"}</time>
               </div>
             </div>
           </div>
@@ -403,10 +399,7 @@ export function OverviewPage() {
         ) : usage.data ? (
           <UsageDashboard
             payload={usage.data}
-            windowLabel={windowDisplayLabel(usageWindow, customRange)}
             includeDateLabels={usageWindow === "since_reset" || usageWindow === "custom" || Number(usageWindow) > 86_400}
-            accountScope={selectedAccounts}
-            userScope={selectedUsers}
             accountStatuses={new Map(catalog.data?.accounts.map((account) => [account.id, {
               label: account.operational_status.label,
               tone: account.operational_status.tone
@@ -417,6 +410,10 @@ export function OverviewPage() {
             tokenMode={tokenMode}
             view={usageView}
             onViewChange={setUsageView}
+            canLoadMoreUsers={selectedUsers.length === 0
+              && userLimit < Math.min(500, userOptions.length)
+              && usage.data.users.length >= usage.data.user_limit}
+            onLoadMoreUsers={() => setUserLimit((current) => Math.min(500, userOptions.length, current + 10))}
           />
         ) : null}
       </section>
@@ -425,8 +422,9 @@ export function OverviewPage() {
 
       <CustomUsageRangeModal
         open={customOpen}
-        title="Token 趋势自定义统计范围"
+        title="时间选择"
         range={customRange}
+        timezone={usage.data?.window_timezone ?? "UTC"}
         onCancel={() => setCustomOpen(false)}
         onApply={(range) => {
           setCustomRange(range);
@@ -451,62 +449,57 @@ function Metric({ label, value, detail }: { label: string; value: string | numbe
 
 function UsageDashboard({
   payload,
-  windowLabel,
   includeDateLabels,
-  accountScope,
-  userScope,
   accountStatuses,
   userStatuses,
   tokenMode,
   view,
-  onViewChange
+  onViewChange,
+  canLoadMoreUsers,
+  onLoadMoreUsers
 }: {
   payload: Awaited<ReturnType<typeof readOverviewUsage>>;
-  windowLabel: string;
   includeDateLabels: boolean;
-  accountScope: string[];
-  userScope: string[];
   accountStatuses: Map<string, SeriesStatus>;
   userStatuses: Map<string, SeriesStatus>;
   tokenMode: TokenMode;
   view: UsageSeriesView;
   onViewChange: (view: UsageSeriesView) => void;
+  canLoadMoreUsers: boolean;
+  onLoadMoreUsers: () => void;
 }) {
   const aggregate = aggregateTokenSeries(payload.buckets, payload.accounts);
-  const scope = `${accountScope.length ? `${accountScope.length} 个 CPA` : "全部 CPA"} · ${userScope.length ? `${userScope.length} 位用户` : "全部用户"}`;
   const interval = formatBucketInterval(payload.bucket_seconds);
   const baseSeries = view === "aggregate"
     ? payload.accounts.length ? [aggregate] : []
     : view === "account" ? payload.accounts : payload.users;
-  const chartSeries = tokenMode === "weighted" ? baseSeries.map(asWeightedSeries) : baseSeries;
-  const baseMetrics = view === "aggregate" ? aggregate : aggregateTokenSeries(payload.buckets, baseSeries);
-  const metrics = tokenMode === "weighted" ? asWeightedSeries(baseMetrics) : baseMetrics;
+  const selectedSeries = tokenMode === "weighted" ? baseSeries.map(asWeightedSeries) : baseSeries;
+  const chartSeries = view === "aggregate" ? selectedSeries : topTokenSeries(selectedSeries, 10);
+  const metrics = tokenMode === "weighted" ? asWeightedSeries(aggregate) : aggregate;
   const modeLabel = tokenMode === "weighted" ? "加权" : "未加权";
   const viewLabel = view === "aggregate" ? "全部账号" : view === "account" ? "CPA 账号" : "用户";
   const activeViewTabID = `overview-token-tab-${view}`;
   const emptyText = view === "user" ? "所选范围内没有用户 Token 数据" : "所选范围内没有账号 Token 数据";
-  const context = `${scope} · ${windowLabel} · 聚合间隔 ${interval}${view === "user" ? ` · Top ${payload.user_limit}` : ""}`;
   return (
     <article className="overview-legacy-usage-panel overview-token-workspace">
       <header className="overview-token-workspace-header">
         <div className="overview-token-view-region">
           <div className="overview-token-view-switch" role="tablist" aria-label="Token 使用数据视角">
             <button id="overview-token-tab-aggregate" type="button" role="tab" aria-selected={view === "aggregate"} aria-controls="overview-token-series" onClick={() => onViewChange("aggregate")}>全部账号</button>
-            <button id="overview-token-tab-account" type="button" role="tab" aria-selected={view === "account"} aria-controls="overview-token-series" onClick={() => onViewChange("account")}>按 CPA</button>
-            <button id="overview-token-tab-user" type="button" role="tab" aria-selected={view === "user"} aria-controls="overview-token-series" onClick={() => onViewChange("user")}>按用户</button>
+            <button id="overview-token-tab-account" type="button" role="tab" aria-selected={view === "account"} aria-controls="overview-token-series" onClick={() => onViewChange("account")}>CPA 账号 Token 统计</button>
+            <button id="overview-token-tab-user" type="button" role="tab" aria-selected={view === "user"} aria-controls="overview-token-series" onClick={() => onViewChange("user")}>用户 Token 统计</button>
           </div>
         </div>
       </header>
 
-      <section className="overview-token-summary-region" aria-label={`${viewLabel}统计摘要`}>
-        <small>{context}</small>
+      {view === "aggregate" ? <section className="overview-token-summary-region" aria-label={`${viewLabel}统计摘要`}>
         <dl className="overview-token-summary-metrics" aria-label={`${viewLabel}${modeLabel} Token 使用量汇总值`}>
-          <WorkspaceMetric label="当前值" value={metrics.current} modeLabel={modeLabel} />
-          <WorkspaceMetric label="范围内总量" value={metrics.total} modeLabel={modeLabel} />
-          <WorkspaceMetric label="平均值" value={metrics.average} modeLabel={modeLabel} />
-          <WorkspaceMetric label="最大值" value={metrics.maximum} modeLabel={modeLabel} />
+          <WorkspaceMetric label="当前值" value={metrics.current} mode={tokenMode} />
+          <WorkspaceMetric label="范围内总量" value={metrics.total} mode={tokenMode} />
+          <WorkspaceMetric label="平均值" value={metrics.average} mode={tokenMode} />
+          <WorkspaceMetric label="最大值" value={metrics.maximum} mode={tokenMode} />
         </dl>
-      </section>
+      </section> : null}
 
       <section
         id="overview-token-series"
@@ -523,6 +516,7 @@ function UsageDashboard({
             summary={view === "aggregate"}
             includeDateLabels={includeDateLabels}
             valueLabel={modeLabel}
+            timezone={payload.window_timezone}
             ariaLabel={`${viewLabel}${modeLabel} Token 使用趋势：${chartSeries.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，")}`}
           />
         ) : (
@@ -531,40 +525,46 @@ function UsageDashboard({
         <footer className="overview-legacy-summary-footer overview-token-workspace-footer">
           <div className="overview-token-series-legend" aria-label={`${viewLabel}图例`}>
             {chartSeries.slice(0, 10).map((item, index) => (
-              <span key={item.name}><i style={{ background: chartColors[index % chartColors.length] }} />{item.name}<small>{modeLabel}</small></span>
+              <span key={item.name}><i style={{ background: chartColors[index % chartColors.length] }} />{item.name}</span>
             ))}
           </div>
           <span>单位：{modeLabel} Token / {interval}</span>
         </footer>
-        <SeriesTable
+        {view !== "aggregate" ? <SeriesTable
           subjectLabel={view === "user" ? "用户" : "CPA"}
           series={view === "user" ? payload.users : payload.accounts}
           emptyText={emptyText}
           statuses={view === "user" ? userStatuses : accountStatuses}
           tokenMode={tokenMode}
-        />
+          canLoadMore={view === "user" && canLoadMoreUsers}
+          onLoadMore={view === "user" ? onLoadMoreUsers : undefined}
+          resetKey={`${view}:${tokenMode}:${payload.window_start_at}:${payload.selected_accounts.join(",")}:${payload.selected_users.join(",")}`}
+        /> : null}
       </section>
     </article>
   );
 }
 
-function WorkspaceMetric({ label, value, modeLabel }: { label: string; value: number; modeLabel: string }) {
+function WorkspaceMetric({ label, value, mode }: { label: string; value: number; mode: TokenMode }) {
+  const modeLabel = mode === "weighted" ? "加权" : "未加权";
   return (
     <div>
       <dt>{label}</dt>
       <dd title={`${value.toLocaleString("en-US")} ${modeLabel} Token`}>
-        <span>{formatTokens(value)}</span><small>{modeLabel}</small>
+        <i className={`overview-token-mode-dot ${mode}`} aria-hidden="true" />
+        <small>{modeLabel}</small><span>{formatTokens(value)}</span>
       </dd>
     </div>
   );
 }
 
-function UsageChartLoader({ buckets, series, summary = false, includeDateLabels, valueLabel, ariaLabel }: {
+function UsageChartLoader({ buckets, series, summary = false, includeDateLabels, valueLabel, timezone, ariaLabel }: {
   buckets: number[];
   series: TokenSeries[];
   summary?: boolean;
   includeDateLabels: boolean;
   valueLabel: string;
+  timezone: string;
   ariaLabel: string;
 }) {
   return (
@@ -579,20 +579,26 @@ function UsageChartLoader({ buckets, series, summary = false, includeDateLabels,
         summary={summary}
         includeDateLabels={includeDateLabels}
         valueLabel={valueLabel}
+        timezone={timezone}
         ariaLabel={ariaLabel}
       />
     </Suspense>
   );
 }
 
-function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode }: {
+function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode, canLoadMore, onLoadMore, resetKey }: {
   subjectLabel: "CPA" | "用户";
   series: TokenSeries[];
   emptyText: string;
   statuses: Map<string, SeriesStatus>;
   tokenMode: TokenMode;
+  canLoadMore: boolean;
+  onLoadMore?: () => void;
+  resetKey: string;
 }) {
   const [sort, setSort] = useState<SortState>({ key: "total", direction: "desc" });
+  const [visibleRows, setVisibleRows] = useState(10);
+  useEffect(() => setVisibleRows(10), [resetKey]);
   const sorted = useMemo(() => [...series].sort((left, right) => {
     const leftValue = seriesSortValue(left, sort.key, statuses, tokenMode);
     const rightValue = seriesSortValue(right, sort.key, statuses, tokenMode);
@@ -602,14 +608,31 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode }: {
     const directed = sort.direction === "asc" ? comparison : -comparison;
     return directed || left.name.localeCompare(right.name, "zh-CN");
   }), [series, sort, statuses, tokenMode]);
+  const colorByName = useMemo(() => new Map(
+    topTokenSeries(tokenMode === "weighted" ? series.map(asWeightedSeries) : series, series.length)
+      .map((item, index) => [item.name, chartColors[index % chartColors.length]])
+  ), [series, tokenMode]);
   const updateSort = (key: SeriesSortKey) => setSort((current) => ({
     key,
     direction: current.key === key
       ? current.direction === "desc" ? "asc" : "desc"
       : key === "name" || key === "status" ? "asc" : "desc"
   }));
+  const loadNextPage = () => {
+    const nextVisibleRows = visibleRows + 10;
+    setVisibleRows(nextVisibleRows);
+    if (nextVisibleRows > sorted.length && canLoadMore) onLoadMore?.();
+  };
   return (
-    <NativeTableViewport className="overview-legacy-table-wrap" aria-label={`${subjectLabel}用量明细表格`}>
+    <NativeTableViewport
+      className="overview-legacy-table-wrap overview-token-detail-table"
+      aria-label={`${subjectLabel}用量明细表格`}
+      onScroll={(event) => {
+        const viewport = event.currentTarget;
+        if (viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 48
+          && (visibleRows < sorted.length || canLoadMore)) loadNextPage();
+      }}
+    >
       <table className="overview-legacy-table">
         <thead>
           <tr>
@@ -636,16 +659,15 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode }: {
               onSort={updateSort}
               help={`${tokenMode === "unweighted" ? "未加权 Token" : "加权 Token"}；取所选时间范围内单个聚合间隔的最高值。`}
             />
-            <SeriesTableHeader label={`范围内总量（${tokenMode === "unweighted" ? "未加权" : "加权"}）`} sortKey="total" sort={sort} onSort={updateSort} />
+            <SeriesTableHeader label="范围内总量" sortKey="total" sort={sort} onSort={updateSort} />
           </tr>
         </thead>
         <tbody>
-          {sorted.length ? sorted.map((item) => {
+          {sorted.length ? sorted.slice(0, visibleRows).map((item) => {
             const status = seriesStatus(item, statuses);
-            const colorIndex = Math.max(0, series.findIndex((candidate) => candidate.name === item.name));
             return (
               <tr key={item.name}>
-                <td><span className="overview-series-name"><i style={{ background: chartColors[colorIndex % chartColors.length] }} /><strong>{item.name}</strong></span></td>
+                <td><span className="overview-series-name"><i style={{ background: colorByName.get(item.name) ?? chartColors[0] }} /><strong>{item.name}</strong></span></td>
                 <td><span className={`overview-status-chip ${status.tone}`}>{status.label}</span></td>
                 <td><SeriesTokenValue series={item} metric="current" tokenMode={tokenMode} /></td>
                 <td><SeriesTokenValue series={item} metric="average" tokenMode={tokenMode} /></td>
@@ -731,12 +753,7 @@ function SeriesTokenValue({ series, metric, tokenMode }: {
   tokenMode: TokenMode;
 }) {
   const value = tokenMode === "weighted" ? weightedMetric(series, metric) : series[metric];
-  return (
-    <div className="overview-selected-token-value">
-      <TokenValue value={value} />
-      <small>{tokenMode === "weighted" ? "加权" : "未加权"}</small>
-    </div>
-  );
+  return <TokenValue value={value} />;
 }
 
 function legacyTokenParts(value: number) {
@@ -823,6 +840,12 @@ function asWeightedSeries(series: TokenSeries): TokenSeries {
   };
 }
 
+function topTokenSeries(series: TokenSeries[], limit: number) {
+  return [...series]
+    .sort((left, right) => right.total - left.total || left.name.localeCompare(right.name, "zh-CN"))
+    .slice(0, limit);
+}
+
 function seriesSortValue(
   series: TokenSeries,
   key: SeriesSortKey,
@@ -887,26 +910,33 @@ function actionLabel(action: RuntimeJob["action"]) {
   return labels[action];
 }
 
-function windowDisplayLabel(window: OverviewUsageWindow, customRange: CustomUsageRange | null) {
-  if (window === "custom") return customRange ? formatCustomUsageRange(customRange) : "自定义";
-  return standardWindows.find((item) => item.value === window)?.label ?? window;
-}
-
-export function formatOverviewUsageRange(startAt: number, endAt: number) {
+export function formatOverviewUsageRange(startAt: number, endAt: number, timezone?: string) {
   if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || startAt <= 0 || endAt < startAt) return "统计边界暂不可用";
   const start = new Date(startAt * 1000);
   const end = new Date(endAt * 1000);
-  const sameDay = start.getFullYear() === end.getFullYear()
-    && start.getMonth() === end.getMonth()
-    && start.getDate() === end.getDate();
+  const sameDay = zonedDateKey(start, timezone) === zonedDateKey(end, timezone);
   const fullFormatter = new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    ...(timezone ? { timeZone: timezone } : {})
   });
   const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit", minute: "2-digit", hour12: false
+    hour: "2-digit", minute: "2-digit", hour12: false, ...(timezone ? { timeZone: timezone } : {})
   });
   const duration = formatUsageRangeDuration(endAt - startAt);
   return `${fullFormatter.format(start)} — ${sameDay ? timeFormatter.format(end) : fullFormatter.format(end)}（${duration}）`;
+}
+
+function zonedDateKey(date: Date, timezone?: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric", month: "2-digit", day: "2-digit", ...(timezone ? { timeZone: timezone } : {})
+  }).format(date);
+}
+
+function formatOverviewUpdateTime(timestamp: number, timezone?: string) {
+  if (!timestamp) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit", minute: "2-digit", hour12: false, ...(timezone ? { timeZone: timezone } : {})
+  }).format(new Date(timestamp * 1000));
 }
 
 function formatUsageRangeDuration(seconds: number) {

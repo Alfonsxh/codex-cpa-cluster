@@ -22,3 +22,10 @@ export function logout(csrfToken: string): Promise<{ logged_out: true }> {
     headers: { "X-CSRF-Token": csrfToken }
   });
 }
+
+export function refreshSession(csrfToken: string): Promise<AdminSession> {
+  return apiRequest<AdminSession>("/admin/api/session/refresh", {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken }
+  });
+}

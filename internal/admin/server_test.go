@@ -47,11 +47,11 @@ func TestAdminSessionUsesRevocableServerSideStateAndCSRF(t *testing.T) {
 	server, _ := newTestAdmin(t)
 
 	response := performAdminRequest(server, http.MethodGet, "/admin/api/session", nil, nil, nil)
-	assertAdminError(t, response, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, response, http.StatusUnauthorized, "session_missing")
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/session", nil, map[string]string{
 		"X-Management-Key": "wrong-management-key",
 	}, nil)
-	assertAdminError(t, response, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, response, http.StatusUnauthorized, "management_key_invalid")
 
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/session", nil, map[string]string{
 		"X-Management-Key":  "test-management-key",
@@ -61,8 +61,10 @@ func TestAdminSessionUsesRevocableServerSideStateAndCSRF(t *testing.T) {
 		t.Fatalf("create session status = %d, body = %s", response.Code, response.Body.String())
 	}
 	var created struct {
-		Authenticated bool   `json:"authenticated"`
-		CSRFToken     string `json:"csrf_token"`
+		Authenticated     bool   `json:"authenticated"`
+		CSRFToken         string `json:"csrf_token"`
+		IdleExpiresAt     int64  `json:"idle_expires_at"`
+		AbsoluteExpiresAt int64  `json:"absolute_expires_at"`
 	}
 	var createdFields map[string]json.RawMessage
 	decodeAdminResponse(t, response, &createdFields)
@@ -70,7 +72,8 @@ func TestAdminSessionUsesRevocableServerSideStateAndCSRF(t *testing.T) {
 		t.Fatalf("session response eagerly includes account catalog: %#v", createdFields)
 	}
 	decodeAdminResponse(t, response, &created)
-	if !created.Authenticated || created.CSRFToken == "" {
+	if !created.Authenticated || created.CSRFToken == "" || created.IdleExpiresAt <= time.Now().Unix() ||
+		created.AbsoluteExpiresAt <= created.IdleExpiresAt {
 		t.Fatalf("created session = %#v", created)
 	}
 	cookies := response.Result().Cookies()
@@ -97,6 +100,13 @@ func TestAdminSessionUsesRevocableServerSideStateAndCSRF(t *testing.T) {
 		t.Fatalf("loaded CSRF token = %q, want %q", loaded.CSRFToken, created.CSRFToken)
 	}
 
+	response = performAdminRequest(server, http.MethodPost, "/admin/api/session/refresh", nil, map[string]string{
+		"X-CSRF-Token": created.CSRFToken,
+	}, cookie)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"absolute_expires_at":`) {
+		t.Fatalf("refresh session status = %d, body = %s", response.Code, response.Body.String())
+	}
+
 	response = performAdminRequest(server, http.MethodPost, "/admin/api/teams", map[string]any{
 		"name": "Platform",
 	}, nil, cookie)
@@ -119,7 +129,42 @@ func TestAdminSessionUsesRevocableServerSideStateAndCSRF(t *testing.T) {
 		t.Fatalf("deleted session cookie = %#v", deletedCookies)
 	}
 	response = performAdminRequest(server, http.MethodGet, "/admin/api/session", nil, nil, cookie)
-	assertAdminError(t, response, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, response, http.StatusUnauthorized, "session_expired")
+}
+
+func TestAdminSessionRefreshExtendsIdleDeadlineWithoutMovingAbsoluteDeadline(t *testing.T) {
+	server, _ := newTestAdmin(t)
+	now := time.Now().Truncate(time.Second)
+	server.now = func() time.Time { return now }
+
+	createdResponse := performAdminRequest(server, http.MethodPost, "/admin/api/session", nil, map[string]string{
+		"X-Management-Key": "test-management-key",
+	}, nil)
+	var created struct {
+		CSRFToken         string `json:"csrf_token"`
+		IdleExpiresAt     int64  `json:"idle_expires_at"`
+		AbsoluteExpiresAt int64  `json:"absolute_expires_at"`
+	}
+	decodeAdminResponse(t, createdResponse, &created)
+	cookie := createdResponse.Result().Cookies()[0]
+
+	now = now.Add(5 * time.Minute)
+	refreshedResponse := performAdminRequest(server, http.MethodPost, "/admin/api/session/refresh", nil, map[string]string{
+		"X-CSRF-Token": created.CSRFToken,
+	}, cookie)
+	var refreshed struct {
+		IdleExpiresAt     int64 `json:"idle_expires_at"`
+		AbsoluteExpiresAt int64 `json:"absolute_expires_at"`
+	}
+	decodeAdminResponse(t, refreshedResponse, &refreshed)
+	if refreshed.IdleExpiresAt != created.IdleExpiresAt+int64((5*time.Minute)/time.Second) ||
+		refreshed.AbsoluteExpiresAt != created.AbsoluteExpiresAt {
+		t.Fatalf("refreshed session = %#v, created = %#v", refreshed, created)
+	}
+
+	now = time.Unix(refreshed.IdleExpiresAt+1, 0)
+	expired := performAdminRequest(server, http.MethodGet, "/admin/api/session", nil, nil, cookie)
+	assertAdminError(t, expired, http.StatusUnauthorized, "session_expired")
 }
 
 func TestAdminManagementKeyRotationInvalidatesOldKeysAndSessionsWithoutEchoingSecret(t *testing.T) {
@@ -150,9 +195,9 @@ func TestAdminManagementKeyRotationInvalidatesOldKeysAndSessionsWithoutEchoingSe
 	}
 	response = performAdminRequest(server, http.MethodGet, "/admin/api/teams", nil,
 		map[string]string{"X-Management-Key": "test-management-key"}, nil)
-	assertAdminError(t, response, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, response, http.StatusUnauthorized, "management_key_invalid")
 	response = performAdminRequest(server, http.MethodGet, "/admin/api/session", nil, nil, cookie)
-	assertAdminError(t, response, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, response, http.StatusUnauthorized, "session_invalidated")
 	response = performAdminRequest(server, http.MethodGet, "/admin/api/teams", nil,
 		map[string]string{"X-Management-Key": "new-management-key!"}, nil)
 	if response.Code != http.StatusOK {
@@ -208,17 +253,21 @@ func TestAdminOverviewUsageUsesBoundedFineGrainedTrendQuery(t *testing.T) {
 	t.Cleanup(server.Close)
 	headers := map[string]string{"X-Management-Key": "test-management-key"}
 	response := performAdminRequest(server, http.MethodGet,
-		"/admin/api/overview/usage?window=3600&account=alpha&user=alice%40example.com", nil, headers, nil)
+		"/admin/api/overview/usage?window=3600&account=alpha&user=alice%40example.com&user_limit=999&token_mode=weighted", nil, headers, nil)
 	if response.Code != http.StatusOK || reader.trendCalls != 1 ||
 		!strings.Contains(response.Body.String(), `"selected_account":"alpha"`) ||
 		!strings.Contains(response.Body.String(), `"selected_user":"alice@example.com"`) ||
 		!strings.Contains(response.Body.String(), `"total":321`) ||
 		!strings.Contains(response.Body.String(), `"weighted_total":400`) ||
+		!strings.Contains(response.Body.String(), `"window_timezone":"Asia/Shanghai"`) ||
 		!strings.Contains(response.Body.String(), `"status":"healthy"`) {
 		t.Fatalf("overview usage = %d %s, reader=%#v", response.Code, response.Body.String(), reader)
 	}
 	if reader.trendStartAt != -2_600 || reader.trendEndAt != 1_001 || reader.trendBucketSeconds != 60 {
 		t.Fatalf("overview trend bounds = %#v", reader)
+	}
+	if reader.trendUserLimit != 500 || reader.trendTokenMode != usage.TokenModeWeighted {
+		t.Fatalf("overview trend ranking = %#v", reader)
 	}
 	response = performAdminRequest(server, http.MethodGet,
 		"/admin/api/overview/usage?window=300", nil, headers, nil)
@@ -709,9 +758,14 @@ func TestUserListAPIIsFineGrainedPaginatedAndSecretFree(t *testing.T) {
 		payload.Pagination.Page != 1 || payload.Pagination.PageSize != 25 || payload.Pagination.Total != 1 {
 		t.Fatalf("user list payload = %#v", payload)
 	}
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load Shanghai timezone: %v", err)
+	}
+	localNow := fixedNow.In(shanghai)
 	expectedStart := time.Date(
-		fixedNow.UTC().Year(), fixedNow.UTC().Month(), fixedNow.UTC().Day(),
-		0, 0, 0, 0, time.UTC,
+		localNow.Year(), localNow.Month(), localNow.Day(),
+		0, 0, 0, 0, shanghai,
 	).Unix()
 	if reader.userSummaryCalls != 1 || reader.userSummaryStartAt != expectedStart {
 		t.Fatalf("user summary calls = %d, start=%d", reader.userSummaryCalls, reader.userSummaryStartAt)
@@ -1453,7 +1507,7 @@ func TestOverviewCatalogUsesTheAccountPageOperationalStatusContract(t *testing.T
 	}
 
 	unauthorized := performAdminRequest(server, http.MethodGet, "/admin/api/overview/catalog", nil, nil, nil)
-	assertAdminError(t, unauthorized, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, unauthorized, http.StatusUnauthorized, "session_missing")
 }
 
 func TestOverviewStatusUsesLiveOAuthRuntimeAndFiveMinuteUsage(t *testing.T) {
@@ -1661,7 +1715,7 @@ func TestNativeAccountsRequireAdminAndExposeLocalURLOnlyForLoopbackHost(t *testi
 	}
 
 	response := performAdminRequest(server, http.MethodGet, "/admin/api/native-accounts", nil, nil, nil)
-	assertAdminError(t, response, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, response, http.StatusUnauthorized, "session_missing")
 
 	headers := map[string]string{"X-Management-Key": "test-management-key", "Host": "cpa.example.com"}
 	response = performAdminRequest(server, http.MethodGet, "/admin/api/native-accounts", nil, headers, nil)
@@ -2113,7 +2167,7 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 	}
 	var initial notificationSettingsResponse
 	decodeAdminResponse(t, response, &initial)
-	if initial.Notifications.WebhookConfigured || initial.Values.Enabled || initial.Values.Timezone != "UTC" {
+	if initial.Notifications.WebhookConfigured || initial.Values.Enabled || initial.Values.Timezone != "Asia/Shanghai" {
 		t.Fatalf("initial notification settings = %#v", initial)
 	}
 	response = performAdminRequest(server, http.MethodPut, "/admin/api/settings/notifications", map[string]any{
@@ -2608,6 +2662,8 @@ type fakeUsageReader struct {
 	trendStartAt                   int64
 	trendEndAt                     int64
 	trendBucketSeconds             int64
+	trendUserLimit                 int
+	trendTokenMode                 usage.TokenMode
 	trendStartAtByAccount          map[string]int64
 	accountSummaries               map[string]usage.AccountUsageSummary
 	accountSummaryCalls            int
@@ -2653,11 +2709,14 @@ func (reader *fakeUsageReader) TokenTimeSeries(
 	startAt int64,
 	endAt int64,
 	bucketSeconds int64,
-	_ int,
+	userLimit int,
+	tokenMode usage.TokenMode,
 	startAtByAccount map[string]int64,
 ) (usage.TokenTrend, error) {
 	reader.trendCalls++
 	reader.trendStartAt, reader.trendEndAt, reader.trendBucketSeconds = startAt, endAt, bucketSeconds
+	reader.trendUserLimit = userLimit
+	reader.trendTokenMode = tokenMode
 	reader.trendStartAtByAccount = startAtByAccount
 	return reader.trendResult, nil
 }

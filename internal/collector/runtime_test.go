@@ -109,6 +109,10 @@ func TestRuntimeRedactsManagementKeyAndPublishesFailedHeartbeat(t *testing.T) {
 }
 
 func TestRuntimeConfigUsesControlSettingsAndValidatesBounds(t *testing.T) {
+	defaults := DefaultRuntimeConfig()
+	if defaults.WeekTimezone != "Asia/Shanghai" {
+		t.Fatalf("default runtime timezone = %q", defaults.WeekTimezone)
+	}
 	config, interval, err := RuntimeConfigFromSettings(map[string]any{
 		"collector.interval_seconds":                   1.5,
 		"collector.batch_size":                         float64(250),

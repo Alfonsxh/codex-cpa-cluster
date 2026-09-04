@@ -288,7 +288,7 @@ func (server *Server) usageTimezone(c *gin.Context) (*time.Location, string, err
 	name, _ := settings["user_quota.timezone"].(string)
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "UTC"
+		name = "Asia/Shanghai"
 	}
 	location, err := time.LoadLocation(name)
 	if err != nil {

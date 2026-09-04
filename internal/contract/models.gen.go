@@ -1672,6 +1672,24 @@ func (e GetAdminOperationImpactParamsAction) Valid() bool {
 	}
 }
 
+// Defines values for GetAdminOverviewUsageParamsTokenMode.
+const (
+	Unweighted GetAdminOverviewUsageParamsTokenMode = "unweighted"
+	Weighted   GetAdminOverviewUsageParamsTokenMode = "weighted"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminOverviewUsageParamsTokenMode enum.
+func (e GetAdminOverviewUsageParamsTokenMode) Valid() bool {
+	switch e {
+	case Unweighted:
+		return true
+	case Weighted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminReleaseStatusParamsFresh.
 const (
 	GetAdminReleaseStatusParamsFreshN0 GetAdminReleaseStatusParamsFresh = "0"
@@ -2101,8 +2119,10 @@ type AccountWeeklyWindow struct {
 
 // AdminSession defines model for AdminSession.
 type AdminSession struct {
-	Authenticated AdminSessionAuthenticated `json:"authenticated"`
-	CsrfToken     *string                   `json:"csrf_token,omitempty"`
+	AbsoluteExpiresAt *int64                    `json:"absolute_expires_at,omitempty"`
+	Authenticated     AdminSessionAuthenticated `json:"authenticated"`
+	CsrfToken         *string                   `json:"csrf_token,omitempty"`
+	IdleExpiresAt     *int64                    `json:"idle_expires_at,omitempty"`
 }
 
 // AdminSessionAuthenticated defines model for AdminSession.Authenticated.
@@ -2725,6 +2745,7 @@ type OverviewUsageResponse struct {
 	WindowSeconds          *int64                       `json:"window_seconds"`
 	WindowStartAt          int64                        `json:"window_start_at"`
 	WindowStartAtByAccount *map[string]int64            `json:"window_start_at_by_account"`
+	WindowTimezone         string                       `json:"window_timezone"`
 }
 
 // OverviewUsageResponseCached defines model for OverviewUsageResponse.Cached.
@@ -4106,13 +4127,17 @@ type GetAdminOperationImpactParamsAction string
 // GetAdminOverviewUsageParams defines parameters for GetAdminOverviewUsage.
 type GetAdminOverviewUsageParams struct {
 	// Window Route-specific usage range; `custom` also requires `start_at` and `end_at`.
-	Window    *UsageWindowQuery      `form:"window,omitempty" json:"window,omitempty"`
-	StartAt   *UsageStartAtQuery     `form:"start_at,omitempty" json:"start_at,omitempty"`
-	EndAt     *UsageEndAtQuery       `form:"end_at,omitempty" json:"end_at,omitempty"`
-	Account   *[]string              `form:"account,omitempty" json:"account,omitempty"`
-	User      *[]openapi_types.Email `form:"user,omitempty" json:"user,omitempty"`
-	UserLimit *int                   `form:"user_limit,omitempty" json:"user_limit,omitempty"`
+	Window    *UsageWindowQuery                     `form:"window,omitempty" json:"window,omitempty"`
+	StartAt   *UsageStartAtQuery                    `form:"start_at,omitempty" json:"start_at,omitempty"`
+	EndAt     *UsageEndAtQuery                      `form:"end_at,omitempty" json:"end_at,omitempty"`
+	Account   *[]string                             `form:"account,omitempty" json:"account,omitempty"`
+	User      *[]openapi_types.Email                `form:"user,omitempty" json:"user,omitempty"`
+	UserLimit *int                                  `form:"user_limit,omitempty" json:"user_limit,omitempty"`
+	TokenMode *GetAdminOverviewUsageParamsTokenMode `form:"token_mode,omitempty" json:"token_mode,omitempty"`
 }
+
+// GetAdminOverviewUsageParamsTokenMode defines parameters for GetAdminOverviewUsage.
+type GetAdminOverviewUsageParamsTokenMode string
 
 // GetAdminReleaseStatusParams defines parameters for GetAdminReleaseStatus.
 type GetAdminReleaseStatusParams struct {
@@ -4150,6 +4175,11 @@ type DeleteAdminSessionParams struct {
 // CreateAdminSessionParams defines parameters for CreateAdminSession.
 type CreateAdminSessionParams struct {
 	XManagementKey ManagementKey `json:"X-Management-Key"`
+}
+
+// RefreshAdminSessionParams defines parameters for RefreshAdminSession.
+type RefreshAdminSessionParams struct {
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // UpdateAdminConfigurationParams defines parameters for UpdateAdminConfiguration.

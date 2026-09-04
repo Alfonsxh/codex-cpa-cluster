@@ -564,6 +564,29 @@ exit 0
 FAKE_SUCCESS
   chmod 0755 "$FAKE_BIN/$command"
 done
+cat >"$FAKE_BIN/timedatectl" <<'FAKE_TIMEDATECTL'
+#!/usr/bin/env sh
+set -eu
+if [ -n "${FAKE_SYSTEM_LOG:-}" ]; then
+  printf '%s %s\n' "$(basename -- "$0")" "$*" >>"$FAKE_SYSTEM_LOG"
+fi
+timezone_file=${FAKE_TIMEZONE_FILE:-${FAKE_SYSTEM_LOG:-/tmp/cpac-system}.timezone}
+case "${1:-}" in
+  show)
+    if [ -f "$timezone_file" ]; then
+      cat "$timezone_file"
+    else
+      printf '%s\n' UTC
+    fi
+    ;;
+  set-timezone)
+    [ "$#" -eq 2 ] || exit 2
+    printf '%s\n' "$2" >"$timezone_file"
+    ;;
+  *) exit 2 ;;
+esac
+FAKE_TIMEDATECTL
+chmod 0755 "$FAKE_BIN/timedatectl"
 cat >"$FAKE_BIN/readlink" <<'FAKE_READLINK'
 #!/usr/bin/env sh
 set -eu
@@ -629,6 +652,7 @@ run_operator_deploy >"$INSTALL_OUTPUT"
 for expected_output in \
   "== CPAC 安装与升级 ==" \
   "检查系统环境" \
+  "统一服务器时区为 Asia/Shanghai" \
   "拉取 Control / Web / Gateway / Edge 镜像" \
   "镜像 Control" \
   "管理员登录  https://qdata.example.com/admin/" \
@@ -640,6 +664,12 @@ do
     exit 1
   }
 done
+[ "$(cat "$SYSTEM_LOG.timezone")" = Asia/Shanghai ] \
+  || { echo "operator deploy did not set the server timezone" >&2; exit 1; }
+grep -Fq 'timedatectl set-timezone Asia/Shanghai' "$SYSTEM_LOG" \
+  || { echo "operator deploy did not issue the server timezone change" >&2; exit 1; }
+grep -Fxq 'CPA_TIMEZONE=Asia/Shanghai' "$OPERATOR_ROOT/runtime/target.env" \
+  || { echo "operator deploy did not persist the service timezone" >&2; exit 1; }
 completion_rows=$(grep -c '^│' "$INSTALL_OUTPUT")
 bordered_completion_rows=$(grep -c '^│.*│$' "$INSTALL_OUTPUT")
 [ "$completion_rows" -gt 0 ] && [ "$completion_rows" -eq "$bordered_completion_rows" ] || {

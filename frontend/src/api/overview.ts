@@ -41,6 +41,7 @@ export type OverviewUsageOptions = {
   accounts?: string[];
   users?: string[];
   userLimit?: number;
+  tokenMode?: "unweighted" | "weighted";
   startAt?: number;
   endAt?: number;
   fresh?: boolean;
@@ -49,7 +50,8 @@ export type OverviewUsageOptions = {
 export function readOverviewUsage(options: OverviewUsageOptions, signal?: AbortSignal): Promise<OverviewUsageResponse> {
   const query = new URLSearchParams({
     window: options.window,
-    user_limit: String(options.userLimit ?? 10)
+    user_limit: String(options.userLimit ?? 10),
+    token_mode: options.tokenMode ?? "unweighted"
   });
   options.accounts?.forEach((account) => query.append("account", account));
   options.users?.forEach((user) => query.append("user", user));

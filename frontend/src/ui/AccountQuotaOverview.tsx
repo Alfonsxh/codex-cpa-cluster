@@ -23,8 +23,7 @@ export function AccountQuotaOverview({ quota }: { quota: OverviewAccountQuotaSum
           detail={`${quota.enabled_accounts} 个启用账号当前都没有可用的常规周限额数据。`}
         />
       ) : (
-        <>
-          <div className="overview-account-quota-body">
+        <div className="overview-account-quota-body">
             <div className="overview-account-quota-primary">
               <span>账号平均已用</span>
               <strong>{formatPercent(used)}</strong>
@@ -51,11 +50,7 @@ export function AccountQuotaOverview({ quota }: { quota: OverviewAccountQuotaSum
               <QuotaMetric label="高风险" value={quota.high_risk_accounts} tone={quota.high_risk_accounts > 0 ? "warning" : undefined} />
               <QuotaMetric label="额度未知" value={quota.unknown_accounts} tone={quota.unknown_accounts > 0 ? "neutral" : undefined} />
             </dl>
-          </div>
-          <footer className="overview-account-quota-footer">
-            按额度已知的启用账号等权计算，未知账号不参与平均；高风险表示已用达到 90% 且尚未耗尽。
-          </footer>
-        </>
+        </div>
       )}
     </section>
   );

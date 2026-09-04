@@ -669,6 +669,22 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   expect(detailMetricsLayout?.headingWidth).toBeLessThanOrEqual(130);
   expect(detailMetricsLayout?.labelClipped).toBe(false);
   expect(detailMetricsLayout?.rateInside).toBe(true);
+  const modelAlignments = await page.locator(".account-model-usage-head").evaluateAll((heads) => heads.map((head) => {
+    const name = head.querySelector<HTMLElement>(".account-model-name");
+    const token = head.querySelector<HTMLElement>(".account-model-token");
+    const headRect = head.getBoundingClientRect();
+    const nameRect = name?.getBoundingClientRect();
+    const tokenRect = token?.getBoundingClientRect();
+    return {
+      nameAlignment: name ? getComputedStyle(name).textAlign : "missing",
+      tokenAlignment: token ? getComputedStyle(token).textAlign : "missing",
+      nameStartsAtLeft: Boolean(nameRect && Math.abs(nameRect.left - headRect.left) <= 1),
+      tokenEndsAtRight: Boolean(tokenRect && Math.abs(tokenRect.right - headRect.right) <= 1)
+    };
+  }));
+  expect(modelAlignments.length).toBeGreaterThan(0);
+  expect(modelAlignments.every((item) => item.nameAlignment === "left" && item.nameStartsAtLeft)).toBe(true);
+  expect(modelAlignments.every((item) => item.tokenAlignment === "right" && item.tokenEndsAtRight)).toBe(true);
   const compactEffort = page.getByRole("button", { name: "查看 gpt-5.6-sol max 推理强度 Token 明细" });
   await compactEffort.hover();
   const effortTooltip = page.locator(".usage-model-effort-tooltip");
@@ -819,7 +835,7 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
     await expect(orderedTabs.nth(1)).toHaveText("每日用量");
     await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
     const resetTime = page.locator(".usage-personal-quota-detail > time");
-    await expect(resetTime).toContainText("北京时间");
+    await expect(resetTime).toHaveText(/重置：\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/);
     expect(await resetTime.evaluate((time) => {
       const timeRect = time.getBoundingClientRect();
       const detailRect = time.parentElement?.getBoundingClientRect();
@@ -1136,7 +1152,7 @@ test("共享表格视口保持动态高度、右侧滚动槽和正确边界阴�
   expect(Math.abs(layout.finalColumnRightDelta - compactColumn.bodyRightDelta)).toBeLessThanOrEqual(1);
 
   await page.goto("/admin/overview");
-  await page.getByRole("tab", { name: "按 CPA" }).click();
+  await page.getByRole("tab", { name: "CPA 账号 Token 统计" }).click();
   const naturalTable = page.locator(".overview-legacy-table-wrap").first();
   await expect(naturalTable).toHaveAttribute("data-scroll-overflow", "false");
   await expect(naturalTable).not.toHaveClass(/can-scroll-up|can-scroll-down/);
@@ -1170,48 +1186,57 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   await expect(card.getByText("实际统计范围")).toBeVisible();
   await expect(card.locator(".overview-token-window-range > strong")).toContainText(/—/);
   await expect(tabs).toHaveCount(3);
+  await expect(summary).toBeVisible();
   await expect(dataScroll.locator(".overview-legacy-chart")).toBeVisible();
-  await expect(dataScroll.getByLabel("CPA用量明细表格")).toBeVisible();
+  await expect(dataScroll.getByLabel("CPA用量明细表格")).toHaveCount(0);
+
+  await card.getByRole("tab", { name: "CPA 账号 Token 统计" }).click();
+  await expect(summary).toHaveCount(0);
+  const detailTable = dataScroll.getByLabel("CPA用量明细表格");
+  await expect(detailTable).toBeVisible();
+  await expect(detailTable.locator("tbody tr")).toHaveCount(10);
 
   const geometry = await card.evaluate((element) => {
     const header = element.querySelector<HTMLElement>(".overview-token-workspace-header");
-    const summaryRegion = element.querySelector<HTMLElement>(".overview-token-summary-region");
     const scroller = element.querySelector<HTMLElement>(".overview-token-data-scroll");
     const chart = element.querySelector<HTMLElement>(".overview-legacy-chart");
-    const table = element.querySelector<HTMLElement>(".overview-legacy-table-wrap");
+    const table = element.querySelector<HTMLElement>(".overview-token-detail-table");
     const tabButtons = [...element.querySelectorAll<HTMLElement>(".overview-token-view-switch [role=tab]")];
-    if (!header || !summaryRegion || !scroller || !chart || !table || tabButtons.length !== 3) {
+    if (!header || !scroller || !chart || !table || tabButtons.length !== 3) {
       throw new Error("Token 卡片几何锚点缺失");
     }
     const headerRect = header.getBoundingClientRect();
-    const summaryRect = summaryRegion.getBoundingClientRect();
     const scrollRect = scroller.getBoundingClientRect();
     const chartRect = chart.getBoundingClientRect();
     const tableRect = table.getBoundingClientRect();
     return {
-      tabsAboveSummary: headerRect.bottom <= summaryRect.top + 1,
-      summaryAboveData: summaryRect.bottom <= scrollRect.top + 1,
+      tabsAboveData: headerRect.bottom <= scrollRect.top + 1,
       chartAboveTable: chartRect.bottom <= tableRect.top + 50,
       tabWidths: tabButtons.map((button) => button.getBoundingClientRect().width),
-      overflowY: getComputedStyle(scroller).overflowY,
-      clientHeight: scroller.clientHeight,
-      scrollHeight: scroller.scrollHeight
+      workspaceOverflowY: getComputedStyle(scroller).overflowY,
+      detailOverflowY: getComputedStyle(table).overflowY,
+      detailClientHeight: table.clientHeight,
+      detailScrollHeight: table.scrollHeight
     };
   });
-  expect(geometry.tabsAboveSummary).toBe(true);
-  expect(geometry.summaryAboveData).toBe(true);
+  expect(geometry.tabsAboveData).toBe(true);
   expect(geometry.chartAboveTable).toBe(true);
   expect(Math.max(...geometry.tabWidths) - Math.min(...geometry.tabWidths)).toBeLessThanOrEqual(1);
-  expect(geometry.overflowY).toBe("auto");
-  expect(geometry.clientHeight).toBeGreaterThanOrEqual(520);
-  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+  expect(geometry.workspaceOverflowY).toBe("visible");
+  expect(geometry.detailOverflowY).toBe("auto");
+  expect(geometry.detailClientHeight).toBeLessThanOrEqual(380);
+  expect(geometry.detailScrollHeight).toBeGreaterThan(geometry.detailClientHeight);
 
-  await tabs.filter({ hasText: "按 CPA" }).click();
-  await expect(card.getByLabel("CPA 账号统计摘要")).toBeVisible();
-  await expect(card.getByRole("tabpanel", { name: "按 CPA" }).getByLabel("CPA用量明细表格")).toBeVisible();
-  await tabs.filter({ hasText: "按用户" }).click();
-  await expect(card.getByLabel("用户统计摘要")).toBeVisible();
-  await expect(card.getByRole("tabpanel", { name: "按用户" }).getByLabel("用户用量明细表格")).toBeVisible();
+  await detailTable.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(detailTable.locator("tbody tr")).toHaveCount(18);
+
+  await expect(card.getByLabel("CPA 账号统计摘要")).toHaveCount(0);
+  await card.getByRole("tab", { name: "用户 Token 统计" }).click();
+  await expect(card.getByLabel("用户统计摘要")).toHaveCount(0);
+  await expect(card.getByRole("tabpanel", { name: "用户 Token 统计" }).getByLabel("用户用量明细表格")).toBeVisible();
 });
 
 test("仅在存在更新时显示心跳入口、悬停展示精简版本信息", async ({ page }) => {
@@ -1305,7 +1330,7 @@ test("30 天图表 Tooltip 为单列 Top 10 且无滚动条", async ({ page }) =
   // The SQLite query itself keeps the stricter 500 ms gate in tests.test_usage_store.
   expect(Date.now() - started).toBeLessThan(1_000);
 
-  await page.getByRole("tab", { name: "按用户" }).click();
+  await page.getByRole("tab", { name: "用户 Token 统计" }).click();
   const chart = page.locator(".overview-legacy-chart").first();
   await expect(chart).toBeVisible();
   await chart.scrollIntoViewIfNeeded();

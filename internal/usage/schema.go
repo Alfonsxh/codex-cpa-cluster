@@ -60,7 +60,7 @@ CREATE TABLE usage_meta (
     value TEXT NOT NULL
 );
 
-INSERT INTO usage_meta(key, value) VALUES ('weekly_usage_timezone', 'UTC');
+INSERT INTO usage_meta(key, value) VALUES ('weekly_usage_timezone', 'Asia/Shanghai');
 
 CREATE TABLE portal_sessions (
     session_hash TEXT PRIMARY KEY,

@@ -76,7 +76,7 @@ func TestSettingsWorkspaceReturnsRealBoundedRedactedRuntimeMetadata(t *testing.T
 	t.Cleanup(server.Close)
 
 	unauthorized := performAdminRequest(server, http.MethodGet, "/admin/api/settings/workspace", nil, nil, nil)
-	assertAdminError(t, unauthorized, http.StatusUnauthorized, "unauthorized")
+	assertAdminError(t, unauthorized, http.StatusUnauthorized, "session_missing")
 	response := performAdminRequest(server, http.MethodGet, "/admin/api/settings/workspace", nil,
 		map[string]string{"X-Management-Key": "test-management-key"}, nil)
 	if response.Code != http.StatusOK {

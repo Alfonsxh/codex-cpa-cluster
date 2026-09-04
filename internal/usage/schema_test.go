@@ -24,6 +24,11 @@ func TestInitializeCreatesCurrentUsageSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open initialized writer: %v", err)
 	}
+	var timezone string
+	if err := writer.db.Get(&timezone, "SELECT value FROM usage_meta WHERE key = ?", weeklyUsageTimezoneKey); err != nil ||
+		timezone != "Asia/Shanghai" {
+		t.Fatalf("initialized usage timezone = %q, %v", timezone, err)
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close initialized writer: %v", err)
 	}

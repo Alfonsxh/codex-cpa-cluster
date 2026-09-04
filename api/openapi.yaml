@@ -80,6 +80,19 @@ paths:
                 $ref: "#/components/schemas/LoggedOutResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /admin/api/session/refresh:
+    post:
+      operationId: refreshAdminSession
+      tags: [admin-session]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          $ref: "#/components/responses/AdminSessionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /admin/api/overview/summary:
     get:
       operationId: getAdminOverviewSummary
@@ -1126,7 +1139,10 @@ paths:
           schema: { type: array, items: { type: string, format: email } }
         - name: user_limit
           in: query
-          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+          schema: { type: integer, minimum: 1, maximum: 500, default: 10 }
+        - name: token_mode
+          in: query
+          schema: { type: string, enum: [unweighted, weighted], default: unweighted }
       responses:
         "200":
           description: Fine-grained Token time series loaded only for the requested window and filters
@@ -2008,6 +2024,12 @@ components:
           const: true
         csrf_token:
           type: string
+        idle_expires_at:
+          type: integer
+          format: int64
+        absolute_expires_at:
+          type: integer
+          format: int64
     OverviewPayload:
       type: object
       additionalProperties: false
@@ -3780,6 +3802,7 @@ components:
         - window
         - window_seconds
         - window_start_at
+        - window_timezone
         - window_start_at_by_account
         - unavailable_accounts
         - bucket_seconds
@@ -3802,6 +3825,7 @@ components:
               enum: [today, custom, since_reset]
         window_seconds: { type: [integer, "null"], format: int64 }
         window_start_at: { type: integer, format: int64 }
+        window_timezone: { type: string }
         window_start_at_by_account:
           type: [object, "null"]
           additionalProperties: { type: integer, format: int64 }
@@ -3826,7 +3850,7 @@ components:
         selected_users:
           type: array
           items: { type: string, format: email }
-        user_limit: { type: integer, minimum: 1, maximum: 50 }
+        user_limit: { type: integer, minimum: 1, maximum: 500 }
         collector: { $ref: "#/components/schemas/CollectorStatus" }
         cached: { type: boolean, const: false }
     RebalanceAccountRequest:

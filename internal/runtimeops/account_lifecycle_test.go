@@ -90,6 +90,7 @@ func TestAccountRuntimeCreatesExactMobySpecProbesAndRollsBackCandidate(t *testin
 	}
 	created := client.creates[0]
 	if created.Name != "fixture-gamma" || created.Config.Image != "registry.example.com/cpa@sha256:immutable" ||
+		len(created.Config.Env) != 1 || created.Config.Env[0] != "TZ=Asia/Shanghai" ||
 		created.Config.Labels[composeProjectLabel] != "fixture-project" ||
 		created.Config.Labels[composeServiceLabel] != "cliproxy-gamma" ||
 		created.HostConfig.NetworkMode != "fixture-backend" || len(created.HostConfig.Mounts) != 4 {
@@ -389,6 +390,7 @@ func TestAccountRuntimeLoginUsesIsolatedOneOffContainerAndRequiresOAuthChange(t 
 	created := client.creates[0]
 	if !strings.HasPrefix(created.Name, "fixture-oauth-alpha-") ||
 		created.Config.Image != "registry.example.com/cpa@sha256:immutable" ||
+		len(created.Config.Env) != 1 || created.Config.Env[0] != "TZ=Asia/Shanghai" ||
 		strings.Join(created.Config.Cmd, " ") != "./CLIProxyAPI -config /CLIProxyAPI/account-config/config.yaml -codex-device-login -no-browser" {
 		t.Fatalf("OAuth create identity = %#v", created)
 	}

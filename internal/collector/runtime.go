@@ -320,7 +320,7 @@ func safeRuntimeError(scope string, err error, secret string) string {
 
 func DefaultRuntimeConfig() RuntimeConfig {
 	return RuntimeConfig{
-		BatchSize: 100, WeekTimezone: "UTC", ResetPersonalWeeklyOnNewWeek: true,
+		BatchSize: 100, WeekTimezone: "Asia/Shanghai", ResetPersonalWeeklyOnNewWeek: true,
 		HeartbeatStaleAfterSeconds: 15, QuotaFailOpenAfterSeconds: 300,
 		ReasoningMultipliers: make(map[string]float64),
 	}

@@ -7,7 +7,7 @@ import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ApiError, subscribeUnauthorized } from "../api/client";
 import { readReleaseStatus, type ReleaseStatus } from "../api/overview";
 import { onboardingQueryKey, readOnboarding } from "../api/onboarding";
-import { logout, readSession, sessionQueryKey } from "../api/session";
+import { logout, readSession, refreshSession, sessionQueryKey } from "../api/session";
 import { AdminToolbarContext } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { LoginPage } from "./LoginPage";
@@ -47,9 +47,33 @@ export function App() {
   }, [queryClient]);
   useEffect(() => subscribeUnauthorized((event) => {
     if (event.scope === "admin" && event.path !== "/admin/api/session") {
-      expireSession("管理会话已失效，请重新输入管理密钥");
+      expireSession(adminSessionNotice(event.code, event.message));
     }
   }), [expireSession]);
+  useEffect(() => {
+    const csrfToken = session.data?.csrf_token;
+    if (!csrfToken) return;
+    let refreshPending = false;
+    let lastRefreshAt = 0;
+    const refreshInterval = 5 * 60 * 1_000;
+    const onActivity = (event: PointerEvent | KeyboardEvent) => {
+      if (!event.isTrusted || (event instanceof KeyboardEvent && event.repeat)) return;
+      const now = Date.now();
+      if (refreshPending || now - lastRefreshAt < refreshInterval) return;
+      refreshPending = true;
+      lastRefreshAt = now;
+      void refreshSession(csrfToken)
+        .then((payload) => queryClient.setQueryData(sessionQueryKey, payload))
+        .catch(() => undefined)
+        .finally(() => { refreshPending = false; });
+    };
+    window.addEventListener("pointerdown", onActivity, { passive: true });
+    window.addEventListener("keydown", onActivity);
+    return () => {
+      window.removeEventListener("pointerdown", onActivity);
+      window.removeEventListener("keydown", onActivity);
+    };
+  }, [queryClient, session.data?.csrf_token]);
   if (session.isPending) {
     return <AppLoading />;
   }
@@ -80,6 +104,13 @@ export function App() {
       </Suspense>
     </AdminShell>
   );
+}
+
+function adminSessionNotice(code: string, fallback: string) {
+  if (code === "session_expired") return "管理会话已过期，请重新输入管理密钥";
+  if (code === "session_invalidated") return "管理密钥已更新，请重新输入管理密钥";
+  if (code === "session_missing") return "管理会话已结束，请重新输入管理密钥";
+  return fallback || "管理会话已失效，请重新输入管理密钥";
 }
 
 function AuthenticatedRoutes({

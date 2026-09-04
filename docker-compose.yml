@@ -6,11 +6,15 @@ x-json-logging: &json-logging
     max-size: "20m"
     max-file: "3"
 
+x-service-environment: &service-environment
+  TZ: ${CPA_TIMEZONE:-Asia/Shanghai}
+
 x-control-service: &control-service
   image: ${CPA_CONTROL_IMAGE:?CPA_CONTROL_IMAGE is required}
   restart: unless-stopped
   logging: *json-logging
   environment:
+    <<: *service-environment
     CLIPROXY_ROOT: ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
   volumes:
     - ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}:${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
@@ -30,6 +34,8 @@ services:
     container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-gateway-blue
     restart: unless-stopped
     logging: *json-logging
+    environment:
+      <<: *service-environment
     group_add:
       - "65534"
     command:
@@ -55,6 +61,8 @@ services:
     container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-gateway-green
     restart: unless-stopped
     logging: *json-logging
+    environment:
+      <<: *service-environment
     group_add:
       - "65534"
     command:
@@ -89,6 +97,7 @@ services:
     expose:
       - "8318"
     environment:
+      <<: *service-environment
       CLIPROXY_ROOT: ${CPA_DEPLOY_ROOT:?CPA_DEPLOY_ROOT is required}
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
@@ -109,6 +118,8 @@ services:
     container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-web
     restart: unless-stopped
     logging: *json-logging
+    environment:
+      <<: *service-environment
     command:
       - --admin-target=http://admin:8318
     expose:
@@ -127,6 +138,8 @@ services:
     container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-edge
     restart: unless-stopped
     logging: *json-logging
+    environment:
+      <<: *service-environment
     command:
       - --active-gateway-file=/var/run/cliproxy-edge/active-gateway.conf
       - --web-target=http://web:8080

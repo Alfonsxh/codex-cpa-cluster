@@ -25,10 +25,11 @@ import (
 )
 
 const (
-	adminSessionCookie = "cpa_admin_session"
-	defaultSessionTTL  = 15 * time.Minute
-	defaultBodyLimit   = int64(1 << 20)
-	brandingBodyLimit  = int64(3 << 20)
+	adminSessionCookie        = "cpa_admin_session"
+	defaultSessionTTL         = 30 * time.Minute
+	defaultSessionAbsoluteTTL = 8 * time.Hour
+	defaultBodyLimit          = int64(1 << 20)
+	brandingBodyLimit         = int64(3 << 20)
 )
 
 type ControlPlaneStore interface {
@@ -73,6 +74,7 @@ type Config struct {
 	Logger               *zap.Logger
 	Now                  func() time.Time
 	SessionTTL           time.Duration
+	SessionAbsoluteTTL   time.Duration
 	SecureCookies        bool
 	Rebalancer           AccountRebalancer
 	Usage                UsageReader
@@ -95,7 +97,7 @@ type UsageReader interface {
 	AccountBreakdown(context.Context, string, int64, *int64) (usage.AccountBreakdown, error)
 	TeamUsage(context.Context, []string, map[string]string, *int64, *int64) (map[string]usage.TeamUsageMetrics, error)
 	TeamBreakdown(context.Context, string, []string, *int64, *int64) (usage.TeamBreakdown, error)
-	TokenTimeSeries(context.Context, []string, []string, []string, int64, int64, int64, int, map[string]int64) (usage.TokenTrend, error)
+	TokenTimeSeries(context.Context, []string, []string, []string, int64, int64, int64, int, usage.TokenMode, map[string]int64) (usage.TokenTrend, error)
 	Status(context.Context) (usage.CollectorStatus, error)
 }
 
@@ -154,6 +156,7 @@ type Server struct {
 	logger                  *zap.Logger
 	now                     func() time.Time
 	sessionTTL              time.Duration
+	sessionAbsoluteTTL      time.Duration
 	secureCookies           bool
 	sessions                *scs.SessionManager
 	rebalancer              AccountRebalancer
@@ -193,9 +196,10 @@ type APIError struct {
 }
 
 type adminContext struct {
-	Kind      string
-	CSRFToken string
-	ExpiresAt int64
+	Kind              string
+	CSRFToken         string
+	IdleExpiresAt     int64
+	AbsoluteExpiresAt int64
 }
 
 const adminContextKey = "admin.authentication"
@@ -215,6 +219,12 @@ func New(config Config) (*Server, error) {
 	if config.SessionTTL <= 0 {
 		config.SessionTTL = defaultSessionTTL
 	}
+	if config.SessionAbsoluteTTL <= 0 {
+		config.SessionAbsoluteTTL = defaultSessionAbsoluteTTL
+	}
+	if config.SessionAbsoluteTTL < config.SessionTTL {
+		return nil, errors.New("admin session absolute TTL must not be shorter than idle TTL")
+	}
 	if config.OperationLock == nil {
 		config.OperationLock = &sync.Mutex{}
 	}
@@ -229,7 +239,8 @@ func New(config Config) (*Server, error) {
 	}
 
 	sessionManager := scs.New()
-	sessionManager.Lifetime = config.SessionTTL
+	sessionManager.Lifetime = config.SessionAbsoluteTTL
+	sessionManager.IdleTimeout = config.SessionTTL
 	sessionManager.HashTokenInStore = true
 	sessionManager.Cookie.Name = adminSessionCookie
 	sessionManager.Cookie.Path = "/admin"
@@ -243,6 +254,7 @@ func New(config Config) (*Server, error) {
 		logger:               config.Logger,
 		now:                  config.Now,
 		sessionTTL:           config.SessionTTL,
+		sessionAbsoluteTTL:   config.SessionAbsoluteTTL,
 		secureCookies:        config.SecureCookies,
 		sessions:             sessionManager,
 		rebalancer:           config.Rebalancer,
@@ -306,6 +318,7 @@ func (server *Server) registerRoutes() {
 	api.POST("/session", server.limitBody(defaultBodyLimit), server.createSession)
 	api.GET("/session", server.requireAdmin(), server.readSession)
 	api.DELETE("/session", server.requireAdmin(), server.deleteSession)
+	api.POST("/session/refresh", server.requireAdmin(), server.refreshSession)
 
 	authenticated := api.Group("")
 	authenticated.Use(server.requireAdmin())
@@ -408,7 +421,7 @@ func (server *Server) createSession(c *gin.Context) {
 		return
 	}
 	if !authenticated {
-		writeError(c, http.StatusUnauthorized, "管理密钥无效", "unauthorized")
+		writeError(c, http.StatusUnauthorized, "管理密钥无效", "management_key_invalid")
 		return
 	}
 	csrfToken, err := randomToken()
@@ -416,34 +429,62 @@ func (server *Server) createSession(c *gin.Context) {
 		server.internalError(c, "generate CSRF token", err)
 		return
 	}
-	expiresAt := server.now().Add(server.sessionTTL).Unix()
+	now := server.now()
+	idleExpiresAt := now.Add(server.sessionTTL).Unix()
+	absoluteExpiresAt := now.Add(server.sessionAbsoluteTTL).Unix()
 	if err := server.sessions.RenewToken(c.Request.Context()); err != nil {
 		server.internalError(c, "renew admin session", err)
 		return
 	}
 	server.sessions.Put(c.Request.Context(), "authenticated", true)
 	server.sessions.Put(c.Request.Context(), "csrf_token", csrfToken)
-	server.sessions.Put(c.Request.Context(), "expires_at", expiresAt)
+	server.sessions.Put(c.Request.Context(), "idle_expires_at", idleExpiresAt)
+	server.sessions.Put(c.Request.Context(), "absolute_expires_at", absoluteExpiresAt)
 	server.sessions.Put(c.Request.Context(), "session_generation", server.sessionGeneration.Load())
+	server.sessions.SetDeadline(c.Request.Context(), time.Unix(absoluteExpiresAt, 0))
 	token, expiry, err := server.sessions.Commit(c.Request.Context())
 	if err != nil {
 		server.internalError(c, "save admin session", err)
 		return
 	}
 	server.writeSessionCookie(c, token, expiry)
-	c.JSON(http.StatusCreated, gin.H{
-		"authenticated": true,
-		"csrf_token":    csrfToken,
+	server.writeAdminSession(c, http.StatusCreated, adminContext{
+		Kind: "session", CSRFToken: csrfToken,
+		IdleExpiresAt: idleExpiresAt, AbsoluteExpiresAt: absoluteExpiresAt,
 	})
 }
 
 func (server *Server) readSession(c *gin.Context) {
 	context := currentAdminContext(c)
+	server.writeAdminSession(c, http.StatusOK, context)
+}
+
+func (server *Server) refreshSession(c *gin.Context) {
+	context := currentAdminContext(c)
+	if context.Kind != "session" {
+		writeError(c, http.StatusBadRequest, "管理密钥请求不需要续期", "session_not_refreshable")
+		return
+	}
+	idleExpiresAt := min(server.now().Add(server.sessionTTL).Unix(), context.AbsoluteExpiresAt)
+	server.sessions.Put(c.Request.Context(), "idle_expires_at", idleExpiresAt)
+	token, expiry, err := server.sessions.Commit(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "refresh admin session", err)
+		return
+	}
+	server.writeSessionCookie(c, token, expiry)
+	context.IdleExpiresAt = idleExpiresAt
+	server.writeAdminSession(c, http.StatusOK, context)
+}
+
+func (server *Server) writeAdminSession(c *gin.Context, status int, context adminContext) {
 	payload := gin.H{"authenticated": true}
 	if context.Kind == "session" {
 		payload["csrf_token"] = context.CSRFToken
+		payload["idle_expires_at"] = context.IdleExpiresAt
+		payload["absolute_expires_at"] = context.AbsoluteExpiresAt
 	}
-	c.JSON(http.StatusOK, payload)
+	c.JSON(status, payload)
 }
 
 func (server *Server) deleteSession(c *gin.Context) {
@@ -483,18 +524,31 @@ func (server *Server) requireAdmin() gin.HandlerFunc {
 				c.Next()
 				return
 			}
-			writeError(c, http.StatusUnauthorized, "管理密钥无效", "unauthorized")
+			writeError(c, http.StatusUnauthorized, "管理密钥无效", "management_key_invalid")
 			c.Abort()
 			return
 		}
 
 		authenticated := server.sessions.GetBool(c.Request.Context(), "authenticated")
 		csrfToken := server.sessions.GetString(c.Request.Context(), "csrf_token")
-		expiresAt := server.sessions.GetInt64(c.Request.Context(), "expires_at")
+		idleExpiresAt := server.sessions.GetInt64(c.Request.Context(), "idle_expires_at")
+		absoluteExpiresAt := server.sessions.GetInt64(c.Request.Context(), "absolute_expires_at")
 		generation := server.sessions.GetInt64(c.Request.Context(), "session_generation")
-		if !authenticated || csrfToken == "" || expiresAt <= server.now().Unix() ||
-			generation != server.sessionGeneration.Load() {
-			writeError(c, http.StatusUnauthorized, "管理密钥无效", "unauthorized")
+		if !authenticated || csrfToken == "" {
+			if _, err := c.Request.Cookie(adminSessionCookie); err == nil {
+				server.rejectSession(c, "管理会话已结束，请重新输入管理密钥", "session_expired")
+			} else {
+				server.rejectSession(c, "管理会话不存在，请重新输入管理密钥", "session_missing")
+			}
+			return
+		}
+		if generation != server.sessionGeneration.Load() {
+			server.rejectSession(c, "管理密钥已更新，请重新输入管理密钥", "session_invalidated")
+			return
+		}
+		now := server.now().Unix()
+		if idleExpiresAt <= now || absoluteExpiresAt <= now {
+			server.rejectSession(c, "管理会话已过期，请重新输入管理密钥", "session_expired")
 			c.Abort()
 			return
 		}
@@ -508,9 +562,18 @@ func (server *Server) requireAdmin() gin.HandlerFunc {
 				return
 			}
 		}
-		c.Set(adminContextKey, adminContext{Kind: "session", CSRFToken: csrfToken, ExpiresAt: expiresAt})
+		c.Set(adminContextKey, adminContext{
+			Kind: "session", CSRFToken: csrfToken,
+			IdleExpiresAt: idleExpiresAt, AbsoluteExpiresAt: absoluteExpiresAt,
+		})
 		c.Next()
 	}
+}
+
+func (server *Server) rejectSession(c *gin.Context, message, code string) {
+	server.writeSessionCookie(c, "", time.Time{})
+	writeError(c, http.StatusUnauthorized, message, code)
+	c.Abort()
 }
 
 func currentAdminContext(c *gin.Context) adminContext {
@@ -551,7 +614,8 @@ func (server *Server) writeSessionCookie(c *gin.Context, token string, expiry ti
 		cookie.MaxAge = -1
 	} else {
 		cookie.Expires = expiry
-		cookie.MaxAge = int(server.sessionTTL.Seconds())
+		remaining := expiry.Sub(server.now())
+		cookie.MaxAge = max(1, int(remaining.Seconds()))
 	}
 	http.SetCookie(c.Writer, cookie)
 }

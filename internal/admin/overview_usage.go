@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -72,10 +73,19 @@ func (server *Server) readOverviewUsage(c *gin.Context) {
 			writeError(c, http.StatusBadRequest, "用户趋势数量无效", "invalid_request")
 			return
 		}
-		userLimit = min(max(parsed, 1), 50)
+		userLimit = min(max(parsed, 1), 500)
+	}
+	tokenMode := usage.TokenMode(strings.ToLower(strings.TrimSpace(c.DefaultQuery("token_mode", string(usage.TokenModeUnweighted)))))
+	if tokenMode != usage.TokenModeUnweighted && tokenMode != usage.TokenModeWeighted {
+		writeError(c, http.StatusBadRequest, "Token 统计口径无效", "invalid_request")
+		return
 	}
 	now := server.now()
-	window, startAt, endAt, bucketSeconds, windowSeconds, err := server.overviewUsageWindow(c, now)
+	location, windowTimezone, err := server.usageTimezone(c)
+	if err != nil {
+		return
+	}
+	window, startAt, endAt, bucketSeconds, windowSeconds, err := server.overviewUsageWindow(c, now, location)
 	if err != nil {
 		writeUsageWindowError(c, err)
 		return
@@ -104,7 +114,7 @@ func (server *Server) readOverviewUsage(c *gin.Context) {
 	}
 	trend, err := server.usage.TokenTimeSeries(
 		c.Request.Context(), trendAccounts, knownUsers, selectedUsers,
-		startAt, endAt, bucketSeconds, userLimit, startAtByAccount,
+		startAt, endAt, bucketSeconds, userLimit, tokenMode, startAtByAccount,
 	)
 	if err != nil {
 		server.internalError(c, "query overview token trend", err)
@@ -125,7 +135,7 @@ func (server *Server) readOverviewUsage(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"generated_at": trend.GeneratedAt, "window": window,
-		"window_seconds": windowSeconds, "window_start_at": startAt,
+		"window_seconds": windowSeconds, "window_start_at": startAt, "window_timezone": windowTimezone,
 		"window_start_at_by_account": startAtByAccount, "unavailable_accounts": unavailableAccounts,
 		"bucket_seconds": bucketSeconds, "buckets": trend.Buckets,
 		"accounts": trend.Accounts, "users": trend.Users,
@@ -138,6 +148,7 @@ func (server *Server) readOverviewUsage(c *gin.Context) {
 func (server *Server) overviewUsageWindow(
 	c *gin.Context,
 	now time.Time,
+	location *time.Location,
 ) (any, int64, int64, int64, any, error) {
 	raw := strings.ToLower(strings.TrimSpace(c.Query("window")))
 	if raw == "" {
@@ -156,10 +167,6 @@ func (server *Server) overviewUsageWindow(
 		return customUsageWindow, startAt, endAt, overviewUsageBucketSeconds(duration), duration, nil
 	}
 	if raw == todayUsageWindow {
-		location, _, err := server.usageTimezone(c)
-		if err != nil {
-			return nil, 0, 0, 0, nil, err
-		}
 		localNow := now.In(location)
 		start := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location).Unix()
 		return todayUsageWindow, start, generatedAt + 1, 15 * 60, nil, nil

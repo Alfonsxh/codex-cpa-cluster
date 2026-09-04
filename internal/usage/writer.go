@@ -27,7 +27,7 @@ const (
 	weeklyUsageBackfillVersion    = "2"
 	weeklyUsageLastEventIDKey     = "weekly_usage_last_event_id"
 	weeklyUsageTimezoneKey        = "weekly_usage_timezone"
-	defaultWeekTimezone           = "UTC"
+	defaultWeekTimezone           = "Asia/Shanghai"
 	reasoningPolicyVersionPrefix  = "reasoning-"
 	reasoningMultiplierConfigBase = "user_quota.reasoning_multiplier."
 )

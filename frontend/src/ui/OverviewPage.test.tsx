@@ -8,9 +8,11 @@ import { formatOverviewUsageRange, OverviewPage } from "./OverviewPage";
 
 describe("OverviewPage legacy dashboard contract", () => {
   it("formats an exact custom range without dropping the exclusive end minute", () => {
-    const startAt = Math.floor(new Date(2026, 8, 3, 10, 0).getTime() / 1000);
-    const endAt = Math.floor(new Date(2026, 8, 3, 11, 0).getTime() / 1000);
-    expect(formatOverviewUsageRange(startAt, endAt)).toMatch(/10:00\s*—\s*11:00（共 1 小时）/);
+    const startAt = Math.floor(Date.parse("2026-09-03T10:00:00+08:00") / 1000);
+    const endAt = Math.floor(Date.parse("2026-09-03T11:00:00+08:00") / 1000);
+    expect(formatOverviewUsageRange(startAt, endAt)).toMatch(
+      /2026\/09\/03 10:00\s*—\s*2026\/09\/03 11:00/
+    );
   });
 
   it("uses fine-grained APIs while restoring the legacy metrics, monitor, tables, and activity layout", async () => {
@@ -142,8 +144,16 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getByRole("tab", { name: "全部账号" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "overview-token-tab-aggregate");
     expect(screen.getByRole("tabpanel")).toHaveClass("overview-token-data-scroll");
-    expect(screen.getByText("实际统计范围")).toBeInTheDocument();
-    expect(screen.getByText(formatOverviewUsageRange(usage.window_start_at, usage.generated_at))).toBeInTheDocument();
+    expect(screen.queryByText("实际统计范围")).not.toBeInTheDocument();
+    const windowSegments = screen.getByRole("group", { name: "Token 使用时间范围" });
+    expect(windowSegments.closest(".overview-token-window-row")).toHaveTextContent(
+      formatOverviewUsageRange(usage.window_start_at, usage.generated_at)
+    );
+    const refreshHeading = screen.getByText("自动刷新").closest(".overview-refresh-heading");
+    expect(refreshHeading).toHaveTextContent("采集正常");
+    expect(within(refreshHeading as HTMLElement).getByLabelText("最近采集时间")).toHaveTextContent(
+      /\d{2}\/\d{2} \d{2}:\d{2}/
+    );
     expect(screen.getByRole("tablist", { name: "Token 使用数据视角" }).closest("header"))
       .not.toContainElement(screen.getByLabelText("全部账号未加权 Token 使用量汇总值"));
     expect(screen.getByLabelText("全部账号统计摘要")).toContainElement(

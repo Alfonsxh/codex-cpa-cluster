@@ -47,6 +47,8 @@ type SortState = {
 type TokenMode = "unweighted" | "weighted";
 type UsageSeriesView = "aggregate" | "account" | "user";
 
+const overviewDisplayTimezone = "Asia/Shanghai";
+
 const standardWindows: Array<{ value: Exclude<OverviewUsageWindow, "custom">; label: string }> = [
   { value: "3600", label: "1 小时" },
   { value: "21600", label: "6 小时" },
@@ -269,107 +271,119 @@ export function OverviewPage() {
           <div className="overview-legacy-filters usage-monitor-filters" aria-label="Token Dashboard 变量">
             <fieldset className="overview-legacy-window-control usage-time-control">
               <legend>时间范围</legend>
-              <div className="overview-legacy-window-segments usage-time-segments" aria-label="Token 使用时间范围">
-                {standardWindows.map((window) => (
+              <div className="overview-token-window-row">
+                <div className="overview-legacy-window-segments usage-time-segments" role="group" aria-label="Token 使用时间范围">
+                  {standardWindows.map((window) => (
+                    <button
+                      key={window.value}
+                      type="button"
+                      aria-pressed={usageWindow === window.value}
+                      onClick={() => setUsageWindow(window.value)}
+                    >
+                      {window.label}
+                    </button>
+                  ))}
                   <button
-                    key={window.value}
                     type="button"
-                    aria-pressed={usageWindow === window.value}
-                    onClick={() => setUsageWindow(window.value)}
+                    aria-pressed={usageWindow === "custom"}
+                    title="选择时间范围"
+                    onClick={() => setCustomOpen(true)}
                   >
-                    {window.label}
+                    时间选择
                   </button>
-                ))}
+                </div>
+                <strong className="overview-token-window-value" aria-live="polite">
+                  {usage.data
+                    ? formatOverviewUsageRange(
+                        usage.data.window_start_at,
+                        usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
+                        overviewDisplayTimezone
+                      )
+                    : "—"}
+                </strong>
+              </div>
+            </fieldset>
+            <div className="overview-legacy-refresh-cluster usage-refresh-cluster">
+              <div className="overview-refresh-heading">
+                <span className="overview-refresh-label">自动刷新</span>
+                <div className="overview-collector-meta" aria-live="polite">
+                  <span className={`overview-collector-state ${collectorState(usage.data?.collector.status).tone}`}>
+                    {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
+                  </span>
+                  <time aria-label="最近采集时间">
+                    {usage.data?.collector.heartbeat_at
+                      ? formatOverviewCollectorTime(usage.data.collector.heartbeat_at, overviewDisplayTimezone)
+                      : "—"}
+                  </time>
+                </div>
+              </div>
+              <div className="overview-refresh-actions">
+                <div className="overview-legacy-filter usage-variable-select usage-refresh-control">
+                  <span className="sr-only">刷新间隔</span>
+                  <LegacyEnhancedSelect
+                    label="自动刷新"
+                    value={String(refreshSeconds)}
+                    options={[
+                      { value: "0", label: "关闭" },
+                      { value: "10", label: "10 秒" },
+                      { value: "30", label: "30 秒" },
+                      { value: "60", label: "1 分钟" },
+                      { value: "300", label: "5 分钟" }
+                    ]}
+                    onChange={(nextValue) => setRefreshSeconds(Number(nextValue))}
+                  />
+                </div>
                 <button
                   type="button"
-                  aria-pressed={usageWindow === "custom"}
-                  title="选择时间范围"
-                  onClick={() => setCustomOpen(true)}
+                  className="button ghost usage-monitor-refresh overview-legacy-refresh-button"
+                  disabled={usage.isFetching || usageRefresh.isPending}
+                  aria-label="刷新 Token Dashboard"
+                  onClick={() => usageRefresh.mutate()}
                 >
-                  时间选择
+                  <span aria-hidden="true">↻</span><span>刷新</span>
                 </button>
               </div>
-            </fieldset>
-            <fieldset className="overview-token-mode-control">
-              <legend>Token 口径</legend>
-              <div className="overview-token-mode-segments" role="group" aria-label="Token 统计口径">
-                <button
-                  type="button"
-                  className="unweighted"
-                  aria-pressed={tokenMode === "unweighted"}
-                  onClick={() => setTokenMode("unweighted")}
-                ><i aria-hidden="true" />未加权</button>
-                <button
-                  type="button"
-                  className="weighted"
-                  aria-pressed={tokenMode === "weighted"}
-                  onClick={() => setTokenMode("weighted")}
-                ><i aria-hidden="true" />加权</button>
-              </div>
-            </fieldset>
-            <LegacyUsageMultiSelect
-              id="overview-usage-account-react"
-              label="CPA"
-              allLabel="全部 CPA"
-              searchPlaceholder="搜索 CPA"
-              value={selectedAccounts}
-              options={accountOptions.map((account) => ({ value: account, label: account }))}
-              loading={catalog.isPending}
-              error={catalog.isError}
-              onChange={setSelectedAccounts}
-            />
-            <LegacyUsageMultiSelect
-              id="overview-usage-user-react"
-              label="用户"
-              allLabel="全部用户"
-              searchPlaceholder="搜索用户邮箱"
-              value={selectedUsers}
-              options={userOptions.map((user) => ({ value: user, label: user }))}
-              loading={catalog.isPending}
-              error={catalog.isError}
-              onChange={setSelectedUsers}
-            />
-            <div className="overview-legacy-refresh-cluster usage-refresh-cluster">
-              <label className="overview-legacy-filter usage-variable-select usage-refresh-control">
-                <span>自动刷新</span>
-                <LegacyEnhancedSelect
-                  label="自动刷新"
-                  value={String(refreshSeconds)}
-                  options={[
-                    { value: "0", label: "关闭" },
-                    { value: "10", label: "10 秒" },
-                    { value: "30", label: "30 秒" },
-                    { value: "60", label: "1 分钟" },
-                    { value: "300", label: "5 分钟" }
-                  ]}
-                  onChange={(nextValue) => setRefreshSeconds(Number(nextValue))}
-                />
-              </label>
-              <button
-                type="button"
-                className="button ghost usage-monitor-refresh overview-legacy-refresh-button"
-                disabled={usage.isFetching || usageRefresh.isPending}
-                aria-label="刷新 Token Dashboard"
-                onClick={() => usageRefresh.mutate()}
-              >
-                <span aria-hidden="true">↻</span><span>刷新</span>
-              </button>
             </div>
-            <div className="overview-token-window-range" aria-live="polite">
-              <span className="overview-token-window-label">实际统计范围</span>
-              <strong>{usage.data
-                ? formatOverviewUsageRange(
-                    usage.data.window_start_at,
-                    usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
-                    usage.data.window_timezone
-                  )
-                : "正在读取统计边界…"}</strong>
-              <div className="overview-legacy-monitor-meta">
-                <span className={`overview-status-chip ${collectorState(usage.data?.collector.status).tone}`}>
-                  {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
-                </span>
-                <time>{usage.data ? `${formatOverviewUpdateTime(usage.data.generated_at, usage.data.window_timezone)} 更新` : "—"}</time>
-              </div>
+            <div className="overview-token-scope-filters">
+              <fieldset className="overview-token-mode-control">
+                <legend>Token 口径</legend>
+                <div className="overview-token-mode-segments" role="group" aria-label="Token 统计口径">
+                  <button
+                    type="button"
+                    className="unweighted"
+                    aria-pressed={tokenMode === "unweighted"}
+                    onClick={() => setTokenMode("unweighted")}
+                  ><i aria-hidden="true" />未加权</button>
+                  <button
+                    type="button"
+                    className="weighted"
+                    aria-pressed={tokenMode === "weighted"}
+                    onClick={() => setTokenMode("weighted")}
+                  ><i aria-hidden="true" />加权</button>
+                </div>
+              </fieldset>
+              <LegacyUsageMultiSelect
+                id="overview-usage-account-react"
+                label="CPA"
+                allLabel="全部 CPA"
+                searchPlaceholder="搜索 CPA"
+                value={selectedAccounts}
+                options={accountOptions.map((account) => ({ value: account, label: account }))}
+                loading={catalog.isPending}
+                error={catalog.isError}
+                onChange={setSelectedAccounts}
+              />
+              <LegacyUsageMultiSelect
+                id="overview-usage-user-react"
+                label="用户"
+                allLabel="全部用户"
+                searchPlaceholder="搜索用户邮箱"
+                value={selectedUsers}
+                options={userOptions.map((user) => ({ value: user, label: user }))}
+                loading={catalog.isPending}
+                error={catalog.isError}
+                onChange={setSelectedUsers}
+              />
             </div>
           </div>
         </div>
@@ -424,7 +438,7 @@ export function OverviewPage() {
         open={customOpen}
         title="时间选择"
         range={customRange}
-        timezone={usage.data?.window_timezone ?? "UTC"}
+        timezone={overviewDisplayTimezone}
         onCancel={() => setCustomOpen(false)}
         onApply={(range) => {
           setCustomRange(range);
@@ -910,46 +924,23 @@ function actionLabel(action: RuntimeJob["action"]) {
   return labels[action];
 }
 
-export function formatOverviewUsageRange(startAt: number, endAt: number, timezone?: string) {
+export function formatOverviewUsageRange(startAt: number, endAt: number, timezone = overviewDisplayTimezone) {
   if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || startAt <= 0 || endAt < startAt) return "统计边界暂不可用";
   const start = new Date(startAt * 1000);
   const end = new Date(endAt * 1000);
-  const sameDay = zonedDateKey(start, timezone) === zonedDateKey(end, timezone);
   const fullFormatter = new Intl.DateTimeFormat("zh-CN", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     ...(timezone ? { timeZone: timezone } : {})
   });
-  const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit", minute: "2-digit", hour12: false, ...(timezone ? { timeZone: timezone } : {})
-  });
-  const duration = formatUsageRangeDuration(endAt - startAt);
-  return `${fullFormatter.format(start)} — ${sameDay ? timeFormatter.format(end) : fullFormatter.format(end)}（${duration}）`;
+  return `${fullFormatter.format(start)} — ${fullFormatter.format(end)}`;
 }
 
-function zonedDateKey(date: Date, timezone?: string) {
-  return new Intl.DateTimeFormat("en-CA", {
-    year: "numeric", month: "2-digit", day: "2-digit", ...(timezone ? { timeZone: timezone } : {})
-  }).format(date);
-}
-
-function formatOverviewUpdateTime(timestamp: number, timezone?: string) {
+function formatOverviewCollectorTime(timestamp: number, timezone = overviewDisplayTimezone) {
   if (!timestamp) return "—";
   return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit", minute: "2-digit", hour12: false, ...(timezone ? { timeZone: timezone } : {})
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    ...(timezone ? { timeZone: timezone } : {})
   }).format(new Date(timestamp * 1000));
-}
-
-function formatUsageRangeDuration(seconds: number) {
-  if (seconds < 60) return `共 ${Math.max(0, Math.round(seconds))} 秒`;
-  if (seconds < 3600) return `共 ${Math.round(seconds / 60)} 分钟`;
-  if (seconds < 86400 && seconds % 3600 === 0) return `共 ${seconds / 3600} 小时`;
-  if (seconds < 86400) {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.round((seconds % 3600) / 60);
-    return `共 ${hours} 小时 ${minutes} 分钟`;
-  }
-  if (seconds % 86400 === 0) return `共 ${seconds / 86400} 天`;
-  return `共 ${Math.round(seconds / 3600)} 小时`;
 }
 
 function formatBucketInterval(seconds: number) {

@@ -1195,8 +1195,36 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   const tabs = tabHeader.getByRole("tab");
   const summary = card.getByLabel("全部账号统计摘要");
   const dataScroll = card.locator(".overview-token-data-scroll");
-  await expect(card.getByText("实际统计范围")).toBeVisible();
-  await expect(card.locator(".overview-token-window-range > strong")).toContainText(/—/);
+  await expect(card.getByText("实际统计范围")).toHaveCount(0);
+  await expect(card.locator(".overview-token-window-value")).toContainText(/—/);
+  await expect(card.locator(".overview-collector-state")).toHaveText("采集正常");
+  await expect(card.locator(".overview-collector-meta time")).toHaveText(/\d{2}\/\d{2} \d{2}:\d{2}/);
+  const filterGeometry = await card.evaluate((element) => {
+    const timeControls = element.querySelector<HTMLElement>(".overview-legacy-window-segments");
+    const refreshSelect = element.querySelector<HTMLElement>(".usage-refresh-control .enhanced-select-trigger");
+    const refreshButton = element.querySelector<HTMLElement>(".overview-legacy-refresh-button");
+    const refreshHeading = element.querySelector<HTMLElement>(".overview-refresh-heading");
+    const collectorMeta = element.querySelector<HTMLElement>(".overview-collector-meta");
+    if (!timeControls || !refreshSelect || !refreshButton || !refreshHeading || !collectorMeta) {
+      throw new Error("Token 筛选栏几何锚点缺失");
+    }
+    const timeRect = timeControls.getBoundingClientRect();
+    const selectRect = refreshSelect.getBoundingClientRect();
+    const buttonRect = refreshButton.getBoundingClientRect();
+    const headingRect = refreshHeading.getBoundingClientRect();
+    const collectorRect = collectorMeta.getBoundingClientRect();
+    return {
+      timeHeight: timeRect.height,
+      selectHeight: selectRect.height,
+      buttonHeight: buttonRect.height,
+      controlsAligned: Math.abs(selectRect.top - buttonRect.top),
+      statusInHeading: collectorRect.top >= headingRect.top - 1 && collectorRect.bottom <= headingRect.bottom + 1
+    };
+  });
+  expect(Math.abs(filterGeometry.timeHeight - filterGeometry.selectHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(filterGeometry.selectHeight - filterGeometry.buttonHeight)).toBeLessThanOrEqual(1);
+  expect(filterGeometry.controlsAligned).toBeLessThanOrEqual(1);
+  expect(filterGeometry.statusInHeading).toBe(true);
   await expect(tabs).toHaveCount(3);
   await expect(summary).toBeVisible();
   await expect(dataScroll.locator(".overview-legacy-chart")).toBeVisible();

@@ -16,6 +16,36 @@ const viewports = [
   { name: "mobile", width: 390, height: 844 }
 ] as const;
 
+test("管理登录表单下移后保持完整、均衡的卡片布局", async ({ page }) => {
+  for (const viewport of [viewports[0], viewports[2]]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/admin/overview");
+    const geometry = await page.locator(".admin-login-layout .auth-card").evaluate((card) => {
+      const eyebrow = card.querySelector<HTMLElement>(":scope > .eyebrow");
+      const form = card.querySelector<HTMLElement>(".auth-form");
+      const passwordRow = card.querySelector<HTMLElement>(".password-row");
+      const quietLink = card.querySelector<HTMLElement>(".quiet-link");
+      if (!eyebrow || !form || !passwordRow || !quietLink) throw new Error("管理登录布局锚点缺失");
+      const cardRect = card.getBoundingClientRect();
+      const eyebrowRect = eyebrow.getBoundingClientRect();
+      const formRect = form.getBoundingClientRect();
+      const passwordRowRect = passwordRow.getBoundingClientRect();
+      const quietLinkRect = quietLink.getBoundingClientRect();
+      return {
+        formGap: formRect.top - eyebrowRect.bottom,
+        passwordRowInsideForm: passwordRowRect.top >= formRect.top && passwordRowRect.bottom <= formRect.bottom,
+        linkInsideCard: quietLinkRect.bottom <= cardRect.bottom,
+        cardInsideViewport: cardRect.top >= 0 && cardRect.bottom <= window.innerHeight
+      };
+    });
+    expect(geometry.formGap).toBeGreaterThanOrEqual(27);
+    expect(geometry.formGap).toBeLessThanOrEqual(29);
+    expect(geometry.passwordRowInsideForm).toBe(true);
+    expect(geometry.linkInsideCard).toBe(true);
+    expect(geometry.cardInsideViewport).toBe(true);
+  }
+});
+
 for (const viewport of viewports) {
   for (const theme of ["light", "dark"] as const) {
     test(`React 页面矩阵 ${viewport.name} ${theme}`, async ({ page }) => {

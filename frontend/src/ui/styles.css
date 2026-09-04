@@ -127,7 +127,7 @@ a { color: inherit; text-decoration: none; }
 .admin-login-layout .auth-brand-logo { margin-bottom: 32px; }
 .admin-login-layout .auth-card h1 { margin: 0; font-size: clamp(28px, 5vw, 40px); letter-spacing: -.04em; }
 .admin-login-layout .auth-card > .eyebrow { margin: 7px 0 0; font: 650 10px/1.2 var(--mono); }
-.admin-login-layout .auth-form { margin-top: 16px; }
+.admin-login-layout .auth-form { margin-top: 28px; }
 .admin-login-layout .auth-copy { margin: 16px 0 30px; color: var(--muted); font-size: 14px; line-height: 1.75; }
 .admin-login-layout .auth-form > label { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 650; }
 .admin-login-layout .password-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }

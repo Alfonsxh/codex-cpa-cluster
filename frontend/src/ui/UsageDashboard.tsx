@@ -522,10 +522,7 @@ function RangeSummary({ window, metrics, loading }: { window: PortalUsageWindow;
   return (
     <div className="usage-range-overview" aria-labelledby="usage-summary-label">
       <div className="usage-range-overview-head"><span id="usage-summary-label">{windowLabel(window)} Token</span><small>全部 CPA</small></div>
-      <div className="usage-range-token-pair">
-        <div><span>未加权</span><strong>{loading ? "—" : <TokenValue value={metrics?.total_tokens ?? 0} />}</strong></div>
-        <div><span>加权</span><strong>{loading ? "—" : <TokenValue value={metrics?.weighted_tokens ?? metrics?.total_tokens ?? 0} />}</strong></div>
-      </div>
+      <TokenPair metrics={metrics} loading={loading} />
     </div>
   );
 }
@@ -696,8 +693,13 @@ function ModelEffortTooltip({ model, effort, window }: { model: string; effort: 
   );
 }
 
-function TokenPair({ metrics }: { metrics: UsageMetrics }) {
-  return <div className="usage-user-token-pair"><div><small>加权</small><TokenValue value={metrics.weighted_tokens ?? metrics.total_tokens} /></div><div><small>未加权</small><TokenValue value={metrics.total_tokens} /></div></div>;
+function TokenPair({ metrics, loading = false }: { metrics?: UsageMetrics; loading?: boolean }) {
+  return (
+    <div className="usage-user-token-pair">
+      <div><small>加权</small>{loading ? <strong>—</strong> : <TokenValue value={metrics?.weighted_tokens ?? metrics?.total_tokens ?? 0} />}</div>
+      <div><small>未加权</small>{loading ? <strong>—</strong> : <TokenValue value={metrics?.total_tokens ?? 0} />}</div>
+    </div>
+  );
 }
 
 function TokenValue({ value }: { value: number }) {

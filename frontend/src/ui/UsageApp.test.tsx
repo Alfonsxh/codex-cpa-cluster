@@ -294,6 +294,10 @@ describe("UsageDashboard", () => {
     expect(quotaUpdated).toHaveClass("usage-updated");
     expect(quotaUpdated.parentElement).toHaveClass("usage-tab-toolbar-actions");
     expect(quotaUpdated.parentElement).toContainElement(screen.getByRole("button", { name: "刷新" }));
+    const todayTokenPair = document.querySelector(".usage-range-overview > .usage-user-token-pair");
+    if (!(todayTokenPair instanceof HTMLElement)) throw new Error("今日 Token 未复用统一的 Token 双行布局");
+    expect([...todayTokenPair.children].map((row) => row.firstElementChild?.textContent)).toEqual(["加权", "未加权"]);
+    expect(document.querySelectorAll(".usage-token-cell .usage-user-token-pair").length).toBeGreaterThan(0);
     expect(screen.queryByText(/未加权累计/)).not.toBeInTheDocument();
     expect(screen.queryByText(/今日请求/)).not.toBeInTheDocument();
     const quotaHelp = screen.getByRole("button", { name: "查看个人周额度 Token 说明" });

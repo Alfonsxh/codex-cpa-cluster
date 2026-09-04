@@ -10,7 +10,6 @@ ARG TARGETARCH
 ENV CGO_ENABLED=0 \
     GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH} \
-    GOMAXPROCS=2 \
     GOPROXY=${GOPROXY} \
     GOSUMDB=${GOSUMDB}
 WORKDIR /src
@@ -22,38 +21,38 @@ FROM go-base AS control-builder
 COPY cmd ./cmd
 COPY internal ./internal
 RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build,sharing=locked \
+    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
     mkdir -p /out \
     && for command in admin bootstrap collector failover log-maintenance notifications ownership quota releasectl; do \
-         go build -p=2 -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o "/out/cpa-${command}" "./cmd/${command}"; \
+         go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o "/out/cpa-${command}" "./cmd/${command}"; \
        done
 
 FROM go-base AS gateway-builder
 COPY cmd/gateway ./cmd/gateway
 COPY internal/gateway ./internal/gateway
 RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build,sharing=locked \
-    go build -p=2 -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-gateway ./cmd/gateway
+    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+    go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-gateway ./cmd/gateway
 
 FROM go-base AS edge-builder
 COPY cmd/edge ./cmd/edge
 COPY internal/edge ./internal/edge
 RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build,sharing=locked \
-    go build -p=2 -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-edge ./cmd/edge
+    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+    go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-edge ./cmd/edge
 
 FROM go-base AS web-go-builder
 COPY cmd/web ./cmd/web
 COPY internal/web ./internal/web
 RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build,sharing=locked \
-    go build -p=2 -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-web ./cmd/web
+    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+    go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-web ./cmd/web
 
 FROM go-base AS test-upstream-builder
 COPY cmd/test-upstream ./cmd/test-upstream
 RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build,sharing=locked \
-    go build -p=2 -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-test-upstream ./cmd/test-upstream
+    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+    go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-test-upstream ./cmd/test-upstream
 
 FROM --platform=$BUILDPLATFORM ${NODE_BUILDER_IMAGE} AS web-builder
 WORKDIR /src/frontend

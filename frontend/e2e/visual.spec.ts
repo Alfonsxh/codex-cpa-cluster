@@ -876,9 +876,21 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
       expect(geometry.tabs.every((tab) => tab.left >= geometry.contentLeft && tab.right <= geometry.contentRight)).toBe(true);
       expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
       await expect(page.getByRole("tab", { name: section === "trend" ? "每日用量" : "账号明细" })).toHaveAttribute("aria-selected", "true");
-      await expect(page.locator(viewport.width <= 900
+      const sectionActions = page.locator(viewport.width <= 900
         ? `.usage-mobile-panel-actions.${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`
-        : `.ant-tabs-extra-content .${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`)).toBeVisible();
+        : `.ant-tabs-extra-content .${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`);
+      await expect(sectionActions).toBeVisible();
+      if (section === "accounts") {
+        const quotaUpdated = sectionActions.locator(".usage-updated");
+        await expect(quotaUpdated).toHaveText(/额度更新 \d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
+        expect(await sectionActions.locator(".usage-refresh-stack").evaluate((stack) => {
+          const button = stack.querySelector<HTMLElement>(".usage-refresh-button")?.getBoundingClientRect();
+          const updated = stack.querySelector<HTMLElement>(".usage-updated")?.getBoundingClientRect();
+          return Boolean(button && updated
+            && updated.top >= button.bottom
+            && Math.abs((button.left + button.right) / 2 - (updated.left + updated.right) / 2) <= 1);
+        })).toBe(true);
+      }
       const centeredControls = page.locator(section === "trend"
         ? ".usage-trend-dimensions button, .usage-trend-windows:visible button"
         : ".usage-window-switcher:visible button");

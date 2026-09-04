@@ -261,6 +261,7 @@ describe("UsageApp", () => {
 describe("UsageDashboard", () => {
   it("formats reset timestamps with the full server date regardless of the browser timezone", () => {
     expect(formatServerTimestamp(20_000)).toBe("1970/01/01 13:33");
+    expect(formatServerTimestamp(20_000, { withSeconds: true })).toBe("1970/01/01 13:33:20");
   });
 
   it("queries detail only while opened and replaces the in-memory key after confirmed rotation", async () => {
@@ -289,6 +290,10 @@ describe("UsageDashboard", () => {
     expect(screen.getByText("个人周用量")).toBeInTheDocument();
     expect(screen.getByText("加权已用 3 M / 20 M")).toBeInTheDocument();
     expect(screen.getByText("重置：1970/01/01 13:33")).toBeInTheDocument();
+    const quotaUpdated = screen.getByText("额度更新 1970/01/01 10:46:40");
+    expect(quotaUpdated).toHaveClass("usage-updated");
+    expect(quotaUpdated.parentElement).toHaveClass("usage-refresh-stack");
+    expect(quotaUpdated.parentElement).toContainElement(screen.getByRole("button", { name: "刷新" }));
     expect(screen.queryByText(/未加权累计/)).not.toBeInTheDocument();
     expect(screen.queryByText(/今日请求/)).not.toBeInTheDocument();
     const quotaHelp = screen.getByRole("button", { name: "查看个人周额度 Token 说明" });

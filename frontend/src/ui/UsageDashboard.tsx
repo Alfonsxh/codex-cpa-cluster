@@ -441,10 +441,12 @@ function AccountWindowControl({
           <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => onChange(option.value)}>{option.label}</button>
         ))}
       </div>
-      <button className="usage-refresh-button" type="button" disabled={refreshing} onClick={onRefresh}>
-        {loading ? "刷新中…" : "刷新"}
-      </button>
-      <time className="usage-updated">额度更新 {formatTimestamp(updatedAt)}</time>
+      <div className="usage-refresh-stack">
+        <button className="usage-refresh-button" type="button" disabled={refreshing} onClick={onRefresh}>
+          {loading ? "刷新中…" : "刷新"}
+        </button>
+        <time className="usage-updated">额度更新 {formatServerTimestamp(updatedAt, { withSeconds: true })}</time>
+      </div>
     </div>
   );
 }
@@ -811,7 +813,7 @@ function formatTimestamp(timestamp: number) {
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
 }
 
-export function formatServerTimestamp(timestamp: number) {
+export function formatServerTimestamp(timestamp: number, { withSeconds = false }: { withSeconds?: boolean } = {}) {
   if (!timestamp) return "—";
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Shanghai",
@@ -820,10 +822,12 @@ export function formatServerTimestamp(timestamp: number) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    ...(withSeconds ? { second: "2-digit" as const } : {}),
     hourCycle: "h23"
   }).formatToParts(new Date(timestamp * 1000));
   const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${value("year")}/${value("month")}/${value("day")} ${value("hour")}:${value("minute")}`;
+  const base = `${value("year")}/${value("month")}/${value("day")} ${value("hour")}:${value("minute")}`;
+  return withSeconds ? `${base}:${value("second")}` : base;
 }
 
 const portalWindowOptions: Array<{ value: PortalUsageWindow; label: string }> = [

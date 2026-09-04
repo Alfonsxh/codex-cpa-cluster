@@ -37,7 +37,10 @@ make publish VERSION=v2.0.0 IMAGE_PREFIXES=ghcr.io/owner
 make package VERSION=v2.0.0
 ```
 
-`control`、`web`、`gateway` 和 `edge` 由各自源码摘要生成不可变标签；目标使用同一 `release-manifest.json` 校验镜像组件标签。CI 只校验和打包，不持有或连接目标。
+`control`、`web`、`gateway` 和 `edge` 由各自源码摘要生成不可变标签；发布工具一次计算四组件摘要，
+复用 Registry 中标签一致的内容，仅用 Buildx Bake 构建缺失组件，并在四组件准备完成后才远端移动
+`latest`。中断后重试不会重新拉取或重建已验证组件。目标使用同一 `release-manifest.json` 校验镜像
+组件标签。CI 只校验和打包，不持有或连接目标。
 
 ## Test 顺序
 

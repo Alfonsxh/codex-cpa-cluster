@@ -37,6 +37,18 @@ type releaseManifest struct {
 	Components map[string]componentRecord `json:"components"`
 }
 
+type buildxImageMetadata struct {
+	Name     string `json:"name"`
+	Manifest struct {
+		Digest string `json:"digest"`
+	} `json:"manifest"`
+	Image struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"config"`
+	} `json:"image"`
+}
+
 type releaseDescriptor struct {
 	SchemaVersion  int                         `json:"schema_version"`
 	ReleaseVersion string                      `json:"release_version"`
@@ -53,31 +65,33 @@ type descriptorRecord struct {
 
 var componentInputs = map[string][]string{
 	"control": {
-		".dockerignore", "Dockerfile", "go.mod", "go.sum",
+		".dockerignore", "Dockerfile", "docker-bake.hcl", "go.mod", "go.sum",
 		"cmd/admin", "cmd/bootstrap", "cmd/collector", "cmd/failover",
 		"cmd/log-maintenance", "cmd/notifications", "cmd/ownership", "cmd/quota",
 		"cmd/releasectl",
-		"internal/accountlifecycle", "internal/accountprojection", "internal/accountstatus",
+		"internal/accountconfig", "internal/accountlifecycle", "internal/accountprojection", "internal/accountstatus",
 		"internal/admin", "internal/branding", "internal/collector", "internal/contract",
 		"internal/bootstrap", "internal/controlplane", "internal/failover",
-		"internal/identity", "internal/logmaintenance", "internal/notifications",
+		"internal/gateway", "internal/identity", "internal/logmaintenance", "internal/notifications",
 		"internal/ownership", "internal/portal", "internal/quota", "internal/runtimeops",
 		"internal/scheduler", "internal/snapshotfile", "internal/usage",
 	},
 	"web": {
-		".dockerignore", "Dockerfile", "go.mod", "go.sum", "cmd/web", "internal/web",
+		".dockerignore", "Dockerfile", "docker-bake.hcl", "go.mod", "go.sum", "cmd/web", "internal/web",
 		"frontend/README.md", "frontend/index.html", "frontend/package.json",
 		"frontend/package-lock.json", "frontend/portal", "frontend/usage", "frontend/scripts",
 		"frontend/src", "frontend/tsconfig.json", "frontend/vite.config.ts",
 		"frontend/vite.portal.config.ts", "frontend/vite.shared.ts", "frontend/vite.usage.config.ts",
 	},
 	"gateway": {
-		".dockerignore", "Dockerfile", "go.mod", "go.sum", "cmd/gateway", "internal/gateway",
+		".dockerignore", "Dockerfile", "docker-bake.hcl", "go.mod", "go.sum", "cmd/gateway", "internal/gateway",
 	},
 	"edge": {
-		".dockerignore", "Dockerfile", "go.mod", "go.sum", "cmd/edge", "internal/edge",
+		".dockerignore", "Dockerfile", "docker-bake.hcl", "go.mod", "go.sum", "cmd/edge", "internal/edge",
 	},
 }
+
+var releaseComponents = []string{"control", "web", "gateway", "edge"}
 
 var (
 	semanticVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-.][0-9A-Za-z.-]+)?$`)
@@ -106,11 +120,13 @@ func main() {
 
 func run(arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("usage: cpa-releasectl <manifest|privacy|archive|checksum> ...")
+		return errors.New("usage: cpa-releasectl <manifest|image-metadata|privacy|archive|checksum> ...")
 	}
 	switch arguments[0] {
 	case "manifest":
 		return runManifest(arguments[1:], output)
+	case "image-metadata":
+		return runImageMetadata(arguments[1:], output)
 	case "privacy":
 		return runPrivacy(arguments[1:], output)
 	case "archive":
@@ -124,7 +140,7 @@ func run(arguments []string, output io.Writer) error {
 
 func runManifest(arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("usage: cpa-releasectl manifest <digest|create|verify|get|descriptor|deploy-env>")
+		return errors.New("usage: cpa-releasectl manifest <digest|plan|create|verify|get|descriptor|deploy-env>")
 	}
 	flags := flag.NewFlagSet("manifest "+arguments[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -155,6 +171,17 @@ func runManifest(arguments []string, output io.Writer) error {
 		}
 		_, err = fmt.Fprintln(output, digest)
 		return err
+	case "plan":
+		manifest, err := buildManifest(absRoot)
+		if err != nil {
+			return err
+		}
+		for _, componentName := range releaseComponents {
+			if _, err := fmt.Fprintf(output, "%s\t%s\n", componentName, manifest.Components[componentName].SourceSHA256); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "create":
 		if strings.TrimSpace(*outputPath) == "" {
 			return errors.New("--output is required")
@@ -205,6 +232,39 @@ func runManifest(arguments []string, output io.Writer) error {
 	default:
 		return fmt.Errorf("unsupported manifest command: %s", arguments[0])
 	}
+}
+
+func runImageMetadata(arguments []string, output io.Writer) error {
+	flags := flag.NewFlagSet("image-metadata", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	inputPath := flags.String("input", "", "docker buildx imagetools JSON input")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*inputPath) == "" {
+		return errors.New("--input is required")
+	}
+	raw, err := os.ReadFile(*inputPath)
+	if err != nil {
+		return fmt.Errorf("read image metadata: %w", err)
+	}
+	var metadata buildxImageMetadata
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return fmt.Errorf("decode image metadata: %w", err)
+	}
+	manifestDigest := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(metadata.Manifest.Digest)), "sha256:")
+	if !validSHA256(manifestDigest) {
+		return errors.New("image metadata manifest digest is invalid")
+	}
+	labels := metadata.Image.Config.Labels
+	component := strings.TrimSpace(labels["io.codex-cpa.component"])
+	componentDigest := strings.ToLower(strings.TrimSpace(labels["io.codex-cpa.component-digest"]))
+	sourceDigest := strings.ToLower(strings.TrimSpace(labels["io.codex-cpa.source-digest"]))
+	if component == "" || !validSHA256(componentDigest) || !validSHA256(sourceDigest) {
+		return errors.New("image metadata release labels are invalid")
+	}
+	_, err = fmt.Fprintf(output, "sha256:%s\t%s\t%s\t%s\n", manifestDigest, component, componentDigest, sourceDigest)
+	return err
 }
 
 func writeDeployEnvironment(path string, descriptor releaseDescriptor) error {
@@ -317,7 +377,8 @@ func componentDigest(root string, inputs []string) (string, error) {
 
 func buildManifest(root string) (releaseManifest, error) {
 	manifest := releaseManifest{Version: manifestVersion, Components: make(map[string]componentRecord, len(componentInputs))}
-	for component, inputs := range componentInputs {
+	for _, component := range releaseComponents {
+		inputs := componentInputs[component]
 		digest, err := componentDigest(root, inputs)
 		if err != nil {
 			return releaseManifest{}, err

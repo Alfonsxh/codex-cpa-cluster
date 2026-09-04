@@ -54,7 +54,14 @@ make publish VERSION=v2.0.0 IMAGE_PREFIXES=ghcr.io/owner
 make package VERSION=v2.0.0
 ```
 
-四个组件均按源码摘要构建不可变标签。`cpa-releasectl` 负责 Manifest、发布描述、归档安全和隐私检查。目标先用镜像标签完成非执行式身份校验，只有 Control 镜像与不可变标签一致后，才允许运行其中的 `cpa-releasectl` 读取 Manifest。
+四个组件均按源码摘要构建不可变标签。发布开始时只生成一次四组件摘要计划，并通过远端
+Manifest/Config 判断 `reuse`、`promote` 或 `build`：已存在且标签一致的组件不会重建，只有内容
+标签的组件直接在 Registry 内创建版本标签，真正缺失的组件才进入 Buildx Bake。Bake 会并行复用
+共享阶段并将内容、版本标签一起推送；版本标签不匹配时在移动任何 `latest` 前失败。所有 Registry
+的四组件不可变标签完成并重新校验后，才远端移动 `latest`，全过程不通过本机 `pull/tag/push`
+搬运镜像层。`cpa-releasectl` 负责 Manifest、发布描述、远端镜像标签解析、归档安全和隐私检查。
+目标先用镜像标签完成非执行式身份校验，只有 Control 镜像与不可变标签一致后，才允许运行其中的
+`cpa-releasectl` 读取 Manifest。
 
 ## Test 应用顺序
 

@@ -10,6 +10,60 @@ import (
 	"testing"
 )
 
+func TestManifestPlanEmitsEveryComponentOnceInStableOrder(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	var output bytes.Buffer
+	if err := runManifest([]string{"plan", "--root", root}, &output); err != nil {
+		t.Fatalf("runManifest plan: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != len(releaseComponents) {
+		t.Fatalf("plan lines = %d, want %d: %q", len(lines), len(releaseComponents), lines)
+	}
+	for index, component := range releaseComponents {
+		fields := strings.Split(lines[index], "\t")
+		if len(fields) != 2 || fields[0] != component || !validSHA256(fields[1]) {
+			t.Fatalf("plan line %d = %q", index, lines[index])
+		}
+	}
+}
+
+func TestImageMetadataReadsBuildxLabelsWithoutPullingLayers(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	input := filepath.Join(t.TempDir(), "metadata.json")
+	payload := `{
+  "name": "ghcr.io/example/codex-cpa-web:v2.0.0",
+  "manifest": {"digest": "sha256:` + strings.Repeat("b", 64) + `"},
+  "image": {"config": {"Labels": {
+    "io.codex-cpa.component": "web",
+    "io.codex-cpa.component-digest": "` + digest + `",
+    "io.codex-cpa.source-digest": "` + digest + `"
+  }}}
+}`
+	if err := os.WriteFile(input, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runImageMetadata([]string{"--input", input}, &output); err != nil {
+		t.Fatalf("runImageMetadata: %v", err)
+	}
+	want := "sha256:" + strings.Repeat("b", 64) + "\tweb\t" + digest + "\t" + digest + "\n"
+	if output.String() != want {
+		t.Fatalf("metadata = %q, want %q", output.String(), want)
+	}
+}
+
+func TestImageMetadataRejectsMissingReleaseLabels(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "metadata.json")
+	payload := `{"manifest":{"digest":"sha256:` + strings.Repeat("b", 64) + `"},"image":{"config":{"Labels":{}}}}`
+	if err := os.WriteFile(input, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runImageMetadata([]string{"--input", input}, &bytes.Buffer{}); err == nil {
+		t.Fatal("runImageMetadata accepted missing release labels")
+	}
+}
+
 func TestChecksumWritesAtomicPortableLines(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.txt")

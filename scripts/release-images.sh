@@ -9,6 +9,8 @@ IMAGE_PREFIXES=${IMAGE_PREFIXES:-}
 ALLOW_DIRTY=${ALLOW_DIRTY:-false}
 RELEASECTL=${RELEASECTL:-}
 RELEASE_COMPONENTS="control web gateway edge"
+REGISTRY_INSPECT_ATTEMPTS=${REGISTRY_INSPECT_ATTEMPTS:-4}
+REGISTRY_INSPECT_RETRY_DELAY_SECONDS=${REGISTRY_INSPECT_RETRY_DELAY_SECONDS:-1}
 TAB=$(printf '\t')
 
 case "$VERSION" in
@@ -24,6 +26,12 @@ case "$PLATFORM" in
   *) echo "PLATFORM 必须是单个 Linux 平台，例如 linux/amd64：$PLATFORM" >&2; exit 1 ;;
 esac
 case "$ALLOW_DIRTY" in true|false) ;; *) echo "ALLOW_DIRTY 只能为 true 或 false" >&2; exit 1 ;; esac
+case "$REGISTRY_INSPECT_ATTEMPTS" in
+  ''|*[!0-9]*|0) echo "REGISTRY_INSPECT_ATTEMPTS 必须是正整数" >&2; exit 1 ;;
+esac
+case "$REGISTRY_INSPECT_RETRY_DELAY_SECONDS" in
+  ''|*[!0-9]*) echo "REGISTRY_INSPECT_RETRY_DELAY_SECONDS 必须是非负整数" >&2; exit 1 ;;
+esac
 case "$ACTION" in build|publish) ;; *) echo "未知动作：$ACTION" >&2; exit 1 ;; esac
 if [ "$ACTION" = publish ] && [ -z "$IMAGE_PREFIXES" ]; then
   echo "发布镜像时 IMAGE_PREFIXES 不能为空" >&2
@@ -111,18 +119,30 @@ inspect_remote_image() {
   INSPECT_OUTPUT=$2
   INSPECT_RAW="$INSPECT_OUTPUT.raw"
   INSPECT_ERROR="$INSPECT_OUTPUT.error"
-  if docker buildx imagetools inspect --format '{{json .}}' "$INSPECT_REFERENCE" >"$INSPECT_RAW" 2>"$INSPECT_ERROR"; then
-    if ! INSPECT_METADATA=$("$RELEASECTL_BIN" image-metadata --input "$INSPECT_RAW"); then
-      echo "无法解析远端镜像元数据：$INSPECT_REFERENCE" >&2
-      return 1
+  INSPECT_ATTEMPT=1
+  while [ "$INSPECT_ATTEMPT" -le "$REGISTRY_INSPECT_ATTEMPTS" ]; do
+    if docker buildx imagetools inspect --format '{{json .}}' "$INSPECT_REFERENCE" >"$INSPECT_RAW" 2>"$INSPECT_ERROR"; then
+      if ! INSPECT_METADATA=$("$RELEASECTL_BIN" image-metadata --input "$INSPECT_RAW"); then
+        echo "无法解析远端镜像元数据：$INSPECT_REFERENCE" >&2
+        return 1
+      fi
+      printf 'exists\t%s\n' "$INSPECT_METADATA" >"$INSPECT_OUTPUT"
+      return 0
     fi
-    printf 'exists\t%s\n' "$INSPECT_METADATA" >"$INSPECT_OUTPUT"
-    return 0
-  fi
-  if grep -Eqi 'not found|manifest unknown|name unknown|(^|[^0-9])404([^0-9]|$)' "$INSPECT_ERROR"; then
-    printf '%s\n' missing >"$INSPECT_OUTPUT"
-    return 0
-  fi
+    if grep -Eqi 'not found|manifest unknown|name unknown|(^|[^0-9])404([^0-9]|$)' "$INSPECT_ERROR"; then
+      printf '%s\n' missing >"$INSPECT_OUTPUT"
+      return 0
+    fi
+    if [ "$INSPECT_ATTEMPT" -ge "$REGISTRY_INSPECT_ATTEMPTS" ] \
+      || ! grep -Eqi 'broken pipe|connection reset|i/o timeout|timed out|unexpected EOF|TLS handshake|temporary failure|network is unreachable' "$INSPECT_ERROR"; then
+      break
+    fi
+    INSPECT_DELAY=$((INSPECT_ATTEMPT * REGISTRY_INSPECT_RETRY_DELAY_SECONDS))
+    printf '远端镜像检查暂时失败，%d 秒后重试（%d/%d）：%s\n' \
+      "$INSPECT_DELAY" "$INSPECT_ATTEMPT" "$REGISTRY_INSPECT_ATTEMPTS" "$INSPECT_REFERENCE" >&2
+    [ "$INSPECT_DELAY" -eq 0 ] || sleep "$INSPECT_DELAY"
+    INSPECT_ATTEMPT=$((INSPECT_ATTEMPT + 1))
+  done
   echo "检查远端镜像失败：$INSPECT_REFERENCE" >&2
   cat "$INSPECT_ERROR" >&2
   return 1

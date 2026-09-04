@@ -81,6 +81,18 @@ case "${1:-}" in
           echo "failed to do request: dial tcp: i/o timeout" >&2
           exit 1
         fi
+        if [ -n "${FAKE_INSPECT_TRANSIENT_MATCH:-}" ] \
+          && printf '%s' "$REFERENCE" | grep -Fq "$FAKE_INSPECT_TRANSIENT_MATCH"; then
+          FAILURE_COUNTER=$(reference_path "inspect-failures-$REFERENCE")
+          FAILURE_COUNT=0
+          [ ! -f "$FAILURE_COUNTER" ] || FAILURE_COUNT=$(cat "$FAILURE_COUNTER")
+          if [ "$FAILURE_COUNT" -lt "${FAKE_INSPECT_TRANSIENT_FAILURES:-1}" ]; then
+            FAILURE_COUNT=$((FAILURE_COUNT + 1))
+            printf '%s\n' "$FAILURE_COUNT" >"$FAILURE_COUNTER"
+            echo "failed to do request: read: connection reset by peer" >&2
+            exit 1
+          fi
+        fi
         RECORD=$(reference_path "$REFERENCE")
         if [ ! -f "$RECORD" ]; then
           echo "manifest unknown: $REFERENCE" >&2
@@ -268,12 +280,25 @@ fi
 # transient outage could trigger an unnecessary build and overwrite mutable tags.
 reset_scenario
 put_registry "$PREFIX_A"
-if run_publish "$PREFIX_A" FAKE_INSPECT_NETWORK_MATCH="codex-cpa-web:$VERSION" >/dev/null 2>&1; then
+if run_publish "$PREFIX_A" REGISTRY_INSPECT_RETRY_DELAY_SECONDS=0 \
+  FAKE_INSPECT_NETWORK_MATCH="codex-cpa-web:$VERSION" >/dev/null 2>&1; then
   echo "network inspection failure was accepted as a missing image" >&2
   exit 1
 fi
 ! grep -Fq 'buildx bake' "$DOCKER_LOG" || { echo "network failure triggered a build" >&2; exit 1; }
 ! grep -Fq 'imagetools create' "$DOCKER_LOG" || { echo "network failure moved a remote tag" >&2; exit 1; }
+
+# Bounded retries absorb transient Registry read failures without rebuilding or
+# moving immutable/latest tags.
+reset_scenario
+put_registry "$PREFIX_A"
+run_publish "$PREFIX_A" REGISTRY_INSPECT_RETRY_DELAY_SECONDS=0 \
+  FAKE_INSPECT_TRANSIENT_MATCH="codex-cpa-web:$VERSION" \
+  FAKE_INSPECT_TRANSIENT_FAILURES=2 >/dev/null
+[ "$(grep -F "codex-cpa-web:$VERSION" "$DOCKER_LOG" | grep -c 'imagetools inspect')" -eq 3 ] \
+  || { echo "transient inspection failure did not use the bounded retry" >&2; exit 1; }
+! grep -Fq 'buildx bake' "$DOCKER_LOG" || { echo "transient retry rebuilt images" >&2; exit 1; }
+! grep -Fq 'imagetools create' "$DOCKER_LOG" || { echo "transient retry moved a remote tag" >&2; exit 1; }
 
 # Build failure leaves latest untouched.
 reset_scenario

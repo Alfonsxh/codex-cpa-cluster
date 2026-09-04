@@ -90,7 +90,7 @@ export function UsageApp() {
             <div>
               <span className="eyebrow">SECURITY CHECK</span>
               <h1>先设置你的个人密码</h1>
-              <p>初始密码仅用于首次登录。完成修改后再加载 API Key 与个人用量。</p>
+              <p>初始密码仅用于首次登录。完成修改后再加载 API Key 与个人周用量。</p>
             </div>
             <PortalPasswordModal
               open
@@ -139,8 +139,8 @@ function UsageAuthenticationBoundary() {
           </div>
           <div className="usage-preview-stat-grid">
             <PreviewStat title="当前账号" value="尚未选择" detail="选择可用账号后显示" />
-            <PreviewStat title="个人用量" value="—" detail="周额度正在读取…" />
-            <PreviewStat title="今日 Token" value="—" detail="今日请求 —" />
+            <PreviewStat title="个人周用量" value="—" detail="周额度正在读取…" />
+            <PreviewStat title="今日 Token" value="—" />
           </div>
         </section>
         <section className="usage-preview-accounts">
@@ -173,13 +173,13 @@ function UsageAuthenticationBoundary() {
   );
 }
 
-function PreviewStat({ title, value, detail }: { title: string; value: string; detail: string }) {
+function PreviewStat({ title, value, detail }: { title: string; value: string; detail?: string }) {
   return (
     <article>
       <span>{title}</span>
       <strong>{value}</strong>
       <div className="usage-preview-progress"><i /></div>
-      <small>{detail}</small>
+      {detail ? <small>{detail}</small> : null}
     </article>
   );
 }

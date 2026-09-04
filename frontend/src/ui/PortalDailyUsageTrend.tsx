@@ -52,7 +52,6 @@ type PortalTrendSummaryItem = {
   value?: string;
   title?: string;
   values?: PortalTrendSummaryValue[];
-  detail?: string;
 };
 
 const directCombinationLimit = 9;
@@ -91,8 +90,6 @@ export function PortalDailyUsageTrend({
     [dimension, modelMetric, query.data]
   );
   const hasData = Boolean(query.data?.days.some((day) => day.request_count > 0 || day.weighted_tokens > 0 || day.total_tokens > 0));
-  const partial = Boolean(query.data?.days.some((day) => day.collection_state !== "complete"));
-
   return (
     <section className={`usage-trend-card${expanded ? "" : " collapsed"}`} aria-label="每日用量">
       <header className="usage-trend-header">
@@ -104,38 +101,45 @@ export function PortalDailyUsageTrend({
         </div>
 
         <div className={`usage-trend-summary${dimension === "model_reasoning" ? " model-reasoning" : ""}`} aria-label="趋势摘要">
-          {summary.items.map((item) => (
-            <div className={[item.label === "主要组合" ? "primary-combination" : "", item.values ? "has-metrics" : ""].filter(Boolean).join(" ")} key={item.label}>
-              <span>{item.label}</span>
-              {item.value ? <strong title={item.title}>{query.isPending ? "—" : item.value}</strong> : null}
-              {item.values ? (
-                <div className="usage-trend-summary-values">
-                  {item.values.map((value) => (
-                    <Tooltip
-                      key={value.metric}
-                      title={query.isPending ? undefined : value.title}
-                      placement="top"
-                      mouseEnterDelay={0.15}
-                      rootClassName="usage-trend-summary-popup"
-                    >
-                      <div
-                        className="usage-trend-summary-value"
-                        data-metric={value.metric}
-                        aria-label={`${value.label} Token，完整数量 ${query.isPending ? "正在读取" : value.title}`}
+          {summary.items.map((item) => {
+            const combinationCount = item.label === "组合数";
+            return (
+              <div className={[
+                item.label === "主要组合" ? "primary-combination" : "",
+                item.values ? "has-metrics" : "",
+                combinationCount ? "combination-count" : ""
+              ].filter(Boolean).join(" ")} key={item.label}>
+                <span>{item.label}</span>
+                {item.value ? <strong title={item.title}>{query.isPending ? "—" : item.value}</strong> : null}
+                {combinationCount ? <time className="usage-trend-combination-updated">{query.data ? `数据更新 ${formatTrendTimestamp(query.data.generated_at)}` : "正在读取趋势"}</time> : null}
+                {item.values ? (
+                  <div className="usage-trend-summary-values">
+                    {item.values.map((value) => (
+                      <Tooltip
+                        key={value.metric}
+                        title={query.isPending ? undefined : value.title}
+                        placement="top"
+                        mouseEnterDelay={0.15}
+                        rootClassName="usage-trend-summary-popup"
                       >
-                        <small><i className="usage-trend-summary-value-marker" aria-hidden="true" /><span>{value.label}</span></small>
-                        <strong>{query.isPending ? "—" : value.value}</strong>
-                      </div>
-                    </Tooltip>
-                  ))}
-                </div>
-              ) : null}
-              {item.detail && !query.isPending ? <small className="usage-trend-summary-detail">{item.detail}</small> : null}
-            </div>
-          ))}
+                        <div
+                          className="usage-trend-summary-value"
+                          data-metric={value.metric}
+                          aria-label={`${value.label} Token，完整数量 ${query.isPending ? "正在读取" : value.title}`}
+                        >
+                          <small><i className="usage-trend-summary-value-marker" aria-hidden="true" /><span>{value.label}</span></small>
+                          <strong>{query.isPending ? "—" : value.value}</strong>
+                        </div>
+                      </Tooltip>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
 
-        <time className="usage-trend-updated">{query.data ? `数据更新 ${formatTrendTimestamp(query.data.generated_at)}` : "正在读取趋势"}</time>
+        {dimension === "total" ? <time className="usage-trend-updated">{query.data ? `数据更新 ${formatTrendTimestamp(query.data.generated_at)}` : "正在读取趋势"}</time> : null}
       </header>
 
       {expanded ? (
@@ -151,16 +155,13 @@ export function PortalDailyUsageTrend({
             <div className="usage-trend-state">所选范围暂无已采集用量</div>
           ) : null}
           {query.data && hasData ? (
-            <>
-              {partial ? <p className="usage-trend-partial">浅色缺口表示该自然日尚未采集或只采集了部分时段。</p> : null}
-              <PortalTrendChart
-                trend={query.data}
-                series={series}
-                dimension={dimension}
-                modelMetric={modelMetric}
-                onModelMetricChange={setModelMetric}
-              />
-            </>
+            <PortalTrendChart
+              trend={query.data}
+              series={series}
+              dimension={dimension}
+              modelMetric={modelMetric}
+              onModelMetricChange={setModelMetric}
+            />
           ) : null}
         </div>
       ) : null}
@@ -208,7 +209,7 @@ function PortalTrendChart({
     const option: DailyTrendOption = {
       animation: false,
       aria: { enabled: true, description: "个人每日 Token 用量趋势" },
-      grid: { left: 58, right: 18, top: 16, bottom: 36, containLabel: false },
+      grid: { left: 66, right: 18, top: 16, bottom: 38, containLabel: false },
       tooltip: {
         trigger: "axis",
         triggerOn: "mousemove|click|mousewheel",
@@ -234,7 +235,7 @@ function PortalTrendChart({
         axisLabel: {
           color: axisColor,
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
-          fontSize: 9,
+          fontSize: 10,
           margin: 17,
           interval: (index: number) => labelIndexes.has(index),
           hideOverlap: true
@@ -249,8 +250,8 @@ function PortalTrendChart({
         axisLabel: {
           color: axisColor,
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
-          fontSize: 9,
-          margin: 10,
+          fontSize: 11,
+          margin: 12,
           formatter: (value: number) => formatTokens(value)
         },
         splitLine: { lineStyle: { color: gridColor, width: 1 } }
@@ -292,21 +293,20 @@ function PortalTrendChart({
   };
 
   return (
-    <div className="usage-trend-chart">
+    <div className={`usage-trend-chart${dimension === "model_reasoning" ? " model-reasoning" : ""}`}>
       <div className="usage-trend-chart-toolbar">
-        <div className="usage-trend-chart-legend" role="group" aria-label="趋势图例">
+        {dimension === "total" ? <div className="usage-trend-chart-legend" role="group" aria-label="趋势图例">
           {series.map((item, index) => (
             <span title={item.name} key={item.name}>
               <i style={{ background: usageChartColors[index % usageChartColors.length] }} aria-hidden="true" />
               <b>{item.name}</b>
             </span>
           ))}
-        </div>
+        </div> : null}
         {dimension === "model_reasoning" ? (
           <div className="usage-trend-metric-switch" role="group" aria-label="模型趋势统计口径">
-            <span>趋势口径</span>
-            <button type="button" aria-pressed={modelMetric === "total"} onClick={() => onModelMetricChange("total")}>未加权</button>
-            <button type="button" aria-pressed={modelMetric === "weighted"} onClick={() => onModelMetricChange("weighted")}>加权</button>
+            <button type="button" data-metric="total" aria-pressed={modelMetric === "total"} onClick={() => onModelMetricChange("total")}><i aria-hidden="true" /><span>未加权</span></button>
+            <button type="button" data-metric="weighted" aria-pressed={modelMetric === "weighted"} onClick={() => onModelMetricChange("weighted")}><i aria-hidden="true" /><span>加权</span></button>
           </div>
         ) : null}
       </div>
@@ -427,7 +427,7 @@ export function summarizePortalTrend(
       title: primary?.label ?? "暂无组合",
       values: primary ? dualSummaryValues(primary.raw, primary.weighted) : dualSummaryValues(0, 0)
     },
-    { label: "组合数", value: String(combinations.size), title: `${combinations.size} 个模型与推理强度组合`, detail: "按加权用量排序" }
+    { label: "组合数", value: String(combinations.size), title: `${combinations.size} 个模型与推理强度组合` }
   ] };
 }
 

@@ -57,6 +57,7 @@ describe("PortalDailyUsageTrend", () => {
     expect(summary.items[1]?.value).toBe("gpt-5.6-sol · xhigh");
     expect(summary.items[1]?.values?.map((value) => value.value)).toEqual(["1.5 K", "1.2 K"]);
     expect(summary.items[2]?.value).toBe("12");
+    expect(summary.items[2]).not.toHaveProperty("detail");
 
     const tooltip = renderPortalTrendTooltip(series.map((item, index) => ({
       seriesName: item.name,

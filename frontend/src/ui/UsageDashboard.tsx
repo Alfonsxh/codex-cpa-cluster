@@ -49,7 +49,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const [window, setWindow] = useState<PortalUsageWindow>("today");
   const [sort, setSort] = useState<SortState>(defaultSort);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [primarySection, setPrimarySection] = useState<PrimarySection>("trend");
+  const [primarySection, setPrimarySection] = useState<PrimarySection>("accounts");
   const [trendWindow, setTrendWindow] = useState<PortalUsageTrendWindow>("30d");
   const compactTabs = useMediaQuery("(max-width: 900px)");
   const [showKey, setShowKey] = useState(false);
@@ -280,20 +280,6 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
           )}
           items={[
             {
-              key: "trend",
-              label: <span className="usage-primary-tab-label"><span className="usage-primary-tab-dot" aria-hidden="true" />每日用量</span>,
-              children: (
-                <>
-                  {compactTabs ? <TrendWindowControl className="usage-mobile-panel-actions" window={trendWindow} onChange={setTrendWindow} /> : null}
-                  <PortalDailyUsageTrend
-                    expanded={primarySection === "trend"}
-                    window={trendWindow}
-                    onSessionExpired={onSessionExpired}
-                  />
-                </>
-              )
-            },
-            {
               key: "accounts",
               label: (
                 <span className="usage-primary-tab-label">
@@ -355,6 +341,20 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
                     </NativeTableViewport>
                   ) : null}
                 </section>
+              )
+            },
+            {
+              key: "trend",
+              label: <span className="usage-primary-tab-label"><span className="usage-primary-tab-dot" aria-hidden="true" />每日用量</span>,
+              children: (
+                <>
+                  {compactTabs ? <TrendWindowControl className="usage-mobile-panel-actions" window={trendWindow} onChange={setTrendWindow} /> : null}
+                  <PortalDailyUsageTrend
+                    expanded={primarySection === "trend"}
+                    window={trendWindow}
+                    onSessionExpired={onSessionExpired}
+                  />
+                </>
               )
             }
           ]}
@@ -495,7 +495,7 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
   ) : null;
   return (
     <div className="usage-personal-overview" aria-labelledby="personal-usage-label">
-      <div className="usage-personal-overview-head"><span id="personal-usage-label">个人用量</span><small className="usage-summary-tag">{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
+      <div className="usage-personal-overview-head"><span id="personal-usage-label">个人周用量</span><small className="usage-summary-tag">{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
       {error ? (
         <div className="usage-current-quota degraded">
           <div><span>个人周额度读取失败</span><button className="usage-inline-retry" type="button" onClick={onRetry}>重试</button></div>
@@ -510,8 +510,7 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
               label="查看个人周额度 Token 说明"
               title={quotaTooltip}
             /> : null}</span>
-            <span>{weekly ? `未加权累计 ${formatTokens(weekly.raw_used_tokens)}` : "未加权用量正在读取…"}</span>
-            <time>{weekly ? `${formatTimestamp(weekly.week_end_at)} 重置` : "—"}</time>
+            <time>{weekly ? `重置：${formatBeijingTimestamp(weekly.week_end_at)}（北京时间）` : "—"}</time>
           </div>
         </div>
       )}
@@ -527,7 +526,6 @@ function RangeSummary({ window, metrics, loading }: { window: PortalUsageWindow;
         <div><span>未加权</span><strong>{loading ? "—" : <TokenValue value={metrics?.total_tokens ?? 0} />}</strong></div>
         <div><span>加权</span><strong>{loading ? "—" : <TokenValue value={metrics?.weighted_tokens ?? metrics?.total_tokens ?? 0} />}</strong></div>
       </div>
-      <span className="usage-range-requests">{windowLabel(window)}请求 {loading ? "—" : formatNumber(metrics?.request_count ?? 0)}</span>
     </div>
   );
 }
@@ -564,7 +562,7 @@ function AccountRows({ account, index, currentGroup, window, expanded, onToggle,
           <div className={`usage-quota ${used >= 100 ? "exhausted" : used >= 80 ? "warning" : ""}`.trim()}>
             <div><strong>{formatPercent(used)}</strong><span>剩余 {formatPercent(remaining)}</span></div>
             <progress className="usage-quota-track" max="100" value={used} aria-label={`已使用 ${formatPercent(used)}`} />
-            <small>{account.status.reset_at ? `${formatTimestamp(account.status.reset_at)} 重置` : "重置时间未知"}</small>
+            <small>{account.status.reset_at ? `${formatBeijingTimestamp(account.status.reset_at)}（北京时间）重置` : "重置时间未知"}</small>
           </div>
         </td>
         <td data-label="活跃用户（近 1 小时）"><strong className="usage-cell-number">{formatNumber(account.active_users_1h)}</strong></td>
@@ -808,6 +806,21 @@ function formatCompact(value: number) {
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
+}
+
+export function formatBeijingTimestamp(timestamp: number) {
+  if (!timestamp) return "—";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date(timestamp * 1000));
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}/${value("month")}/${value("day")} ${value("hour")}:${value("minute")}`;
 }
 
 const portalWindowOptions: Array<{ value: PortalUsageWindow; label: string }> = [

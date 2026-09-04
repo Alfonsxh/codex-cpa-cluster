@@ -338,7 +338,8 @@ for (const viewport of viewports) {
       const page = await context.newPage();
       await installUsageVisualBackend(page);
       await page.goto("/usage/");
-      await expect(page.getByRole("tab", { name: "账号明细" })).toBeVisible();
+      await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "false");
       await expect(page).toHaveScreenshot(`react-usage-${viewport.name}-${theme}.png`, {
         fullPage: false,
         // Keep mobile baselines resilient to macOS glyph antialiasing drift.
@@ -371,7 +372,7 @@ for (const state of ["loading", "empty", "error"] as const) {
   });
 }
 
-test("个人使用中心每日用量默认展开，图表撑满内容区并可切换", async ({ page }) => {
+test("个人使用中心账号明细默认展开，按需加载趋势并保留双页签状态", async ({ page }) => {
   await page.setViewportSize({ width: 1086, height: 900 });
   await setTheme(page, "light");
   const trendRequests: string[] = [];
@@ -383,15 +384,20 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
   await page.goto("http://127.0.0.1:5194/usage/");
 
   const chart = page.getByRole("img", { name: /个人每日 Token 用量趋势/ });
-  await expect(chart).toBeVisible();
+  const sectionTabs = page.locator(".usage-primary-tabs [role=tab]");
+  await expect(sectionTabs).toHaveCount(2);
+  await expect(sectionTabs.nth(0)).toContainText("账号明细");
+  await expect(sectionTabs.nth(1)).toHaveText("每日用量");
+  await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();
+  await expect(chart).toHaveCount(0);
+  await expect.poll(() => trendRequests).toEqual([]);
+
   const topCardRect = await page.locator(".usage-key-card").evaluate((element) => element.getBoundingClientRect().toJSON());
   const detailFrameRect = await page.locator(".usage-detail-sections").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - detailFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - detailFrameRect.right)).toBeLessThanOrEqual(1);
-  const chartCanvasRect = await page.locator(".usage-trend-chart-canvas").evaluate((element) => element.getBoundingClientRect().toJSON());
-  expect(chartCanvasRect.height).toBeGreaterThan(300);
-  expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeGreaterThanOrEqual(0);
-  expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeLessThanOrEqual(16);
   const summaryTags = await page.locator(".usage-current-account-head .usage-summary-tag, .usage-personal-overview-head .usage-summary-tag").evaluateAll((tags) => tags.map((tag) => {
     const style = getComputedStyle(tag);
     const rect = tag.getBoundingClientRect();
@@ -407,16 +413,25 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
   }));
   expect(summaryTags).toHaveLength(2);
   expect(summaryTags[0]).toEqual(summaryTags[1]);
-  const sectionTabs = await page.locator(".usage-primary-tabs [role=tab]").evaluateAll((tabs) => tabs.map((tab) => {
+  const sectionTabRects = await sectionTabs.evaluateAll((tabs) => tabs.map((tab) => {
     const rect = tab.getBoundingClientRect();
     return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
   }));
-  expect(sectionTabs).toHaveLength(2);
-  expect(Math.abs(sectionTabs[0].top - sectionTabs[1].top)).toBeLessThanOrEqual(1);
-  expect(Math.abs(sectionTabs[0].bottom - sectionTabs[1].bottom)).toBeLessThanOrEqual(1);
-  expect(sectionTabs[1].left).toBeGreaterThanOrEqual(sectionTabs[0].right);
-  expect(sectionTabs.every((tab) => tab.left >= detailFrameRect.left && tab.right <= detailFrameRect.right)).toBe(true);
+  expect(sectionTabRects).toHaveLength(2);
+  expect(Math.abs(sectionTabRects[0].top - sectionTabRects[1].top)).toBeLessThanOrEqual(1);
+  expect(Math.abs(sectionTabRects[0].bottom - sectionTabRects[1].bottom)).toBeLessThanOrEqual(1);
+  expect(sectionTabRects[1].left).toBeGreaterThanOrEqual(sectionTabRects[0].right);
+  expect(sectionTabRects.every((tab) => tab.left >= detailFrameRect.left && tab.right <= detailFrameRect.right)).toBe(true);
   await expect(page.locator(".usage-section-switcher")).toHaveCount(0);
+
+  const initialAccountActions = page.locator(".ant-tabs-extra-content .usage-tab-toolbar-actions");
+  await expect(initialAccountActions).toBeVisible();
+  await page.getByRole("tab", { name: "每日用量" }).click();
+  await expect(chart).toBeVisible();
+  const chartCanvasRect = await page.locator(".usage-trend-chart-canvas").evaluate((element) => element.getBoundingClientRect().toJSON());
+  expect(chartCanvasRect.height).toBeGreaterThan(300);
+  expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeGreaterThanOrEqual(0);
+  expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeLessThanOrEqual(16);
   const trendTabActions = page.locator(".ant-tabs-extra-content .usage-trend-windows");
   await expect(trendTabActions).toBeVisible();
   expect(await trendTabActions.evaluate((element) => {
@@ -428,9 +443,11 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
     "/usage/me/usage-trend?window=30d&dimension=total"
   ]);
   await expect(page.getByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "false");
   await expect(page.getByRole("button", { name: "展开", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "收起", exact: true })).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toHaveCount(0);
+  await expect(page.getByText("浅色缺口表示该自然日尚未采集或只采集了部分时段。")).toHaveCount(0);
   const trendSummary = page.getByLabel("趋势摘要");
   await expect(trendSummary.getByText("30天用量", { exact: true })).toBeVisible();
   await expect(trendSummary.getByText("未加权", { exact: true })).toHaveCount(3);
@@ -473,9 +490,58 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
     "/usage/me/usage-trend?window=7d&dimension=model_reasoning"
   );
   await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("趋势图例")).toHaveCount(0);
+  await expect(page.getByText("趋势口径", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "未加权", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(trendSummary.getByText("未加权", { exact: true })).toHaveCount(2);
   await expect(trendSummary.getByText("加权", { exact: true })).toHaveCount(2);
+  const metricSwitchLayout = await page.locator(".usage-trend-metric-switch button").evaluateAll((buttons) => buttons.map((button) => {
+    const marker = button.querySelector<HTMLElement>("i");
+    const label = button.querySelector<HTMLElement>("span");
+    if (!marker || !label) return null;
+    const buttonRect = button.getBoundingClientRect();
+    const markerRect = marker.getBoundingClientRect();
+    const labelRect = label.getBoundingClientRect();
+    const contentLeft = Math.min(markerRect.left, labelRect.left);
+    const contentRight = Math.max(markerRect.right, labelRect.right);
+    return {
+      markerColor: getComputedStyle(marker).backgroundColor,
+      markerWidth: markerRect.width,
+      markerHeight: markerRect.height,
+      horizontalDelta: Math.abs((contentLeft + contentRight) / 2 - (buttonRect.left + buttonRect.width / 2)),
+      verticalDelta: Math.abs((labelRect.top + labelRect.height / 2) - (buttonRect.top + buttonRect.height / 2))
+    };
+  }));
+  expect(metricSwitchLayout).toHaveLength(2);
+  expect(metricSwitchLayout.every((item) => item && item.markerWidth === 6 && item.markerHeight === 6
+    && item.horizontalDelta <= 1 && item.verticalDelta <= 1)).toBe(true);
+  expect(new Set(metricSwitchLayout.map((item) => item?.markerColor)).size).toBe(2);
+  const combinationCountLayout = await page.locator(".usage-trend-summary .combination-count").evaluate((card) => {
+    const label = card.querySelector<HTMLElement>(":scope > span");
+    const count = card.querySelector<HTMLElement>(":scope > strong");
+    const updated = card.querySelector<HTMLElement>(":scope > time");
+    if (!label || !count || !updated) return null;
+    const cardRect = card.getBoundingClientRect();
+    const labelRect = label.getBoundingClientRect();
+    const countRect = count.getBoundingClientRect();
+    const updatedRect = updated.getBoundingClientRect();
+    return {
+      count: count.textContent,
+      updated: updated.textContent,
+      sameLine: Math.max(labelRect.bottom, countRect.bottom, updatedRect.bottom) - Math.min(labelRect.top, countRect.top, updatedRect.top) <= Math.max(labelRect.height, countRect.height, updatedRect.height) + 2,
+      ordered: labelRect.right <= countRect.left && countRect.right <= updatedRect.left,
+      inside: updatedRect.right <= cardRect.right + 1,
+      clipped: updated.scrollWidth > updated.clientWidth
+    };
+  });
+  expect(combinationCountLayout).toEqual(expect.objectContaining({
+    count: "4",
+    sameLine: true,
+    ordered: true,
+    inside: true,
+    clipped: false
+  }));
+  expect(combinationCountLayout?.updated).toMatch(/^数据更新 /);
   const primaryCombination = page.locator(".usage-trend-summary .primary-combination > strong");
   await expect(primaryCombination).toHaveText("gpt-5.6-sol · xhigh");
   expect(await primaryCombination.evaluate((element) => ({
@@ -483,6 +549,10 @@ test("个人使用中心每日用量默认展开，图表撑满内容区并可�
     overflow: getComputedStyle(element).overflow,
     textOverflow: getComputedStyle(element).textOverflow
   }))).toEqual({ clipped: false, overflow: "visible", textOverflow: "clip" });
+  const axisFontSizes = await page.locator(".usage-trend-chart-canvas svg text").evaluateAll((labels) => labels.map((label) => Number.parseFloat(getComputedStyle(label).fontSize)));
+  expect(axisFontSizes.length).toBeGreaterThan(0);
+  expect(Math.min(...axisFontSizes)).toBeGreaterThanOrEqual(10);
+  expect(Math.max(...axisFontSizes)).toBeGreaterThanOrEqual(11);
 
   await chart.focus();
   const tooltipOuter = page.locator(".usage-trend-echarts-tooltip");
@@ -602,10 +672,26 @@ test("个人使用中心模型与推理强度组合趋势视觉基准", async ({
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
+  await page.getByRole("tab", { name: "每日用量" }).click();
   await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
   await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeVisible();
   await expect(page).toHaveScreenshot("react-usage-trend-model-reasoning-desktop-light.png", { fullPage: false });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const compactCombination = await page.locator(".usage-trend-summary .combination-count").evaluate((card) => {
+    const items = [...card.children].map((child) => (child as HTMLElement).getBoundingClientRect());
+    const bounds = card.getBoundingClientRect();
+    return {
+      sameLine: Math.max(...items.map((item) => item.bottom)) - Math.min(...items.map((item) => item.top)) <= Math.max(...items.map((item) => item.height)) + 2,
+      inside: items.every((item) => item.left >= bounds.left && item.right <= bounds.right + 1),
+      bodyScrollWidth: document.body.scrollWidth,
+      viewportWidth: window.innerWidth
+    };
+  });
+  expect(compactCombination.sameLine).toBe(true);
+  expect(compactCombination.inside).toBe(true);
+  expect(compactCombination.bodyScrollWidth).toBeLessThanOrEqual(compactCombination.viewportWidth);
 });
 
 test("个人使用中心移动端可滚动到账号明细", async ({ page }) => {
@@ -630,8 +716,9 @@ test("个人使用中心移动端可滚动到账号明细", async ({ page }) => 
   expect(await content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   expect(await header.evaluate((element) => element.getBoundingClientRect().top)).toBe(headerTop);
   const accountRect = await lastAccount.evaluate((element) => element.getBoundingClientRect());
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
   expect(accountRect.top).toBeGreaterThanOrEqual(0);
-  expect(accountRect.bottom).toBeLessThanOrEqual(844);
+  expect(accountRect.bottom).toBeLessThanOrEqual(viewportHeight + 1);
   await expect(accountTable).toBeVisible();
 });
 
@@ -696,6 +783,19 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     await page.goto("http://127.0.0.1:5194/usage/");
+    const orderedTabs = page.locator(".usage-primary-tabs [role=tab]");
+    await expect(orderedTabs).toHaveCount(2);
+    await expect(orderedTabs.nth(0)).toContainText("账号明细");
+    await expect(orderedTabs.nth(1)).toHaveText("每日用量");
+    await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
+    const resetTime = page.locator(".usage-personal-quota-detail > time");
+    await expect(resetTime).toContainText("北京时间");
+    expect(await resetTime.evaluate((time) => {
+      const timeRect = time.getBoundingClientRect();
+      const detailRect = time.parentElement?.getBoundingClientRect();
+      return Boolean(detailRect && timeRect.left >= detailRect.left && timeRect.right <= detailRect.right + 1
+        && time.scrollWidth <= time.clientWidth);
+    })).toBe(true);
 
     for (const section of ["trend", "accounts"] as const) {
       await page.getByRole("tab", { name: section === "trend" ? "每日用量" : "账号明细" }).click();
@@ -733,6 +833,13 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
       await expect(page.locator(viewport.width <= 900
         ? `.usage-mobile-panel-actions.${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`
         : `.ant-tabs-extra-content .${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`)).toBeVisible();
+      const centeredControls = page.locator(section === "trend"
+        ? ".usage-trend-dimensions button, .usage-trend-windows:visible button"
+        : ".usage-window-switcher:visible button");
+      expect(await centeredControls.evaluateAll((buttons) => buttons.every((button) => {
+        const style = getComputedStyle(button);
+        return style.display === "flex" && style.alignItems === "center" && style.justifyContent === "center" && style.textAlign === "center";
+      }))).toBe(true);
       await expect(page.locator(".usage-primary-tabs .ant-tabs-nav-operations")).toBeHidden();
       await expect(page.locator(".usage-section-switcher")).toHaveCount(0);
     }

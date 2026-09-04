@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UsageApp } from "./UsageApp";
-import { UsageDashboard } from "./UsageDashboard";
+import { formatBeijingTimestamp, UsageDashboard } from "./UsageDashboard";
 
 const profile = {
   user: "alice@example.com",
@@ -259,6 +259,10 @@ describe("UsageApp", () => {
 });
 
 describe("UsageDashboard", () => {
+  it("formats reset timestamps with the full Beijing date regardless of the host timezone", () => {
+    expect(formatBeijingTimestamp(20_000)).toBe("1970/01/01 13:33");
+  });
+
   it("queries detail only while opened and replaces the in-memory key after confirmed rotation", async () => {
     const storageSpy = vi.spyOn(Storage.prototype, "setItem");
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -282,8 +286,11 @@ describe("UsageDashboard", () => {
     renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
 
     expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
-    expect(screen.getByText("个人用量")).toBeInTheDocument();
+    expect(screen.getByText("个人周用量")).toBeInTheDocument();
     expect(screen.getByText("加权已用 3 M / 20 M")).toBeInTheDocument();
+    expect(screen.getByText("重置：1970/01/01 13:33（北京时间）")).toBeInTheDocument();
+    expect(screen.queryByText(/未加权累计/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/今日请求/)).not.toBeInTheDocument();
     const quotaHelp = screen.getByRole("button", { name: "查看个人周额度 Token 说明" });
     await user.hover(quotaHelp);
     const quotaTooltip = await screen.findByRole("tooltip");
@@ -296,7 +303,6 @@ describe("UsageDashboard", () => {
     expect(within(quotaTooltip).getByText("剩余额度")).toBeInTheDocument();
     expect(within(quotaTooltip).getByText("17 M Token")).toBeInTheDocument();
     await user.unhover(quotaHelp);
-    await user.click(screen.getByRole("tab", { name: "账号明细" }));
     for (const heading of ["序号", "当前账号", "CPA 账号", "账号周额度", "活跃用户", "账号状态", "我的请求", "我的 Token", "最后使用"]) {
       expect(screen.getByRole("columnheader", { name: new RegExp(heading) })).toBeInTheDocument();
     }
@@ -380,16 +386,26 @@ describe("UsageDashboard", () => {
     expect(within(switchDialog).queryByRole("button", { name: "仅复制图片配置" })).not.toBeInTheDocument();
   }, 15_000);
 
-  it("opens the daily trend by default and preserves both section states while switching tabs", async () => {
+  it("opens account details by default and preserves both section states while switching tabs", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => portalReadResponse(String(input)));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
 
-    expect(await screen.findByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "false");
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0]).toHaveTextContent("账号明细");
+    expect(tabs[1]).toHaveTextContent("每日用量");
+    expect(screen.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "false");
     expect(screen.queryByRole("button", { name: /^展开$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^收起$/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("columnheader", { name: /CPA 账号/ })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /个人每日 Token 用量趋势/ })).not.toBeInTheDocument();
+    expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toHaveLength(0);
+    expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
+
+    await user.click(screen.getByRole("tab", { name: "每日用量" }));
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-trend?")).toEqual([
       "/usage/me/usage-trend?window=30d&dimension=total"
     ]));

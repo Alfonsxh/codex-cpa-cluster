@@ -140,6 +140,8 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getByText("1.6 个账号")).toBeInTheDocument();
 
     expect(await screen.findByRole("heading", { name: "Token 使用" })).toBeInTheDocument();
+    expect(screen.getByText("TOKEN MONITOR")).toHaveClass("section-kicker");
+    expect(screen.queryByText("按时间与使用主体查看趋势")).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Token 统计口径" })).toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: "Token 使用数据视角" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "全部账号" })).toHaveAttribute("aria-selected", "true");
@@ -163,8 +165,13 @@ describe("OverviewPage legacy dashboard contract", () => {
       .toContainElement(collectorMeta);
     expect(document.querySelector(".usage-monitor-filters")).not.toContainElement(collectorMeta);
     const refreshCluster = document.querySelector(".overview-legacy-refresh-cluster") as HTMLElement;
-    expect(screen.getByText("Token 口径").closest(".overview-token-scope-filters")).toContainElement(refreshCluster);
-    expect(screen.queryByLabelText("全部账号统计摘要")).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Token 口径" }).closest(".overview-token-scope-filters")).toContainElement(refreshCluster);
+    const aggregateSummary = await screen.findByRole("region", { name: "全部账号统计摘要" });
+    expect(aggregateSummary).toHaveTextContent("当前值");
+    expect(aggregateSummary).toHaveTextContent("范围内总量");
+    expect(aggregateSummary).toHaveTextContent("平均值");
+    expect(aggregateSummary).toHaveTextContent("最大值");
+    expect(aggregateSummary).toHaveTextContent("未加权");
     expect(screen.queryByLabelText("全部账号未加权 Token 使用量汇总值")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("全部账号图例")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("CPA用量明细表格")).not.toBeInTheDocument();
@@ -184,6 +191,8 @@ describe("OverviewPage legacy dashboard contract", () => {
     await user.click(screen.getByRole("button", { name: /^加权$/ }));
     expect(screen.queryByLabelText("全部账号加权 Token 使用量汇总值")).not.toBeInTheDocument();
     expect(await screen.findByRole("img", { name: /全部账号加权 Token 使用趋势/ })).toBeInTheDocument();
+    expect(aggregateSummary).toHaveTextContent("加权");
+    expect(aggregateSummary.querySelector('[data-metric="current"] strong')).toHaveTextContent("250 Token");
     await user.click(screen.getByRole("button", { name: /^未加权$/ }));
 
     await user.click(screen.getByRole("tab", { name: "CPA 账号 Token 统计" }));

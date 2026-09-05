@@ -1286,6 +1286,172 @@ test("共享表格视口保持动态高度、右侧滚动槽和正确边界阴�
   }))).toEqual({ gutter: "auto", before: "0", after: "0" });
 });
 
+for (const viewport of [
+  ...viewports,
+  { name: "workspace", width: 1280, height: 900 },
+  { name: "full-hd", width: 1920, height: 1080 },
+  { name: "wide", width: 2560, height: 1440 }
+]) {
+  for (const theme of ["light", "dark"] as const) {
+    test(`Token 筛选栏布局与无背景 Tab：${viewport.name} ${theme}`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await setTheme(page, theme);
+      await login(page, "/admin/overview", "Token 使用");
+      const card = page.locator(".overview-token-monitor-card");
+      await expect(card.locator(".section-kicker")).toHaveText("TOKEN MONITOR");
+      await expect(card.getByText("按时间与使用主体查看趋势")).toHaveCount(0);
+
+      const layout = await card.locator(".usage-monitor-filters").evaluate((filters) => {
+        const time = filters.querySelector(".overview-token-window-row")!.getBoundingClientRect();
+        const scope = filters.querySelector(".overview-token-scope-filters")!.getBoundingClientRect();
+        const controls = [...filters.querySelectorAll(".overview-token-mode-control, .usage-variable, .overview-legacy-refresh-cluster")];
+        const bounds = filters.getBoundingClientRect();
+        return {
+          scopeRightOfTime: scope.left >= time.right + 12 && Math.abs(scope.top - time.top) <= 1,
+          scopeBelowTime: scope.top >= time.bottom,
+          overflow: filters.scrollWidth - filters.clientWidth,
+          controlsInside: controls.every((control) => {
+            const rect = control.getBoundingClientRect();
+            return rect.left >= bounds.left && rect.right <= bounds.right;
+          }),
+          scopeSingleRow: controls.every((control) => Math.abs(control.getBoundingClientRect().bottom - controls[0].getBoundingClientRect().bottom) <= 1)
+        };
+      });
+      expect(layout.overflow).toBeLessThanOrEqual(1);
+      expect(layout.controlsInside).toBe(true);
+      if (viewport.width > 1120) expect(layout.scopeRightOfTime).toBe(true);
+      else expect(layout.scopeBelowTime).toBe(true);
+      if (viewport.width >= 1440) expect(layout.scopeSingleRow).toBe(true);
+
+      const tabs = card.getByRole("tablist", { name: "Token 使用数据视角" });
+      for (const name of ["全部账号", "CPA 账号 Token 统计", "用户 Token 统计"]) {
+        const tab = tabs.getByRole("tab", { name, exact: true });
+        await expect(tab).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(tab).toHaveCSS("background-image", "none");
+        await tab.hover();
+        await expect(tab).toHaveCSS("background-image", "none");
+        await tab.click();
+        await expect(tab).toHaveAttribute("aria-selected", "true");
+        await expect(tab).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(tab).toHaveCSS("background-image", "none");
+        await expect.poll(() => tab.evaluate((element) => getComputedStyle(element, "::after").opacity)).toBe("1");
+        await expect(card.getByRole("tabpanel", { name, exact: true })).toBeVisible();
+        const chartCanvas = card.getByRole("tabpanel", { name, exact: true }).locator(".usage-chart-canvas");
+        await expect(chartCanvas).toHaveCSS("height", "500px");
+        await expect(chartCanvas.locator("svg")).toHaveAttribute("height", "500");
+        const aggregateSummary = card.getByRole("region", { name: "全部账号统计摘要" });
+        if (name === "全部账号") {
+          await expect(aggregateSummary).toBeVisible();
+          await expect(aggregateSummary.getByRole("columnheader")).toHaveCount(7);
+          await expect(aggregateSummary.getByRole("cell")).toHaveCount(7);
+          for (const cell of await aggregateSummary.getByRole("cell").all()) {
+            await expect(cell).toHaveCSS("vertical-align", "middle");
+          }
+          await expect(aggregateSummary.locator(".overview-chart-summary-time time")).toBeVisible();
+          await expect(aggregateSummary.locator(".overview-chart-summary-mode .overview-chart-mode-tag")).toBeVisible();
+          for (const token of await aggregateSummary.locator(".overview-chart-summary-token").all()) {
+            await expect(token).toHaveCSS("text-align", "right");
+            await expect(token.locator("strong")).toHaveText(/[\d,.]+ (Token|K|M|B)/);
+            await expect(token.locator("small")).toHaveText(/^[\d,]+$/);
+          }
+          expect(await aggregateSummary.evaluate((element) => {
+            const chart = element.previousElementSibling!.getBoundingClientRect();
+            const rect = element.getBoundingClientRect();
+            const panel = element.parentElement!.getBoundingClientRect();
+            return rect.top >= chart.bottom && rect.right <= panel.right + 1;
+          })).toBe(true);
+        } else {
+          await expect(aggregateSummary).toHaveCount(0);
+        }
+      }
+      const firstTab = tabs.getByRole("tab", { name: "全部账号", exact: true });
+      await firstTab.focus();
+      await firstTab.press("Enter");
+      await expect(firstTab).toHaveAttribute("aria-selected", "true");
+      await expect(firstTab).toBeFocused();
+      await expect(firstTab).toHaveCSS("background-image", "none");
+      await expect(card.getByRole("tabpanel", { name: "全部账号", exact: true })).toBeVisible();
+    });
+  }
+}
+
+test("全部账号图下摘要跟随口径、时段及时间范围", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setTheme(page, "dark");
+  await page.route("**/admin/api/overview/usage?*", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    const sixHours = new URL(route.request().url()).searchParams.get("window") === "21600";
+    const start = Date.parse(sixHours ? "2026-09-05T06:00:00+08:00" : "2026-09-05T08:00:00+08:00") / 1000;
+    payload.buckets = [start, start + 900];
+    payload.accounts = [{
+      ...payload.accounts[0],
+      values: sixHours ? [50, 150] : [100, 300],
+      weighted_values: sixHours ? [100, 300] : [200, 600]
+    }];
+    payload.window_timezone = "Asia/Shanghai";
+    await route.fulfill({ response, json: payload });
+  });
+  await login(page, "/admin/overview", "Token 使用");
+  const card = page.locator(".overview-token-monitor-card");
+  const summary = card.getByRole("region", { name: "全部账号统计摘要" });
+  const point = summary.locator('[data-metric="point"]');
+  const pointHeader = summary.locator('[data-metric-header="point"]');
+  const time = summary.locator(".overview-chart-summary-time time");
+  const chart = card.locator(".overview-legacy-chart");
+  const metric = (name: string) => {
+    const key = ({ 当前值: "current", 范围内总量: "total", 平均值: "average", 最大值: "maximum" } as Record<string, string>)[name];
+    return summary.locator(`[data-metric="${key}"] strong`);
+  };
+  await expect(metric("当前值")).toHaveText("300 Token");
+  await expect(metric("范围内总量")).toHaveText("400 Token");
+  await expect(metric("平均值")).toHaveText("200 Token");
+  await expect(metric("最大值")).toHaveText("300 Token");
+  await expect(pointHeader).toHaveText("最新时段");
+  await expect(time).toHaveText("2026/09/05 08:15:00");
+  await expect(chart.locator("svg text").filter({ hasText: "峰值 300 Token" })).toBeVisible();
+  await chart.hover({ position: { x: 80, y: 100 } });
+  await expect(pointHeader).toHaveText("所选时段");
+  await expect(point.locator("strong")).toHaveText("100 Token");
+  await card.getByRole("heading", { name: "Token 使用" }).hover();
+  await expect(pointHeader).toHaveText("最新时段");
+  await expect(point.locator("strong")).toHaveText("300 Token");
+  await chart.focus();
+  await chart.press("Home");
+  await expect(pointHeader).toHaveText("所选时段");
+  await expect(point.locator("strong")).toHaveText("100 Token");
+  await expect(time).toHaveText("2026/09/05 08:00:00");
+  await expect(metric("当前值")).toHaveText("300 Token");
+  await expect(metric("范围内总量")).toHaveText("400 Token");
+  await expect(card.locator(".overview-chart-tooltip")).toHaveCount(0);
+  await chart.press("Escape");
+  await expect(pointHeader).toHaveText("最新时段");
+  await expect(point.locator("strong")).toHaveText("300 Token");
+  await chart.press("ArrowLeft");
+  await expect(point.locator("strong")).toHaveText("100 Token");
+  await chart.press("ArrowRight");
+  await expect(point.locator("strong")).toHaveText("300 Token");
+  await card.getByRole("button", { name: "加权", exact: true }).click();
+  await expect(metric("范围内总量")).toHaveText("800 Token");
+  await expect(metric("当前值")).toHaveText("600 Token");
+  await expect(metric("平均值")).toHaveText("400 Token");
+  await expect(metric("最大值")).toHaveText("600 Token");
+  await expect(chart.locator("svg text").filter({ hasText: "峰值 600 Token" })).toBeVisible();
+  await expect(chart.locator("svg text").filter({ hasText: "峰值 300 Token" })).toHaveCount(0);
+  await expect(summary.locator(".overview-chart-summary-token small")).toHaveText(["600", "600", "800", "400", "600"]);
+  await expect(summary.locator(".overview-chart-mode-tag.weighted")).toHaveText("加权");
+  await chart.focus();
+  await chart.press("Home");
+  await expect(point.locator("strong")).toHaveText("200 Token");
+  await expect(point.locator("small")).toHaveText("200");
+  await card.getByRole("button", { name: "6 小时", exact: true }).click();
+  await expect(metric("范围内总量")).toHaveText("400 Token");
+  await expect(time).toHaveText("2026/09/05 06:15:00");
+  await expect(point.locator("strong")).toHaveText("300 Token");
+  await expect(summary.locator(".overview-chart-summary-token small")).toHaveText(["300", "300", "400", "200", "300"]);
+  await summary.screenshot({ path: test.info().outputPath("token-summary.png") });
+});
+
 test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明细", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setTheme(page, "dark");
@@ -1314,8 +1480,8 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   await expect(card.locator(".overview-collector-meta time")).toHaveText(/\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
   const filterGeometry = await card.evaluate((element) => {
     const timeControls = element.querySelector<HTMLElement>(".overview-legacy-window-segments");
-    const startBoundary = element.querySelector<HTMLElement>(".overview-token-window-value:first-child");
-    const endBoundary = element.querySelector<HTMLElement>(".overview-token-window-value:last-child");
+    const startBoundary = element.querySelector<HTMLElement>(".overview-token-window-value:first-child strong");
+    const endBoundary = element.querySelector<HTMLElement>(".overview-token-window-value:last-child strong");
     const headingRow = element.querySelector<HTMLElement>(".overview-token-heading-row");
     const filters = element.querySelector<HTMLElement>(".usage-monitor-filters");
     const refreshSelect = element.querySelector<HTMLElement>(".usage-refresh-control .enhanced-select-trigger");
@@ -1344,7 +1510,8 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
       statusInHeading: collectorRect.top >= headingRect.top - 1 && collectorRect.bottom <= headingRect.bottom + 1,
       headingAboveFilters: headingRect.bottom < filtersRect.top,
       statusOnFirstRow: collectorRect.bottom <= scopeRect.top,
-      refreshOnSecondRow: selectRect.top >= scopeRect.top - 1 && buttonRect.bottom <= scopeRect.bottom + 1
+      refreshWithinScope: selectRect.top >= scopeRect.top - 1 && buttonRect.bottom <= scopeRect.bottom + 1,
+      scopeRightOfTime: scopeRect.left >= timeControls.closest("fieldset")!.getBoundingClientRect().right + 12
     };
   });
   expect(Math.abs(filterGeometry.timeHeight - filterGeometry.startHeight)).toBeLessThanOrEqual(1);
@@ -1355,22 +1522,23 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   expect(filterGeometry.statusInHeading).toBe(true);
   expect(filterGeometry.headingAboveFilters).toBe(true);
   expect(filterGeometry.statusOnFirstRow).toBe(true);
-  expect(filterGeometry.refreshOnSecondRow).toBe(true);
+  expect(filterGeometry.refreshWithinScope).toBe(true);
+  expect(filterGeometry.scopeRightOfTime).toBe(true);
   await expect(tabs).toHaveCount(3);
-  await expect(summary).toHaveCount(0);
+  await expect(summary).toBeVisible();
   await expect(dataScroll.locator(".overview-legacy-chart")).toBeVisible();
-  await expect(dataScroll.locator(".overview-legacy-chart")).toHaveCSS("min-height", "320px");
+  await expect(dataScroll.locator(".overview-legacy-chart")).toHaveCSS("min-height", "500px");
   await expect(dataScroll.locator(".overview-token-series-legend")).toHaveCount(0);
   await expect(dataScroll.getByLabel("CPA用量明细表格")).toHaveCount(0);
   const aggregateChart = dataScroll.locator(".overview-legacy-chart");
   await aggregateChart.hover({ position: { x: 540, y: 150 } });
-  const aggregateTooltip = page.locator(".overview-chart-tooltip[data-summary=true]");
-  await expect(aggregateTooltip).toBeVisible();
-  await expect(aggregateTooltip.locator(".overview-chart-mode-tag.unweighted")).toHaveText("未加权");
-  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("当前值");
-  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("范围内总量");
-  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("平均值");
-  await expect(aggregateTooltip.locator(".overview-chart-tooltip-metrics")).toContainText("最大值");
+  await expect(page.locator(".overview-chart-tooltip")).toHaveCount(0);
+  await expect(summary).toContainText("所选时段");
+  await expect(summary.locator(".overview-chart-mode-tag.unweighted")).toHaveText("未加权");
+  await expect(summary).toContainText("当前值");
+  await expect(summary).toContainText("范围内总量");
+  await expect(summary).toContainText("平均值");
+  await expect(summary).toContainText("最大值");
 
   await card.getByRole("tab", { name: "CPA 账号 Token 统计" }).click();
   await expect(summary).toHaveCount(0);

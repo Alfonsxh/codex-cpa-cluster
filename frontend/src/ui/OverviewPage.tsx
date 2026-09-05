@@ -5,7 +5,8 @@ import {
   Suspense,
   useEffect,
   useMemo,
-  useState
+  useState,
+  type ReactNode
 } from "react";
 
 import {
@@ -228,6 +229,7 @@ export function OverviewPage() {
   }
 
   const summary = overview.data.summary;
+  const usageBoundaryUpdating = usage.isFetching && (usage.isPlaceholderData || !usage.data);
   return (
     <section className="page-content overview-legacy-page">
       {onboarding.data ? <OnboardingCard status={onboarding.data} /> : null}
@@ -266,7 +268,7 @@ export function OverviewPage() {
           <div className="overview-token-heading-row">
             <div className="overview-legacy-toolbar-title usage-monitor-title">
               <h3 id="overview-token-monitor-title">Token 使用</h3>
-              <small>按时间与使用主体查看趋势</small>
+              <p className="section-kicker">TOKEN MONITOR</p>
             </div>
             <div className="overview-collector-meta" aria-live="polite">
               <span className={`overview-collector-state ${collectorState(usage.data?.collector.status).tone}`}>
@@ -280,9 +282,9 @@ export function OverviewPage() {
             </div>
           </div>
           <div className="overview-legacy-filters usage-monitor-filters" aria-label="Token Dashboard 变量">
-            <fieldset className="overview-legacy-window-control usage-time-control">
-              <legend>时间范围</legend>
-              <div className="overview-token-window-row">
+            <div className="overview-token-window-row">
+              <fieldset className="overview-legacy-window-control usage-time-control">
+                <legend>时间范围</legend>
                 <div className="overview-legacy-window-segments usage-time-segments" role="group" aria-label="Token 使用时间范围">
                   {standardWindows.map((window) => (
                     <button
@@ -303,23 +305,25 @@ export function OverviewPage() {
                     时间选择
                   </button>
                 </div>
-                <div className="overview-token-window-boundaries" aria-label="Token 使用时间边界" aria-live="polite">
-                  <span className="overview-token-window-value">
-                    <small>起始时间</small>
-                    <strong>{usage.data ? formatOverviewUsageBoundary(usage.data.window_start_at, overviewDisplayTimezone) : "—"}</strong>
-                  </span>
-                  <span className="overview-token-window-value">
-                    <small>结束时间</small>
-                    <strong>{usage.data
-                      ? formatOverviewUsageBoundary(
-                          usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
-                          overviewDisplayTimezone
-                        )
-                      : "—"}</strong>
-                  </span>
-                </div>
+              </fieldset>
+              <div className="overview-token-window-boundaries" aria-label="Token 使用时间边界" aria-live="polite" aria-busy={usageBoundaryUpdating}>
+                <UsageTimeBoundary
+                  label="起始时间"
+                  value={usage.data ? formatOverviewUsageBoundary(usage.data.window_start_at, overviewDisplayTimezone) : "—"}
+                  updating={usageBoundaryUpdating}
+                />
+                <UsageTimeBoundary
+                  label="结束时间"
+                  value={usage.data
+                    ? formatOverviewUsageBoundary(
+                        usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
+                        overviewDisplayTimezone
+                      )
+                    : "—"}
+                  updating={usageBoundaryUpdating}
+                />
               </div>
-            </fieldset>
+            </div>
             <div className="overview-token-scope-filters">
               <fieldset className="overview-token-mode-control">
                 <legend>Token 口径</legend>
@@ -456,6 +460,19 @@ export function OverviewPage() {
   );
 }
 
+function UsageTimeBoundary({ label, value, updating }: {
+  label: string;
+  value: string;
+  updating: boolean;
+}) {
+  return (
+    <span className="overview-token-window-value">
+      <small>{label}</small>
+      <strong>{updating ? "…" : value}</strong>
+    </span>
+  );
+}
+
 function Metric({ label, value, detail }: { label: string; value: string | number; detail: string }) {
   return (
     <article className="overview-legacy-metric">
@@ -502,6 +519,11 @@ function UsageDashboard({
     : chartSeries.map((item) => `${item.name} ${formatTokens(item.total)}`).join("，");
   const activeViewTabID = `overview-token-tab-${view}`;
   const emptyText = view === "user" ? "所选范围内没有用户 Token 数据" : "所选范围内没有账号 Token 数据";
+  const chartFooter = (
+    <footer className="overview-legacy-summary-footer overview-token-workspace-footer">
+      <span>单位：{modeLabel} Token / {interval}</span>
+    </footer>
+  );
   return (
     <article className="overview-legacy-usage-panel overview-token-workspace">
       <header className="overview-token-workspace-header">
@@ -530,15 +552,15 @@ function UsageDashboard({
             includeDateLabels={includeDateLabels}
             valueLabel={modeLabel}
             timezone={payload.window_timezone}
-            summaryMetrics={view === "aggregate" ? metrics : undefined}
             ariaLabel={`${viewLabel}${modeLabel} Token 使用趋势：${chartAriaDetails}`}
+            footer={chartFooter}
           />
         ) : (
-          <div className="overview-legacy-chart-empty"><strong>暂无趋势</strong><span>{emptyText}</span></div>
+          <>
+            <div className="overview-legacy-chart-empty"><strong>暂无趋势</strong><span>{emptyText}</span></div>
+            {chartFooter}
+          </>
         )}
-        <footer className="overview-legacy-summary-footer overview-token-workspace-footer">
-          <span>单位：{modeLabel} Token / {interval}</span>
-        </footer>
         {view !== "aggregate" ? <SeriesTable
           subjectLabel={view === "user" ? "用户" : "CPA"}
           series={view === "user" ? payload.users : payload.accounts}
@@ -554,21 +576,24 @@ function UsageDashboard({
   );
 }
 
-function UsageChartLoader({ buckets, series, summary = false, includeDateLabels, valueLabel, timezone, summaryMetrics, ariaLabel }: {
+function UsageChartLoader({ buckets, series, summary = false, includeDateLabels, valueLabel, timezone, ariaLabel, footer }: {
   buckets: number[];
   series: TokenSeries[];
   summary?: boolean;
   includeDateLabels: boolean;
   valueLabel: string;
   timezone: string;
-  summaryMetrics?: TokenSeries;
   ariaLabel: string;
+  footer: ReactNode;
 }) {
   return (
     <Suspense fallback={(
-      <div className={`overview-legacy-chart overview-legacy-chart-loading${summary ? " summary" : ""}`} role="status">
-        <Spin size="small" /><span>正在加载趋势图</span>
-      </div>
+      <>
+        <div className={`overview-legacy-chart overview-legacy-chart-loading${summary ? " summary" : ""}`} role="status">
+          <Spin size="small" /><span>正在加载趋势图</span>
+        </div>
+        {footer}
+      </>
     )}>
       <EChartsUsageChart
         buckets={buckets}
@@ -577,8 +602,8 @@ function UsageChartLoader({ buckets, series, summary = false, includeDateLabels,
         includeDateLabels={includeDateLabels}
         valueLabel={valueLabel}
         timezone={timezone}
-        summaryMetrics={summaryMetrics}
         ariaLabel={ariaLabel}
+        footer={footer}
       />
     </Suspense>
   );

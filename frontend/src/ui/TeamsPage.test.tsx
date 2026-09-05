@@ -64,6 +64,9 @@ describe("TeamsPage frozen legacy contract", () => {
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
       "序号", "团队", "当前成员", "活跃成员", "全部历史 Token", "更新时间", "操作"
     ]);
+    expect(screen.getByText("1970/01/01 08:01")).toBeInTheDocument();
+    expect(screen.getByText("1970/01/01 08:03")).toBeInTheDocument();
+    expect(screen.getByText("1970/01/01 08:05")).toBeInTheDocument();
     expect(await screen.findByText("12.4")).toBeInTheDocument();
     expect(screen.getByText("平台研发")).toHaveClass("team-tag-style-indigo");
     expect(screen.getByText("数据智能")).toHaveClass("team-tag-style-cyan");
@@ -129,6 +132,8 @@ describe("TeamsPage frozen legacy contract", () => {
     expect(within(dialog).queryByText("当前管理团队")).not.toBeInTheDocument();
     expect(within(dialog).getByText("共 3 位匹配用户；批量操作仅作用于已勾选用户")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: /选择全部匹配/ })).not.toBeInTheDocument();
+    expect(within(dialog).getByText("平台研发", { selector: "span.team-chip" })).toHaveClass("team-tag-style-indigo");
+    expect(within(dialog).getByText("数据智能", { selector: "span.team-chip" })).toHaveClass("team-tag-style-cyan");
     expect(within(dialog).getByText("本团队成员")).toBeInTheDocument();
     expect(within(dialog).getByText("属于其他团队")).toBeInTheDocument();
     expect(within(dialog).getByText("尚未加入")).toBeInTheDocument();

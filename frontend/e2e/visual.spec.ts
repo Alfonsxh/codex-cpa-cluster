@@ -442,6 +442,8 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   await expect(page.getByRole("tab", { name: "账号明细" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "false");
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();
+  await expect(page.locator(".usage-account-table thead th").first()).toHaveCSS("position", "sticky");
+  await expect(page.locator(".usage-last-used").first()).toHaveText(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/);
   await expect(chart).toHaveCount(0);
   await expect.poll(() => trendRequests).toEqual([]);
 
@@ -682,23 +684,38 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   await page.getByRole("button", { name: "使用明细" }).click();
   const detailMetricsLayout = await page.locator(".usage-detail-panel").evaluate((panel) => {
     const heading = panel.querySelector<HTMLElement>(".usage-detail-heading");
-    const cacheHead = panel.querySelector<HTMLElement>(".usage-cache-head");
-    const cacheLabel = cacheHead?.querySelector<HTMLElement>("span");
-    const cacheRate = cacheHead?.querySelector<HTMLElement>("small");
-    if (!heading || !cacheHead || !cacheLabel || !cacheRate) return null;
+    const cacheCell = [...panel.querySelectorAll<HTMLElement>(".usage-token-grid > div")].find((cell) => cell.querySelector("span")?.textContent?.trim() === "缓存率");
+    const metricCells = [...panel.querySelectorAll<HTMLElement>(".usage-token-grid > div")].slice(0, 2);
+    const tokenCells = [...panel.querySelectorAll<HTMLElement>(".usage-token-grid > div")].filter((cell) => cell.querySelector("span")?.textContent?.includes("Token"));
+    if (!heading || !cacheCell || metricCells.length !== 2 || tokenCells.length !== 5) return null;
+    const cacheLabel = cacheCell.querySelector<HTMLElement>("span");
+    const cacheValue = cacheCell.querySelector<HTMLElement>("strong");
+    if (!cacheLabel || !cacheValue) return null;
     const headingRect = heading.getBoundingClientRect();
-    const cacheRect = cacheHead.getBoundingClientRect();
-    const rateRect = cacheRate.getBoundingClientRect();
     return {
       headingWidth: headingRect.width,
       labelClipped: cacheLabel.scrollWidth > cacheLabel.clientWidth,
-      rateInside: rateRect.left >= cacheRect.left && rateRect.right <= cacheRect.right
+      cacheValue: cacheValue.textContent?.trim(),
+      cacheCellText: cacheCell.textContent?.trim(),
+      tokenRawValues: tokenCells.map((cell) => cell.querySelector<HTMLElement>(".usage-token-raw")?.textContent?.trim() ?? ""),
+      requestAlignments: metricCells.map((cell) => ({
+        textAlign: getComputedStyle(cell).textAlign,
+        labelAlign: getComputedStyle(cell.querySelector("span") as HTMLElement).textAlign,
+        valueAlign: getComputedStyle(cell.querySelector("strong") as HTMLElement).textAlign
+      }))
     };
   });
   expect(detailMetricsLayout).not.toBeNull();
   expect(detailMetricsLayout?.headingWidth).toBeLessThanOrEqual(130);
   expect(detailMetricsLayout?.labelClipped).toBe(false);
-  expect(detailMetricsLayout?.rateInside).toBe(true);
+  expect(detailMetricsLayout?.cacheValue).toMatch(/%$/);
+  expect(detailMetricsLayout?.cacheCellText).not.toContain("缓存 Token");
+  expect(detailMetricsLayout?.tokenRawValues).toHaveLength(5);
+  expect(detailMetricsLayout?.tokenRawValues?.every((value) => /^\d[\d,]* Token$/.test(value))).toBe(true);
+  expect(detailMetricsLayout?.requestAlignments).toEqual([
+    { textAlign: "center", labelAlign: "center", valueAlign: "center" },
+    { textAlign: "center", labelAlign: "center", valueAlign: "center" }
+  ]);
   const modelAlignments = await page.locator(".account-model-usage-head").evaluateAll((heads) => heads.map((head) => {
     const name = head.querySelector<HTMLElement>(".account-model-name");
     const token = head.querySelector<HTMLElement>(".account-model-token");

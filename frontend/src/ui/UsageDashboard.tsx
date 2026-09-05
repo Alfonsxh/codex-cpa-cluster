@@ -563,7 +563,7 @@ function AccountRows({ account, index, currentGroup, window, expanded, onToggle,
         <td data-label="账号状态"><StatusTag account={account} /></td>
         <td data-label={`我的请求（${windowLabel(window)}）`}><strong className="usage-cell-number" title={formatNumber(account.usage.request_count)}>{formatCompact(account.usage.request_count)}</strong></td>
         <td className="usage-token-cell" data-label={`我的 Token（${windowLabel(window)}）`}><div className="usage-token-content"><TokenPair metrics={account.usage} /></div></td>
-        <td data-label="我的最后使用"><time className="usage-last-used">{formatTimestamp(account.usage.last_used_at)}</time></td>
+        <td data-label="我的最后使用"><time className="usage-last-used">{formatServerTimestamp(account.usage.last_used_at)}</time></td>
         <td><button className="usage-expand-button" type="button" aria-label={expanded ? "收起使用明细" : "使用明细"} aria-expanded={expanded} onClick={onToggle}>{expanded ? "−" : "+"}</button></td>
       </tr>
       {expanded ? <UsageBreakdownRow account={account} window={window} /> : null}
@@ -604,18 +604,29 @@ function UsageTokenGrid({ metrics }: { metrics: UsageMetrics }) {
     <div className="usage-token-grid">
       <Metric label="成功请求" value={formatNumber(metrics.success_count)} />
       <Metric label="失败请求" value={formatNumber(metrics.failed_count)} />
-      <Metric label="输入 Token" value={formatTokens(metrics.input_tokens)} />
-      <Metric label="输出 Token" value={formatTokens(metrics.output_tokens)} />
-      <Metric label="推理 Token" value={formatTokens(metrics.reasoning_tokens)} />
-      <div><div className="usage-cache-head"><span>缓存 Token</span><small className="usage-cache-rate">缓存率 {cacheRate}</small></div><strong>{formatTokens(metrics.cached_tokens)}</strong></div>
-      <Metric label="未加权 Token" value={formatTokens(metrics.total_tokens)} />
-      <Metric label="加权 Token" value={formatTokens(metrics.weighted_tokens ?? metrics.total_tokens)} />
+      <TokenMetric label="输入 Token" value={metrics.input_tokens} />
+      <TokenMetric label="输出 Token" value={metrics.output_tokens} />
+      <TokenMetric label="推理 Token" value={metrics.reasoning_tokens} />
+      <Metric label="缓存率" value={cacheRate} />
+      <TokenMetric label="未加权 Token" value={metrics.total_tokens} />
+      <TokenMetric label="加权 Token" value={metrics.weighted_tokens ?? metrics.total_tokens} />
     </div>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function TokenMetric({ label, value }: { label: string; value: number }) {
+  const safeValue = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{formatTokens(safeValue)}</strong>
+      {safeValue >= 1_000 ? <small className="usage-token-raw">{formatNumber(safeValue)} Token</small> : null}
+    </div>
+  );
 }
 
 function UsageHelp({ label, title }: { label: string; title: ReactNode }) {
@@ -799,11 +810,6 @@ function formatNumber(value: number) {
 
 function formatCompact(value: number) {
   return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value) || 0);
-}
-
-function formatTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
 }
 
 export function formatServerTimestamp(timestamp: number, { withSeconds = false }: { withSeconds?: boolean } = {}) {

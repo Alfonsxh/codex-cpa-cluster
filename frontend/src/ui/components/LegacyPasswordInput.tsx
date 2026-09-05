@@ -7,8 +7,11 @@ export function LegacyPasswordInput({
   minLength,
   maxLength,
   autoComplete = "new-password",
+  disabled = false,
   name,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
   inputRef,
   onBlur,
   onValueChange
@@ -19,8 +22,11 @@ export function LegacyPasswordInput({
   minLength?: number;
   maxLength?: number;
   autoComplete?: string;
+  disabled?: boolean;
   name?: string;
   ariaLabel?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
   inputRef?: Ref<HTMLInputElement>;
   onBlur?: FocusEventHandler<HTMLInputElement>;
   onValueChange: (value: string) => void;
@@ -33,12 +39,15 @@ export function LegacyPasswordInput({
         id={id}
         name={name}
         aria-label={ariaLabel}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
         type={visible ? "text" : "password"}
         value={value}
         placeholder={placeholder}
         minLength={minLength}
         maxLength={maxLength}
         autoComplete={autoComplete}
+        disabled={disabled}
         onBlur={onBlur}
         onChange={(event) => onValueChange(event.target.value)}
       />
@@ -46,6 +55,7 @@ export function LegacyPasswordInput({
         className="password-visibility-toggle"
         type="button"
         tabIndex={-1}
+        disabled={disabled}
         aria-controls={id}
         aria-label={visible ? "隐藏密码" : "显示密码"}
         aria-pressed={visible}

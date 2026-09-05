@@ -61,6 +61,22 @@ describe("UsageLoginPage email suffix selector", () => {
     expect(screen.getByLabelText("密码")).toHaveValue("");
   });
 
+  it("provides an eye toggle for the login password without adding it to the tab order", async () => {
+    const { user } = setup({ overlay: true });
+    const password = await screen.findByLabelText("密码");
+    const toggle = screen.getByRole("button", { name: "显示密码" });
+
+    expect(password).toHaveAttribute("type", "password");
+    expect(toggle).toHaveAttribute("tabindex", "-1");
+    await user.type(password, "test-password");
+    await user.click(toggle);
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).toHaveValue("test-password");
+    expect(screen.getByRole("button", { name: "隐藏密码" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "隐藏密码" }));
+    expect(password).toHaveAttribute("type", "password");
+  });
+
   it("supports keyboard suffix selection and keeps the selected identity after a rejected login", async () => {
     const { user, logins } = setup({ loginFails: true });
     await user.type(screen.getByRole("textbox", { name: "邮箱用户名" }), "alice");

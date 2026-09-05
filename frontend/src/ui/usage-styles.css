@@ -51,6 +51,15 @@ body {
 .usage-login-card .usage-login-email-fields > input { width: 100%; min-width: 0; height: 44px; }
 .usage-login-card .usage-login-email-fields .enhanced-select-trigger { min-height: 44px; height: 44px; padding: 10px 12px; border-radius: 9px; font: 14px/1.25 var(--sans); }
 .usage-login-card .usage-email-retry { padding: 0 4px; color: var(--accent); border: 0; background: transparent; cursor: pointer; font: inherit; text-decoration: underline; }
+.usage-login-card .password-input { position: relative; display: block; min-width: 0; }
+.usage-login-card .password-input > input { width: 100%; min-height: 44px; height: 44px; padding: 12px 48px 12px 14px; }
+.usage-login-card .password-visibility-toggle { position: absolute; top: 50%; right: 7px; display: grid; width: 32px; min-height: 32px; padding: 0; place-items: center; color: var(--faint); background: transparent; border: 0; border-radius: 7px; cursor: pointer; transform: translateY(-50%); transition: color .15s ease, background .15s ease; }
+.usage-login-card .password-visibility-toggle:hover:not(:disabled),
+.usage-login-card .password-visibility-toggle[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.usage-login-card .password-visibility-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.usage-login-card .password-visibility-toggle svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.usage-login-card .password-visibility-toggle[aria-pressed="false"] .password-eye-hide,
+.usage-login-card .password-visibility-toggle[aria-pressed="true"] .password-eye-show { display: none; }
 @media (max-width: 480px) {
   .usage-login-card .usage-login-email-fields { grid-template-columns: minmax(0, 1fr); }
 }
@@ -393,10 +402,9 @@ body {
 .usage-token-grid > div > strong { display: block; }
 .usage-token-grid > div > span { margin-bottom: 7px; color: var(--faint); font-size: 9px; }
 .usage-token-grid > div > strong { font: 700 12px/1 var(--mono); }
+.usage-token-grid > div > .usage-token-raw { display: block; margin-top: 5px; color: var(--faint); font: 9px/1.2 var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-token-grid > div:nth-child(-n+2) { align-items: center; text-align: center; }
 .usage-token-grid-placeholder .ant-skeleton-input { width: 100%; min-width: 0; height: 22px; }
-.usage-cache-head { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); justify-items: end; gap: 3px; margin-bottom: 7px; }
-.usage-cache-head > span { overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.usage-cache-rate { min-width: max-content; padding: 3px 5px; color: var(--accent); background: var(--accent-soft); border-radius: 999px; font: 700 8px/1 var(--mono); }
 .account-model-usage { display: grid; gap: 10px; padding: 14px 16px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 .account-model-usage-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--ink); font-size: 10px; font-weight: 700; }
 .account-model-usage-title small { color: var(--faint); font: 9px/1.45 var(--mono); font-weight: 500; }

@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 
@@ -14,6 +14,7 @@ import {
 } from "../api/public-site";
 import { ThemeToggle, useTheme } from "./ThemeProvider";
 import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
+import { LegacyPasswordInput } from "./components/LegacyPasswordInput";
 
 const loginSchema = z.object({
   email: z.string().trim().min(1, "请输入邮箱用户名"),
@@ -161,17 +162,28 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
                 : !emailDomains.length ? <small className="field-error" role="alert">尚未配置企业邮箱后缀，请联系管理员设置。</small>
                   : null}
           </div>
-          <label className="field">
+          <div className="field">
             <span>密码</span>
-            <input
-              type="password"
-              aria-label="密码"
-              autoComplete="current-password"
-              aria-invalid={Boolean(form.formState.errors.password)}
-              {...form.register("password")}
+            <Controller
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <LegacyPasswordInput
+                  id="usage-login-password"
+                  name={field.name}
+                  value={field.value}
+                  inputRef={field.ref}
+                  onBlur={field.onBlur}
+                  onValueChange={field.onChange}
+                  ariaLabel="密码"
+                  ariaInvalid={Boolean(form.formState.errors.password)}
+                  disabled={login.isPending}
+                  autoComplete="current-password"
+                />
+              )}
             />
             {form.formState.errors.password ? <small className="field-error">{form.formState.errors.password.message}</small> : null}
-          </label>
+          </div>
           {login.isError ? (
             <div className="inline-alert" role="alert">
               {retrySeconds > 0

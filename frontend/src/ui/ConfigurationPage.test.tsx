@@ -133,7 +133,7 @@ describe("ConfigurationPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "保存 1 项配置？" })).not.toBeInTheDocument());
   });
 
-  it("removes static setting descriptions and places the WeCom switch before the webhook editor", async () => {
+  it("renders field descriptions and places the WeCom switch before the webhook editor", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const path = String(input);
       const supporting = supportingSettingsResponse(path);
@@ -147,7 +147,9 @@ describe("ConfigurationPage", () => {
 
     await screen.findByLabelText("请求重试次数");
     expect(screen.queryByText("统一作用于所有业务 CPA。")).not.toBeInTheDocument();
-    expect(screen.queryByText("单次上游请求失败后的重试次数。")).not.toBeInTheDocument();
+    expect(screen.getByText("单次上游请求失败后的重试次数。")).toBeInTheDocument();
+    expect(screen.queryByText("branding.product_name", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("默认 Codex CPA Cluster", { exact: true })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /企业微信通知/ }));
     const enabled = screen.getByLabelText("启用企业微信通知");
     const webhook = screen.getByText("企业微信群 Webhook");

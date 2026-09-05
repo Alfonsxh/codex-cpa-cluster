@@ -602,7 +602,7 @@ function TeamMembersModal({ team, csrfToken, onClose, onCatalogRefresh, onToast 
 function MemberRow({ index, user, teamID, checked, onChange }: { index: number; user: UserSummary; teamID: string; checked: boolean; onChange: (checked: boolean) => void }) {
   const conflict = Boolean(user.team_id && user.team_id !== teamID);
   const current = user.team_id === teamID;
-  return <tr><td className="table-index-cell">{index}</td><td><input type="checkbox" aria-label={`选择 ${user.email}`} checked={checked} onChange={(event) => onChange(event.target.checked)} /></td><td><span className="table-primary">{user.email}</span></td><td>{user.team ? <span className="team-chip">{user.team.name}</span> : <span className="team-chip unassigned">未分组</span>}</td><td className="number-cell token-total"><LegacyTokenValue value={user.usage?.weighted_tokens ?? 0} /></td><td><span className={`status-chip ${conflict ? "warning" : current ? "success" : "neutral"}`}>{conflict ? "属于其他团队" : current ? "本团队成员" : "尚未加入"}</span></td></tr>;
+  return <tr><td className="table-index-cell">{index}</td><td><input type="checkbox" aria-label={`选择 ${user.email}`} checked={checked} onChange={(event) => onChange(event.target.checked)} /></td><td><span className="table-primary">{user.email}</span></td><td>{user.team ? <span className={teamTagClassName(user.team.tag_style)}>{user.team.name}</span> : <span className={teamTagClassName(null, true)}>未分组</span>}</td><td className="number-cell token-total"><LegacyTokenValue value={user.usage?.weighted_tokens ?? 0} /></td><td><span className={`status-chip ${conflict ? "warning" : current ? "success" : "neutral"}`}>{conflict ? "属于其他团队" : current ? "本团队成员" : "尚未加入"}</span></td></tr>;
 }
 
 function IndeterminateCheckbox({ ariaLabel, checked, indeterminate, onChange }: { ariaLabel: string; checked: boolean; indeterminate: boolean; onChange: (checked: boolean) => void }) {
@@ -641,7 +641,7 @@ function sameCriteria(left: MemberCriteria, right: MemberCriteria) {
 
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
+  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
 }
 
 function formatNumber(value: number) {

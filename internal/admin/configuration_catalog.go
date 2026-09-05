@@ -145,14 +145,14 @@ func errMissingConfigurationPresentation(key string) error {
 
 var configurationGroupDescriptions = map[string]string{
 	"品牌与身份":  "品牌、域名和客户端配置。",
-	"CPA 请求":    "CPA 请求与代理配置。",
+	"CPA 请求": "CPA 请求与代理配置。",
 	"用量与额度":  "额度与用量采集。",
 	"账号自动切换": "额度不足时自动迁移。",
-	"用户额度":    "用户额度和故障策略。",
+	"用户额度":   "用户额度和故障策略。",
 	"推理强度策略": "Token 倍率和颜色。",
 	"企业微信通知": "额度报告和预警。",
 	"会话与采集":  "会话和采集设置。",
-	"账号供应":    "新 CPA 端口范围。",
+	"账号供应":   "新 CPA 端口范围。",
 	"账号与发布":  "CPA 监听、镜像和版本。",
 }
 

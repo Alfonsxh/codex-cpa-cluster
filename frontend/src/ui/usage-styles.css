@@ -47,6 +47,13 @@ body {
 .usage-login-card-overlay .login-card-heading p { display: none; }
 .usage-login-card-overlay .field { font-size: 10px; }
 .usage-login-card-overlay .quiet-link { display: none; }
+.usage-login-card .usage-login-email-fields { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(160px, .85fr); align-items: center; gap: 12px; }
+.usage-login-card .usage-login-email-fields > input { width: 100%; min-width: 0; height: 44px; }
+.usage-login-card .usage-login-email-fields .enhanced-select-trigger { min-height: 44px; height: 44px; padding: 10px 12px; border-radius: 9px; font: 14px/1.25 var(--sans); }
+.usage-login-card .usage-email-retry { padding: 0 4px; color: var(--accent); border: 0; background: transparent; cursor: pointer; font: inherit; text-decoration: underline; }
+@media (max-width: 480px) {
+  .usage-login-card .usage-login-email-fields { grid-template-columns: minmax(0, 1fr); }
+}
 
 .usage-center-shell {
   display: flex;

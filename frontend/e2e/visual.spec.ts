@@ -122,6 +122,27 @@ for (const viewport of viewports) {
   }
 }
 
+test("用户时间筛选在窄屏不挤没列表，用户行与分页均可到达", async ({ page }) => {
+  await setTheme(page, "light");
+  await login(page, "/admin/users", "添加用户");
+  for (const viewport of [viewports[1], viewports[2]]) {
+    await page.setViewportSize(viewport);
+    const row = page.locator(".user-summary-row").first();
+    const tableBody = page.locator(".user-legacy-table .ant-table-body");
+    await row.scrollIntoViewIfNeeded();
+    await expect(row).toBeInViewport();
+    expect(await tableBody.evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(120);
+    await row.locator(".table-primary").click();
+    await expect(row).toHaveAttribute("aria-expanded", "true");
+    await row.locator(".table-primary").click();
+    await expect(row).toHaveAttribute("aria-expanded", "false");
+    const pagination = page.getByRole("navigation", { name: "用户列表页码" });
+    await pagination.scrollIntoViewIfNeeded();
+    await expect(pagination).toBeInViewport();
+    expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+  }
+});
+
 test("首次管理登录进入独立配置页，状态接口失败时不阻塞其他管理页面", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setTheme(page, "light");
@@ -883,6 +904,23 @@ test("账号展开区复用旧版四层信息结构", async ({ page }) => {
   })).toBe(true);
   await page.mouse.move(0, 0);
   await expect(statusTooltip).toBeHidden();
+
+  const activityHelp = page.locator(".account-activity-help").first();
+  const helpText = await activityHelp.getAttribute("aria-label");
+  const activityTooltip = page.getByRole("tooltip", { name: helpText! });
+  await activityHelp.hover();
+  await expect(activityTooltip).toBeVisible();
+  expect(await activityTooltip.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.right <= window.innerWidth
+      && element.closest(".account-legacy-table") === null;
+  })).toBe(true);
+  await page.mouse.move(0, 0);
+  await expect(activityTooltip).toBeHidden();
+  await activityHelp.focus();
+  await expect(activityTooltip).toBeVisible();
+  await activityHelp.blur();
+  await expect(activityTooltip).toBeHidden();
 
   await page.getByRole("row", { name: "展开 cpa-main" }).click();
   await expect(page.getByRole("region", { name: "模型与推理强度 Token 明细" })).toBeVisible();

@@ -4,6 +4,14 @@ import { fileURLToPath } from "node:url";
 
 const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(frontendRoot, "..");
+// Cross-app navigation must stay inside this isolated preview, never jump to
+// the operator's daily development servers or their selected remote backend.
+const frontendEnvironment = {
+  CPA_DEV_PROXY_TARGET: "http://127.0.0.1:8896",
+  VITE_DEV_ADMIN_ORIGIN: "http://127.0.0.1:5193",
+  VITE_DEV_USAGE_ORIGIN: "http://127.0.0.1:5194",
+  VITE_DEV_PORTAL_ORIGIN: "http://127.0.0.1:5192"
+};
 
 export default defineConfig({
   testDir: "./e2e",
@@ -37,21 +45,24 @@ export default defineConfig({
       timeout: 30_000
     },
     {
-      command: "CPA_DEV_PROXY_TARGET=http://127.0.0.1:8896 npm run dev -- --port 5193",
+      command: "npm run dev -- --port 5193",
+      env: frontendEnvironment,
       cwd: frontendRoot,
       url: "http://127.0.0.1:5193/admin/",
       reuseExistingServer: false,
       timeout: 30_000
     },
     {
-      command: "CPA_DEV_PROXY_TARGET=http://127.0.0.1:8896 npm run dev:usage -- --port 5194",
+      command: "npm run dev:usage -- --port 5194",
+      env: frontendEnvironment,
       cwd: frontendRoot,
       url: "http://127.0.0.1:5194/usage/",
       reuseExistingServer: false,
       timeout: 30_000
     },
     {
-      command: "CPA_DEV_PROXY_TARGET=http://127.0.0.1:8896 npm run dev:portal -- --port 5192",
+      command: "npm run dev:portal -- --port 5192",
+      env: frontendEnvironment,
       cwd: frontendRoot,
       url: "http://127.0.0.1:5192/",
       reuseExistingServer: false,

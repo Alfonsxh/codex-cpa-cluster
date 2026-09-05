@@ -64,7 +64,12 @@ RUN --mount=type=cache,id=cpac-npm-cache,target=/root/.npm \
     npm run build
 
 FROM ${RUNTIME_IMAGE} AS go-runtime
-RUN test -s /etc/ssl/certs/ca-certificates.crt \
+# Go embeds tzdata, but libc and shell tools also need the system zoneinfo.
+ENV TZ=Asia/Shanghai
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apk/repositories \
+    && apk add --no-cache tzdata \
+    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
     && addgroup -S -g 10001 cpa \
     && adduser -S -D -H -u 10001 -G cpa cpa
 LABEL org.opencontainers.image.source="https://github.com/Alfonsxh/codex-cpa-cluster" \

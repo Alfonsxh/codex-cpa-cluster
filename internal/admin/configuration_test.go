@@ -94,6 +94,12 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	if proxy.Value != "" || proxy.Configured == nil || !*proxy.Configured || proxy.ValueType != "proxy_url_secret" {
 		t.Fatalf("sanitized proxy field = %#v", proxy)
 	}
+	for _, key := range []string{"user_quota.timezone", "notification.timezone"} {
+		field := fields[key]
+		if field.Default != "Asia/Shanghai" || field.Value != "Asia/Shanghai" {
+			t.Fatalf("initial timezone %s = %#v", key, field)
+		}
+	}
 	failover := fields["account_failover.mode"]
 	if !reflect.DeepEqual(failover.Choices, []configurationCatalogChoice{
 		{Value: "off", Label: "关闭"}, {Value: "active", Label: "自动执行"},
@@ -155,7 +161,7 @@ func TestConfigurationEndpointPersistsExplicitDefaultSelection(t *testing.T) {
 	}
 	t.Cleanup(server.Close)
 	response := performAdminRequest(server, http.MethodPost, "/admin/api/settings/configuration", map[string]any{
-		"confirm": "save", "values": map[string]any{"user_quota.timezone": "UTC"},
+		"confirm": "save", "values": map[string]any{"user_quota.timezone": "Asia/Shanghai"},
 	}, map[string]string{"X-Management-Key": "test-management-key"}, nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("explicit default update = %d %s", response.Code, response.Body.String())
@@ -167,7 +173,7 @@ func TestConfigurationEndpointPersistsExplicitDefaultSelection(t *testing.T) {
 		t.Fatalf("explicit default response = %#v", payload)
 	}
 	settings, err := store.ReadSettings(context.Background())
-	if err != nil || settings["user_quota.timezone"] != "UTC" {
+	if err != nil || settings["user_quota.timezone"] != "Asia/Shanghai" {
 		t.Fatalf("explicit default setting = %#v, %v", settings["user_quota.timezone"], err)
 	}
 	if len(applier.calls) != 1 || !reflect.DeepEqual(applier.calls[0].Changed, []string{"user_quota.timezone"}) {

@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { sessionQueryKey } from "../api/session";
 import { LoginPage } from "./LoginPage";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 function renderLogin(properties: React.ComponentProps<typeof LoginPage> = {}) {
   const queryClient = new QueryClient({
@@ -25,6 +28,15 @@ function renderLogin(properties: React.ComponentProps<typeof LoginPage> = {}) {
 }
 
 describe("LoginPage", () => {
+  it.each([true, false])("uses the correct usage entry in development=%s", (development) => {
+    vi.stubEnv("DEV", development);
+    vi.stubEnv("VITE_DEV_USAGE_ORIGIN", "http://127.0.0.1:5194");
+    renderLogin();
+    expect(screen.getByRole("link", { name: /进入使用中心/ })).toHaveAttribute(
+      "href", development ? "http://127.0.0.1:5194/usage/" : "/usage/"
+    );
+  });
+
   it("matches the legacy password visibility state and clears the key after success", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       authenticated: true,

@@ -200,9 +200,12 @@ describe("AccountsPage", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/admin/api/images/cliproxy")).toBe(true);
     const actionTexts = [...document.querySelectorAll(".account-detail-actions button")].map((button) => button.textContent?.trim());
     expect(actionTexts).toEqual([
-      "重新 OAuth", "重启容器", "镜像已同步", "停止容器",
-      "查看日志", "编辑账号", "停用账号", "迁移全部用户"
+      "查看日志", "编辑账号", "重新 OAuth", "镜像已同步",
+      "重启容器", "迁移全部用户", "停止容器", "停用账号"
     ]);
+    expect(expanded.getByRole("group", { name: "常用操作" }).querySelectorAll("button")).toHaveLength(3);
+    expect(expanded.getByRole("group", { name: "容器维护" }).querySelectorAll("button")).toHaveLength(2);
+    expect(expanded.getByRole("group", { name: "风险操作" }).querySelectorAll("button")).toHaveLength(3);
     expect(actionTexts).not.toContain("更多");
   }, 10_000);
 
@@ -244,7 +247,11 @@ describe("AccountsPage", () => {
     const helpText = "过去滚动 60 分钟内至少发起 1 次业务请求的去重用户；成功和失败请求均计入。";
     const help = screen.getAllByRole("button", { name: helpText })[1];
     await user.hover(help);
-    expect(help).toHaveAttribute("data-tooltip", helpText);
+    const tooltip = await screen.findByRole("tooltip", { name: helpText });
+    // Real-browser coverage checks placement and visibility; JSDOM has no layout.
+    expect(tooltip).toHaveTextContent(helpText);
+    expect(tooltip.closest(".ant-table-wrapper")).toBeNull();
+    expect(document.body).toContainElement(tooltip);
   });
 
   it("loads quota-reset details only after click and submits the selected credit", async () => {

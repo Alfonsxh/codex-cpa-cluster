@@ -13,6 +13,40 @@ describe("OnboardingPage", () => {
     localStorage.clear();
     sessionStorage.clear();
   });
+
+  it.each([
+    ["default", "Asia/Shanghai", "Asia/Shanghai"],
+    ["empty", "", "Asia/Shanghai"],
+    ["whitespace", "   ", "Asia/Shanghai"],
+    ["missing", null, "Asia/Shanghai"],
+    ["explicit custom", "UTC", "UTC"]
+  ])("uses Beijing time for %s configuration without replacing a saved custom timezone", async (_name, value, expected) => {
+    const catalog = configurationCatalog();
+    for (const group of catalog.groups) {
+      group.fields = group.fields.flatMap((field) => field.key !== "user_quota.timezone"
+        ? [field]
+        : value === null ? [] : [{ ...field, value }]);
+    }
+    let status = freshStatus();
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/admin/api/onboarding") return jsonResponse(status);
+      if (path === "/admin/api/settings/configuration" && !init?.method) return jsonResponse(catalog);
+      if (path === "/admin/api/settings/configuration" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({ confirm: "save", values: { "user_quota.timezone": expected } });
+        status = completeRecommendedStep(status, "quota_timezone");
+        return jsonResponse({ message: "已保存时区", changed: ["user_quota.timezone"], applied: ["collector"], pending_deployment: false });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderOnboarding("/setup?step=quota_timezone");
+
+    await waitFor(() => expect(screen.getByLabelText("用户额度时区")).toHaveValue(expected));
+    await user.click(screen.getByRole("button", { name: "保存时区" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=weekly_quota"));
+  });
   it("saves required email domains without persisting any setup value in browser storage", async () => {
     let status = freshStatus();
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -322,7 +356,7 @@ function configurationCatalog(): ConfigurationCatalog {
         name: "用户额度",
         description: "额度配置",
         fields: [
-          configurationField("user_quota.timezone", "用户额度时区", "timezone", "UTC", "UTC"),
+          configurationField("user_quota.timezone", "用户额度时区", "timezone", "Asia/Shanghai", "Asia/Shanghai"),
           configurationField("user_quota.default_weekly_tokens", "默认周额度", "nullable_integer", null, null)
         ]
       },

@@ -26,6 +26,8 @@ import {
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { InitialPasswordModal } from "./InitialPasswordModal";
 
+const defaultQuotaTimezone = "Asia/Shanghai";
+
 const requiredLabels: Record<string, string> = {
   email_domains: "访问范围",
   initial_password: "初始密码"
@@ -66,7 +68,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   const [domains, setDomains] = useState("");
   const [drafts, setDrafts] = useState<OnboardingDrafts>({
     publicURL: window.location.origin,
-    quotaTimezone: "",
+    quotaTimezone: defaultQuotaTimezone,
     weeklyQuota: null,
     webhookURL: "",
     productName: "",
@@ -118,11 +120,10 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   useEffect(() => {
     if (!catalog.data || configurationHydrated.current) return;
     configurationHydrated.current = true;
-    const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     setDrafts((current) => ({
       ...current,
       publicURL: configurationStringValue(catalog.data, "branding.public_base_url") || window.location.origin,
-      quotaTimezone: configurationStringValue(catalog.data, "user_quota.timezone") || browserTimezone,
+      quotaTimezone: configurationStringValue(catalog.data, "user_quota.timezone").trim() || defaultQuotaTimezone,
       weeklyQuota: configurationNumberValue(catalog.data, "user_quota.default_weekly_tokens"),
       productName: configurationStringValue(catalog.data, "branding.product_name"),
       shortName: configurationStringValue(catalog.data, "branding.short_name"),
@@ -439,7 +440,7 @@ function OnboardingStepAction({
       <div className="onboarding-inline-form">
         <label htmlFor="onboarding-quota-timezone">用户额度时区</label>
         <Input id="onboarding-quota-timezone" value={drafts.quotaTimezone} onChange={(event) => onDraftChange("quotaTimezone", event.target.value)} placeholder="Asia/Shanghai" />
-        <small>使用 IANA 时区，例如 Asia/Shanghai、Europe/London 或 UTC。</small>
+        <small>默认使用北京时间（Asia/Shanghai，UTC+8），今日从 00:00 开始，自然周从周一 00:00 开始。</small>
         <Button type="primary" loading={pending} disabled={!drafts.quotaTimezone.trim()} onClick={() => onSaveConfiguration({ "user_quota.timezone": drafts.quotaTimezone.trim() })}>保存时区</Button>
       </div>
     );

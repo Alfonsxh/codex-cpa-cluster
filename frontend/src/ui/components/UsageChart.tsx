@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { TokenSeries } from "../../api/overview";
 import { formatTokens } from "../formatters";
 import { useTheme } from "../ThemeProvider";
+import { OverviewTokenValue } from "./OverviewTokenValue";
 
 echarts.use([LineChart, GridComponent, MarkLineComponent, MarkPointComponent, TooltipComponent, AriaComponent, SVGRenderer]);
 
@@ -273,7 +274,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
                 <th scope="col" className="overview-chart-summary-time">时间</th>
                 <th scope="col" className="overview-chart-summary-mode">Token 口径</th>
                 {summaryColumns.map(([key, label]) => (
-                  <th scope="col" data-metric-header={key} key={key}>{label}</th>
+                  <th scope="col" className="overview-token-number-cell" data-metric-header={key} key={key}>{label}</th>
                 ))}
               </tr>
             </thead>
@@ -288,11 +289,8 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
                   <span className={`overview-chart-mode-tag ${valueLabel === "加权" ? "weighted" : "unweighted"}`}><i aria-hidden="true" />{valueLabel}</span>
                 </td>
                 {summaryColumns.map(([key, , value]) => (
-                  <td className="overview-chart-summary-token" data-metric={key} key={key}>
-                    <div className="overview-chart-summary-token-values">
-                      <strong>{formatTokens(value)}</strong>
-                      <small>{value.toLocaleString("en-US", { maximumFractionDigits: 0 })}</small>
-                    </div>
+                  <td className="overview-chart-summary-token overview-token-number-cell" data-metric={key} key={key}>
+                    <OverviewTokenValue value={value} />
                   </td>
                 ))}
               </tr>

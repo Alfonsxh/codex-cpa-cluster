@@ -1026,11 +1026,19 @@ function accountColumns({
       ...accountSortHeader("last_used", "最后使用", sort, onSort),
       align: "center",
       width: "7%",
-      render: (_, account) => (
-        <div className="account-cell-content">
-          {account.usage_available ? formatAccountLastUsed(account.usage.last_used_at) : "—"}
-        </div>
-      )
+      render: (_, account) => {
+        const timestamp = account.usage.last_used_at;
+        const label = account.usage_available ? formatAccountLastUsed(timestamp) : "—";
+        return (
+          <div className="account-cell-content">
+            {account.usage_available && timestamp > 0 ? (
+              <time className="account-last-used" dateTime={new Date(timestamp * 1000).toISOString()} title={label}>
+                {label.replace(" ", "\n")}
+              </time>
+            ) : label}
+          </div>
+        );
+      }
     }
   ];
 }
@@ -1165,52 +1173,63 @@ function AccountExpandedRow({
       <AccountModelUsage query={usageDetail} />
 
       <div className="account-detail-actions">
-        <button className="button secondary" type="button" onClick={() => onOAuth(account)}>
-          {account.oauth_configured === true ? "重新 OAuth" : "开始 OAuth"}
-        </button>
-        <button className="button ghost" type="button" onClick={() => onRuntimeOperation({ action: running ? "restart" : "start", account })}>
-          {running ? "重启容器" : "启动容器"}
-        </button>
-        <button
-          className="button ghost"
-          type="button"
-          disabled={imageUpdateDisabled}
-          title={imageUpdateTitle}
-          onClick={() => onUpdateImage(account)}
-        >{image?.using_target ? "镜像已同步" : "更新镜像"}</button>
-        {running ? (
-          <button className="button danger-outline" type="button" onClick={() => onRuntimeOperation({ action: "stop", account })}>停止容器</button>
-        ) : null}
-        <button className="button ghost" type="button" onClick={() => onOpenLogs(account.id)}>查看日志</button>
-        <button className="button ghost" type="button" aria-label={`编辑 ${account.id}`} onClick={() => onEdit(account)}>编辑账号</button>
-        <button
-          className={`button ${account.enabled ? "danger-outline is-enabled" : "secondary"} account-policy-action`}
-          type="button"
-          disabled={account.enabled && !availableOtherAccounts}
-          title={account.enabled && !availableOtherAccounts ? "至少保留一个可用 CPA" : undefined}
-          onClick={() => onPolicy(account)}
-        >
-          {account.enabled ? "停用账号" : "启用账号"}
-        </button>
-        <button
-          className="button secondary account-rebalance-action"
-          type="button"
-          disabled={account.routed_users <= 0}
-          title={account.routed_users <= 0 ? "当前账号没有需要迁移的用户" : `将 ${formatNumber(account.routed_users)} 个已路由用户按自动切换算法分配到其他可用账号`}
-          aria-label={`迁移全部用户：${account.routed_users <= 0 ? "当前账号没有需要迁移的用户" : `将 ${formatNumber(account.routed_users)} 个已路由用户按自动切换算法分配到其他可用账号`}`}
-          onClick={() => onRebalance(account)}
-        >
-          迁移全部用户
-        </button>
+        <div className="account-detail-action-group" role="group" aria-label="常用操作">
+          <button className="button ghost" type="button" onClick={() => onOpenLogs(account.id)}>查看日志</button>
+          <button className="button ghost" type="button" aria-label={`编辑 ${account.id}`} onClick={() => onEdit(account)}>编辑账号</button>
+          <button className="button ghost" type="button" onClick={() => onOAuth(account)}>
+            {account.oauth_configured === true ? "重新 OAuth" : "开始 OAuth"}
+          </button>
+        </div>
+        <div className="account-detail-action-group" role="group" aria-label="容器维护">
+          <button
+            className="button ghost"
+            type="button"
+            disabled={imageUpdateDisabled}
+            title={imageUpdateTitle}
+            onClick={() => onUpdateImage(account)}
+          >{image?.using_target ? "镜像已同步" : "更新镜像"}</button>
+          <button className="button ghost" type="button" onClick={() => onRuntimeOperation({ action: running ? "restart" : "start", account })}>
+            {running ? "重启容器" : "启动容器"}
+          </button>
+        </div>
+        <div className="account-detail-action-group account-detail-action-group-risk" role="group" aria-label="风险操作">
+          <button
+            className="button account-rebalance-action"
+            type="button"
+            disabled={account.routed_users <= 0}
+            title={account.routed_users <= 0 ? "当前账号没有需要迁移的用户" : `将 ${formatNumber(account.routed_users)} 个已路由用户按自动切换算法分配到其他可用账号`}
+            aria-label={`迁移全部用户：${account.routed_users <= 0 ? "当前账号没有需要迁移的用户" : `将 ${formatNumber(account.routed_users)} 个已路由用户按自动切换算法分配到其他可用账号`}`}
+            onClick={() => onRebalance(account)}
+          >
+            迁移全部用户
+          </button>
+          {running ? (
+            <button className="button danger-outline" type="button" onClick={() => onRuntimeOperation({ action: "stop", account })}>停止容器</button>
+          ) : null}
+          <button
+            className={`button ${account.enabled ? "danger-outline is-enabled" : "secondary"} account-policy-action`}
+            type="button"
+            disabled={account.enabled && !availableOtherAccounts}
+            title={account.enabled && !availableOtherAccounts ? "至少保留一个可用 CPA" : undefined}
+            onClick={() => onPolicy(account)}
+          >
+            {account.enabled ? "停用账号" : "启用账号"}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function AccountDetailFact({ label, value, note = "" }: { label: string; value: React.ReactNode; note?: string }) {
+function AccountDetailFact({ label, value, note = "", className }: {
+  label: string;
+  value: React.ReactNode;
+  note?: string;
+  className?: string;
+}) {
   const primitive = typeof value === "string" || typeof value === "number";
   return (
-    <div>
+    <div className={className}>
       <span>{label}</span>
       {primitive ? <strong title={String(value)}>{value}</strong> : value}
       {note ? <small className="account-runtime-note" title={note}>{note}</small> : null}
@@ -1221,19 +1240,19 @@ function AccountDetailFact({ label, value, note = "" }: { label: string; value: 
 function AccountUsageFacts({ usage }: { usage: Account["usage"] }) {
   return (
     <div className="account-detail-facts account-usage-facts">
-      <AccountDetailFact label="成功请求" value={formatNumber(usage.success_count)} />
-      <AccountDetailFact label="失败请求" value={formatNumber(usage.failed_count)} />
-      <AccountDetailFact label="输入 Token" value={<LegacyTokenUsage value={usage.input_tokens} />} />
-      <AccountDetailFact label="输出 Token" value={<LegacyTokenUsage value={usage.output_tokens} />} />
-      <AccountDetailFact label="推理 Token" value={<LegacyTokenUsage value={usage.reasoning_tokens} />} />
-      <div className="account-cache-fact">
+      <AccountDetailFact className="account-request-fact" label="成功请求" value={formatNumber(usage.success_count)} />
+      <AccountDetailFact className="account-request-fact" label="失败请求" value={formatNumber(usage.failed_count)} />
+      <AccountDetailFact className="account-token-fact" label="输入 Token" value={<LegacyTokenUsage value={usage.input_tokens} />} />
+      <AccountDetailFact className="account-token-fact" label="输出 Token" value={<LegacyTokenUsage value={usage.output_tokens} />} />
+      <AccountDetailFact className="account-token-fact" label="推理 Token" value={<LegacyTokenUsage value={usage.reasoning_tokens} />} />
+      <div className="account-cache-fact account-token-fact">
         <div className="account-cache-head">
-          <span>缓存 Token</span>
           <small title="缓存 Token ÷ 输入 Token">缓存率 {formatRatio(usage.cached_tokens, usage.input_tokens)}</small>
+          <span>缓存 Token</span>
         </div>
         <LegacyTokenUsage value={usage.cached_tokens} />
       </div>
-      <div className="account-token-total-fact">
+      <div className="account-token-total-fact account-token-fact">
         <span>Token 总计</span>
         <LegacyTokenUsage value={usage.total_tokens} />
       </div>
@@ -1411,7 +1430,17 @@ function AccountActivity({ account }: { account: Account }) {
               </span>
             </span>
           ) : <strong>{activeValue}</strong>}
-          <button className="account-activity-help" type="button" data-tooltip={activeHelp} aria-label={activeHelp}>?</button>
+          <Tooltip
+            title={activeHelp}
+            trigger={["hover", "focus"]}
+            placement="top"
+            autoAdjustOverflow
+            mouseEnterDelay={0.1}
+            getPopupContainer={() => document.body}
+            rootClassName="account-runtime-status-tooltip"
+          >
+            <button className="account-activity-help" type="button" aria-label={activeHelp}>?</button>
+          </Tooltip>
         </span>
         <small className={activeUsers === null ? "warning" : ""}>{activeDetail}</small>
       </div>
@@ -1548,7 +1577,7 @@ function formatTaskDuration(startedAt?: number | null, finishedAt?: number | nul
 }
 
 function formatAccountLastUsed(timestamp: number) {
-  return timestamp ? formatCompactTimestamp(timestamp) : "从未使用";
+  return timestamp ? formatTaskTimestamp(timestamp) : "从未使用";
 }
 
 function formatToolbarTime(timestamp: number) {

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -7,19 +7,117 @@ import { describe, expect, it, vi } from "vitest";
 import { UsersPage } from "./UsersPage";
 
 describe("UsersPage legacy parity", () => {
+  it.each([
+    { action: "轮换唯一 Key", dialog: "轮换 Key？" },
+    { action: "停用唯一 Key", dialog: "停用用户的 API Key？" },
+    { action: "删除用户", dialog: "删除用户与 API Key？" }
+  ])("groups user actions and preserves confirmation for $action", async ({ action, dialog }) => {
+    const fetchMock = userFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    const actions = await screen.findByRole("group", { name: "用户管理操作" });
+    expect(Array.from(actions.querySelectorAll("button"), (button) => button.textContent?.trim())).toEqual([
+      "设置团队", "配置周额度", "重置密码", "更多操作"
+    ]);
+    const more = within(actions).getByRole("button", { name: "更多操作" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector(".user-detail-actions-menu")).not.toBeInTheDocument();
+    await user.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    const menu = await screen.findByRole("menu", { name: "更多用户操作" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "轮换唯一 Key", "停用唯一 Key", "删除用户"
+    ]);
+    await user.click(within(menu).getByRole("menuitem", { name: action }));
+    const confirmation = await screen.findByRole("dialog");
+    expect(within(confirmation).getByRole("heading", { name: dialog })).toBeInTheDocument();
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(false);
+  });
+
+  it("hides key lifecycle menu items when the user has no active key", async () => {
+    vi.stubGlobal("fetch", userFetchMock((path) => {
+      if (!path.startsWith("/admin/api/users?")) return undefined;
+      return Promise.resolve(jsonResponse({ ...userCatalog(), users: [{ ...baseUser(), active_keys: 0 }] }));
+    }));
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    await user.click(await screen.findByRole("button", { name: "更多操作" }));
+    const menu = await screen.findByRole("menu", { name: "更多用户操作" });
+    expect(within(menu).queryByRole("menuitem", { name: "轮换唯一 Key" })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "停用唯一 Key" })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "删除用户" })).toBeInTheDocument();
+  });
+
+  it("keeps token values inline and presents effort tooltip metrics as label-value pairs", async () => {
+    vi.stubGlobal("fetch", userFetchMock());
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    const table = await screen.findByLabelText("模型用量表格");
+    const token = table.querySelector(".token-usage") as HTMLElement;
+    expect(token.querySelector(".token-usage-exact")).toHaveTextContent("1,200 Token");
+    expect(token.querySelector(".token-usage-sr-only")).toHaveTextContent("1,200 Token");
+    await user.hover(token);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await user.unhover(token);
+
+    const effort = within(table).getByRole("button", { name: "查看 gpt-5.6 · high 的 CPA 用量分布" });
+    await user.hover(effort);
+    const tooltip = await screen.findByRole("tooltip", { name: "gpt-5.6 · high" });
+    expect(tooltip.querySelectorAll("dt")).toHaveLength(7);
+    expect(within(tooltip).getByText("调用", { selector: "dt" }).nextElementSibling).toHaveTextContent("4");
+    expect(within(tooltip).getByText("总 Token", { selector: "dt" }).nextElementSibling).toHaveTextContent("1,200");
+    expect(within(tooltip).getByText("加权 Token", { selector: "dt" }).nextElementSibling).toHaveTextContent("1,500");
+    await user.unhover(effort);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("opens the create dialog from the first-run deep link", async () => {
     vi.stubGlobal("fetch", userFetchMock());
     renderUsers("/users?create=1");
-    expect(await screen.findByRole("dialog", { name: /添加用户/ })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: /添加用户/ });
+    const notice = dialog.querySelector(".inline-notice");
+    expect(notice).toHaveTextContent("系统会创建统一 API Key，并为用户设置系统默认初始密码。");
+    expect(notice).toHaveTextContent("API Key 只显示一次；");
+    expect(notice).toHaveTextContent("用户首次登录必须修改默认密码。");
+    expect(notice?.querySelectorAll("br")).toHaveLength(2);
   });
 
-  it("loads the paginated eleven-column catalog and defers user and team detail until expansion", async () => {
+  it("keeps pagination in the table panel but outside its scroll viewport", async () => {
+    vi.stubGlobal("fetch", userFetchMock());
+    const user = userEvent.setup();
+    renderUsers();
+
+    const email = await screen.findByText("alice@example.com");
+    const panel = email.closest(".legacy-user-table-state");
+    const pagination = screen.getByLabelText("用户分页");
+    expect(panel).not.toBeNull();
+    expect(pagination.parentElement).toBe(panel);
+    expect(pagination.closest(".admin-table-viewport")).toBeNull();
+    expect(within(pagination).getByRole("button", { name: "上一页" })).toBeDisabled();
+    expect(within(pagination).getByRole("button", { name: "下一页" })).toBeDisabled();
+
+    await user.click(within(pagination).getByRole("button", { name: "每页条数：50" }));
+    const options = screen.getByRole("listbox", { name: "每页条数" });
+    expect(options.parentElement).toBe(document.body);
+    await user.click(within(options).getByRole("option", { name: "25" }));
+    expect(within(pagination).getByRole("button", { name: "每页条数：25" })).toBeInTheDocument();
+  });
+
+  it("loads the catalog, expands user detail and keeps team filtering without team shortcuts", async () => {
     const fetchMock = userFetchMock();
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderUsers();
 
     expect(await screen.findByText("alice@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /管理团队/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /团队用量|Token 用量$/ })).not.toBeInTheDocument();
     expect(screen.getByText("Platform", { selector: ".team-chip" })).toHaveClass("team-tag-style-rose");
     await waitFor(() => expect(requestPaths(fetchMock)).toContain("/admin/api/teams/usage?window=today"));
     expect(screen.getAllByRole("columnheader")).toHaveLength(11);
@@ -35,6 +133,11 @@ describe("UsersPage legacy parity", () => {
     await user.click(row!);
     expect(await screen.findByText("模型与推理分析")).toBeInTheDocument();
     expect(await screen.findByText("alpha", { selector: ".user-account-table .table-primary" })).toBeInTheDocument();
+    const accountTable = screen.getByLabelText("用户账号明细表格");
+    expect(accountTable.previousElementSibling).toHaveTextContent("CPA 账号用量分析");
+    await waitFor(() => expect(screen.getByLabelText("模型用量表格")).toBeInTheDocument());
+    expect(screen.queryByLabelText("推理强度用量明细表格")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CPA：全部 CPA" }).closest(".usage-analysis-header")).toHaveTextContent("模型与推理分析");
     await waitFor(() => {
       expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/users/detail?"))).toBe(true);
       expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/users/usage-breakdown?"))).toBe(true);
@@ -42,10 +145,249 @@ describe("UsersPage legacy parity", () => {
 
     await user.click(screen.getByRole("button", { name: "团队：全部团队" }));
     await user.click(screen.getByRole("option", { name: "Platform" }));
-    await user.click(screen.getByRole("button", { name: "Platform Token 用量" }));
-    expect(await screen.findByText("Platform · Token 用量")).toBeInTheDocument();
-    expect(await screen.findByText("活跃成员排行")).toBeInTheDocument();
-    expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/teams/usage-breakdown?"))).toBe(true);
+    await waitFor(() => expect(requestPaths(fetchMock).some((path) => (
+      path.startsWith("/admin/api/users?") && new URL(path, "http://localhost").searchParams.get("team_id") === "team_platform"
+    ))).toBe(true));
+    expect(screen.getByRole("button", { name: "团队：Platform" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /管理团队/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /团队用量|Token 用量$/ })).not.toBeInTheDocument();
+    expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/teams/usage-breakdown?"))).toBe(false);
+  });
+
+  it.each([
+    { success: 3, failed: 1 },
+    { success: 3, failed: 0 },
+    { success: 0, failed: 0 },
+    { success: 0, failed: 2 }
+  ])("shows $success successful and $failed failed calls in the summary instead of the analysis header", async ({ success, failed }) => {
+    const fetchMock = userFetchMock((path) => {
+      if (!path.startsWith("/admin/api/users/usage-breakdown?")) return undefined;
+      const breakdown = usageBreakdown();
+      return Promise.resolve(jsonResponse({
+        ...breakdown,
+        totals: { ...breakdown.totals, request_count: success + failed, success_count: success, failed_count: failed },
+        combinations: success ? breakdown.combinations : []
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers();
+
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    const header = (await screen.findByText("模型与推理分析")).closest(".usage-analysis-header") as HTMLElement;
+    const calls = (await screen.findByText("成功调用")).closest(".usage-analysis-call-stat") as HTMLElement;
+    expect(calls.parentElement).toHaveClass("usage-analysis-summary");
+    expect(header.nextElementSibling).toBe(calls.parentElement);
+    expect(calls.parentElement?.nextElementSibling).toHaveClass(success ? "usage-model-table-wrap" : "usage-analysis-message");
+    expect(within(calls).getByText("成功调用").nextElementSibling).toHaveTextContent(String(success));
+    expect(within(calls).getByText("失败调用").nextElementSibling).toHaveTextContent(String(failed));
+    expect(within(calls).getByText("失败调用").nextElementSibling).toHaveClass("usage-analysis-failed-count");
+    expect(within(calls).getByText("成功调用").nextElementSibling).not.toHaveClass("usage-analysis-failed-count");
+    expect(screen.getAllByText("失败调用", { exact: true })).toHaveLength(1);
+    expect(within(header).queryByText("成功调用")).not.toBeInTheDocument();
+    expect(within(header).queryByText("失败调用")).not.toBeInTheDocument();
+    expect(within(header).queryByText("CPA", { exact: true })).not.toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: "CPA：全部 CPA" })).toBeInTheDocument();
+    const breakdownRequests = requestPaths(fetchMock).filter((path) => path.startsWith("/admin/api/users/usage-breakdown?"));
+    expect(breakdownRequests.length).toBeGreaterThan(0);
+    expect(breakdownRequests.every((path) => !new URL(path, "http://localhost").searchParams.has("account"))).toBe(true);
+  });
+
+  it("keeps the summary and CPA account table when the selected time range has no successful calls", async () => {
+    const emptyUsage = {
+      request_count: 0, success_count: 0, failed_count: 0,
+      input_tokens: 0, output_tokens: 0, reasoning_tokens: 0, cached_tokens: 0,
+      total_tokens: 0, weighted_tokens: 0, known_effort_count: 0, last_used_at: null
+    };
+    const fetchMock = userFetchMock((path) => {
+      if (path.startsWith("/admin/api/users/usage-breakdown?")) {
+        return Promise.resolve(jsonResponse({ ...usageBreakdown(), totals: emptyUsage, combinations: [] }));
+      }
+      return undefined;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers();
+
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    const analysis = (await screen.findByText("模型与推理分析")).closest(".user-usage-analysis") as HTMLElement;
+    expect(await within(analysis).findByText("当前范围暂无成功调用")).toBeInTheDocument();
+    expect(analysis.querySelector(".usage-model-table")).not.toBeInTheDocument();
+    const summary = analysis.querySelector(".usage-analysis-summary") as HTMLElement;
+    expect(summary.parentElement).toBe(analysis);
+    expect(summary.children).toHaveLength(5);
+    expect(within(summary).getByText("成功调用").nextElementSibling).toHaveTextContent("0");
+    expect(within(summary).getByText("失败调用").nextElementSibling).toHaveTextContent("0");
+    expect(within(analysis).queryByRole("alert")).not.toBeInTheDocument();
+
+    expect(within(analysis).getByRole("button", { name: "CPA：全部 CPA" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("推理强度用量明细表格")).not.toBeInTheDocument();
+    expect(screen.getByText("CPA 账号用量分析")).toBeInTheDocument();
+    expect(screen.getByLabelText("用户账号明细表格")).toBeInTheDocument();
+  });
+
+  it("opens the selected model and effort CPA distribution in a drawer without changing the main summary", async () => {
+    const fetchMock = userFetchMock((path) => {
+      if (!path.startsWith("/admin/api/users/usage-breakdown?")) return undefined;
+      return Promise.resolve(jsonResponse({
+        ...usageBreakdown(),
+        combinations: [
+          { ...metrics(1_200, 1_800), account: "alpha", model: "gpt-5.6", reasoning_effort: "high", success_count: 3 },
+          { ...metrics(2_400, 3_600), account: "beta", model: "gpt-5.6", reasoning_effort: "high", success_count: 1 },
+          { ...metrics(9_000, 9_000), account: "gamma", model: "gpt-5.4", reasoning_effort: "high" },
+          { ...metrics(3_000, 3_000), account: "delta", model: "gpt-5.6", reasoning_effort: "low" }
+        ]
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    const trigger = await screen.findByRole("button", { name: "查看 gpt-5.6 · high 的 CPA 用量分布" });
+    const summary = document.querySelector(".usage-analysis-summary") as HTMLElement;
+    const initialSummary = summary.textContent;
+    const initialRequests = requestPaths(fetchMock).filter((path) => path.startsWith("/admin/api/users/usage-breakdown?"));
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "gpt-5.6 · high · CPA 用量分布" });
+    expect(within(dialog).getByText("high", { selector: ".user-model-effort-tag" })).toHaveClass("account-model-effort-high");
+    const alpha = within(dialog).getByText("alpha", { selector: ".table-primary" }).closest("tr")!;
+    const beta = within(dialog).getByText("beta", { selector: ".table-primary" }).closest("tr")!;
+    expect(alpha.querySelectorAll("td.user-model-account-number")).toHaveLength(3);
+    const rawHeader = within(dialog).getByRole("columnheader", { name: "未加权 Token" });
+    const accountOrder = () => Array.from(dialog.querySelectorAll(".ant-table-tbody .table-primary"), (cell) => cell.textContent);
+    expect(rawHeader).toHaveAttribute("aria-sort", "descending");
+    expect(rawHeader.querySelector(".user-model-account-sort-arrow.active")).toHaveTextContent("↓");
+    expect(accountOrder()).toEqual(["beta", "alpha"]);
+    await user.click(rawHeader);
+    expect(rawHeader).toHaveAttribute("aria-sort", "ascending");
+    expect(rawHeader.querySelector(".user-model-account-sort-arrow.active")).toHaveTextContent("↑");
+    expect(accountOrder()).toEqual(["alpha", "beta"]);
+    await user.click(rawHeader);
+    expect(rawHeader).toHaveAttribute("aria-sort", "descending");
+    expect(accountOrder()).toEqual(["beta", "alpha"]);
+    const callsHeader = within(dialog).getByRole("columnheader", { name: "调用" });
+    await user.click(callsHeader);
+    expect(callsHeader).toHaveAttribute("aria-sort", "descending");
+    expect(rawHeader.querySelector(".user-model-account-sort-arrow")).toHaveTextContent("↕");
+    expect(rawHeader.querySelector(".user-model-account-sort-arrow.active")).toBeNull();
+    expect(within(dialog).getAllByRole("columnheader").filter((header) => header.querySelector(".user-model-account-sort-arrow.active"))).toHaveLength(1);
+    expect(accountOrder()).toEqual(["alpha", "beta"]);
+    expect(within(alpha).getByText("75%")).toBeInTheDocument();
+    expect(within(beta).getByText("25%")).toBeInTheDocument();
+    expect(alpha.children[3]).toHaveTextContent("1,200 Token");
+    expect(alpha.children[4]).toHaveTextContent("×1.50");
+    expect(alpha.children[5]).toHaveTextContent("1,800 Token");
+    expect(alpha.children[6]).toHaveTextContent("400");
+    expect(alpha.querySelector("time")).toHaveTextContent("1970/01/01");
+    expect(alpha.querySelector("time")).toHaveTextContent("08:04:10");
+    expect(within(dialog).queryByText("gamma", { selector: ".table-primary" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("delta", { selector: ".table-primary" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /CPA：/ })).not.toBeInTheDocument();
+    expect(summary.textContent).toBe(initialSummary);
+    expect(requestPaths(fetchMock).filter((path) => path.startsWith("/admin/api/users/usage-breakdown?"))).toEqual(initialRequests);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const lowTrigger = screen.getByRole("button", { name: "查看 gpt-5.6 · low 的 CPA 用量分布" });
+    lowTrigger.focus();
+    await user.keyboard("{Enter}");
+    const lowDialog = await screen.findByRole("dialog", { name: "gpt-5.6 · low · CPA 用量分布" });
+    expect(within(lowDialog).getByText("low", { selector: ".user-model-effort-tag" })).toHaveClass("account-model-effort-low");
+    expect(within(lowDialog).getByText("delta", { selector: ".table-primary" })).toBeInTheDocument();
+    expect(within(lowDialog).queryByRole("button", { name: /CPA：/ })).not.toBeInTheDocument();
+  });
+
+  it("shares the analysis header CPA filter with model totals and drawer rows, including loading and empty states", async () => {
+    const betaUsage = metrics(2_400, 3_600);
+    const betaRow = { ...betaUsage, account: "beta", model: "gpt-5.6", reasoning_effort: "high" };
+    let finishBeta!: (response: Response) => void;
+    const betaResponse = new Promise<Response>((resolve) => { finishBeta = resolve; });
+    const fetchMock = userFetchMock((path) => {
+      if (path.startsWith("/admin/api/users/detail?")) {
+        const detail = userDetail();
+        return Promise.resolve(jsonResponse({ ...detail, user: {
+          ...detail.user,
+          accounts: [detail.user.accounts[0],
+            { ...detail.user.accounts[0], account: "beta", usage: betaUsage },
+            { ...detail.user.accounts[0], account: "idle" }
+          ]
+        } }));
+      }
+      if (!path.startsWith("/admin/api/users/usage-breakdown?")) return undefined;
+      const account = new URL(path, "http://localhost").searchParams.get("account");
+      if (account === "beta") return betaResponse;
+      if (account === "idle") return Promise.resolve(jsonResponse({
+        ...usageBreakdown(), account,
+        totals: { ...metrics(0, 0), request_count: 0, success_count: 0, failed_count: 0, known_effort_count: 0 },
+        combinations: []
+      }));
+      return Promise.resolve(jsonResponse({
+        ...usageBreakdown(),
+        totals: { ...metrics(3_600, 5_100), request_count: 8, success_count: 6, failed_count: 2 },
+        combinations: [...usageBreakdown().combinations, betaRow]
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    await screen.findByLabelText("模型用量表格");
+    const analysis = screen.getByText("模型与推理分析").closest(".user-usage-analysis") as HTMLElement;
+    const header = analysis.querySelector(".usage-analysis-header") as HTMLElement;
+    const chooseAccount = async (current: string, next: string) => {
+      await user.click(within(header).getByRole("button", { name: `CPA：${current}` }));
+      await user.click(screen.getByRole("option", { name: next }));
+    };
+    await chooseAccount("全部 CPA", "beta");
+    await waitFor(() => expect(requestPaths(fetchMock).some((path) => path.includes("usage-breakdown?") && path.includes("account=beta"))).toBe(true));
+    expect(within(analysis).getByLabelText("正在加载模型分析")).toBeInTheDocument();
+    expect(within(analysis).queryByLabelText("模型用量表格")).not.toBeInTheDocument();
+    await act(async () => finishBeta(jsonResponse({ ...usageBreakdown(), account: "beta", totals: betaUsage, combinations: [betaRow] })));
+    const trigger = await within(analysis).findByRole("button", { name: "查看 gpt-5.6 · high 的 CPA 用量分布" });
+    expect(within(analysis).getByText("成功调用").nextElementSibling).toHaveTextContent("3");
+    expect(analysis.querySelector(".usage-analysis-token-stat")).toHaveTextContent("2,400 Token");
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "gpt-5.6 · high · CPA 用量分布" });
+    expect(within(dialog).getByText("beta", { selector: ".table-primary" })).toBeInTheDocument();
+    expect(within(dialog).queryByText("alpha", { selector: ".table-primary" })).not.toBeInTheDocument();
+    expect(within(dialog).getByText("100%")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /CPA：/ })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(within(header).getByRole("button", { name: "CPA：beta" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".user-account-table .table-primary")).toHaveLength(3);
+
+    await chooseAccount("beta", "idle");
+    expect(await within(analysis).findByText("当前范围暂无成功调用")).toBeInTheDocument();
+    expect(within(analysis).getByText("成功调用").nextElementSibling).toHaveTextContent("0");
+    await chooseAccount("idle", "全部 CPA");
+    expect(await within(analysis).findByLabelText("模型用量表格")).toBeInTheDocument();
+    expect(within(analysis).getByText("成功调用").nextElementSibling).toHaveTextContent("6");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("normalizes missing model and effort names and merges their CPA distribution safely", async () => {
+    vi.stubGlobal("fetch", userFetchMock((path) => {
+      if (!path.startsWith("/admin/api/users/usage-breakdown?")) return undefined;
+      return Promise.resolve(jsonResponse({
+        ...usageBreakdown(),
+        combinations: [
+          { ...metrics(600, 600), weighted_tokens: undefined, account: "alpha", model: "unknown", reasoning_effort: "unknown" },
+          { ...metrics(600, 900), account: "alpha", model: "", reasoning_effort: "" }
+        ]
+      }));
+    }));
+    const user = userEvent.setup();
+    renderUsers();
+    await user.click((await screen.findByText("alice@example.com")).closest("tr")!);
+    await user.click(await screen.findByRole("button", { name: "查看 未上报模型 · 未上报强度 的 CPA 用量分布" }));
+    const dialog = await screen.findByRole("dialog", { name: "未上报模型 · 未上报强度 · CPA 用量分布" });
+    expect(within(dialog).getByText("未上报强度", { selector: ".user-model-effort-tag" })).toHaveClass("account-model-effort-unknown");
+    expect(within(dialog).getAllByText("alpha", { selector: ".table-primary" })).toHaveLength(1);
+    const row = within(dialog).getByText("alpha", { selector: ".table-primary" }).closest("tr")!;
+    expect(row.children[1]).toHaveTextContent("6");
+    expect(row.children[2]).toHaveTextContent("100%");
+    expect(row.children[3]).toHaveTextContent("1,200 Token");
+    expect(row.children[5]).toHaveTextContent("1,500 Token");
   });
 
   it("preserves team assignment, create-secret and key-rotation request contracts", async () => {
@@ -67,23 +409,38 @@ describe("UsersPage legacy parity", () => {
     expect(new Headers(assignment?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
 
     await user.click(screen.getByRole("button", { name: "添加用户" }));
-    expect(await screen.findByText("企业邮箱后缀：@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "用户邮箱" })).toHaveAttribute("placeholder", "name@example.com");
-    await user.type(screen.getByRole("textbox", { name: "用户邮箱" }), "new@example.com");
+    expect(await screen.findByRole("button", { name: "邮箱后缀：@example.com" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "邮箱用户名" })).toHaveAttribute("placeholder", "输入用户名");
+    await user.type(screen.getByRole("textbox", { name: "邮箱用户名" }), "new");
     await user.click(screen.getByRole("button", { name: "创建用户" }));
-    expect(await screen.findByText("保存新生成的凭据")).toBeInTheDocument();
-    expect(screen.getByText("one-time-api-key")).toBeInTheDocument();
-    expect(screen.getByText("one-time-password")).toBeInTheDocument();
+    expect(await screen.findByText("用户已创建")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "用户凭据" })).toBeInTheDocument();
+    const keyField = within(screen.getByRole("group", { name: "API Key" }));
+    const passwordField = within(screen.getByRole("group", { name: "初始密码" }));
+    expect(keyField.getByLabelText("API Key")).toHaveAttribute("type", "password");
+    expect(passwordField.getByLabelText("初始密码")).toHaveAttribute("type", "password");
+    await user.click(keyField.getByRole("button", { pressed: false }));
+    await user.click(passwordField.getByRole("button", { pressed: false }));
+    expect(keyField.getByLabelText("API Key")).toHaveAttribute("type", "text");
+    expect(keyField.getByLabelText("API Key")).toHaveValue("one-time-api-key");
+    expect(passwordField.getByLabelText("初始密码")).toHaveAttribute("type", "text");
+    expect(passwordField.getByLabelText("初始密码")).toHaveValue("one-time-password");
     const create = request(fetchMock, "/admin/api/users", "POST");
     expect(JSON.parse(String(create?.[1]?.body))).toEqual({ email: "new@example.com", team_id: null });
     await user.click(screen.getByRole("button", { name: "我已保存" }));
-    expect(screen.queryByText("one-time-api-key")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "用户凭据" })).not.toBeInTheDocument();
 
     const row = screen.getByText("alice@example.com").closest("tr");
     await user.click(row!);
-    await user.click(await screen.findByRole("button", { name: "轮换唯一 Key" }));
+    await user.click(await screen.findByRole("button", { name: "更多操作" }));
+    await user.click(await screen.findByRole("menuitem", { name: "轮换唯一 Key" }));
     await user.click(screen.getByRole("button", { name: "确认轮换" }));
-    expect(await screen.findByText("rotated-one-time-key")).toBeInTheDocument();
+    expect(await screen.findByText("API Key 已更新")).toBeInTheDocument();
+    const rotatedField = within(screen.getByRole("group", { name: "API Key" }));
+    expect(rotatedField.getByLabelText("API Key")).toHaveAttribute("type", "password");
+    await user.click(rotatedField.getByRole("button", { pressed: false }));
+    expect(rotatedField.getByLabelText("API Key")).toHaveAttribute("type", "text");
+    expect(rotatedField.getByLabelText("API Key")).toHaveValue("rotated-one-time-key");
     const rotate = request(fetchMock, "/admin/api/keys/rotate", "POST");
     expect(JSON.parse(String(rotate?.[1]?.body))).toEqual({ label: "alice@example.com:alpha" });
     expect(new Headers(rotate?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
@@ -138,6 +495,109 @@ describe("UsersPage legacy parity", () => {
       users: ["alice@example.com"],
       confirm: "restore_default"
     });
+  });
+});
+
+describe("create user email suffix selector", () => {
+  function withDomains(domains: string[]) {
+    return userFetchMock((path) => path === "/site-config.json"
+      ? Promise.resolve(jsonResponse({ allowed_email_domains: domains }))
+      : undefined);
+  }
+
+  it("normalizes configured suffixes, supports keyboard selection and combines the selected address", async () => {
+    const fetchMock = withDomains([" @Example.COM ", "example.com", "example.org"]);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers("/users?create=1");
+    const input = await screen.findByRole("textbox", { name: "邮箱用户名" });
+    await user.type(input, "new");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "邮箱后缀：@example.com" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    const options = screen.getByRole("listbox", { name: "邮箱后缀" });
+    expect(within(options).getAllByRole("option")).toHaveLength(2);
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByRole("button", { name: "邮箱后缀：@example.org" })).toHaveFocus();
+    expect(request(fetchMock, "/admin/api/users", "POST")).toBeUndefined();
+    await user.click(input);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(request(fetchMock, "/admin/api/users", "POST")).toBeDefined());
+    expect(JSON.parse(String(request(fetchMock, "/admin/api/users", "POST")?.[1]?.body))).toEqual({ email: "new@example.org", team_id: null });
+  });
+
+  it("splits a pasted full email without duplicating or changing its suffix", async () => {
+    const fetchMock = withDomains(["example.com", "example.org"]);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers("/users?create=1");
+    const input = await screen.findByRole("textbox", { name: "邮箱用户名" });
+    await screen.findByRole("button", { name: "邮箱后缀：@example.com" });
+    await user.click(input);
+    await user.paste("  new@Example.ORG  ");
+    expect(input).toHaveValue("new");
+    expect(screen.getByRole("button", { name: "邮箱后缀：@example.org" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "创建用户" }));
+    await waitFor(() => expect(request(fetchMock, "/admin/api/users", "POST")).toBeDefined());
+    expect(JSON.parse(String(request(fetchMock, "/admin/api/users", "POST")?.[1]?.body)).email).toBe("new@example.org");
+  });
+
+  it("accepts a typed full address when configured suffixes share a prefix", async () => {
+    const fetchMock = withDomains(["example.com", "example.com.test"]);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers("/users?create=1");
+    await user.type(await screen.findByRole("textbox", { name: "邮箱用户名" }), "new@example.com.test");
+    await user.click(screen.getByRole("button", { name: "创建用户" }));
+    await waitFor(() => expect(request(fetchMock, "/admin/api/users", "POST")).toBeDefined());
+    expect(JSON.parse(String(request(fetchMock, "/admin/api/users", "POST")?.[1]?.body)).email).toBe("new@example.com.test");
+  });
+
+  it("rejects unconfigured pasted domains instead of silently replacing them", async () => {
+    const fetchMock = withDomains(["example.com"]);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers("/users?create=1");
+    const input = await screen.findByRole("textbox", { name: "邮箱用户名" });
+    await user.click(input);
+    await user.paste("new@unconfigured.test");
+    await user.click(screen.getByRole("button", { name: "创建用户" }));
+    expect(await screen.findByText(/邮箱后缀不匹配/)).toBeInTheDocument();
+    expect(input).toHaveValue("new@unconfigured.test");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(request(fetchMock, "/admin/api/users", "POST")).toBeUndefined();
+  });
+
+  it("disables creation until suffixes load and preserves the draft when retrying", async () => {
+    let finishLoading: ((value: Response) => void) | undefined;
+    const pending = new Promise<Response>((resolve) => { finishLoading = resolve; });
+    let attempts = 0;
+    const fetchMock = userFetchMock((path) => {
+      if (path !== "/site-config.json") return undefined;
+      return ++attempts === 1 ? pending : Promise.resolve(jsonResponse({ allowed_email_domains: ["example.com"] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderUsers("/users?create=1");
+    const input = await screen.findByRole("textbox", { name: "邮箱用户名" });
+    await user.type(input, "draft");
+    expect(screen.getByRole("button", { name: "创建用户" })).toBeDisabled();
+    finishLoading?.(jsonResponse({ error: "site configuration unavailable" }, { status: 503 }));
+    await user.click(await screen.findByRole("button", { name: /重\s*试/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "创建用户" })).toBeEnabled());
+    expect(input).toHaveValue("draft");
+    expect(screen.getByRole("button", { name: "邮箱后缀：@example.com" })).toBeEnabled();
+    expect(request(fetchMock, "/admin/api/users", "POST")).toBeUndefined();
+  });
+
+  it("shows the configuration entry and prevents creation when no suffix is configured", async () => {
+    const fetchMock = withDomains([]);
+    vi.stubGlobal("fetch", fetchMock);
+    renderUsers("/users?create=1");
+    expect(await screen.findByRole("link", { name: "系统配置" })).toHaveAttribute("href", "/configuration?group=品牌与身份&key=identity.allowed_email_domains");
+    expect(screen.getByRole("button", { name: "创建用户" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "邮箱后缀：暂无可用后缀" })).toBeDisabled();
+    expect(request(fetchMock, "/admin/api/users", "POST")).toBeUndefined();
   });
 });
 

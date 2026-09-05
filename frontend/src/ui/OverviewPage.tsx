@@ -33,6 +33,7 @@ import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
 import { LegacyUsageMultiSelect } from "./components/LegacyUsageMultiSelect";
 import { NativeTableViewport } from "./components/NativeTableViewport";
+import { OverviewTokenValue } from "./components/OverviewTokenValue";
 import { formatTokens } from "./formatters";
 import { OnboardingCard } from "./OnboardingCard";
 
@@ -674,10 +675,10 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode, can
               <tr key={item.name}>
                 <td><span className="overview-series-name"><i style={{ background: colorByName.get(item.name) ?? chartColors[0] }} /><strong>{item.name}</strong></span></td>
                 <td><span className={`overview-status-chip ${status.tone}`}>{status.label}</span></td>
-                <td><SeriesTokenValue series={item} metric="current" tokenMode={tokenMode} /></td>
-                <td><SeriesTokenValue series={item} metric="average" tokenMode={tokenMode} /></td>
-                <td><SeriesTokenValue series={item} metric="maximum" tokenMode={tokenMode} /></td>
-                <td className="usage-monitor-total"><SeriesTokenValue series={item} metric="total" tokenMode={tokenMode} /></td>
+                <td className="overview-token-number-cell"><SeriesTokenValue series={item} metric="current" tokenMode={tokenMode} /></td>
+                <td className="overview-token-number-cell"><SeriesTokenValue series={item} metric="average" tokenMode={tokenMode} /></td>
+                <td className="overview-token-number-cell"><SeriesTokenValue series={item} metric="maximum" tokenMode={tokenMode} /></td>
+                <td className="overview-token-number-cell"><SeriesTokenValue series={item} metric="total" tokenMode={tokenMode} /></td>
               </tr>
             );
           }) : (
@@ -698,7 +699,7 @@ function SeriesTableHeader({ label, sortKey, sort, onSort }: {
   const active = sort.key === sortKey;
   const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
   return (
-    <th aria-sort={ariaSort}>
+    <th scope="col" aria-sort={ariaSort} className={sortKey !== "name" && sortKey !== "status" ? "overview-token-number-cell" : undefined}>
       <SortButton label={label} sortKey={sortKey} sort={sort} onSort={onSort} />
     </th>
   );
@@ -726,51 +727,13 @@ function SortButton({ label, sortKey, sort, onSort }: {
   );
 }
 
-function TokenValue({ value }: { value: number }) {
-  const token = legacyTokenParts(value);
-  return (
-    <span className="token-usage">
-      <span className="token-usage-main" aria-hidden="true">
-        <span className="token-usage-value">{token.amount}</span>
-        <small className="token-usage-unit">{token.unit}</small>
-      </span>
-      {token.compacted ? <small className="token-usage-exact" aria-hidden="true">{token.label}</small> : null}
-      <span className="token-usage-sr-only">{token.label}</span>
-    </span>
-  );
-}
-
 function SeriesTokenValue({ series, metric, tokenMode }: {
   series: TokenSeries;
   metric: Exclude<SeriesSortKey, "name" | "status">;
   tokenMode: TokenMode;
 }) {
   const value = tokenMode === "weighted" ? weightedMetric(series, metric) : series[metric];
-  return <TokenValue value={value} />;
-}
-
-function legacyTokenParts(value: number) {
-  const normalized = Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
-  let divisor = 1;
-  let unit = "Token";
-  if (normalized >= 1_000_000_000) [divisor, unit] = [1_000_000_000, "B"];
-  else if (normalized >= 1_000_000) [divisor, unit] = [1_000_000, "M"];
-  else if (normalized >= 1_000) [divisor, unit] = [1_000, "K"];
-  let rounded = Math.round((normalized / divisor) * 10) / 10;
-  if (unit === "K" && rounded >= 1_000) {
-    [divisor, unit] = [1_000_000, "M"];
-    rounded = Math.round((normalized / divisor) * 10) / 10;
-  }
-  if (unit === "M" && rounded >= 1_000) {
-    [divisor, unit] = [1_000_000_000, "B"];
-    rounded = Math.round((normalized / divisor) * 10) / 10;
-  }
-  return {
-    amount: new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(rounded),
-    unit,
-    label: `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(normalized)} Token`,
-    compacted: divisor > 1
-  };
+  return <OverviewTokenValue value={value} />;
 }
 
 function RecentJobs({ jobs, pending, error }: { jobs: RuntimeJob[]; pending: boolean; error: unknown }) {

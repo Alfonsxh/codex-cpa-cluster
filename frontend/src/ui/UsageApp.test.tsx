@@ -169,19 +169,20 @@ describe("UsageApp", () => {
 
     expect(await screen.findByRole("heading", { name: "登录使用中心" })).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "登录使用中心" })).toBeInTheDocument();
-    expect(await screen.findByText("企业邮箱后缀：@example.com")).toBeInTheDocument();
-    expect(screen.getByLabelText("用户邮箱")).toHaveAttribute("placeholder", "name@example.com");
+    expect(await screen.findByRole("button", { name: "邮箱后缀：@example.com" })).toBeEnabled();
+    expect(screen.getByLabelText("邮箱用户名")).toHaveAttribute("placeholder", "输入用户名");
     expect(screen.getByText("账号明细")).toBeInTheDocument();
     expect(screen.getByText("我的 API Key")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "切换为深色主题" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith("/usage/me/"))).toBe(false);
-    await user.type(screen.getByLabelText("用户邮箱"), "alice@example.com");
+    await user.type(screen.getByLabelText("邮箱用户名"), "alice");
     await user.type(screen.getByLabelText("密码"), "initial-password");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
     expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith("/usage/session", expect.objectContaining({
       method: "POST",
+      body: JSON.stringify({ email: "alice@example.com", password: "initial-password" }),
       credentials: "same-origin"
     }));
   });
@@ -210,7 +211,7 @@ describe("UsageApp", () => {
     renderPortal(<UsageApp />);
 
     expect(await screen.findByRole("dialog", { name: "登录使用中心" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("用户邮箱"), "alice@example.com");
+    await user.type(screen.getByLabelText("邮箱用户名"), "alice@example.com");
     await user.type(screen.getByLabelText("密码"), "initial-password");
     await user.click(screen.getByRole("button", { name: "登录" }));
     expect(await screen.findByRole("dialog", { name: "首次登录必须修改密码" })).toBeInTheDocument();
@@ -230,6 +231,7 @@ describe("UsageApp", () => {
   it("retains credentials and prevents duplicate submit during a 429 retry window", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
+      if (path === "/site-config.json") return jsonResponse(siteConfiguration);
       if (path === "/usage/session" && (!init?.method || init.method === "GET")) {
         return jsonResponse({ error: { code: "session_required", message: "用户会话已失效" } }, 401);
       }
@@ -245,14 +247,15 @@ describe("UsageApp", () => {
     const user = userEvent.setup();
     renderPortal(<UsageApp />);
 
-    const email = await screen.findByLabelText("用户邮箱");
+    const email = await screen.findByLabelText("邮箱用户名");
     const password = screen.getByLabelText("密码");
     await user.type(email, "alice@example.com");
     await user.type(password, "initial-password");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("3 秒后重试");
-    expect(email).toHaveValue("alice@example.com");
+    expect(email).toHaveValue("alice");
+    expect(screen.getByRole("button", { name: "邮箱后缀：@example.com" })).toBeInTheDocument();
     expect(password).toHaveValue("initial-password");
     expect(screen.getByRole("button", { name: "3 秒后重试" })).toBeDisabled();
   });

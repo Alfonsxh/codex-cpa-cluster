@@ -2,11 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminShell } from "./App";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
 import { ThemeProvider } from "./ThemeProvider";
+
+beforeEach(() => vi.stubEnv("DEV", false));
+afterEach(() => vi.unstubAllEnvs());
 
 function renderShell(pathname: string, children: React.ReactNode = <div>页面内容</div>) {
   window.history.pushState({}, "", `/admin${pathname}`);
@@ -23,6 +26,20 @@ function renderShell(pathname: string, children: React.ReactNode = <div>页面�
 }
 
 describe("AdminShell legacy visual contract", () => {
+  it("switches development apps across ports without changing internal navigation", () => {
+    vi.stubEnv("DEV", true);
+    vi.stubEnv("VITE_DEV_USAGE_ORIGIN", "http://127.0.0.1:5194");
+    vi.stubEnv("VITE_DEV_PORTAL_ORIGIN", "http://127.0.0.1:5192");
+    renderShell("/settings", <ConfigurationSectionNav />);
+
+    const switcher = screen.getByRole("region", { name: "界面切换" });
+    expect(within(switcher).getByRole("link", { name: /服务入口/ }))
+      .toHaveAttribute("href", "http://127.0.0.1:5192/");
+    expect(within(switcher).getByRole("link", { name: /使用中心/ }))
+      .toHaveAttribute("href", "http://127.0.0.1:5194/usage/");
+    expect(screen.getByRole("link", { name: /运行配置/ })).toHaveAttribute("href", "/admin/configuration");
+  });
+
   it("keeps one configuration entry and the legacy interface switcher", () => {
     renderShell("/notifications");
 

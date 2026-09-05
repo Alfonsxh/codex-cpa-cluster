@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { ApiError } from "../api/client";
 import { login, sessionQueryKey } from "../api/session";
+import { applicationHref } from "../application-links";
 import { useTheme } from "./ThemeProvider";
 
 const loginSchema = z.object({
@@ -103,7 +104,7 @@ export function LoginPage({ notice = "", onAuthenticated }: { notice?: string; o
           </div>
           <p className="form-error" role="alert">{errorMessage}</p>
         </form>
-        <a className="quiet-link" href="/usage/">进入使用中心 →</a>
+        <a className="quiet-link" href={applicationHref("usage")}>进入使用中心 →</a>
       </section>
     </main>
   );

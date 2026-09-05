@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { ApiError } from "../api/client";
+import { applicationHref } from "../application-links";
 import {
   defaultPublicSiteConfiguration,
   listNativeAccounts,
@@ -50,7 +51,7 @@ export function PortalLandingApp() {
       <section className="portal-entry-grid" aria-label="可用界面">
         <EntryCard
           className="portal-entry-primary"
-          href="/admin/"
+          href={applicationHref("admin")}
           number="01"
           badge="需要管理密钥"
           icon="control"
@@ -60,7 +61,7 @@ export function PortalLandingApp() {
           action="进入管理平台"
         />
         <EntryCard
-          href="/usage/"
+          href={applicationHref("usage")}
           number="02"
           badge="邮箱进入"
           icon="usage"
@@ -134,7 +135,7 @@ function NativeAccountGrid({ accounts }: { accounts: NativeAccount[] }) {
   return (
     <section className="native-grid" aria-label="业务 CPA 原生管理入口">
       {accounts.map((account, index) => <NativeAccountCard account={account} index={index} key={account.id} />)}
-      <a href="/admin/?action=add-account" className="native-card native-add-card" aria-label="添加业务 CPA">
+      <a href={applicationHref("admin", "?action=add-account")} className="native-card native-add-card" aria-label="添加业务 CPA">
         <div className="native-card-top"><span className="native-index">＋</span><span className="native-access native-access-guarded">仅管理员</span></div>
         <div>
           <p className="native-kicker">EXPAND ACCOUNT POOL</p>

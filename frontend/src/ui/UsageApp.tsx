@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { ApiError } from "../api/client";
+import { applicationHref } from "../application-links";
 import {
   logoutPortal,
   portalSessionQueryKey,
@@ -117,7 +118,7 @@ function UsageAuthenticationBoundary() {
   return (
     <div className="usage-shell usage-authentication-boundary">
       <header className="usage-topbar usage-preview-topbar">
-        <a className="usage-preview-brand" href="/" aria-label="返回 Codex CPA 首页">
+        <a className="usage-preview-brand" href={applicationHref("portal")} aria-label="返回 Codex CPA 首页">
           <img
             src={`/portal/assets/codex-cpa-cluster-logo${theme === "dark" ? "-dark" : ""}.svg`}
             alt="Codex CPA Cluster"
@@ -202,7 +203,7 @@ function UsageShell({
     <main className="usage-shell usage-center-shell">
       <header className="usage-center-head">
         <div className="usage-brand-block">
-          <a href="/" aria-label="Codex CPA 使用中心">
+          <a href={applicationHref("portal")} aria-label="Codex CPA 使用中心">
             <img
               className="usage-brand-logo"
               src={`/portal/assets/codex-cpa-cluster-logo${theme === "dark" ? "-dark" : ""}.svg`}

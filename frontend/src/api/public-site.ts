@@ -39,7 +39,7 @@ export function emailPlaceholder(domains: readonly string[] | undefined): string
   return `name@${normalizedEmailDomains(domains)[0] ?? "example.com"}`;
 }
 
-function normalizedEmailDomains(domains: readonly string[] | undefined): string[] {
+export function normalizedEmailDomains(domains: readonly string[] | undefined): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const value of domains ?? []) {

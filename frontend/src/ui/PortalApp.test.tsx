@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PortalApp, safeManagementURL } from "./PortalApp";
 
@@ -25,9 +25,26 @@ const branding = {
   }
 };
 
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => vi.stubEnv("DEV", false));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe("PortalApp", () => {
+  it("links development entries to their isolated app origins", async () => {
+    vi.stubEnv("DEV", true);
+    vi.stubEnv("VITE_DEV_ADMIN_ORIGIN", "http://127.0.0.1:5193");
+    vi.stubEnv("VITE_DEV_USAGE_ORIGIN", "http://127.0.0.1:5194");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(branding)));
+    renderPortal("/");
+
+    expect(await screen.findByRole("link", { name: /综合管理平台/ }))
+      .toHaveAttribute("href", "http://127.0.0.1:5193/admin/");
+    expect(screen.getByRole("link", { name: /使用中心/ }))
+      .toHaveAttribute("href", "http://127.0.0.1:5194/usage/");
+  });
+
   it("renders the framework-backed landing entries from public branding", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(branding)));
     renderPortal("/");

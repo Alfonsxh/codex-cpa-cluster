@@ -8,6 +8,7 @@ import { ApiError, subscribeUnauthorized } from "../api/client";
 import { readReleaseStatus, type ReleaseStatus } from "../api/overview";
 import { onboardingQueryKey, readOnboarding } from "../api/onboarding";
 import { logout, readSession, refreshSession, sessionQueryKey } from "../api/session";
+import { applicationHref } from "../application-links";
 import { AdminToolbarContext } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { LoginPage } from "./LoginPage";
@@ -292,12 +293,12 @@ export function AdminShell({
         <section className="side-nav-switcher" aria-label="界面切换">
           <div className="side-nav-switcher-heading"><span>界面切换</span><small>SWITCH</small></div>
           <div className="side-nav-switcher-links">
-            <a href="/">
+            <a href={applicationHref("portal")}>
               <span className="side-nav-switcher-index">01</span>
               <span className="side-nav-switcher-copy"><strong>服务入口</strong><small>返回界面选择</small></span>
               <span className="side-nav-switcher-arrow" aria-hidden="true">›</span>
             </a>
-            <a href="/usage/">
+            <a href={applicationHref("usage")}>
               <span className="side-nav-switcher-index">02</span>
               <span className="side-nav-switcher-copy"><strong>使用中心</strong><small>Key、账号与用量</small></span>
               <span className="side-nav-switcher-arrow" aria-hidden="true">›</span>

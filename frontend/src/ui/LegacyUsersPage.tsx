@@ -1,7 +1,9 @@
+import { DownOutlined } from "@ant-design/icons";
 import {
   Button,
   Checkbox,
   Drawer,
+  Dropdown,
   Form,
   Modal,
   Skeleton,
@@ -14,12 +16,11 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/client";
 import {
-  emailDomainHint,
-  emailPlaceholder,
+  normalizedEmailDomains,
   publicSiteQueryKey,
   readPublicSiteConfiguration
 } from "../api/public-site";
@@ -42,7 +43,6 @@ import {
   usersQueryKey,
   usersQueryRoot,
   type UserAccountDetail,
-  type UserDetail,
   type UserListParams,
   type UserOneTimeKey,
   type UserQuotaActionInput,
@@ -71,9 +71,9 @@ import {
 } from "../api/usage";
 import { AdminTable } from "./components/AdminTable";
 import { NativeTableViewport } from "./components/NativeTableViewport";
+import { SecretRevealModal, type SecretReveal } from "./components/SecretRevealModal";
 import {
   CustomUsageRangeModal,
-  formatCustomUsageRange,
   type CustomUsageRange
 } from "./components/CustomUsageRangeModal";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
@@ -102,16 +102,6 @@ type UserAccountSortField =
   | "total_tokens"
   | "weighted_tokens"
   | "last_used_at";
-type BreakdownSortField =
-  | "account"
-  | "combination"
-  | "success_count"
-  | "share"
-  | "total_tokens"
-  | "multiplier"
-  | "weighted_tokens"
-  | "average_total"
-  | "last_used_at";
 type TeamAssignment = {
   users: string[];
   targetTeamID: string | null;
@@ -121,30 +111,22 @@ type LifecycleAction = {
   user: UserSummary;
   keyLabel?: string;
 };
-type SecretReveal = {
-  message: string;
-  keys: UserOneTimeKey[];
-  password?: string;
-  passwordUser?: string;
-};
 type QuotaActionDraft = {
   action: "add_bonus" | "reset_usage";
   scope: "selected" | "all";
   users: string[];
 };
 
-const usageWindowOptions: Array<{ value: UsageWindow; label: string }> = [
+const usageWindowOptions: Array<{ value: Exclude<UsageWindow, "custom">; label: string }> = [
   { value: "3600", label: "1 小时" },
   { value: "today", label: "今日" },
   { value: "86400", label: "24 小时" },
   { value: "604800", label: "7 天" },
   { value: "2592000", label: "30 天" },
-  { value: "all", label: "全部" },
-  { value: "custom", label: "自定义…" }
+  { value: "all", label: "全部" }
 ];
 
 export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
@@ -175,11 +157,11 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
   const debouncedSearch = useDebouncedValue(searchDraft.trim(), 250);
 
   useEffect(() => {
-    if (debouncedSearch === query) return;
+    if (debouncedSearch !== searchDraft.trim() || debouncedSearch === query) return;
     setQuery(debouncedSearch);
     setPage(1);
     setExpandedUsers([]);
-  }, [debouncedSearch, query]);
+  }, [debouncedSearch, query, searchDraft]);
 
   const usageRange = useMemo<UsageRange>(() => ({
     window: usageWindow,
@@ -300,6 +282,7 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
     onSuccess: async (result, input) => {
       setCreateOpen(false);
       setSecretReveal({
+        kind: "created",
         message: result.message,
         keys: result.keys,
         password: result.initial_password,
@@ -344,6 +327,7 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
     onSuccess: async (result, action) => {
       if (result.keys.length || result.password) {
         setSecretReveal({
+          kind: action.kind === "rotate" ? "rotated" : "password-reset",
           message: result.message,
           keys: result.keys,
           password: result.password,
@@ -438,11 +422,13 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
     { value: "unassigned", label: "未分组" },
     ...(catalog?.teams ?? []).map((team) => ({ value: team.id, label: team.name }))
   ];
-  const displayedUsageOptions = usageWindowOptions.map((option) => (
-    option.value === "custom" && customRange
-      ? { ...option, label: formatCustomUsageRange(customRange) }
-      : option
-  ));
+  const rangeUpdating = users.isFetching && (users.isPlaceholderData || !catalog);
+  const rangeBoundary = (timestamp: number | null | undefined, unbounded = false) => {
+    if (rangeUpdating) return "…";
+    if (!catalog || users.isPlaceholderData) return "—";
+    if (timestamp == null || timestamp <= 0) return unbounded ? "不限" : "—";
+    return formatLastUsed(timestamp, true);
+  };
   const total = catalog?.pagination.total ?? 0;
   const selectedTeamUsage = teamUsage.data?.teams.find((team) => team.id === teamID) ?? null;
   const totalPages = Math.max(1, catalog?.pagination.total_pages ?? 1);
@@ -452,27 +438,66 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
   return (
     <section className="page-content legacy-user-page">
       <div className="legacy-user-management-panel">
-        <div className="management-toolbar user-management-toolbar">
-          <label className="search-field user-search-input">
-            <span aria-hidden="true">⌕</span>
-            <input
-              type="search"
-              aria-label="搜索用户"
-              placeholder="搜索用户邮箱"
-              value={searchDraft}
-              onChange={(event) => setSearchDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                setQuery(event.currentTarget.value.trim());
-                setPage(1);
-                setExpandedUsers([]);
-              }}
-            />
-          </label>
+        <div className="management-toolbar user-management-toolbar user-time-filter-toolbar">
+          <div className="overview-token-window-row user-time-filter">
+            <fieldset className="overview-legacy-window-control usage-time-control">
+              <legend>时间范围</legend>
+              <div className="overview-legacy-window-segments usage-time-segments" role="group" aria-label="用户用量时间范围">
+                {usageWindowOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={usageWindow === option.value}
+                    onClick={() => {
+                      setUsageWindow(option.value);
+                      setPage(1);
+                      setExpandedUsers([]);
+                    }}
+                  >{option.label}</button>
+                ))}
+                <button
+                  type="button"
+                  aria-pressed={usageWindow === "custom"}
+                  title="选择时间范围"
+                  onClick={() => setCustomRangeOpen(true)}
+                >时间选择</button>
+              </div>
+            </fieldset>
+            <div className="overview-token-window-boundaries" aria-label="用户用量时间边界" aria-live="polite" aria-busy={rangeUpdating}>
+              <div className="overview-token-window-value">
+                <small>起始时间</small>
+                <strong>{rangeBoundary(catalog?.window_start_at, usageWindow === "all")}</strong>
+              </div>
+              <div className="overview-token-window-value">
+                <small>结束时间</small>
+                <strong>{rangeBoundary(catalog?.window_end_at)}</strong>
+              </div>
+            </div>
+          </div>
           <div className="user-toolbar-actions management-toolbar-controls">
             <div className="management-filter-grid user-filter-grid">
-              <label className="window-field filter-field user-filter-field">
+              <div className="user-filter-field user-search-filter-field">
+                <label htmlFor="user-search-filter">用户</label>
+                <label className="search-field user-search-input">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    id="user-search-filter"
+                    type="search"
+                    aria-label="搜索用户"
+                    placeholder="搜索用户邮箱"
+                    value={searchDraft}
+                    onChange={(event) => setSearchDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      setQuery(event.currentTarget.value.trim());
+                      setPage(1);
+                      setExpandedUsers([]);
+                    }}
+                  />
+                </label>
+              </div>
+              <label className="window-field filter-field user-filter-field user-team-filter-field">
                 <span>团队</span>
                 <LegacyEnhancedSelect
                   id="user-team-filter"
@@ -486,34 +511,8 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
                   }}
                 />
               </label>
-              <label className="window-field filter-field user-filter-field usage-window-field">
-                <span>统计范围</span>
-                <LegacyEnhancedSelect
-                  id="user-usage-window"
-                  label="统计范围"
-                  value={usageWindow}
-                  options={displayedUsageOptions}
-                  onChange={(value) => {
-                    if (value === "custom") {
-                      setCustomRangeOpen(true);
-                      return;
-                    }
-                    setUsageWindow(value);
-                    setExpandedUsers([]);
-                  }}
-                />
-              </label>
             </div>
             <div className="management-primary-actions user-primary-actions">
-              <Button
-                className="team-usage-trigger"
-                disabled={!selectedTeamUsage}
-                onClick={() => setTeamUsageOpen(true)}
-              >
-                <span className="team-usage-trigger-icon" aria-hidden="true">↗</span>
-                {selectedTeamUsage ? selectedTeamUsage.name + " Token 用量" : "选择团队后查看用量"}
-              </Button>
-              <Button onClick={() => navigate("/teams")}>进入团队管理</Button>
               <Button type="primary" onClick={() => {
                 createMutation.reset();
                 setCreateOpen(true);
@@ -606,65 +605,67 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
               <Button type="primary" onClick={() => setCreateOpen(true)}>添加第一个用户</Button>
             </div>
           ) : null}
-        </div>
 
-        {total ? (
-          <div className="table-pagination user-pagination" aria-label="用户分页">
-            <span className="pagination-summary">共 {formatNumber(total)} 位用户 · {formatNumber(startIndex)}–{formatNumber(endIndex)}</span>
-            <div className="pagination-actions">
-              <label className="pagination-size">
-                <span>每页</span>
-                <LegacyEnhancedSelect
-                  label="每页条数"
-                  value={String(pageSize)}
-                  options={[25, 50, 100].map((value) => ({ value: String(value), label: String(value) }))}
-                  onChange={(nextValue) => {
-                    setPageSize(Number(nextValue));
-                    setPage(1);
+          {total ? (
+            <div className="table-pagination user-pagination" aria-label="用户分页">
+              <span className="pagination-summary">共 {formatNumber(total)} 位用户 · {formatNumber(startIndex)}–{formatNumber(endIndex)}</span>
+              <div className="pagination-actions">
+                <label className="pagination-size">
+                  <span>每页</span>
+                  <LegacyEnhancedSelect
+                    label="每页条数"
+                    value={String(pageSize)}
+                    options={[25, 50, 100].map((value) => ({ value: String(value), label: String(value) }))}
+                    onChange={(nextValue) => {
+                      setPageSize(Number(nextValue));
+                      setPage(1);
+                      setExpandedUsers([]);
+                    }}
+                  />
+                  <span>条</span>
+                </label>
+                <nav className="pagination-controls" aria-label="用户列表页码">
+                  <Button disabled={page <= 1} onClick={() => {
+                    setPage((current) => Math.max(1, current - 1));
                     setExpandedUsers([]);
-                  }}
-                />
-                <span>条</span>
-              </label>
-              <nav className="pagination-controls" aria-label="用户列表页码">
-                <Button disabled={page <= 1} onClick={() => {
-                  setPage((current) => Math.max(1, current - 1));
-                  setExpandedUsers([]);
-                }}>上一页</Button>
-                <div className="pagination-pages">
-                  {paginationItems(page, totalPages).map((item, index) => (
-                    item === "…"
-                      ? <span key={"ellipsis-" + index} className="pagination-ellipsis" aria-hidden="true">…</span>
-                      : <Button
-                          key={item}
-                          className={item === page ? "pagination-page active" : "pagination-page"}
-                          aria-current={item === page ? "page" : undefined}
-                          onClick={() => {
-                            setPage(item);
-                            setExpandedUsers([]);
-                          }}
-                        >{item}</Button>
-                  ))}
-                </div>
-                <Button disabled={page >= totalPages} onClick={() => {
-                  setPage((current) => Math.min(totalPages, current + 1));
-                  setExpandedUsers([]);
-                }}>下一页</Button>
-              </nav>
+                  }}>上一页</Button>
+                  <div className="pagination-pages">
+                    {paginationItems(page, totalPages).map((item, index) => (
+                      item === "…"
+                        ? <span key={"ellipsis-" + index} className="pagination-ellipsis" aria-hidden="true">…</span>
+                        : <Button
+                            key={item}
+                            className={item === page ? "pagination-page active" : "pagination-page"}
+                            aria-current={item === page ? "page" : undefined}
+                            onClick={() => {
+                              setPage(item);
+                              setExpandedUsers([]);
+                            }}
+                          >{item}</Button>
+                    ))}
+                  </div>
+                  <Button disabled={page >= totalPages} onClick={() => {
+                    setPage((current) => Math.min(totalPages, current + 1));
+                    setExpandedUsers([]);
+                  }}>下一页</Button>
+                </nav>
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       <CustomUsageRangeModal
         open={customRangeOpen}
-        title="用户信息自定义统计范围"
+        title="选择时间范围"
+        timezone="Asia/Shanghai"
         range={customRange}
         onCancel={() => setCustomRangeOpen(false)}
         onApply={(range) => {
           setCustomRange(range);
           setUsageWindow("custom");
           setCustomRangeOpen(false);
+          setPage(1);
           setExpandedUsers([]);
         }}
       />
@@ -682,6 +683,9 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
         teams={teamOptions}
         initialTeamID={catalog?.teams.some((team) => team.id === teamID) ? teamID : ""}
         emailDomains={siteConfiguration.data?.allowed_email_domains}
+        emailDomainsLoading={siteConfiguration.isPending || siteConfiguration.isFetching}
+        emailDomainsFailed={siteConfiguration.isError}
+        onRetryEmailDomains={() => { void siteConfiguration.refetch(); }}
         pending={createMutation.isPending}
         error={createMutation.error}
         onCancel={() => setCreateOpen(false)}
@@ -929,7 +933,7 @@ function userColumns({
       ...sortable("last_used", "最后使用"),
       key: "last-used",
       width: "10%",
-      render: (_, user) => formatLastUsed(user.usage.last_used_at)
+      render: (_, user) => <UserLastUsed timestamp={user.usage.last_used_at} />
     }
   ];
 }
@@ -1037,16 +1041,14 @@ function LegacyTokenValue({ value }: { value: number | null | undefined }) {
   const [formatted, unit = "Token"] = formatTokenAmount(amount).split(" ");
   const compacted = Math.abs(amount) >= 1_000;
   return (
-    <Tooltip title={formatNumber(amount) + " Token"}>
-      <span className="token-usage">
-        <span className="token-usage-main" aria-hidden="true">
-          <span className="token-usage-value">{formatted}</span>
-          <small className="token-usage-unit">{unit}</small>
-        </span>
-        {compacted ? <small className="token-usage-exact" aria-hidden="true">{formatNumber(amount)} Token</small> : null}
-        <span className="token-usage-sr-only">{formatNumber(amount)} Token</span>
+    <span className="token-usage">
+      <span className="token-usage-main" aria-hidden="true">
+        <span className="token-usage-value">{formatted}</span>
+        <small className="token-usage-unit">{unit}</small>
       </span>
-    </Tooltip>
+      {compacted ? <small className="token-usage-exact" aria-hidden="true">{formatNumber(amount)} Token</small> : null}
+      <span className="token-usage-sr-only">{formatNumber(amount)} Token</span>
+    </span>
   );
 }
 
@@ -1066,12 +1068,9 @@ function UserExpandedRow({
   onLifecycle: (action: LifecycleAction) => void;
 }) {
   void csrfToken;
-  const [accountFilter, setAccountFilter] = useState("");
+  const [moreActionsOpen, setMoreActionsOpen] = useState(false);
+  const [analysisAccount, setAnalysisAccount] = useState("");
   const [accountSort, setAccountSort] = useState<{ field: UserAccountSortField; direction: SortDirection }>({
-    field: "total_tokens",
-    direction: "desc"
-  });
-  const [breakdownSort, setBreakdownSort] = useState<{ field: BreakdownSortField; direction: SortDirection }>({
     field: "total_tokens",
     direction: "desc"
   });
@@ -1083,7 +1082,7 @@ function UserExpandedRow({
     gcTime: 30_000,
     retry: false
   });
-  const breakdownRange = { ...range, account: accountFilter || undefined };
+  const breakdownRange = { ...range, account: analysisAccount || undefined };
   const breakdown = useQuery({
     queryKey: usageBreakdownQueryKey("user", user.email, breakdownRange),
     queryFn: ({ signal }) => readUsageBreakdown("user", user.email, breakdownRange, signal),
@@ -1123,21 +1122,17 @@ function UserExpandedRow({
   return (
     <div className="user-detail-panel">
       <UserUsageAnalysis
-        user={detailedUser}
+        accounts={detailedUser.accounts.map((account) => account.account)}
+        accountFilter={analysisAccount}
+        onAccountFilter={setAnalysisAccount}
         query={breakdown.data}
         pending={breakdown.isPending}
         error={breakdown.error}
-        accountFilter={accountFilter}
-        sort={breakdownSort}
-        onAccountFilter={setAccountFilter}
-        onSort={(field) => setBreakdownSort((current) => ({
-          field,
-          direction: current.field === field
-            ? (current.direction === "asc" ? "desc" : "asc")
-            : (field === "account" || field === "combination" ? "asc" : "desc")
-        }))}
         onRetry={() => void breakdown.refetch()}
       />
+      <div className="usage-analysis-title">
+        <strong>CPA 账号用量分析</strong>
+      </div>
       <NativeTableViewport className="user-account-table-wrap" aria-label="用户账号明细表格">
         <table className="user-account-table">
           <thead>
@@ -1168,67 +1163,86 @@ function UserExpandedRow({
                 <td className="number-cell"><LegacyTokenValue value={account.usage.cached_tokens} /></td>
                 <td className="number-cell token-total"><LegacyTokenValue value={account.usage.total_tokens} /></td>
                 <td className="number-cell token-total"><LegacyTokenValue value={account.usage.weighted_tokens} /></td>
-                <td>{formatLastUsed(account.usage.last_used_at)}</td>
+                <td><UserLastUsed timestamp={account.usage.last_used_at} /></td>
               </tr>
             ))}
           </tbody>
         </table>
       </NativeTableViewport>
-      <div className="user-detail-actions">
-        <button className="inline-action" type="button" onClick={onTeam}>设置团队</button>
-        <button className="inline-action" type="button" onClick={onQuota}>配置周额度</button>
-        <button className="inline-action" type="button" onClick={() => onLifecycle({ kind: "reset-password", user })}>重置密码</button>
-        <button className="inline-action danger-text" type="button" onClick={() => onLifecycle({ kind: "delete", user })}>删除用户</button>
-        {user.active_keys && keyLabel ? (
-          <>
-            <button className="inline-action" type="button" onClick={() => onLifecycle({ kind: "rotate", user, keyLabel })}>轮换唯一 Key</button>
-            <button className="inline-action danger-text" type="button" onClick={() => onLifecycle({ kind: "revoke", user })}>停用唯一 Key</button>
-          </>
-        ) : null}
+      <div className="user-detail-actions" role="group" aria-label="用户管理操作">
+        <Button onClick={onTeam}>设置团队</Button>
+        <Button onClick={onQuota}>配置周额度</Button>
+        <Button onClick={() => onLifecycle({ kind: "reset-password", user })}>重置密码</Button>
+        <Dropdown
+          trigger={["click"]}
+          placement="topRight"
+          open={moreActionsOpen}
+          onOpenChange={setMoreActionsOpen}
+          autoFocus
+          destroyOnHidden
+          classNames={{ root: "user-detail-actions-menu" }}
+          menu={{
+            "aria-label": "更多用户操作",
+            items: [
+              ...(user.active_keys && keyLabel ? [
+                { key: "rotate", label: "轮换唯一 Key" },
+                { key: "revoke", label: "停用唯一 Key", danger: true },
+                { type: "divider" as const }
+              ] : []),
+              { key: "delete", label: "删除用户", danger: true }
+            ],
+            onClick: ({ key }) => {
+              setMoreActionsOpen(false);
+              if (key === "rotate" && user.active_keys && keyLabel) onLifecycle({ kind: "rotate", user, keyLabel });
+              if (key === "revoke" && user.active_keys && keyLabel) onLifecycle({ kind: "revoke", user });
+              if (key === "delete") onLifecycle({ kind: "delete", user });
+            }
+          }}
+        >
+          <Button aria-haspopup="menu" aria-expanded={moreActionsOpen}>更多操作 <DownOutlined aria-hidden="true" /></Button>
+        </Dropdown>
       </div>
     </div>
   );
 }
 
 function UserUsageAnalysis({
-  user,
+  accounts,
+  accountFilter,
+  onAccountFilter,
   query,
   pending,
   error,
-  accountFilter,
-  sort,
-  onAccountFilter,
-  onSort,
   onRetry
 }: {
-  user: UserDetail;
+  accounts: string[];
+  accountFilter: string;
+  onAccountFilter: (account: string) => void;
   query: UsageBreakdown | undefined;
   pending: boolean;
   error: unknown;
-  accountFilter: string;
-  sort: { field: BreakdownSortField; direction: SortDirection };
-  onAccountFilter: (account: string) => void;
-  onSort: (field: BreakdownSortField) => void;
   onRetry: () => void;
 }) {
-  const header = (successCount?: number) => (
+  const [selectedEffort, setSelectedEffort] = useState<UserModelEffortSelection | null>(null);
+  const header = () => (
     <div className="usage-analysis-header">
       <div className="usage-analysis-title">
         <strong>模型与推理分析</strong>
-        {successCount === undefined ? null : <span>成功调用 <b>{formatNumber(successCount)}</b></span>}
       </div>
-      <label className="compact-select usage-analysis-filter">
-        <span>CPA</span>
+      <div className="usage-analysis-filter">
         <LegacyEnhancedSelect
           label="CPA"
           value={accountFilter}
           options={[
             { value: "", label: "全部 CPA" },
-            ...user.accounts.map((account) => ({ value: account.account, label: account.account }))
+            ...accounts.map((account) => ({ value: account, label: account }))
           ]}
-          onChange={onAccountFilter}
+          onChange={(account) => {
+            setSelectedEffort(null);
+            onAccountFilter(account);
+          }}
         />
-      </label>
+      </div>
     </div>
   );
   if (pending && !query) {
@@ -1265,17 +1279,13 @@ function UserUsageAnalysis({
   const successCount = query.totals.success_count ?? 0;
   const failedCount = query.totals.failed_count ?? 0;
   const totalWeighted = query.totals.weighted_tokens ?? query.totals.total_tokens;
-  const rows = [...query.combinations].sort((left, right) => compareRows(
-    breakdownSortValue(left, sort.field, totalWeighted),
-    breakdownSortValue(right, sort.field, totalWeighted),
-    sort.direction,
-    String(left.account || "") + left.model + left.reasoning_effort,
-    String(right.account || "") + right.model + right.reasoning_effort
-  ));
-  const models = groupUserModels(rows);
+  const models = groupUserModels(query.combinations);
   const summary = (
     <div className="usage-analysis-summary">
-      <div><span>失败调用</span><strong>{formatNumber(failedCount)}</strong></div>
+      <div className="usage-analysis-call-stat">
+        <span>成功调用</span><strong>{formatNumber(successCount)}</strong>
+        <span>失败调用</span><strong className="usage-analysis-failed-count">{formatNumber(failedCount)}</strong>
+      </div>
       <div><span>强度覆盖率</span><strong>{formatUsageRatio(query.totals.known_effort_count ?? 0, successCount)}</strong></div>
       <div className="usage-analysis-token-stat"><span>未加权 Token</span><strong><LegacyTokenValue value={query.totals.total_tokens} /></strong></div>
       <div className="usage-analysis-token-stat"><span>加权 Token</span><strong><LegacyTokenValue value={totalWeighted} /></strong></div>
@@ -1285,20 +1295,19 @@ function UserUsageAnalysis({
   if (!successCount) {
     return (
       <section className="user-usage-analysis">
-        {header(successCount)}
-        <div className="usage-analysis-layout usage-analysis-layout-empty">
-          <div className="usage-analysis-message compact">
-            <strong>当前范围暂无成功调用</strong>
-            <span>{failedCount ? `有 ${formatNumber(failedCount)} 次失败调用，未计入占比。` : "产生新调用后将在这里显示模型与推理强度组合。"}</span>
-          </div>
-          {summary}
+        {header()}
+        {summary}
+        <div className="usage-analysis-message compact">
+          <strong>当前范围暂无成功调用</strong>
+          <span>{failedCount ? `有 ${formatNumber(failedCount)} 次失败调用，未计入占比。` : "产生新调用后将在这里显示模型与推理强度组合。"}</span>
         </div>
       </section>
     );
   }
   return (
     <section className="user-usage-analysis">
-      {header(successCount)}
+      {header()}
+      {summary}
       <NativeTableViewport className="usage-model-table-wrap" aria-label="模型用量表格">
         <table className="usage-model-table">
           <thead><tr><th className="table-index-column">序号</th><th>模型</th><th>使用量</th><th>推理强度构成</th><th>Token 明细</th><th>调用</th></tr></thead>
@@ -1308,7 +1317,7 @@ function UserUsageAnalysis({
                 <td className="table-index-cell">{index + 1}</td>
                 <td><span className="table-primary model-name">{model.model}</span></td>
                 <td className="number-cell"><LegacyTokenValue value={model.totalTokens} /></td>
-                <td><UserModelEffortProgress model={model} /></td>
+                <td><UserModelEffortProgress model={model} onSelect={setSelectedEffort} /></td>
                 <td>
                   <dl className="usage-model-token-details">
                     <div><dt>输入</dt><dd><LegacyTokenValue value={model.inputTokens} /></dd></div>
@@ -1323,52 +1332,124 @@ function UserUsageAnalysis({
           </tbody>
         </table>
       </NativeTableViewport>
-      {summary}
-      <NativeTableViewport className="usage-breakdown-table-wrap" aria-label="推理强度用量明细表格">
-        <table className="usage-breakdown-table">
-          <thead><tr>
-            <th className="table-index-column">序号</th>
-            {([
-              ["account", "CPA"],
-              ["combination", "模型 × 推理强度"],
-              ["success_count", "调用"],
-              ["share", "占比"],
-              ["total_tokens", "未加权 Token"],
-              ["multiplier", "实际倍率"],
-              ["weighted_tokens", "加权 Token"],
-              ["average_total", "平均/次"],
-              ["last_used_at", "最后使用"]
-            ] as Array<[BreakdownSortField, string]>).map(([field, label]) => (
-              <th key={field} aria-sort={sort.field === field ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
-                <button className={"legacy-sort-button" + (sort.field === field ? " active" : "")} type="button" onClick={() => onSort(field)}>{label}</button>
-              </th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {rows.map((row, index) => {
-              const weighted = row.weighted_tokens ?? row.total_tokens;
-              const multiplier = row.total_tokens > 0 ? weighted / row.total_tokens : 0;
-              const share = successCount > 0 ? row.success_count / successCount * 100 : 0;
-              return (
-                <tr key={String(row.account || "") + ":" + row.model + ":" + row.reasoning_effort}>
-                  <td className="table-index-cell">{index + 1}</td>
-                  <td><span className="table-primary">{row.account ?? ""}</span></td>
-                  <td><span className="table-primary model-name">{usageCombinationLabel(row)}</span></td>
-                  <td className="number-cell">{formatNumber(row.success_count)}</td>
-                  <td className="number-cell usage-percentage">{share.toFixed(1)}%</td>
-                  <td className="number-cell"><LegacyTokenValue value={row.total_tokens} /></td>
-                  <td className="number-cell">×{multiplier.toFixed(2)}</td>
-                  <td className="number-cell token-total"><LegacyTokenValue value={weighted} /></td>
-                  <td className="number-cell"><LegacyTokenValue value={row.success_count ? Math.round(row.total_tokens / row.success_count) : 0} /></td>
-                  <td>{formatLastUsed(row.last_used_at)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </NativeTableViewport>
       {error ? <div className="usage-analysis-stale">刷新失败，当前展示上一次成功数据：{errorMessage(error)}</div> : null}
+      {selectedEffort ? (
+        <UserModelAccountDrawer
+          key={JSON.stringify(selectedEffort)}
+          selection={selectedEffort}
+          query={query}
+          error={error}
+          pending={pending}
+          onRetry={onRetry}
+          onClose={() => setSelectedEffort(null)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+type UserModelEffortSelection = { model: string; effort: string };
+
+function userUsageModelName(model: string) {
+  return model && model !== "unknown" ? model : "未上报模型";
+}
+
+function userUsageEffortName(effort: string) {
+  return effort && effort !== "unknown" ? effort : "未上报强度";
+}
+
+function UserModelAccountDrawer({
+  selection,
+  query,
+  error,
+  pending,
+  onRetry,
+  onClose
+}: {
+  selection: UserModelEffortSelection;
+  query: UsageBreakdown;
+  error: unknown;
+  pending: boolean;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  const grouped = new Map<string, UsageCombination>();
+  query.combinations.filter((row) => (
+    userUsageModelName(row.model) === selection.model
+    && userUsageEffortName(row.reasoning_effort) === selection.effort
+  )).forEach((row) => {
+    const account = row.account || "";
+    const current = grouped.get(account);
+    grouped.set(account, current ? {
+      ...current,
+      request_count: current.request_count + row.request_count,
+      success_count: current.success_count + row.success_count,
+      failed_count: current.failed_count + row.failed_count,
+      input_tokens: current.input_tokens + row.input_tokens,
+      output_tokens: current.output_tokens + row.output_tokens,
+      reasoning_tokens: current.reasoning_tokens + row.reasoning_tokens,
+      cached_tokens: current.cached_tokens + row.cached_tokens,
+      total_tokens: current.total_tokens + row.total_tokens,
+      weighted_tokens: (current.weighted_tokens ?? current.total_tokens) + (row.weighted_tokens ?? row.total_tokens),
+      last_used_at: Math.max(current.last_used_at || 0, row.last_used_at || 0)
+    } : { ...row, account });
+  });
+  const rows = [...grouped.values()].sort((left, right) => right.total_tokens - left.total_tokens || String(left.account).localeCompare(String(right.account)));
+  const successCount = rows.reduce((total, row) => total + row.success_count, 0);
+  const multiplier = (row: UsageCombination) => row.total_tokens > 0 ? (row.weighted_tokens ?? row.total_tokens) / row.total_tokens : 0;
+  const average = (row: UsageCombination) => row.success_count > 0 ? Math.round(row.total_tokens / row.success_count) : 0;
+  const columns: TableColumnsType<UsageCombination> = [
+    { title: "CPA 账号", dataIndex: "account", key: "account", width: 160, sorter: (left, right) => String(left.account).localeCompare(String(right.account)), render: (account: string) => <span className="table-primary">{account || "未上报 CPA"}</span> },
+    { title: "调用", dataIndex: "success_count", key: "calls", className: "user-model-account-number", width: 84, align: "right", sorter: (left, right) => left.success_count - right.success_count, render: (count: number) => formatNumber(count) },
+    { title: <Tooltip title="占当前 CPA 筛选范围内，该模型与推理强度成功调用的比例">调用占比</Tooltip>, key: "share", className: "user-model-account-number", width: 100, align: "right", render: (_, row) => formatUsageRatio(row.success_count, successCount) },
+    { title: "未加权 Token", dataIndex: "total_tokens", key: "raw", width: 150, align: "right", defaultSortOrder: "descend", sorter: (left, right) => left.total_tokens - right.total_tokens, render: (tokens: number) => <LegacyTokenValue value={tokens} /> },
+    { title: "实际倍率", key: "multiplier", className: "user-model-account-number", width: 96, align: "right", sorter: (left, right) => multiplier(left) - multiplier(right), render: (_, row) => "×" + multiplier(row).toFixed(2) },
+    { title: "加权 Token", key: "weighted", width: 150, align: "right", sorter: (left, right) => (left.weighted_tokens ?? left.total_tokens) - (right.weighted_tokens ?? right.total_tokens), render: (_, row) => <LegacyTokenValue value={row.weighted_tokens ?? row.total_tokens} /> },
+    { title: <span className="user-model-account-column-title">平均/次<small>未加权 Token</small></span>, key: "average", width: 144, align: "right", sorter: (left, right) => average(left) - average(right), render: (_, row) => <LegacyTokenValue value={average(row)} /> },
+    { title: "最后使用", key: "last_used_at", width: 150, align: "right", sorter: (left, right) => (left.last_used_at || 0) - (right.last_used_at || 0), render: (_, row) => <UserLastUsed timestamp={row.last_used_at} /> }
+  ];
+  return (
+    <Drawer
+      className="user-model-account-drawer"
+      title={(
+        <span className="user-model-account-title">
+          <span>{selection.model}</span>{" · "}
+          <Tag className={`user-model-effort-tag account-model-effort-${effortColorKey(selection.effort)}`}>{selection.effort}</Tag>
+          {" · CPA 用量分布"}
+        </span>
+      )}
+      placement="right"
+      size="min(1200px, 100vw)"
+      open
+      onClose={onClose}
+      destroyOnHidden
+    >
+      <div className="user-model-account-toolbar">
+        <div className="user-model-account-context">
+          <strong>{query.user}</strong>
+          <span>{formatLastUsed(query.window_start_at, true)} — {formatLastUsed(query.window_end_at, true)}</span>
+        </div>
+      </div>
+      {error ? <div className="usage-analysis-stale" role="alert">刷新失败，当前展示上一次成功数据：{errorMessage(error)} <button type="button" className="inline-action" onClick={onRetry}>重试</button></div> : null}
+      <AdminTable
+        className="user-model-account-table"
+        rowKey={(row) => JSON.stringify(row.account ?? "")}
+        columns={columns.map((column) => ({
+          ...column,
+          sortIcon: ({ sortOrder }: { sortOrder?: "ascend" | "descend" | null }) => (
+            <span className={"user-model-account-sort-arrow" + (sortOrder ? " active" : "")} aria-hidden="true">
+              {sortOrder === "ascend" ? "↑" : sortOrder === "descend" ? "↓" : "↕"}
+            </span>
+          )
+        }))}
+        dataSource={rows}
+        minWidth={1134}
+        showSorterTooltip={false}
+        sortDirections={["descend", "ascend", "descend"]}
+        loading={pending}
+        emptyText="当前范围暂无该模型与推理强度的 CPA 用量"
+      />
+    </Drawer>
   );
 }
 
@@ -1388,13 +1469,13 @@ function groupUserModels(combinations: UsageCombination[]): UserModelRow[] {
   const grouped = new Map<string, UsageCombination[]>();
   combinations.forEach((item) => {
     if (item.total_tokens <= 0) return;
-    const model = item.model && item.model !== "unknown" ? item.model : "未上报模型";
+    const model = userUsageModelName(item.model);
     grouped.set(model, [...(grouped.get(model) ?? []), item]);
   });
   return [...grouped.entries()].map(([model, items]) => {
     const effortsByName = new Map<string, UsageCombination>();
     items.forEach((item) => {
-      const name = item.reasoning_effort && item.reasoning_effort !== "unknown" ? item.reasoning_effort : "未上报强度";
+      const name = userUsageEffortName(item.reasoning_effort);
       const current = effortsByName.get(name);
       effortsByName.set(name, current ? {
         ...current,
@@ -1435,20 +1516,25 @@ function groupUserModels(combinations: UsageCombination[]): UserModelRow[] {
   }).sort((left, right) => right.totalTokens - left.totalTokens || left.model.localeCompare(right.model, "zh-CN"));
 }
 
-function UserModelEffortProgress({ model }: { model: UserModelRow }) {
+function UserModelEffortProgress({ model, onSelect }: { model: UserModelRow; onSelect: (selection: UserModelEffortSelection) => void }) {
   return (
     <div className="account-model-progress" role="group" aria-label={`${model.model} 各推理强度 Token 占比`}>
       {model.efforts.map((effort) => {
-        const lines = modelEffortTooltipLines(model.model, effort);
+        const tooltip = modelEffortTooltipDetails(model.model, effort);
         const shareUnits = Math.max(1, Math.min(100, Math.round(effort.sharePercent)));
         return (
-          <LegacyUsageTooltip key={effort.reasoning_effort} lines={lines}>
+          <LegacyUsageTooltip key={effort.reasoning_effort} content={tooltip}>
             {(events) => (
               <button
                 {...events}
                 className={`account-model-progress-segment account-model-effort-${effortColorKey(effort.reasoning_effort)} account-model-share-tens-${Math.floor(shareUnits / 10)} account-model-share-ones-${shareUnits % 10}${effort.sharePercent < 18 ? " compact" : ""}`}
                 type="button"
-                aria-label={lines.join("，")}
+                aria-label={`查看 ${model.model} · ${effort.reasoning_effort} 的 CPA 用量分布`}
+                aria-haspopup="dialog"
+                onClick={() => {
+                  events.onBlur();
+                  onSelect({ model: model.model, effort: effort.reasoning_effort });
+                }}
               >
                 <span>{effort.reasoning_effort}</span>
                 <em>{formatUsageRatio(effort.total_tokens, model.totalTokens)}</em>
@@ -1461,17 +1547,25 @@ function UserModelEffortProgress({ model }: { model: UserModelRow }) {
   );
 }
 
-function modelEffortTooltipLines(model: string, effort: UserModelEffort | TeamModelEffort) {
-  return [
-    `${model} · ${effort.reasoning_effort}`,
-    `调用：${formatNumber(effort.request_count)}`,
-    `输入：${formatNumber(effort.input_tokens)}`,
-    `输出：${formatNumber(effort.output_tokens)}`,
-    `推理：${formatNumber(effort.reasoning_tokens)}`,
-    `缓存：${formatNumber(effort.cached_tokens)}`,
-    `总 Token：${formatNumber(effort.total_tokens)}`,
-    `加权 Token：${formatNumber(effort.weighted_tokens ?? effort.total_tokens)}`
-  ];
+type ModelEffortTooltipContent = { title: string; metrics: Array<{ label: string; value: string }> };
+
+function modelEffortTooltipDetails(model: string, effort: UserModelEffort | TeamModelEffort): ModelEffortTooltipContent {
+  return {
+    title: `${model} · ${effort.reasoning_effort}`,
+    metrics: [
+      { label: "调用", value: formatNumber(effort.request_count) },
+      { label: "输入", value: formatNumber(effort.input_tokens) },
+      { label: "输出", value: formatNumber(effort.output_tokens) },
+      { label: "推理", value: formatNumber(effort.reasoning_tokens) },
+      { label: "缓存", value: formatNumber(effort.cached_tokens) },
+      { label: "总 Token", value: formatNumber(effort.total_tokens) },
+      { label: "加权 Token", value: formatNumber(effort.weighted_tokens ?? effort.total_tokens) }
+    ]
+  };
+}
+
+function modelEffortTooltipText(content: ModelEffortTooltipContent) {
+  return [content.title, ...content.metrics.map(({ label, value }) => `${label}：${value}`)].join("，");
 }
 
 type LegacyUsageTooltipEvents = {
@@ -1482,17 +1576,17 @@ type LegacyUsageTooltipEvents = {
 };
 
 function LegacyUsageTooltip({
-  lines,
+  content,
   children
 }: {
-  lines: string[];
+  content: ModelEffortTooltipContent;
   children: (events: LegacyUsageTooltipEvents) => ReactNode;
 }) {
   const trigger = useRef<HTMLElement | null>(null);
   const layer = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
-  const text = lines.join("\n");
+  const text = modelEffortTooltipText(content);
   const show = (element: HTMLElement) => {
     trigger.current = element;
     setPosition(null);
@@ -1521,12 +1615,21 @@ function LegacyUsageTooltip({
         <div
           ref={layer}
           className="user-usage-tooltip-layer"
+          role="tooltip"
+          aria-label={content.title}
           style={{
             left: position?.left ?? 0,
             top: position?.top ?? 0,
             visibility: position ? "visible" : "hidden"
           }}
-        >{text}</div>,
+        >
+          <strong className="user-usage-tooltip-title">{content.title}</strong>
+          <dl className="user-usage-tooltip-metrics">
+            {content.metrics.map(({ label, value }) => (
+              <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+            ))}
+          </dl>
+        </div>,
         document.body
       ) : null}
     </>
@@ -1619,6 +1722,9 @@ function CreateUserModal({
   teams,
   initialTeamID,
   emailDomains,
+  emailDomainsLoading,
+  emailDomainsFailed,
+  onRetryEmailDomains,
   pending,
   error,
   onCancel,
@@ -1628,23 +1734,54 @@ function CreateUserModal({
   teams: Array<{ value: string; label: string }>;
   initialTeamID: string;
   emailDomains: readonly string[] | undefined;
+  emailDomainsLoading: boolean;
+  emailDomainsFailed: boolean;
+  onRetryEmailDomains: () => void;
   pending: boolean;
   error: unknown;
   onCancel: () => void;
   onSubmit: (input: { email: string; teamID: string | null }) => void;
 }) {
   const [email, setEmail] = useState("");
+  const [emailDomain, setEmailDomain] = useState("");
+  const [emailError, setEmailError] = useState("");
   const [teamID, setTeamID] = useState("");
   const emailInputRef = useRef<HTMLInputElement>(null);
-  const domainHint = emailDomainHint(emailDomains);
+  const domains = useMemo(() => normalizedEmailDomains(emailDomains), [emailDomains]);
+  const selectedDomain = domains.includes(emailDomain) ? emailDomain : domains[0] ?? "";
+  const emailDomainsReady = !emailDomainsLoading && !emailDomainsFailed && Boolean(selectedDomain);
   useEffect(() => {
     if (!open) return;
     setEmail("");
+    setEmailDomain("");
+    setEmailError("");
     setTeamID(initialTeamID);
   }, [initialTeamID, open]);
+  const parseFullEmail = (value: string) => {
+    const parts = value.trim().split("@");
+    if (parts.length !== 2 || !domains.includes(parts[1].toLowerCase())) return null;
+    return { localPart: parts[0], domain: parts[1].toLowerCase() };
+  };
+  const acceptFullEmail = (value: string) => {
+    const parsed = parseFullEmail(value);
+    if (!parsed) return false;
+    setEmail(parsed.localPart);
+    setEmailDomain(parsed.domain);
+    setEmailError("");
+    return true;
+  };
   const submit = () => {
+    if (pending || !emailDomainsReady) return;
     if (!emailInputRef.current?.reportValidity()) return;
-    onSubmit({ email, teamID: teamID || null });
+    const parsed = parseFullEmail(email);
+    const localPart = parsed?.localPart ?? email.trim();
+    if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(localPart)) {
+      setEmailError(email.includes("@") ? "邮箱后缀不匹配，请仅输入用户名并选择已配置的后缀。" : "请输入有效的邮箱用户名。");
+      emailInputRef.current?.focus();
+      return;
+    }
+    setEmailError("");
+    onSubmit({ email: `${localPart}@${parsed?.domain ?? selectedDomain}`, teamID: teamID || null });
   };
   return (
     <Modal
@@ -1658,7 +1795,7 @@ function CreateUserModal({
       maskTransitionName=""
       okText="创建用户"
       cancelText="取消"
-      okButtonProps={{ disabled: pending }}
+      okButtonProps={{ disabled: pending || !emailDomainsReady }}
       onCancel={onCancel}
       onOk={submit}
       afterOpenChange={(opened) => {
@@ -1668,20 +1805,61 @@ function CreateUserModal({
       mask={{ closable: false }}
     >
       <div className="legacy-user-form-body">
-        <label className="field">
-          <span>用户邮箱</span>
-          <input
-            type="email"
-            ref={emailInputRef}
-            aria-label="用户邮箱"
-            placeholder={emailPlaceholder(emailDomains)}
-            value={email}
-            autoFocus
-            required
-            onChange={(event) => setEmail(event.target.value)}
-          />
-          {domainHint ? <small>{domainHint}</small> : null}
-        </label>
+        <div className="field">
+          <span id="new-user-email-label">用户邮箱</span>
+          <div className="user-email-fields" role="group" aria-labelledby="new-user-email-label">
+            <input
+              type="text"
+              inputMode="email"
+              ref={emailInputRef}
+              aria-label="邮箱用户名"
+              aria-invalid={Boolean(emailError)}
+              aria-describedby={emailError ? "new-user-email-error" : undefined}
+              placeholder="输入用户名"
+              value={email}
+              autoFocus
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              required
+              disabled={pending}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setEmailError("");
+              }}
+              onBlur={() => acceptFullEmail(email)}
+              onPaste={(event) => {
+                if (acceptFullEmail(event.clipboardData.getData("text"))) event.preventDefault();
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                event.stopPropagation();
+                submit();
+              }}
+            />
+            <LegacyEnhancedSelect
+              id="new-user-email-domain"
+              label="邮箱后缀"
+              value={selectedDomain}
+              options={domains.length
+                ? domains.map((domain) => ({ value: domain, label: `@${domain}` }))
+                : [{ value: "", label: emailDomainsLoading ? "正在加载后缀…" : "暂无可用后缀" }]}
+              disabled={pending || !emailDomainsReady}
+              onChange={(domain) => {
+                const parts = email.trim().split("@");
+                if (parts.length === 2) setEmail(parts[0]);
+                setEmailDomain(domain);
+                setEmailError("");
+              }}
+            />
+          </div>
+          {emailDomainsLoading ? <small role="status">正在读取企业邮箱后缀…</small>
+            : emailDomainsFailed ? <small role="alert">邮箱后缀加载失败。<Button type="link" size="small" onClick={onRetryEmailDomains}>重试</Button></small>
+              : !domains.length ? <small role="alert">尚未配置企业邮箱后缀，请先到<Link to="/configuration?group=品牌与身份&key=identity.allowed_email_domains" onClick={onCancel}>系统配置</Link>设置。</small>
+                : null}
+          {emailError ? <small className="user-email-error" id="new-user-email-error" role="alert">{emailError}</small> : null}
+        </div>
         <label className="field add-user-team-field">
           <span>所属团队</span>
           <LegacyEnhancedSelect
@@ -1692,7 +1870,13 @@ function CreateUserModal({
           />
           <small>可选；团队仅用于用量统计，不影响 CPA 自动分配。</small>
         </label>
-        <div className="inline-notice">系统会创建统一 API Key，并为用户设置系统默认初始密码。API Key 只显示一次；用户首次登录必须修改默认密码。</div>
+        <div className="inline-notice">
+          系统会创建统一 API Key，并为用户设置系统默认初始密码。
+          <br />
+          API Key 只显示一次；
+          <br />
+          用户首次登录必须修改默认密码。
+        </div>
         <LegacyFormError error={error} />
       </div>
     </Modal>
@@ -1768,61 +1952,6 @@ function LegacyConfirmModal({
         <div className="legacy-confirm-icon" aria-hidden="true">!</div>
         <h3>{title}</h3>
         <div className="legacy-confirm-message">{children}</div>
-      </div>
-    </Modal>
-  );
-}
-
-function SecretRevealModal({
-  value,
-  onClose
-}: {
-  value: SecretReveal | null;
-  onClose: () => void;
-}) {
-  const secrets = value
-    ? [
-        ...value.keys.map((key) => ({ account: key.account || "全部 CPA", user: key.user, value: key.key })),
-        ...(value.password ? [{ account: "使用中心默认初始密码", user: value.passwordUser ?? value.keys[0]?.user ?? "", value: value.password }] : [])
-      ]
-    : [];
-  const copyAll = () => {
-    if (!value) return;
-    const rows = [
-      ...value.keys.map((key) => `${key.label}\t${key.key}`),
-      ...(value.password ? [`${value.passwordUser ?? value.keys[0]?.user ?? "user"}:usage-password\t${value.password}`] : [])
-    ];
-    void copyText(rows.join("\n"));
-  };
-  return (
-    <Modal
-      className="legacy-secret-modal"
-      title={<LegacyDialogTitle title="保存新生成的凭据" kicker="ONE-TIME SECRET" />}
-      open={value !== null}
-      width={660}
-      centered
-      closeIcon={<span className="legacy-dialog-close" aria-hidden="true">×</span>}
-      transitionName=""
-      maskTransitionName=""
-      onCancel={onClose}
-      destroyOnHidden
-      mask={{ closable: false }}
-      footer={[
-        <Button key="copy-all" onClick={copyAll}>复制全部</Button>,
-        <Button key="saved" type="primary" onClick={onClose}>我已保存</Button>
-      ]}
-    >
-      <div className="warning-banner">{value?.message || "关闭后平台不会再次展示完整凭据。"}</div>
-      <div className="secret-list">
-        {secrets.map((secret, index) => (
-          <div className="secret-item" key={secret.account + ":" + index}>
-            <div className="secret-item-head"><strong>{secret.account}</strong><span>{secret.user}</span></div>
-            <div className="secret-value">
-              <code>{secret.value}</code>
-              <button className="secret-copy" type="button" onClick={() => void copyText(secret.value)}>复制</button>
-            </div>
-          </div>
-        ))}
       </div>
     </Modal>
   );
@@ -2384,16 +2513,16 @@ function TeamUsageContent({
               <span className="team-combination-progress">
                 <span className="account-model-progress" role="group" aria-label={model.model + " 各推理强度 Token 占比"}>
                   {model.efforts.map((effort) => {
-                    const lines = modelEffortTooltipLines(model.model, effort);
+                    const tooltip = modelEffortTooltipDetails(model.model, effort);
                     const shareUnits = Math.max(1, Math.min(100, Math.round(effort.sharePercent)));
                     return (
-                      <LegacyUsageTooltip key={effort.reasoning_effort} lines={lines}>
+                      <LegacyUsageTooltip key={effort.reasoning_effort} content={tooltip}>
                         {(events) => (
                           <button
                             {...events}
                             className={`account-model-progress-segment account-model-effort-${effortColorKey(effort.reasoning_effort)} account-model-share-tens-${Math.floor(shareUnits / 10)} account-model-share-ones-${shareUnits % 10}${effort.sharePercent < 18 ? " compact" : ""}`}
                             type="button"
-                            aria-label={lines.join("，")}
+                            aria-label={modelEffortTooltipText(tooltip)}
                           >
                             <span>{effort.reasoning_effort}</span>
                             <em>{effort.sharePercent.toFixed(1)}%</em>
@@ -2546,19 +2675,6 @@ function accountSortValue(account: UserAccountDetail, field: UserAccountSortFiel
   return account.usage.last_used_at || null;
 }
 
-function breakdownSortValue(row: UsageCombination, field: BreakdownSortField, totalWeighted: number): string | number | null {
-  const weighted = row.weighted_tokens ?? row.total_tokens;
-  if (field === "account") return row.account || "";
-  if (field === "combination") return row.model + ":" + row.reasoning_effort;
-  if (field === "success_count") return row.success_count;
-  if (field === "share") return totalWeighted > 0 ? weighted / totalWeighted : 0;
-  if (field === "total_tokens") return row.total_tokens;
-  if (field === "multiplier") return row.total_tokens > 0 ? weighted / row.total_tokens : 0;
-  if (field === "weighted_tokens") return weighted;
-  if (field === "average_total") return row.success_count > 0 ? row.total_tokens / row.success_count : 0;
-  return row.last_used_at || null;
-}
-
 function compareRows(
   left: string | number | null,
   right: string | number | null,
@@ -2617,12 +2733,6 @@ function formatUsageRatio(value: number | null | undefined, total: number | null
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format((Number(value) || 0) * 100 / denominator) + "%";
 }
 
-function usageCombinationLabel(row: UsageCombination) {
-  const model = row.model && row.model !== "unknown" ? row.model : "未上报模型";
-  const effort = row.reasoning_effort && row.reasoning_effort !== "unknown" ? row.reasoning_effort : "未上报";
-  return `${model}-${effort}`;
-}
-
 function usageWindowLabel(window: UsageWindow) {
   return {
     "3600": "1 小时",
@@ -2664,13 +2774,26 @@ function formatFullTimestamp(timestamp: number | null | undefined) {
   }).format(new Date(timestamp * 1000));
 }
 
-function formatLastUsed(timestamp: number | null | undefined) {
+function UserLastUsed({ timestamp }: { timestamp: number | null | undefined }) {
+  if (!timestamp || !Number.isFinite(timestamp) || timestamp <= 0) return <span className="user-last-used">从未使用</span>;
+  const label = formatLastUsed(timestamp, true);
+  return (
+    <time className="user-last-used" dateTime={new Date(timestamp * 1000).toISOString()} title={label}>
+      {label.replace(" ", "\n")}
+    </time>
+  );
+}
+
+function formatLastUsed(timestamp: number | null | undefined, full = false) {
   if (!timestamp) return "从未使用";
   return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: full ? "Asia/Shanghai" : undefined,
+    year: full ? "numeric" : undefined,
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: full ? "2-digit" : undefined,
     hour12: false
   }).format(new Date(timestamp * 1000));
 }
@@ -2718,9 +2841,4 @@ function errorMessage(error: unknown) {
 
 function isInteractiveRowTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest("button, a, input, select, textarea, label, [role='button']"));
-}
-
-async function copyText(value: string) {
-  if (!navigator.clipboard) return;
-  await navigator.clipboard.writeText(value);
 }

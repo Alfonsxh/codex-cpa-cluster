@@ -2464,7 +2464,7 @@ async function installUsageVisualBackend(page: Page, state: "normal" | "loading"
 // Opt-in documentation capture uses only the isolated, synthetic preview backend.
 test("文档深色截图", async ({ page }) => {
   test.skip(process.env.CPAP_DOC_SCREENSHOTS !== "1", "仅按需生成公开文档截图");
-  await page.setViewportSize({ width: 1440, height: 1440 });
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await setTheme(page, "dark");
   await page.route("**/admin/api/release*", (route) => fulfillJSON(route, {
     configured: true, status: "ok", current_version: "v2.0.0", latest_version: "v2.0.0", available: false, checked_at: 1787500800
@@ -2478,7 +2478,6 @@ test("文档深色截图", async ({ page }) => {
   };
   await login(page, "/admin/overview", "Token 使用");
   await capture("overview");
-  await page.setViewportSize({ width: 1440, height: 900 });
   await openRoute(page, routes[1]);
   await capture("accounts");
   await installUsageVisualBackend(page);

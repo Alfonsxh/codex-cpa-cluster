@@ -136,4 +136,4 @@ API Key 仍按需读取，退出登录和会话失效继续清理缓存。
 
 ## 公开文档截图
 
-运行 `npm --prefix frontend run docs:screenshots`，使用 Playwright 的隔离演示后端生成 `docs/assets/screenshot-{overview,accounts,usage}.png`，两个语言的 README 共享这些图片。截图固定为深色模式，账号和统计均来自合成测试数据；不要改接真实环境。发布前逐张检查图片，确认没有真实邮箱、Key、Webhook、内部域名或目标地址。日常浏览器矩阵仍覆盖深浅两种主题，不将测试基准图片作为产品截图发布。
+运行 `npm --prefix frontend run docs:screenshots`，使用 Playwright 的隔离演示后端生成 `docs/assets/screenshot-{overview,accounts,usage}.png`，两个语言的 README 共享这些图片。截图固定为 1920×1080 的深色模式视口，不缩放页面或拼接长图，账号和统计均来自合成测试数据；不要改接真实环境。发布前逐张检查图片，确认没有真实邮箱、Key、Webhook、内部域名或目标地址。日常浏览器矩阵仍覆盖深浅两种主题，不将测试基准图片作为产品截图发布。

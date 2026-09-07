@@ -188,7 +188,8 @@ export function ConfigurationPage({
     const group = searchParams.get("group") ?? "";
     const current = configurationCategories.find((item) => item.name === group);
     const legacy = current ? undefined : legacyConfigurationSection(group);
-    const destination = field?.group ?? section?.category ?? current?.name ?? legacy?.category ?? "品牌与身份";
+    const requestedCategory = field?.group ?? section?.category ?? current?.name ?? legacy?.category ?? "品牌与身份";
+    const destination = availableSections.some((item) => item.category === requestedCategory) ? requestedCategory : "品牌与身份";
     setCategory(destination);
     const targetSection = field?.section ?? section?.id ?? legacy?.id
       ?? availableSections.find((item) => item.category === destination)?.id ?? "";

@@ -51,6 +51,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs \
   CONTRIBUTING.md \
   LICENSE \
   README.md \
+  README.en.md \
   SECURITY.md \
   api \
   cmd \

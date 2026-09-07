@@ -2257,7 +2257,7 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 		t.Fatalf("manual notification = %d, %s", response.Code, response.Body.String())
 	}
 	if len(sender.contents) != 1 || !strings.Contains(sender.contents[0], "55% | 2 | 2") ||
-		!strings.Contains(sender.contents[0], "# Codex CPA · 账号额度报告") {
+		!strings.Contains(sender.contents[0], "# CCPA · 账号额度报告") {
 		t.Fatalf("manual notification content = %#v", sender.contents)
 	}
 	state, found, err := notifications.ReadRuntimeState(context.Background(), store)
@@ -2268,7 +2268,7 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "测试消息已发送") {
 		t.Fatalf("test notification = %d, %s", response.Code, response.Body.String())
 	}
-	if len(sender.contents) != 2 || !strings.Contains(sender.contents[1], "# Codex CPA · 通知测试") ||
+	if len(sender.contents) != 2 || !strings.Contains(sender.contents[1], "# ✅ CCPA · 通知测试") ||
 		!strings.Contains(sender.contents[1], "企业微信通知通道连接正常") ||
 		strings.Contains(sender.contents[1], "账号额度报告") || strings.Contains(sender.contents[1], "55%") {
 		t.Fatalf("test notification content = %#v", sender.contents)

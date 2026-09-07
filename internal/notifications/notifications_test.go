@@ -299,11 +299,12 @@ func TestWorkerScheduledReportAbsorbsTransitionsAndDisabledPreservesError(t *tes
 	store, activity, sender := workerFixtures()
 	store.settings["notification.daily_times"] = "09:01"
 	worker := &Worker{Store: store, Activity: activity, Sender: sender}
-	setQuota(store, "alpha", 40, "ok")
+	cycleEnd := fixedNow("Asia/Shanghai", 2026, 7, 20, 9, 1, 0)().Unix()
+	setQuota(store, "alpha", 40, "ok", cycleEnd)
 	runWorkerAt(t, worker, 9, 0, nil)
-	setQuota(store, "alpha", 4, "ok")
+	setQuota(store, "alpha", 4, "ok", cycleEnd+quota.WeeklyWindowSeconds)
 	runWorkerAt(t, worker, 9, 1, []string{"scheduled"})
-	if len(sender.contents) != 1 || !strings.Contains(sender.contents[0], "🔄 额度刷新") {
+	if len(sender.contents) != 1 || !strings.Contains(sender.contents[0], "🔄 周额度已重置") {
 		t.Fatalf("scheduled transition content = %#v", sender.contents)
 	}
 	state := store.notificationState(t)

@@ -57,6 +57,8 @@ describe("ConfigurationPage", () => {
     expect(screen.getByText("1 项未保存")).toBeInTheDocument();
     productName.focus();
     await user.keyboard("{Enter}");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "保存配置", exact: true }));
 
     expect(await screen.findByText("已保存 1 项配置")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));

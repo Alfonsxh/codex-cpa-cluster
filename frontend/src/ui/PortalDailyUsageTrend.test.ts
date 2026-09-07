@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PortalUsageTrend } from "../api/portal";
+import { formatUsageCombinationLabel } from "./usage-multiplier-labels";
 import {
   buildPortalTrendSeries,
   renderPortalTrendTooltip,
@@ -8,6 +9,32 @@ import {
 } from "./PortalDailyUsageTrend";
 
 describe("PortalDailyUsageTrend", () => {
+  it("labels model and reasoning multipliers from current settings without reweighting recorded usage", () => {
+    const trend = fixtureTrend("model_reasoning", [{
+      ...day("2026-08-29", "complete", 100, 150),
+      combinations: [{ model: "gpt-6-astra", reasoning_effort: "max", request_count: 1, total_tokens: 100, weighted_tokens: 150 }]
+    }]);
+    const multipliers = {
+      models: { "gpt-6-astra": 4, unknown: 1 },
+      reasoning_efforts: { xhigh: 1, max: 2, unknown: 1 }
+    };
+    trend.current_multipliers = multipliers;
+    expect(formatUsageCombinationLabel("gpt-6-astra", "xhigh", multipliers)).toBe("gpt-6-astra (×4) · xhigh");
+    expect(buildPortalTrendSeries(trend, "model_reasoning")[0]).toEqual({
+      name: "gpt-6-astra (×4) · max (×2)", values: [150]
+    });
+    expect(summarizePortalTrend(trend, "model_reasoning").items[1]?.value).toBe("gpt-6-astra (×4) · max (×2)");
+    multipliers.models["gpt-6-astra"] = 1;
+    multipliers.reasoning_efforts.max = 0.5;
+    expect(buildPortalTrendSeries(trend, "model_reasoning")[0]).toEqual({
+      name: "gpt-6-astra · max (×0.5)", values: [150]
+    });
+    expect(formatUsageCombinationLabel("GPT-6-ASTRA", "MAX", multipliers)).toBe("GPT-6-ASTRA · MAX (×0.5)");
+    multipliers.models.unknown = 1.5;
+    expect(formatUsageCombinationLabel("custom-model", "xhigh", multipliers)).toBe("custom-model (×1.5) · xhigh");
+    expect(formatUsageCombinationLabel("gpt-6-astra", "max")).toBe("gpt-6-astra · max");
+  });
+
   it("keeps uncollected days disconnected and summarizes weighted versus raw totals", () => {
     const trend = fixtureTrend("total", [
       day("2026-08-27", "uncollected", 0, 0),

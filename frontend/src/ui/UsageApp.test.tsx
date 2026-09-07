@@ -293,7 +293,8 @@ describe("UsageDashboard", () => {
     expect(screen.getByText("个人周用量")).toBeInTheDocument();
     expect(screen.getByText("加权已用 3 M / 20 M")).toBeInTheDocument();
     expect(screen.getByText("重置：1970/01/01 13:33")).toBeInTheDocument();
-    const quotaUpdated = screen.getByText("额度更新 1970/01/01 10:46:40");
+    const quotaUpdated = screen.getByRole("status", { name: "账号明细数据更新时间" });
+    expect(quotaUpdated).toHaveTextContent("数据更新1970/01/01 10:46:40");
     expect(quotaUpdated).toHaveClass("usage-updated");
     expect(quotaUpdated.parentElement).toHaveClass("usage-tab-toolbar-actions");
     expect(quotaUpdated.parentElement).toContainElement(screen.getByRole("button", { name: "刷新" }));
@@ -446,9 +447,9 @@ describe("UsageDashboard", () => {
     ));
     expect(screen.getByText("主要组合")).toBeInTheDocument();
     expect(screen.getAllByText("gpt-5.4 · high").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "未加权" })).toHaveAttribute("aria-pressed", "true");
-    await user.click(screen.getByRole("button", { name: "加权" }));
     expect(screen.getByRole("button", { name: "加权" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "未加权" }));
+    expect(screen.getByRole("button", { name: "未加权" })).toHaveAttribute("aria-pressed", "true");
     expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("user="))).toBe(false);
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/usage/me/key")).toBe(false);

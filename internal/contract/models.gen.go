@@ -2898,17 +2898,20 @@ type PortalSessionAuthenticated bool
 
 // PortalUsageTrend defines model for PortalUsageTrend.
 type PortalUsageTrend struct {
-	CollectionStartedAt int64                      `json:"collection_started_at"`
-	Days                []PortalUsageTrendDay      `json:"days"`
-	Definition          string                     `json:"definition"`
-	Dimension           PortalUsageTrendDimension  `json:"dimension"`
-	EffectiveStartAt    int64                      `json:"effective_start_at"`
-	GeneratedAt         int64                      `json:"generated_at"`
-	Window              PortalUsageTrendWindow     `json:"window"`
-	WindowDays          PortalUsageTrendWindowDays `json:"window_days"`
-	WindowEndAt         int64                      `json:"window_end_at"`
-	WindowStartAt       int64                      `json:"window_start_at"`
-	WindowTimezone      string                     `json:"window_timezone"`
+	CollectionStartedAt int64 `json:"collection_started_at"`
+
+	// CurrentMultipliers Current Configuration Center multipliers for display only; historical weighted Token totals retain their recorded multipliers.
+	CurrentMultipliers *UsageDisplayMultipliers   `json:"current_multipliers,omitempty"`
+	Days               []PortalUsageTrendDay      `json:"days"`
+	Definition         string                     `json:"definition"`
+	Dimension          PortalUsageTrendDimension  `json:"dimension"`
+	EffectiveStartAt   int64                      `json:"effective_start_at"`
+	GeneratedAt        int64                      `json:"generated_at"`
+	Window             PortalUsageTrendWindow     `json:"window"`
+	WindowDays         PortalUsageTrendWindowDays `json:"window_days"`
+	WindowEndAt        int64                      `json:"window_end_at"`
+	WindowStartAt      int64                      `json:"window_start_at"`
+	WindowTimezone     string                     `json:"window_timezone"`
 }
 
 // PortalUsageTrendWindowDays defines model for PortalUsageTrend.WindowDays.
@@ -3569,15 +3572,18 @@ type UpdateUserTeamsRequest struct {
 
 // UsageBreakdown defines model for UsageBreakdown.
 type UsageBreakdown struct {
-	Account             *string                 `json:"account"`
-	CollectionStartedAt int64                   `json:"collection_started_at"`
-	Combinations        []UsageCombination      `json:"combinations"`
-	Definition          string                  `json:"definition"`
-	EffectiveStartAt    int64                   `json:"effective_start_at"`
-	GeneratedAt         int64                   `json:"generated_at"`
-	Models              []UsageModelMetrics     `json:"models"`
-	ReasoningEfforts    []UsageReasoningMetrics `json:"reasoning_efforts"`
-	Totals              struct {
+	Account             *string            `json:"account"`
+	CollectionStartedAt int64              `json:"collection_started_at"`
+	Combinations        []UsageCombination `json:"combinations"`
+
+	// CurrentMultipliers Current Configuration Center multipliers for display only; historical weighted Token totals retain their recorded multipliers.
+	CurrentMultipliers *UsageDisplayMultipliers `json:"current_multipliers,omitempty"`
+	Definition         string                   `json:"definition"`
+	EffectiveStartAt   int64                    `json:"effective_start_at"`
+	GeneratedAt        int64                    `json:"generated_at"`
+	Models             []UsageModelMetrics      `json:"models"`
+	ReasoningEfforts   []UsageReasoningMetrics  `json:"reasoning_efforts"`
+	Totals             struct {
 		CachedTokens     int64  `json:"cached_tokens"`
 		FailedCount      int64  `json:"failed_count"`
 		InputTokens      int64  `json:"input_tokens"`
@@ -3623,6 +3629,12 @@ type UsageCombination struct {
 	SuccessCount    int64   `json:"success_count"`
 	TotalTokens     int64   `json:"total_tokens"`
 	WeightedTokens  *int64  `json:"weighted_tokens,omitempty"`
+}
+
+// UsageDisplayMultipliers Current Configuration Center multipliers for display only; historical weighted Token totals retain their recorded multipliers.
+type UsageDisplayMultipliers struct {
+	Models           map[string]float32 `json:"models"`
+	ReasoningEfforts map[string]float32 `json:"reasoning_efforts"`
 }
 
 // UsageMetrics defines model for UsageMetrics.

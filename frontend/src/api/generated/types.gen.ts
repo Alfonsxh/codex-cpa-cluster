@@ -927,6 +927,18 @@ export type UsageCombination = UsageMetrics & {
     reasoning_effort: string;
 };
 
+/**
+ * Current Configuration Center multipliers for display only; historical weighted Token totals retain their recorded multipliers.
+ */
+export type UsageDisplayMultipliers = {
+    models: {
+        [key: string]: number;
+    };
+    reasoning_efforts: {
+        [key: string]: number;
+    };
+};
+
 export type UsageBreakdown = {
     generated_at: number;
     window: number | string;
@@ -944,6 +956,7 @@ export type UsageBreakdown = {
     models: Array<UsageModelMetrics>;
     reasoning_efforts: Array<UsageReasoningMetrics>;
     combinations: Array<UsageCombination>;
+    current_multipliers?: UsageDisplayMultipliers;
 };
 
 export type PortalUsageTrendCombination = {
@@ -977,6 +990,7 @@ export type PortalUsageTrend = {
     collection_started_at: number;
     effective_start_at: number;
     days: Array<PortalUsageTrendDay>;
+    current_multipliers?: UsageDisplayMultipliers;
 };
 
 export type PortalLoginRequest = {

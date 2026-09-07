@@ -3495,6 +3495,18 @@ components:
             account: { type: string }
             model: { type: string }
             reasoning_effort: { type: string }
+    UsageDisplayMultipliers:
+      type: object
+      additionalProperties: false
+      description: Current Configuration Center multipliers for display only; historical weighted Token totals retain their recorded multipliers.
+      required: [models, reasoning_efforts]
+      properties:
+        models:
+          type: object
+          additionalProperties: { type: number, minimum: 0.1, maximum: 10 }
+        reasoning_efforts:
+          type: object
+          additionalProperties: { type: number, minimum: 0.1, maximum: 10 }
     UsageBreakdown:
       type: object
       required:
@@ -3540,6 +3552,8 @@ components:
         combinations:
           type: array
           items: { $ref: "#/components/schemas/UsageCombination" }
+        current_multipliers:
+          $ref: "#/components/schemas/UsageDisplayMultipliers"
     PortalUsageTrendCombination:
       type: object
       additionalProperties: false
@@ -3606,6 +3620,8 @@ components:
           minItems: 7
           maxItems: 90
           items: { $ref: "#/components/schemas/PortalUsageTrendDay" }
+        current_multipliers:
+          $ref: "#/components/schemas/UsageDisplayMultipliers"
     PortalLoginRequest:
       type: object
       additionalProperties: false

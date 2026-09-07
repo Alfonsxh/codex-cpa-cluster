@@ -26,6 +26,11 @@ export default defineConfig(({ mode }) => {
         "^/usage/(session|me)(?:/|$)": proxy(),
         "/site-config.json": proxy(),
         "/branding": proxy(),
+        // Vite prefixes asset URLs in index.html with the /usage/ base.
+        "/usage/portal/assets": {
+          ...proxy(),
+          rewrite: (path) => path.replace(/^\/usage/, "")
+        },
         "/portal/assets": proxy()
       }
     },

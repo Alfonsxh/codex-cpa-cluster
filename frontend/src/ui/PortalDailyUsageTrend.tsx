@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
+import { useSiteTimezone } from "./site-time";
 import * as echarts from "echarts/core";
 import { LineChart, type LineSeriesOption } from "echarts/charts";
 import {
@@ -27,6 +27,7 @@ import {
 import { formatTokenAmount, formatTokens } from "./formatters";
 import { usageChartColors } from "./components/UsageChart";
 import { useTheme } from "./ThemeProvider";
+import { formatUsageCombinationLabel as combinationLabel } from "./usage-multiplier-labels";
 
 echarts.use([LineChart, GridComponent, TooltipComponent, AriaComponent, SVGRenderer]);
 
@@ -57,18 +58,26 @@ type PortalTrendSummaryItem = {
 
 const directCombinationLimit = 9;
 
+export type PortalTrendUpdateStatus = {
+  updatedAt: number;
+  refreshing: boolean;
+  failed: boolean;
+};
+
 export function PortalDailyUsageTrend({
   expanded,
   window,
-  onSessionExpired
+  onSessionExpired,
+  onUpdateStatusChange
 }: {
   expanded: boolean;
   window: PortalUsageTrendWindow;
   onSessionExpired: () => void;
+  onUpdateStatusChange?: (status: PortalTrendUpdateStatus) => void;
 }) {
   useSiteTimezone();
   const [dimension, setDimension] = useState<PortalUsageTrendDimension>("total");
-  const [modelMetric, setModelMetric] = useState<PortalTrendMetric>("total");
+  const [modelMetric, setModelMetric] = useState<PortalTrendMetric>("weighted");
   const query = useQuery({
     queryKey: portalUsageTrendQueryKey(window, dimension),
     queryFn: ({ signal }) => readPortalUsageTrend(window, dimension, signal),
@@ -82,6 +91,14 @@ export function PortalDailyUsageTrend({
   useEffect(() => {
     if (query.error instanceof ApiError && query.error.status === 401) onSessionExpired();
   }, [onSessionExpired, query.error]);
+
+  useEffect(() => {
+    onUpdateStatusChange?.({
+      updatedAt: query.data?.generated_at ?? 0,
+      refreshing: query.isFetching,
+      failed: query.isError
+    });
+  }, [onUpdateStatusChange, query.data?.generated_at, query.isFetching, query.isError]);
 
   const summary = useMemo(
     () => summarizePortalTrend(query.data, dimension),
@@ -113,7 +130,6 @@ export function PortalDailyUsageTrend({
               ].filter(Boolean).join(" ")} key={item.label}>
                 <span>{item.label}</span>
                 {item.value ? <strong title={item.title}>{query.isPending ? "—" : item.value}</strong> : null}
-                {combinationCount ? <time className="usage-trend-combination-updated">{query.data ? `数据更新 ${formatTrendTimestamp(query.data.generated_at)}` : "正在读取趋势"}</time> : null}
                 {item.values ? (
                   <div className="usage-trend-summary-values">
                     {item.values.map((value) => (
@@ -141,7 +157,6 @@ export function PortalDailyUsageTrend({
           })}
         </div>
 
-        {dimension === "total" ? <time className="usage-trend-updated">{query.data ? `数据更新 ${formatTrendTimestamp(query.data.generated_at)}` : "正在读取趋势"}</time> : null}
       </header>
 
       {expanded ? (
@@ -307,8 +322,8 @@ function PortalTrendChart({
         </div> : null}
         {dimension === "model_reasoning" ? (
           <div className="usage-trend-metric-switch" role="group" aria-label="模型趋势统计口径">
-            <button type="button" data-metric="total" aria-pressed={modelMetric === "total"} onClick={() => onModelMetricChange("total")}><i aria-hidden="true" /><span>未加权</span></button>
             <button type="button" data-metric="weighted" aria-pressed={modelMetric === "weighted"} onClick={() => onModelMetricChange("weighted")}><i aria-hidden="true" /><span>加权</span></button>
+            <button type="button" data-metric="total" aria-pressed={modelMetric === "total"} onClick={() => onModelMetricChange("total")}><i aria-hidden="true" /><span>未加权</span></button>
           </div>
         ) : null}
       </div>
@@ -373,7 +388,7 @@ export function buildPortalTrendSeries(
     modelMetric === "total" ? item.total_tokens : item.weighted_tokens
   );
   const result = direct.map(([key, identity]) => ({
-    name: combinationLabel(identity.model, identity.effort),
+    name: combinationLabel(identity.model, identity.effort, trend.current_multipliers),
     values: trend.days.map((day) => visibleValue(day.collection_state, day.combinations
       .filter((item) => combinationKey(item.model, item.reasoning_effort) === key)
       .reduce((sum, item) => sum + metricValue(item), 0)))
@@ -414,7 +429,7 @@ export function summarizePortalTrend(
   for (const day of trend.days) {
     for (const item of day.combinations) {
       const key = combinationKey(item.model, item.reasoning_effort);
-      const current = combinations.get(key) ?? { label: combinationLabel(item.model, item.reasoning_effort), raw: 0, weighted: 0 };
+      const current = combinations.get(key) ?? { label: combinationLabel(item.model, item.reasoning_effort, trend.current_multipliers), raw: 0, weighted: 0 };
       current.raw += item.total_tokens;
       current.weighted += item.weighted_tokens;
       combinations.set(key, current);
@@ -513,24 +528,9 @@ function combinationKey(model: string, effort: string) {
   return `${model}\u0000${effort}`;
 }
 
-function combinationLabel(model: string, effort: string) {
-  return `${model || "unknown"} · ${effort || "unknown"}`;
-}
-
 function formatTrendDate(date: string) {
   const [, month = "", day = ""] = date.split("-");
   return `${Number(month)}月${Number(day)}日`;
-}
-
-function formatTrendTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(new Date(timestamp * 1000));
 }
 
 function errorMessage(error: unknown) {

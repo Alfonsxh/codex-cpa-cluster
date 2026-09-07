@@ -29,9 +29,10 @@ import {
 } from "../api/portal";
 import type { UsageBreakdown, UsageCombination, UsageMetrics } from "../api/generated";
 import { PortalClientConfigModal, type PortalClientConfigMode } from "./PortalClientConfigModal";
-import { PortalDailyUsageTrend } from "./PortalDailyUsageTrend";
+import { PortalDailyUsageTrend, type PortalTrendUpdateStatus } from "./PortalDailyUsageTrend";
 import { NativeTableViewport } from "./components/NativeTableViewport";
 import { formatTokenAmount, formatTokens } from "./formatters";
+import { formatUsageCombinationLabel, formatUsageModelLabel, formatUsageReasoningLabel } from "./usage-multiplier-labels";
 
 type SortField = "current" | "account" | "quota" | "active_users" | "status" | "requests" | "tokens" | "last_used";
 type SortState = { field: SortField; direction: "asc" | "desc"; pinCurrent: boolean };
@@ -53,7 +54,8 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [primarySection, setPrimarySection] = useState<PrimarySection>("accounts");
   const [trendWindow, setTrendWindow] = useState<PortalUsageTrendWindow>("30d");
-  const compactTabs = useMediaQuery("(max-width: 900px)");
+  const [trendUpdateStatus, setTrendUpdateStatus] = useState<PortalTrendUpdateStatus>({ updatedAt: 0, refreshing: false, failed: false });
+  const compactTabs = useMediaQuery("(max-width: 1120px)");
   const [showKey, setShowKey] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyValue, setKeyValue] = useState("");
@@ -269,13 +271,14 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
           destroyOnHidden={false}
           onChange={(key) => setPrimarySection(key as PrimarySection)}
           tabBarExtraContent={compactTabs ? undefined : primarySection === "trend" ? (
-            <TrendWindowControl window={trendWindow} onChange={setTrendWindow} />
+            <TrendWindowControl window={trendWindow} onChange={setTrendWindow} updateStatus={trendUpdateStatus} />
           ) : (
             <AccountWindowControl
               window={window}
               onChange={setWindow}
               refreshing={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
-              loading={accounts.isFetching && !accounts.isPending}
+              loading={accounts.isFetching || quota.isFetching}
+              failed={accounts.isError || quota.isError}
               updatedAt={accounts.data?.generated_at ?? quota.data?.generated_at ?? 0}
               onRefresh={refresh}
             />
@@ -286,8 +289,8 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
               label: (
                 <span className="usage-primary-tab-label">
                   <span className="usage-primary-tab-dot" aria-hidden="true" />
-                  账号明细
-                  <span className="usage-primary-tab-count" aria-hidden="true">{accounts.isPending ? "…" : sortedAccounts.length}</span>
+                  <span className="usage-primary-tab-text">账号明细</span>
+                  <span className="usage-primary-tab-count" aria-hidden="true"><span>{accounts.isPending ? "…" : sortedAccounts.length}</span></span>
                 </span>
               ),
               children: (
@@ -297,7 +300,8 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
                     window={window}
                     onChange={setWindow}
                     refreshing={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
-                    loading={accounts.isFetching && !accounts.isPending}
+                    loading={accounts.isFetching || quota.isFetching}
+                    failed={accounts.isError || quota.isError}
                     updatedAt={accounts.data?.generated_at ?? quota.data?.generated_at ?? 0}
                     onRefresh={refresh}
                   /> : null}
@@ -347,14 +351,15 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
             },
             {
               key: "trend",
-              label: <span className="usage-primary-tab-label"><span className="usage-primary-tab-dot" aria-hidden="true" />每日用量</span>,
+              label: <span className="usage-primary-tab-label"><span className="usage-primary-tab-dot" aria-hidden="true" /><span className="usage-primary-tab-text">每日用量</span></span>,
               children: (
                 <>
-                  {compactTabs ? <TrendWindowControl className="usage-mobile-panel-actions" window={trendWindow} onChange={setTrendWindow} /> : null}
+                  {compactTabs ? <TrendWindowControl className="usage-mobile-panel-actions" window={trendWindow} onChange={setTrendWindow} updateStatus={trendUpdateStatus} /> : null}
                   <PortalDailyUsageTrend
                     expanded={primarySection === "trend"}
                     window={trendWindow}
                     onSessionExpired={onSessionExpired}
+                    onUpdateStatusChange={setTrendUpdateStatus}
                   />
                 </>
               )
@@ -401,17 +406,22 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
 function TrendWindowControl({
   className = "",
   window,
-  onChange
+  onChange,
+  updateStatus
 }: {
   className?: string;
   window: PortalUsageTrendWindow;
   onChange: (window: PortalUsageTrendWindow) => void;
+  updateStatus: PortalTrendUpdateStatus;
 }) {
   return (
-    <div className={`usage-trend-windows ${className}`.trim()} role="group" aria-label="每日趋势时间范围">
-      {portalTrendWindowOptions.map((option) => (
-        <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => onChange(option.value)}>{option.label}</button>
-      ))}
+    <div className={`usage-trend-toolbar-actions ${className}`.trim()}>
+      <UsageUpdateBadge scope="每日用量" {...updateStatus} />
+      <div className="usage-trend-windows" role="group" aria-label="每日趋势时间范围">
+        {portalTrendWindowOptions.map((option) => (
+          <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => onChange(option.value)}>{option.label}</button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -422,6 +432,7 @@ function AccountWindowControl({
   onChange,
   refreshing,
   loading,
+  failed,
   updatedAt,
   onRefresh
 }: {
@@ -430,11 +441,13 @@ function AccountWindowControl({
   onChange: (window: PortalUsageWindow) => void;
   refreshing: boolean;
   loading: boolean;
+  failed: boolean;
   updatedAt: number;
   onRefresh: () => void;
 }) {
   return (
     <div className={`usage-toolbar-actions usage-tab-toolbar-actions ${className}`.trim()}>
+      <UsageUpdateBadge scope="账号明细" updatedAt={updatedAt} refreshing={loading} failed={failed} />
       <div className="usage-window-switcher" role="group" aria-label="统计时间范围">
         {portalWindowOptions.map((option) => (
           <button type="button" key={option.value} aria-pressed={window === option.value} onClick={() => onChange(option.value)}>{option.label}</button>
@@ -443,9 +456,20 @@ function AccountWindowControl({
       <button className="usage-refresh-button" type="button" disabled={refreshing} onClick={onRefresh}>
         {loading ? "刷新中…" : "刷新"}
       </button>
-      <time className="usage-updated">额度更新 {formatServerTimestamp(updatedAt, { withSeconds: true })}</time>
     </div>
   );
+}
+
+function UsageUpdateBadge({ scope, updatedAt, refreshing, failed }: PortalTrendUpdateStatus & { scope: string }) {
+  const hasTimestamp = Number.isFinite(updatedAt) && updatedAt > 0;
+  const state = refreshing ? "loading" : failed ? "error" : hasTimestamp ? "ready" : "empty";
+  return <div className="usage-updated" role="status" aria-label={`${scope}数据更新时间`} data-state={state}>
+    <span className="usage-update-dot" aria-hidden="true" />
+    <span className="usage-update-label">{refreshing ? "更新中" : failed ? "更新失败" : "数据更新"}</span>
+    <time key={updatedAt} className="usage-update-time" dateTime={hasTimestamp ? new Date(updatedAt * 1000).toISOString() : undefined}>
+      {hasTimestamp ? formatServerTimestamp(updatedAt, { withSeconds: true }) : refreshing ? "正在读取…" : "暂无数据"}
+    </time>
+  </div>;
 }
 
 function useMediaQuery(query: string) {
@@ -551,7 +575,7 @@ function AccountRows({ account, index, currentGroup, window, expanded, onToggle,
       <tr className={`usage-summary-row ${current ? "current" : ""}`.trim()} aria-expanded={expanded} tabIndex={0} onKeyDown={rowKeyDown} onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a")) onToggle(); }}>
         <td className="table-index-cell" data-label="序号">{index + 1}</td>
         <td data-label="当前账号">
-          {current ? <span className="usage-current-mark" title="当前账号">✓<span className="sr-only">当前账号</span></span> : <button className="usage-select-button" type="button" disabled={!account.selectable || !account.status.selectable} title={account.status.reason} onClick={onSwitch}>{currentGroup ? "切换" : "选择"}</button>}
+          {current ? <span className="usage-current-mark" title="当前账号"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7" /></svg><span className="sr-only">当前账号</span></span> : <button className="usage-select-button" type="button" disabled={!account.selectable || !account.status.selectable} title={account.status.reason} onClick={onSwitch}>{currentGroup ? "切换" : "选择"}</button>}
         </td>
         <td data-label="CPA 账号"><strong className="usage-account-id" title={accountLabel(account)}>{accountLabel(account)}</strong></td>
         <td data-label="账号周额度">
@@ -609,7 +633,10 @@ function UsageTokenGrid({ metrics }: { metrics: UsageMetrics }) {
       <TokenMetric label="输入 Token" value={metrics.input_tokens} />
       <TokenMetric label="输出 Token" value={metrics.output_tokens} />
       <TokenMetric label="推理 Token" value={metrics.reasoning_tokens} />
-      <Metric label="缓存率" value={cacheRate} />
+      <div className="usage-cache-metric">
+        <span>缓存率</span>
+        <div className="usage-metric-value"><strong className="usage-cache-rate" title="缓存 Token ÷ 输入 Token">{cacheRate}</strong></div>
+      </div>
       <TokenMetric label="未加权 Token" value={metrics.total_tokens} />
       <TokenMetric label="加权 Token" value={metrics.weighted_tokens ?? metrics.total_tokens} />
     </div>
@@ -617,7 +644,7 @@ function UsageTokenGrid({ metrics }: { metrics: UsageMetrics }) {
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
-  return <div><span>{label}</span><strong>{value}</strong></div>;
+  return <div><span>{label}</span><div className="usage-metric-value"><strong>{value}</strong></div></div>;
 }
 
 function TokenMetric({ label, value }: { label: string; value: number }) {
@@ -625,8 +652,10 @@ function TokenMetric({ label, value }: { label: string; value: number }) {
   return (
     <div>
       <span>{label}</span>
-      <strong>{formatTokens(safeValue)}</strong>
-      {safeValue >= 1_000 ? <small className="usage-token-raw">{formatNumber(safeValue)} Token</small> : null}
+      <div className="usage-metric-value">
+        <strong>{formatTokens(safeValue)}</strong>
+        {safeValue >= 1_000 ? <small className="usage-token-raw">{formatNumber(safeValue)} Token</small> : null}
+      </div>
     </div>
   );
 }
@@ -646,29 +675,32 @@ function ModelBreakdown({ data, window }: { data: UsageBreakdown; window: Portal
   if (models.length === 0) return <div className="account-model-usage-message">当前范围暂无我的模型与推理强度 Token 数据。</div>;
   return (
     <div className="account-model-usage-list">
-      {models.map((model) => (
-        <div className="account-model-usage-row" key={model.name}>
-          <div className="account-model-usage-head">
-            <strong className="account-model-name" title={model.name}>{model.name}</strong>
-            <span className="account-model-token">{formatTokens(model.total)}</span>
+      {models.map((model) => {
+        const modelLabel = formatUsageModelLabel(model.name, data.current_multipliers);
+        return (
+          <div className="account-model-usage-row" key={model.name}>
+            <div className="account-model-usage-head">
+              <strong className="account-model-name" title={modelLabel}>{modelLabel}</strong>
+              <span className="account-model-token">{formatTokens(model.total)}</span>
+            </div>
+            <div className="account-model-progress" role="group" aria-label={`${modelLabel} 各推理强度 Token 占比`}>
+              {model.efforts.map((effort) => (
+                <Tooltip
+                  key={effort.reasoning_effort}
+                  title={<ModelEffortTooltip model={model.name} effort={effort} window={window} multipliers={data.current_multipliers} />}
+                  trigger={["hover", "focus"]}
+                  placement="top"
+                  rootClassName="usage-model-effort-popup"
+                >
+                  <button className={`account-model-progress-segment account-model-effort-${effortColorKey(effort.reasoning_effort)} ${effort.share < 18 ? "compact" : ""}`.trim()} style={{ flexGrow: Math.max(1, Math.round(effort.share)) }} type="button" aria-label={`查看 ${modelLabel} ${formatUsageReasoningLabel(effort.reasoning_effort, data.current_multipliers)} 推理强度 Token 明细`}>
+                    <span>{formatUsageReasoningLabel(effort.reasoning_effort, data.current_multipliers)}</span><em>{formatPercent(effort.share)}</em>
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
           </div>
-          <div className="account-model-progress" role="group" aria-label={`${model.name} 各推理强度 Token 占比`}>
-            {model.efforts.map((effort) => (
-              <Tooltip
-                key={effort.reasoning_effort}
-                title={<ModelEffortTooltip model={model.name} effort={effort} window={window} />}
-                trigger={["hover", "focus"]}
-                placement="top"
-                rootClassName="usage-model-effort-popup"
-              >
-                <button className={`account-model-progress-segment account-model-effort-${effortColorKey(effort.reasoning_effort)} ${effort.share < 18 ? "compact" : ""}`.trim()} style={{ flexGrow: Math.max(1, Math.round(effort.share)) }} type="button" aria-label={`查看 ${model.name} ${effort.reasoning_effort} 推理强度 Token 明细`}>
-                  <span>{effort.reasoning_effort}</span><em>{formatPercent(effort.share)}</em>
-                </button>
-              </Tooltip>
-            ))}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -682,10 +714,10 @@ function groupModelCombinations(combinations: UsageCombination[]) {
   }).sort((left, right) => right.total - left.total || left.name.localeCompare(right.name));
 }
 
-function ModelEffortTooltip({ model, effort, window }: { model: string; effort: UsageCombination & { share: number }; window: PortalUsageWindow }) {
+function ModelEffortTooltip({ model, effort, window, multipliers }: { model: string; effort: UsageCombination & { share: number }; window: PortalUsageWindow; multipliers: UsageBreakdown["current_multipliers"] }) {
   return (
     <div className="usage-model-effort-tooltip">
-      <strong>{model} · {effort.reasoning_effort}</strong>
+      <strong>{formatUsageCombinationLabel(model, effort.reasoning_effort, multipliers)}</strong>
       <span><b>统计范围</b><em>{windowLabel(window)}</em></span>
       <span><b>该模型加权占比</b><em>{formatPercent(effort.share)}</em></span>
       <span><b>调用</b><em>{formatNumber(effort.request_count)}</em></span>

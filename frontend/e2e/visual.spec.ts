@@ -612,7 +612,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   expect(sectionTabRects.every((tab) => tab.left >= detailFrameRect.left && tab.right <= detailFrameRect.right)).toBe(true);
   await expect(page.locator(".usage-section-switcher")).toHaveCount(0);
 
-  const initialAccountActions = page.locator(".ant-tabs-extra-content .usage-tab-toolbar-actions");
+  const initialAccountActions = page.locator(".usage-mobile-panel-actions.usage-tab-toolbar-actions");
   await expect(initialAccountActions).toBeVisible();
   await page.getByRole("tab", { name: "每日用量" }).click();
   await expect(chart).toBeVisible();
@@ -620,12 +620,14 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   expect(chartCanvasRect.height).toBeGreaterThan(300);
   expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeGreaterThanOrEqual(0);
   expect(detailFrameRect.bottom - chartCanvasRect.bottom).toBeLessThanOrEqual(16);
-  const trendTabActions = page.locator(".ant-tabs-extra-content .usage-trend-windows");
+  const trendTabActions = page.locator(".usage-mobile-panel-actions.usage-trend-toolbar-actions");
   await expect(trendTabActions).toBeVisible();
   expect(await trendTabActions.evaluate((element) => {
     const action = element.getBoundingClientRect();
-    const navigation = element.closest(".ant-tabs-nav")?.getBoundingClientRect();
-    return Boolean(navigation && action.top >= navigation.top && action.bottom <= navigation.bottom && action.right <= navigation.right);
+    const section = element.closest(".usage-detail-sections");
+    const navigation = section?.querySelector(".ant-tabs-nav")?.getBoundingClientRect();
+    const frame = section?.getBoundingClientRect();
+    return Boolean(navigation && frame && action.top >= navigation.bottom && action.bottom <= frame.bottom && action.right <= frame.right);
   })).toBe(true);
   await expect.poll(() => trendRequests).toEqual([
     "/usage/me/usage-trend?window=30d&dimension=total"
@@ -680,7 +682,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   await expect(page.getByText("主要组合", { exact: true })).toBeVisible();
   await expect(page.getByLabel("趋势图例")).toHaveCount(0);
   await expect(page.getByText("趋势口径", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "未加权", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "加权", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(trendSummary.getByText("未加权", { exact: true })).toHaveCount(2);
   await expect(trendSummary.getByText("加权", { exact: true })).toHaveCount(2);
   const metricSwitchLayout = await page.locator(".usage-trend-metric-switch button").evaluateAll((buttons) => buttons.map((button) => {
@@ -707,19 +709,16 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   const combinationCountLayout = await page.locator(".usage-trend-summary .combination-count").evaluate((card) => {
     const label = card.querySelector<HTMLElement>(":scope > span");
     const count = card.querySelector<HTMLElement>(":scope > strong");
-    const updated = card.querySelector<HTMLElement>(":scope > time");
-    if (!label || !count || !updated) return null;
+    if (!label || !count) return null;
     const cardRect = card.getBoundingClientRect();
     const labelRect = label.getBoundingClientRect();
     const countRect = count.getBoundingClientRect();
-    const updatedRect = updated.getBoundingClientRect();
     return {
       count: count.textContent,
-      updated: updated.textContent,
-      sameLine: Math.max(labelRect.bottom, countRect.bottom, updatedRect.bottom) - Math.min(labelRect.top, countRect.top, updatedRect.top) <= Math.max(labelRect.height, countRect.height, updatedRect.height) + 2,
-      ordered: labelRect.right <= countRect.left && countRect.right <= updatedRect.left,
-      inside: updatedRect.right <= cardRect.right + 1,
-      clipped: updated.scrollWidth > updated.clientWidth
+      sameLine: Math.max(labelRect.bottom, countRect.bottom) - Math.min(labelRect.top, countRect.top) <= Math.max(labelRect.height, countRect.height) + 2,
+      ordered: labelRect.right <= countRect.left,
+      inside: countRect.right <= cardRect.right + 1,
+      clipped: count.scrollWidth > count.clientWidth
     };
   });
   expect(combinationCountLayout).toEqual(expect.objectContaining({
@@ -729,7 +728,8 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
     inside: true,
     clipped: false
   }));
-  expect(combinationCountLayout?.updated).toMatch(/^数据更新 /);
+  await expect(page.getByRole("status", { name: "每日用量数据更新时间" })).toHaveText(/数据更新\s*\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
+  await expect(page.locator(".usage-trend-card time")).toHaveCount(0);
   const primaryCombination = page.locator(".usage-trend-summary .primary-combination > strong");
   await expect(primaryCombination).toHaveText("gpt-5.6-sol · xhigh");
   expect(await primaryCombination.evaluate((element) => ({
@@ -742,6 +742,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   expect(Math.min(...axisFontSizes)).toBeGreaterThanOrEqual(10);
   expect(Math.max(...axisFontSizes)).toBeGreaterThanOrEqual(11);
 
+  await page.getByRole("button", { name: "未加权", exact: true }).click();
   await chart.focus();
   const tooltipOuter = page.locator(".usage-trend-echarts-tooltip");
   const tooltip = page.locator(".usage-trend-tooltip[data-active=true]");
@@ -800,12 +801,14 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   const accountFrameRect = await page.locator(".usage-detail-sections").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - accountFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - accountFrameRect.right)).toBeLessThanOrEqual(1);
-  const accountTabActions = page.locator(".ant-tabs-extra-content .usage-tab-toolbar-actions");
+  const accountTabActions = page.locator(".usage-mobile-panel-actions.usage-tab-toolbar-actions");
   await expect(accountTabActions).toBeVisible();
   expect(await accountTabActions.evaluate((element) => {
     const action = element.getBoundingClientRect();
-    const navigation = element.closest(".ant-tabs-nav")?.getBoundingClientRect();
-    return Boolean(navigation && action.top >= navigation.top && action.bottom <= navigation.bottom && action.right <= navigation.right);
+    const section = element.closest(".usage-detail-sections");
+    const navigation = section?.querySelector(".ant-tabs-nav")?.getBoundingClientRect();
+    const frame = section?.getBoundingClientRect();
+    return Boolean(navigation && frame && action.top >= navigation.bottom && action.bottom <= frame.bottom && action.right <= frame.right);
   })).toBe(true);
   await page.getByRole("button", { name: "使用明细" }).click();
   const detailMetricsLayout = await page.locator(".usage-detail-panel").evaluate((panel) => {
@@ -820,6 +823,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
     const headingRect = heading.getBoundingClientRect();
     return {
       headingWidth: headingRect.width,
+      panelWidth: panel.getBoundingClientRect().width,
       labelClipped: cacheLabel.scrollWidth > cacheLabel.clientWidth,
       cacheValue: cacheValue.textContent?.trim(),
       cacheCellText: cacheCell.textContent?.trim(),
@@ -832,7 +836,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
     };
   });
   expect(detailMetricsLayout).not.toBeNull();
-  expect(detailMetricsLayout?.headingWidth).toBeLessThanOrEqual(130);
+  expect(detailMetricsLayout?.headingWidth).toBeCloseTo((detailMetricsLayout?.panelWidth ?? 0) - 2, 0);
   expect(detailMetricsLayout?.labelClipped).toBe(false);
   expect(detailMetricsLayout?.cacheValue).toMatch(/%$/);
   expect(detailMetricsLayout?.cacheCellText).not.toContain("缓存 Token");
@@ -1170,21 +1174,18 @@ test("使用中心横向 Tab 在桌面、窄屏与移动端完整利用内容宽
       expect(geometry.tabs.every((tab) => tab.left >= geometry.contentLeft && tab.right <= geometry.contentRight)).toBe(true);
       expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth);
       await expect(page.getByRole("tab", { name: section === "trend" ? "每日用量" : "账号明细" })).toHaveAttribute("aria-selected", "true");
-      const sectionActions = page.locator(viewport.width <= 900
-        ? `.usage-mobile-panel-actions.${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`
-        : `.ant-tabs-extra-content .${section === "trend" ? "usage-trend-windows" : "usage-tab-toolbar-actions"}`);
+      const sectionActions = page.locator(viewport.width <= 1120
+        ? `.usage-mobile-panel-actions.${section === "trend" ? "usage-trend-toolbar-actions" : "usage-tab-toolbar-actions"}`
+        : `.ant-tabs-extra-content .${section === "trend" ? "usage-trend-toolbar-actions" : "usage-tab-toolbar-actions"}`);
       await expect(sectionActions).toBeVisible();
-      if (section === "accounts") {
-        const quotaUpdated = sectionActions.locator(".usage-updated");
-        await expect(quotaUpdated).toHaveText(/额度更新 \d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
-        expect(await sectionActions.evaluate((toolbar) => {
-          const button = toolbar.querySelector<HTMLElement>(".usage-refresh-button")?.getBoundingClientRect();
-          const updated = toolbar.querySelector<HTMLElement>(".usage-updated")?.getBoundingClientRect();
-          return Boolean(button && updated
-            && updated.top >= button.bottom
-            && Math.abs(button.right - updated.right) <= 1);
-        })).toBe(true);
-      }
+      await expect(sectionActions.locator(".usage-updated")).toHaveText(/数据更新\s*\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
+      expect(await sectionActions.evaluate((toolbar) => {
+        const controls = toolbar.querySelector<HTMLElement>(".usage-window-switcher, .usage-trend-windows")?.getBoundingClientRect();
+        const updated = toolbar.querySelector<HTMLElement>(".usage-updated")?.getBoundingClientRect();
+        return Boolean(controls && updated && (window.innerWidth <= 680
+          ? updated.bottom <= controls.top
+          : updated.right <= controls.left));
+      })).toBe(true);
       const centeredControls = page.locator(section === "trend"
         ? ".usage-trend-dimensions button, .usage-trend-windows:visible button"
         : ".usage-window-switcher:visible button");

@@ -193,17 +193,11 @@ func buildConfigurationDefinitions() []configurationDefinition {
 			model.Default, 0.1, 10, "quota",
 		))
 	}
-	for _, effort := range []struct {
-		name     string
-		fallback float64
-	}{
-		{"none", 1}, {"minimal", 1}, {"low", 1}, {"medium", 1}, {"high", 1},
-		{"xhigh", 1}, {"max", 2}, {"ultra", 3}, {"auto", 1}, {"unknown", 1},
-	} {
+	for _, effort := range usage.ReasoningMultiplierDefinitions() {
 		definitions = append(definitions, number(
-			"user_quota.reasoning_multiplier."+effort.name,
-			strings.ToUpper(effort.name[:1])+effort.name[1:]+" 推理强度倍率",
-			effort.fallback, 0.1, 10, "quota",
+			usage.ReasoningMultiplierSettingKey(effort.Effort),
+			strings.ToUpper(effort.Effort[:1])+effort.Effort[1:]+" 推理强度倍率",
+			effort.Default, 0.1, 10, "quota",
 		))
 	}
 	for _, effort := range []struct {

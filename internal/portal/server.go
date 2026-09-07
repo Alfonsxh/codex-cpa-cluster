@@ -624,6 +624,11 @@ func (server *Server) readUsageBreakdown(c *gin.Context) {
 		server.internalError(c, "read portal usage breakdown", err)
 		return
 	}
+	multipliers, err := server.currentUsageMultipliers(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read current usage multipliers", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"generated_at": server.now().Unix(), "window": window.Name,
 		"window_seconds": window.Seconds, "window_start_at": window.StartAt,
@@ -634,6 +639,7 @@ func (server *Server) readUsageBreakdown(c *gin.Context) {
 		"effective_start_at":    breakdown.EffectiveStartAt,
 		"totals":                breakdown.Totals, "models": breakdown.Models,
 		"reasoning_efforts": breakdown.ReasoningEfforts, "combinations": breakdown.Combinations,
+		"current_multipliers": multipliers,
 	})
 }
 
@@ -679,6 +685,11 @@ func (server *Server) readUsageTrend(c *gin.Context) {
 		server.internalError(c, "read portal daily usage trend", err)
 		return
 	}
+	multipliers, err := server.currentUsageMultipliers(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read current usage multipliers", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"generated_at": server.now().Unix(), "window": window, "window_days": trend.WindowDays,
 		"window_start_at": trend.WindowStartAt, "window_end_at": trend.WindowEndAt,
@@ -687,6 +698,7 @@ func (server *Server) readUsageTrend(c *gin.Context) {
 		"collection_started_at": trend.CollectionStartedAt,
 		"effective_start_at":    trend.EffectiveStartAt,
 		"days":                  trend.Days,
+		"current_multipliers":   multipliers,
 	})
 }
 

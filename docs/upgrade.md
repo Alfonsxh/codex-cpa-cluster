@@ -7,10 +7,10 @@ Python v1 首次切换到 Go v2 必须先完成 [保留数据迁移方案](pytho
 已经初始化的目标直接执行：
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
 ```
 
-Codex CPA Pool 继续使用现有 GitHub 发行源，安装器可读取历史发布归档。以下路径以新默认运维根目录 `/home/ccpa` 为例；历史 `/home/cpac` 安装继续原址运行，执行命令时使用其实际根目录，不迁移运行数据。新 `CPAP_*` 参数与配置兼容旧 `CPAC_*`；升级只替换既有 `target.env` 的 Control、Web、Gateway、Edge 四个镜像字段，保留目标身份、网络、端口与维护确认配置，Nginx 配置和 `external` 提示使用该文件的实际 `CPA_PUBLIC_PORT`（`18317` 仅为新安装默认值）。指定历史 Release 附带旧安装器时，会保留当前 Pool 安装器，避免退回旧安装协议。
+从 Codex CPA Pool 的 GitHub Releases 下载升级脚本，安装器可读取历史发布归档。以下路径以新默认运维根目录 `/home/ccpa` 为例；历史 `/home/cpac` 安装继续原址运行，执行命令时使用其实际根目录，不迁移运行数据。新 `CPAP_*` 参数与配置兼容旧 `CPAC_*`；升级只替换既有 `target.env` 的 Control、Web、Gateway、Edge 四个镜像字段，保留目标身份、网络、端口与维护确认配置，Nginx 配置和 `external` 提示使用该文件的实际 `CPA_PUBLIC_PORT`（`18317` 仅为新安装默认值）。指定历史 Release 附带旧安装器时，会保留当前 Pool 安装器，避免退回旧安装协议。
 
 命令重新获取最新 `run.sh`，然后自动复用 `/home/ccpa/config.env` 中的域名和入口模式，在 `/home/ccpa/backups/` 创建 root-only 备份并执行正式蓝绿部署。升级成功后会删除旧版 `/home/ccpa/deploy.sh` 入口。升级绝不因缺少 Nginx、证书或不同域名站点而改变既有入口模式：`external` 始终不触碰 Nginx/Certbot 且跳过公网检查；`managed` 只更新本项目自己托管的站点。旧版无标记站点不会被自动认领，保留旧站点时应先执行 `sudo /home/ccpa/run.sh ingress set external`。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会先安全迁移到解析后的实际运维根目录。
 

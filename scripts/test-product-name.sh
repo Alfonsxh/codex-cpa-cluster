@@ -15,6 +15,11 @@ for residue in "$FORBIDDEN_NAME" "CPA"'C_INGRESS_MODE=managed' "$FORBIDDEN_SLUG.
   fi
 done
 printf 'https://github.com/Alfonsxh/%s/releases/latest\n' "$FORBIDDEN_SLUG" >"$TEST_ROOT/page.html"
+if sh "$ROOT_DIR/scripts/check-product-name.sh" "$TEST_ROOT" >/dev/null 2>&1; then
+  echo 'name gate accepted a retired repository URL' >&2
+  exit 1
+fi
+printf '%s\n' 'https://github.com/Alfonsxh/codex-cpa-pool/releases/latest' >"$TEST_ROOT/page.html"
 sh "$ROOT_DIR/scripts/check-product-name.sh" "$TEST_ROOT" >/dev/null
 printf 'module github.com/Alfonsxh/%s\n' "$FORBIDDEN_SLUG" >"$TEST_ROOT/go.mod"
 if sh "$ROOT_DIR/scripts/check-product-name.sh" "$TEST_ROOT" >/dev/null 2>&1; then

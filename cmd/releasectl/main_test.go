@@ -242,3 +242,22 @@ func TestWebhookScannerAllowsOnlyExplicitFixtureKeys(t *testing.T) {
 		t.Fatal("non-fixture webhook key was accepted")
 	}
 }
+
+func TestPublicCommunityDomainDoesNotAllowLookalikes(t *testing.T) {
+	for _, test := range []struct {
+		host string
+		want bool
+	}{
+		{host: "t.me", want: true},
+		{host: "T.ME", want: true},
+		{host: "t.me.attacker.net", want: false},
+		{host: "private.t.me", want: false},
+		{host: "not-t.me", want: false},
+	} {
+		t.Run(test.host, func(t *testing.T) {
+			if got := allowedDomain(test.host); got != test.want {
+				t.Fatalf("allowedDomain(%q) = %v, want %v", test.host, got, test.want)
+			}
+		})
+	}
+}

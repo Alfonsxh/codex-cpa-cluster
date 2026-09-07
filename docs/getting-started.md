@@ -42,10 +42,10 @@ make -f scripts/build.mk test-down
 域名 DNS 需预先指向目标机。安装和以后每次升级都可以重复执行同一条命令：
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
 ```
 
-产品名称为 Codex CPA Pool；下载继续使用现有 GitHub 发行源。下文的 `/home/ccpa` 是新安装默认目录；旧版 `/home/cpac` 环境原址沿用，命令中的路径应替换为实际运维根目录。安装器使用 `CPAP_*` 参数与配置，并兼容旧 `CPAC_*`。详见[部署兼容规则](deployment.md#名称与现有部署兼容)。
+产品名称为 Codex CPA Pool；官方发布源为 `Alfonsxh/codex-cpa-pool`。下文的 `/home/ccpa` 是新安装默认目录；旧版 `/home/cpac` 环境原址沿用，命令中的路径应替换为实际运维根目录。安装器使用 `CPAP_*` 参数与配置，并兼容旧 `CPAC_*`。详见[部署兼容规则](deployment.md#名称与现有部署兼容)。
 
 默认入口选择 GitHub Latest Release。已安装环境可以执行 `sudo /home/ccpa/run.sh --tag`，按版本顺序查看高于当前部署版本的 GitHub Releases 并交互选择；非交互调用只打印候选，不执行升级。需要固定版本时使用 `sudo /home/ccpa/run.sh --tag v2.0.0`；指定 Tag 必须存在对应 GitHub Release 及完整校验附件，脚本不会从孤立 Git Tag 或源码归档部署。
 

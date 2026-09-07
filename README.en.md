@@ -15,10 +15,10 @@
   </p>
 
   <p>
-    <a href="https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-cluster?include_prereleases&sort=semver"></a>
-    <a href="https://github.com/Alfonsxh/codex-cpa-cluster/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Alfonsxh/codex-cpa-cluster/actions/workflows/ci.yml/badge.svg"></a>
-    <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Alfonsxh/codex-cpa-cluster">
-    <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-cluster"></a>
+    <a href="https://github.com/Alfonsxh/codex-cpa-pool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-pool?include_prereleases&sort=semver"></a>
+    <a href="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml/badge.svg"></a>
+    <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Alfonsxh/codex-cpa-pool">
+    <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-pool"></a>
   </p>
 
   <img alt="Codex CPA Pool overview" src="./docs/assets/screenshot-overview.png" width="1440">
@@ -33,21 +33,23 @@
 
 > PS: Works just as well for individuals pooling personal accounts.
 
-The product is **Codex CPA Pool**. GitHub hosting and release downloads continue to use `Alfonsxh/codex-cpa-cluster`, preserving the existing releases, badges, and security-reporting endpoint.
+The project and GitHub repository share the **Codex CPA Pool** name (`Alfonsxh/codex-cpa-pool`).
+
+Join the [Telegram community](https://t.me/+vzojgInHfy44ZTM9) for usage discussions, deployment help, and feature suggestions. Joining requires admin approval. Include your version and redacted logs when reporting a problem.
 
 ## Quick Start
 
 Download the install script and run it — you can review the script before executing:
 
 ```sh
-curl -fsSLO https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh
+curl -fsSLO https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh
 sudo sh run.sh
 ```
 
 Or start directly with one command; the installer saves `run.sh` in the operator directory before continuing:
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
 ```
 
 ## Features

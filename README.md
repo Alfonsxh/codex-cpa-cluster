@@ -15,10 +15,10 @@
   </p>
 
   <p>
-    <a href="https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-cluster?include_prereleases&sort=semver"></a>
-    <a href="https://github.com/Alfonsxh/codex-cpa-cluster/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Alfonsxh/codex-cpa-cluster/actions/workflows/ci.yml/badge.svg"></a>
-    <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Alfonsxh/codex-cpa-cluster">
-    <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-cluster"></a>
+    <a href="https://github.com/Alfonsxh/codex-cpa-pool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-pool?include_prereleases&sort=semver"></a>
+    <a href="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml/badge.svg"></a>
+    <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Alfonsxh/codex-cpa-pool">
+    <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-pool"></a>
   </p>
 
   <p>
@@ -26,7 +26,8 @@
     <a href="#features">核心能力</a> ·
     <a href="#architecture">运行架构</a> ·
     <a href="#documentation">文档</a> ·
-    <a href="./CONTRIBUTING.md">参与贡献</a>
+    <a href="./CONTRIBUTING.md">参与贡献</a> ·
+    <a href="https://t.me/+vzojgInHfy44ZTM9">Telegram 交流群</a>
   </p>
 
   <img alt="Codex CPA Pool 运行总览" src="./docs/assets/screenshot-overview.png" width="1440">
@@ -41,7 +42,9 @@
 
 > PS：个人聚合多账号同样适用。
 
-项目名称为 **Codex CPA Pool**。GitHub 仓库与发行下载继续沿用 `Alfonsxh/codex-cpa-cluster`，以保持现有发布、徽章和安全报告入口可用。
+项目与 GitHub 仓库统一使用 **Codex CPA Pool**（`Alfonsxh/codex-cpa-pool`）。
+
+加入 [Telegram 项目交流群](https://t.me/+vzojgInHfy44ZTM9)，交流使用经验、部署问题与功能建议。入群需管理员批准；反馈问题时请提供版本和脱敏日志。
 
 <a id="quick-start"></a>
 
@@ -50,14 +53,14 @@
 下载安装脚本并执行，运行前可以先检查脚本内容：
 
 ```sh
-curl -fsSLO https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh
+curl -fsSLO https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh
 sudo sh run.sh
 ```
 
 也可以一条命令启动，安装器会先将 `run.sh` 保存到运维目录再继续执行：
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
 ```
 
 <a id="features"></a>

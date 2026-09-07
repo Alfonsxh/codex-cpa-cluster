@@ -13,7 +13,7 @@ Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入
 
 ## 名称与现有部署兼容
 
-产品统一使用 Codex CPA Pool；GitHub 发行源仍为 `Alfonsxh/codex-cpa-cluster`，现有下载链接保持有效。新发布归档使用 `codex-cpa-pool` 前缀，安装器仍可读取历史归档。新安装的默认运维根目录是 `/home/ccpa`，安装器参数和配置使用 `CPAP_*`。旧 `CPAC_*` 参数、配置与 `/home/cpac` 中的已安装环境继续被识别并原址沿用；改名不会移动运行数据或重建 SQLite、API Key、OAuth。升级只替换既有 `target.env` 的 Control、Web、Gateway、Edge 四个镜像字段，保留目标身份、网络、端口和维护确认配置；指定的历史 Release 若附带旧安装器，则保留当前 Pool 安装器，避免退回旧安装协议。
+产品与 GitHub 发行源统一使用 Codex CPA Pool（`Alfonsxh/codex-cpa-pool`）。新发布归档使用 `codex-cpa-pool` 前缀，安装器仍可读取历史归档。新安装的默认运维根目录是 `/home/ccpa`，安装器参数和配置使用 `CPAP_*`。旧 `CPAC_*` 参数、配置与 `/home/cpac` 中的已安装环境继续被识别并原址沿用；改名不会移动运行数据或重建 SQLite、API Key、OAuth。升级只替换既有 `target.env` 的 Control、Web、Gateway、Edge 四个镜像字段，保留目标身份、网络、端口和维护确认配置；指定的历史 Release 若附带旧安装器，则保留当前 Pool 安装器，避免退回旧安装协议。
 
 下文以新默认目录为例，已安装环境应使用部署完成卡片中报告的实际运维根目录。
 
@@ -22,7 +22,7 @@ Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入
 全新单机目标使用唯一的部署脚本，不要手工创建 SQLite、主密钥或快照：
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
+curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
 ```
 
 管道入口会把 Release 中的 `run.sh` 原子安装到内部运维目录，再重新连接当前终端并执行，因此首次安装仍可交互输入域名和入口模式。`scripts/run.sh` 随后校验 GitHub Release 中的脚本、归档和机器可读发布环境，保留宿主机时区，全部 Codex CPA Pool 服务及后续创建的业务 CPA 容器使用 UTC。业务时区由首次 Web 设置及配置中心的 `system.timezone` 统一管理，不再读取 `CPA_TIMEZONE`。在 `/home/ccpa/` 同一文件系统创建临时根目录后，通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/ccpa/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。

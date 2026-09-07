@@ -23,24 +23,12 @@ if scan --files | rg -i "$FORBIDDEN" >"$RESULTS"; then
 fi
 scan -n -i "$FORBIDDEN" >"$RESULTS" || status=$?
 [ "${status:-0}" -le 1 ] || exit "$status"
-# Narrow compatibility exceptions: immutable hosting identity, old persisted
-# values/installer inputs and tests that explicitly prove their migration.
+# Narrow compatibility exceptions: old persisted values/installer inputs and
+# tests that explicitly prove their migration. Current hosting uses the Pool name.
 awk '
   {
     path=$0; sub(/:[0-9]+:.*/, "", path); sub(/^\.\//, "", path)
     line=$0; sub(/^[^:]+:[0-9]+:/, "", line)
-    # Only live HTTPS hosting URLs are external identities. In particular,
-    # github.com module/import paths must still fail the product-name gate.
-    gsub(/https:\/\/(github\.com\/|api\.github\.com\/repos\/)Alfonsxh\/codex-cpa-cluster/, "", line)
-    gsub(/https:\/\/img\.shields\.io\/github\/(v\/release|go-mod\/go-version|license)\/Alfonsxh\/codex-cpa-cluster/, "", line)
-    if ((path == "scripts/build.mk" && line ~ /^GH_REPO \?=/) ||
-        (path == "scripts/local-release.sh" && line ~ /^GH_REPO=/) ||
-        (path == "scripts/run.sh" && line ~ /^DEFAULT_REPOSITORY=/) ||
-        (path == "README.md" && line ~ /GitHub 仓库与发行下载继续沿用/) ||
-        (path == "README.en.md" && line ~ /GitHub hosting and release downloads continue to use/) ||
-        (path == "docs/deployment.md" && line ~ /GitHub 发行源仍为/)) {
-      gsub(/Alfonsxh\/codex-cpa-cluster/, "", line)
-    }
     if (path == "scripts/check-product-name.sh") next
     if (path == "internal/admin/branding_compatibility_test.go" || path == "scripts/test-run-compat.sh") next
     if (path == "internal/admin/general_settings.go" && line ~ /legacyProductName = "Codex CPA Cluster"/) next
@@ -66,7 +54,7 @@ awk '
 ' "$RESULTS" >"$RESULTS.filtered"
 if [ -s "$RESULTS.filtered" ]; then
   cat "$RESULTS.filtered" >&2
-  echo '发现未明确归类的旧产品名称；仅历史输入兼容与现有发行源可以保留' >&2
+  echo '发现未明确归类的旧产品名称；仅历史输入兼容可以保留' >&2
   exit 1
 fi
 printf '%s\n' 'Pool product-name gate passed'

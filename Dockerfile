@@ -72,7 +72,7 @@ RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apk/re
     && test -s /etc/ssl/certs/ca-certificates.crt \
     && addgroup -S -g 10001 cpa \
     && adduser -S -D -H -u 10001 -G cpa cpa
-LABEL org.opencontainers.image.source="https://github.com/Alfonsxh/codex-cpa-cluster" \
+LABEL org.opencontainers.image.source="https://github.com/Alfonsxh/codex-cpa-pool" \
       org.opencontainers.image.version="" \
       org.opencontainers.image.revision=""
 
@@ -103,7 +103,7 @@ COPY --from=web-go-builder /out/cpa-web /usr/local/bin/cpa-web
 COPY --from=web-builder /src/frontend/dist/portal /srv/cpa-web/portal
 COPY --from=web-builder /src/frontend/dist/admin /srv/cpa-web/admin
 COPY --from=web-builder /src/frontend/dist/usage /srv/cpa-web/usage
-LABEL org.opencontainers.image.source="https://github.com/Alfonsxh/codex-cpa-cluster" \
+LABEL org.opencontainers.image.source="https://github.com/Alfonsxh/codex-cpa-pool" \
       org.opencontainers.image.version="" \
       org.opencontainers.image.revision=""
 USER cpa:cpa

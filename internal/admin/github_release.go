@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	// The published release source keeps its repository identifier until the remote is renamed.
-	defaultGitHubLatestReleaseURL = "https://api.github.com/repos/Alfonsxh/codex-cpa-cluster/releases/latest"
+	// Query the canonical repository for published release metadata.
+	defaultGitHubLatestReleaseURL = "https://api.github.com/repos/Alfonsxh/codex-cpa-pool/releases/latest"
 	githubReleaseBodyLimit        = 1 << 20
 	githubReleaseTimeout          = 15 * time.Second
 )

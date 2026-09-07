@@ -23,8 +23,8 @@ for operator_suffix in GITHUB_REPOSITORY RUN_ASSET_URL STAGING_ROOT DEPLOY_ROOT 
 done
 unset operator_suffix operator_current_set operator_legacy_set operator_current_value operator_legacy_value
 
-# The existing publication repository remains authoritative until it is moved.
-DEFAULT_REPOSITORY=${CPAP_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}
+# Canonical repository for installation assets and release metadata.
+DEFAULT_REPOSITORY=${CPAP_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-pool}
 RUN_ASSET_URL=${CPAP_RUN_ASSET_URL:-https://github.com/$DEFAULT_REPOSITORY/releases/latest/download/run.sh}
 
 # Compatibility boundary: retain existing operator/runtime roots in place.

@@ -273,6 +273,50 @@ describe("ConfigurationPage", () => {
     await waitFor(() => expect(workspaceReads).toBe(2));
   });
 
+  it("shows model multipliers and saves Astra changes as quota policy", async () => {
+    let current = configurationFixture();
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path !== "/admin/api/settings/configuration") throw new Error(`unexpected request: ${path}`);
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { values: Record<string, unknown> };
+        current = withUpdatedValues(current, body.values);
+        return jsonResponse({
+          message: "已保存 1 项配置",
+          changed: Object.keys(body.values),
+          applied: ["quota"],
+          pending_deployment: false
+        });
+      }
+      return jsonResponse(current);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
+
+    await user.click(await screen.findByRole("button", { name: /推理强度策略/ }));
+    expect(screen.getByText("模型倍率 × 推理强度倍率")).toBeInTheDocument();
+    expect(screen.getByLabelText("gpt-6-astra用户额度倍率")).toHaveValue(4);
+    expect(screen.getByLabelText("gpt-5.6-sol用户额度倍率")).toHaveValue(1);
+    expect(screen.getByLabelText("其他未匹配模型用户额度倍率")).toHaveValue(1);
+
+    const astra = screen.getByLabelText("gpt-6-astra用户额度倍率");
+    await user.clear(astra);
+    await user.type(astra, "5");
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+    expect(await screen.findByText(/用户额度下次采集后生效/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存并应用" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1));
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      confirm: "save",
+      values: { "user_quota.model_multiplier.gpt-6-astra": 5 }
+    });
+  });
+
   it("shows a recoverable empty state when the configuration catalog has no groups", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const path = String(input);
@@ -297,7 +341,7 @@ function configurationFixture(): ConfigurationCatalog {
   return {
     version: 1,
     generated_at: 1_800_000_000,
-    field_count: 6,
+    field_count: 11,
     groups: [
       {
         name: "CPA 请求",
@@ -386,6 +430,26 @@ function configurationFixture(): ConfigurationCatalog {
         ]
       },
       {
+        name: "推理强度策略",
+        description: "模型与推理强度共同决定用户额度 Token 倍率。",
+        fields: [
+          multiplierField("user_quota.model_multiplier.gpt-6-astra", "gpt-6-astra 模型倍率", 4),
+          multiplierField("user_quota.model_multiplier.gpt-5.6-sol", "gpt-5.6-sol 模型倍率", 1),
+          multiplierField("user_quota.model_multiplier.unknown", "其他 / 未匹配模型 模型倍率", 1),
+          multiplierField("user_quota.reasoning_multiplier.max", "Max 推理强度倍率", 2),
+          {
+            key: "admin.account_usage.reasoning_effort_color.max",
+            label: "Max 推理强度颜色",
+            description: "账号明细显示颜色。",
+            type: "color",
+            value: "#b2731e",
+            default: "#b2731e",
+            apply_mode: "live",
+            editable: true
+          }
+        ]
+      },
+      {
         name: "企业微信通知",
         description: "企业微信通知配置。",
         fields: [
@@ -402,6 +466,22 @@ function configurationFixture(): ConfigurationCatalog {
         ]
       }
     ]
+  };
+}
+
+function multiplierField(key: string, label: string, value: number): ConfigurationCatalog["groups"][number]["fields"][number] {
+  return {
+    key,
+    label,
+    description: "新采集事件的 Token 倍率。",
+    type: "number",
+    value,
+    default: value,
+    apply_mode: "quota",
+    editable: true,
+    unit: "倍",
+    min: 0.1,
+    max: 10
   };
 }
 

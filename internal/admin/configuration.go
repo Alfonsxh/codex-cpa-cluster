@@ -20,6 +20,7 @@ import (
 
 	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -180,6 +181,17 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		{Key: "user_quota.default_weekly_tokens", Label: "用户周额度系统默认值", ValueType: "nullable_integer", ApplyMode: "quota", Default: nil, Minimum: 1, Maximum: 1_000_000_000_000, HasMinimum: true, HasMaximum: true},
 		boolean("user_quota.reset_personal_weekly_on_new_week", "新周恢复默认个人额度", true, "quota"),
 		integer("user_quota.fail_open_after_seconds", "额度故障放行等待", 300, 30, 3600, "quota"),
+	}
+	for _, model := range usage.ModelMultiplierDefinitions() {
+		label := model.Model
+		if model.Model == "unknown" {
+			label = "其他 / 未匹配模型"
+		}
+		definitions = append(definitions, number(
+			usage.ModelMultiplierSettingKey(model.Model),
+			label+" 模型倍率",
+			model.Default, 0.1, 10, "quota",
+		))
 	}
 	for _, effort := range []struct {
 		name     string

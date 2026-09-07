@@ -54,10 +54,10 @@ func (writer *FencedRuntimeWriter) IngestEvents(
 	ctx context.Context,
 	account string,
 	events []usage.Event,
-	multipliers map[string]float64,
+	policy usage.WeightPolicy,
 ) (usage.IngestCounters, error) {
 	return withFencedResult(ctx, writer.fence, func() (usage.IngestCounters, error) {
-		return writer.writer.IngestEvents(ctx, account, events, multipliers)
+		return writer.writer.IngestEvents(ctx, account, events, policy)
 	})
 }
 

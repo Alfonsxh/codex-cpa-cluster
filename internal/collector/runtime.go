@@ -55,6 +55,7 @@ type RuntimeConfig struct {
 	WeekTimezone                 string
 	ResetPersonalWeeklyOnNewWeek bool
 	DefaultWeeklyTokens          *int64
+	ModelMultipliers             map[string]float64
 	ReasoningMultipliers         map[string]float64
 	HeartbeatStaleAfterSeconds   int64
 	QuotaFailOpenAfterSeconds    int64
@@ -133,7 +134,13 @@ func (runtime *Runtime) RunOnce(ctx context.Context) (RunResult, error) {
 	if err != nil {
 		return result, fmt.Errorf("read collector accounts: %w", err)
 	}
-	service := &Service{Writer: runtime.Writer, Multipliers: runtime.Config.ReasoningMultipliers}
+	service := &Service{
+		Writer: runtime.Writer,
+		Policy: usage.WeightPolicy{
+			ModelMultipliers:     runtime.Config.ModelMultipliers,
+			ReasoningMultipliers: runtime.Config.ReasoningMultipliers,
+		},
+	}
 	factory := runtime.QueueFactory
 	if factory == nil {
 		factory = defaultQueueFactory
@@ -323,6 +330,7 @@ func DefaultRuntimeConfig() RuntimeConfig {
 	return RuntimeConfig{
 		BatchSize: 100, WeekTimezone: sitetime.DefaultName, ResetPersonalWeeklyOnNewWeek: true,
 		HeartbeatStaleAfterSeconds: 15, QuotaFailOpenAfterSeconds: 300,
+		ModelMultipliers:     make(map[string]float64),
 		ReasoningMultipliers: make(map[string]float64),
 	}
 }
@@ -361,6 +369,17 @@ func RuntimeConfigFromSettings(settings map[string]any) (RuntimeConfig, time.Dur
 		return config, 0, err
 	} else if found {
 		config.QuotaFailOpenAfterSeconds = value
+	}
+	for _, model := range usage.ModelMultiplierDefinitions() {
+		key := usage.ModelMultiplierSettingKey(model.Model)
+		if value, found, err := numericSetting(settings, key); err != nil {
+			return config, 0, err
+		} else if found {
+			if value < 0.1 || value > 10 {
+				return config, 0, fmt.Errorf("%s must be between 0.1 and 10", key)
+			}
+			config.ModelMultipliers[key] = value
+		}
 	}
 	for _, effort := range runtimeReasoningEfforts {
 		key := runtimeReasoningMultiplierPrefix + effort

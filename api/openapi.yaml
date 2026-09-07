@@ -1367,7 +1367,7 @@ paths:
         - adminSession: []
       responses:
         "200":
-          description: Complete effective configuration catalog with presentation metadata and write-only secrets masked
+          description: Complete effective configuration catalog, including model and reasoning-effort quota multipliers, with presentation metadata and write-only secrets masked
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ConfigurationCatalog" }
@@ -1387,7 +1387,7 @@ paths:
             schema: { $ref: "#/components/schemas/ConfigurationUpdateRequest" }
       responses:
         "200":
-          description: Atomic settings and encrypted-proxy update with compensated runtime apply
+          description: Atomic settings and encrypted-proxy update with compensated runtime apply; multiplier changes affect only newly collected usage events
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ConfigurationUpdateResponse" }

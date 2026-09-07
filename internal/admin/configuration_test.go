@@ -14,8 +14,8 @@ import (
 )
 
 func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
-	if len(configurationDefinitions) != 66 {
-		t.Fatalf("configuration definition count = %d, want 66", len(configurationDefinitions))
+	if len(configurationDefinitions) != 78 {
+		t.Fatalf("configuration definition count = %d, want 78", len(configurationDefinitions))
 	}
 	if len(configurationPresentationByKey) != len(configurationDefinitions) {
 		t.Fatalf("configuration presentation count = %d, want %d", len(configurationPresentationByKey), len(configurationDefinitions))
@@ -53,6 +53,14 @@ func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
 	if defaults["user_quota.reasoning_multiplier.ultra"] != float64(3) {
 		t.Fatalf("ultra reasoning multiplier default = %#v, want 3", defaults["user_quota.reasoning_multiplier.ultra"])
 	}
+	if defaults["user_quota.model_multiplier.gpt-6-astra"] != float64(4) ||
+		defaults["user_quota.model_multiplier.gpt-5.6-sol"] != float64(1) ||
+		defaults["user_quota.model_multiplier.unknown"] != float64(1) {
+		t.Fatalf("model multiplier defaults = astra %#v, sol %#v, unknown %#v",
+			defaults["user_quota.model_multiplier.gpt-6-astra"],
+			defaults["user_quota.model_multiplier.gpt-5.6-sol"],
+			defaults["user_quota.model_multiplier.unknown"])
+	}
 }
 
 func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testing.T) {
@@ -74,7 +82,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	}
 	var catalog configurationCatalogResponse
 	decodeAdminResponse(t, response, &catalog)
-	if catalog.Version != 2 || catalog.FieldCount != 66 || len(catalog.Groups) != 11 || catalog.GeneratedAt <= 0 {
+	if catalog.Version != 2 || catalog.FieldCount != 78 || len(catalog.Groups) != 11 || catalog.GeneratedAt <= 0 {
 		t.Fatalf("configuration catalog summary = %#v", catalog)
 	}
 
@@ -87,7 +95,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 			fields[field.Key] = field
 		}
 	}
-	if len(fields) != 66 {
+	if len(fields) != 78 {
 		t.Fatalf("configuration catalog fields = %d", len(fields))
 	}
 	proxy := fields["cpa.proxy_url"]
@@ -109,6 +117,11 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	weekly := fields["user_quota.default_weekly_tokens"]
 	if weekly.Minimum == nil || *weekly.Minimum != 1 || weekly.Maximum == nil || *weekly.Maximum != 1_000_000_000_000 || weekly.Unit != "Token" {
 		t.Fatalf("weekly quota metadata = %#v", weekly)
+	}
+	astra := fields["user_quota.model_multiplier.gpt-6-astra"]
+	if astra.Default != float64(4) || astra.Value != float64(4) || astra.Minimum == nil ||
+		*astra.Minimum != 0.1 || astra.Maximum == nil || *astra.Maximum != 10 || astra.Unit != "倍" {
+		t.Fatalf("Astra model multiplier metadata = %#v", astra)
 	}
 }
 
@@ -134,6 +147,8 @@ func TestConfigurationValueNormalizationCoversSupportedTypesAndBoundaries(t *tes
 		{key: "notification.daily_times", raw: "18:00,9:00,09:00", want: "09:00,18:00"},
 		{key: "runtime.cliproxy_image", raw: "invalid image", wantErr: true},
 		{key: "admin.account_usage.reasoning_effort_color.max", raw: "#B2731E", want: "#b2731e"},
+		{key: "user_quota.model_multiplier.gpt-6-astra", raw: "4", want: float64(4)},
+		{key: "user_quota.model_multiplier.gpt-6-astra", raw: "10.1", wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.key+"/"+valueString(test.raw), func(t *testing.T) {

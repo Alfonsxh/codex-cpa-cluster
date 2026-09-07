@@ -29,7 +29,7 @@ const (
 	weeklyUsageLastEventIDKey     = "weekly_usage_last_event_id"
 	weeklyUsageTimezoneKey        = "weekly_usage_timezone"
 	defaultWeekTimezone           = sitetime.DefaultName
-	reasoningPolicyVersionPrefix  = "reasoning-"
+	weightPolicyVersionPrefix     = "model-reasoning-"
 	reasoningMultiplierConfigBase = "user_quota.reasoning_multiplier."
 )
 
@@ -376,7 +376,7 @@ func (writer *Writer) IngestEvents(
 	ctx context.Context,
 	account string,
 	events []Event,
-	multipliers map[string]float64,
+	policy WeightPolicy,
 ) (IngestCounters, error) {
 	counters := IngestCounters{}
 	account = strings.TrimSpace(account)
@@ -403,8 +403,9 @@ func (writer *Writer) IngestEvents(
 		return counters, nil
 	}
 
-	normalizedMultipliers := reasoningMultipliers(multipliers)
-	policyVersion := reasoningPolicyVersion(normalizedMultipliers)
+	modelMultipliers := normalizedModelMultipliers(policy.ModelMultipliers)
+	reasoningMultipliers := normalizedReasoningMultipliers(policy.ReasoningMultipliers)
+	policyVersion := weightPolicyVersion(modelMultipliers, reasoningMultipliers)
 	now := writer.now().Unix()
 	transaction, err := writer.writeDB.BeginTxx(ctx, nil)
 	if err != nil {
@@ -427,7 +428,15 @@ func (writer *Writer) IngestEvents(
 			counters.UnknownAPIKey++
 			continue
 		}
-		event := normalizeEvent(account, item, identity, normalizedMultipliers, policyVersion, now)
+		event := normalizeEvent(
+			account,
+			item,
+			identity,
+			modelMultipliers,
+			reasoningMultipliers,
+			policyVersion,
+			now,
+		)
 		result, err := transaction.ExecContext(ctx, `
             INSERT OR IGNORE INTO usage_events(
                 event_key, account, user_email, key_label, occurred_at,
@@ -1054,7 +1063,8 @@ func normalizeEvent(
 	account string,
 	item preparedEvent,
 	identity identityRow,
-	multipliers map[string]float64,
+	modelMultipliers map[string]float64,
+	reasoningMultipliers map[string]float64,
 	policyVersion string,
 	now int64,
 ) normalizedEvent {
@@ -1072,7 +1082,9 @@ func normalizeEvent(
 		alias = model
 	}
 	reasoningEffort := normalizeReasoningEffort(payload["reasoning_effort"])
-	multiplier := multipliers[reasoningEffort]
+	modelMultiplier := modelMultipliers[normalizeModelMultiplier(model, alias)]
+	reasoningMultiplier := reasoningMultipliers[reasoningEffort]
+	multiplier := modelMultiplier * reasoningMultiplier
 	requestID := strings.TrimSpace(stringValue(payload["request_id"]))
 	return normalizedEvent{
 		EventKey:              usageEventKey(account, requestID, item.keyDigest, payload),
@@ -1148,7 +1160,7 @@ func canonicalJSON(value any) []byte {
 	return bytes.TrimSuffix(output.Bytes(), []byte("\n"))
 }
 
-func reasoningMultipliers(configuration map[string]float64) map[string]float64 {
+func normalizedReasoningMultipliers(configuration map[string]float64) map[string]float64 {
 	result := make(map[string]float64, len(reasoningEfforts))
 	for _, effort := range reasoningEfforts {
 		fallback := 1.0
@@ -1167,11 +1179,54 @@ func reasoningMultipliers(configuration map[string]float64) map[string]float64 {
 	return result
 }
 
-func reasoningPolicyVersion(multipliers map[string]float64) string {
-	keys := append([]string(nil), reasoningEfforts...)
-	sort.Strings(keys)
+func normalizedModelMultipliers(configuration map[string]float64) map[string]float64 {
+	definitions := ModelMultiplierDefinitions()
+	result := make(map[string]float64, len(definitions))
+	for _, definition := range definitions {
+		value, found := configuration[ModelMultiplierSettingKey(definition.Model)]
+		if !found {
+			value, found = configuration[definition.Model]
+		}
+		if !found || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+			value = definition.Default
+		}
+		result[definition.Model] = value
+	}
+	return result
+}
+
+func normalizeModelMultiplier(model string, alias string) string {
+	value := strings.ToLower(strings.TrimSpace(model))
+	if value == "" {
+		value = strings.ToLower(strings.TrimSpace(alias))
+	}
+	for _, definition := range modelMultiplierDefinitions {
+		if value == definition.Model {
+			return value
+		}
+	}
+	return "unknown"
+}
+
+func weightPolicyVersion(modelMultipliers map[string]float64, reasoningMultipliers map[string]float64) string {
 	var semantic strings.Builder
 	semantic.WriteByte('{')
+	writeMultiplierPolicyMap(&semantic, "models", modelMultipliers)
+	semantic.WriteByte(',')
+	writeMultiplierPolicyMap(&semantic, "reasoning", reasoningMultipliers)
+	semantic.WriteByte('}')
+	digest := sha256.Sum256([]byte(semantic.String()))
+	return weightPolicyVersionPrefix + hex.EncodeToString(digest[:])[:12]
+}
+
+func writeMultiplierPolicyMap(semantic *strings.Builder, name string, multipliers map[string]float64) {
+	keys := make([]string, 0, len(multipliers))
+	for key := range multipliers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	semantic.WriteString(strconv.Quote(name))
+	semantic.WriteString(":{")
 	for index, key := range keys {
 		if index > 0 {
 			semantic.WriteByte(',')
@@ -1185,8 +1240,6 @@ func reasoningPolicyVersion(multipliers map[string]float64) string {
 		semantic.WriteString(raw)
 	}
 	semantic.WriteByte('}')
-	digest := sha256.Sum256([]byte(semantic.String()))
-	return reasoningPolicyVersionPrefix + hex.EncodeToString(digest[:])[:12]
 }
 
 func normalizeReasoningEffort(value any) string {

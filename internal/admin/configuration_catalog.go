@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -150,7 +151,7 @@ var configurationGroupDescriptions = map[string]string{
 	"用量与额度":  "额度与用量采集。",
 	"账号自动切换": "额度不足时自动迁移。",
 	"用户额度":   "用户额度和故障策略。",
-	"推理强度策略": "Token 倍率和颜色。",
+	"推理强度策略": "模型与推理强度共同决定用户额度 Token 倍率；颜色只影响展示。",
 	"企业微信通知": "额度报告和预警。",
 	"会话与采集":  "会话和采集设置。",
 	"账号供应":   "新 CPA 端口范围。",
@@ -224,4 +225,16 @@ var configurationPresentationByKey = map[string]configurationPresentation{
 	"accounts.port_end":                                  {Group: "账号供应", Description: "新 CPA 端口终点，不小于起点。"},
 	"accounts.listen_address":                            {Group: "账号与发布", Description: "仅允许宿主机回环地址。"},
 	"runtime.cliproxy_image":                             {Group: "账号与发布", Description: "在账号管理中拉取并验证更新。"},
+}
+
+func init() {
+	for _, model := range usage.ModelMultiplierDefinitions() {
+		description := "新采集事件的模型 Token 倍率。"
+		if model.Model == "unknown" {
+			description = "模型未匹配时用于新采集事件的 Token 倍率。"
+		}
+		configurationPresentationByKey[usage.ModelMultiplierSettingKey(model.Model)] = configurationPresentation{
+			Group: "推理强度策略", Description: description, Unit: "倍",
+		}
+	}
 }

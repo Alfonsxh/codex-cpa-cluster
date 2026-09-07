@@ -3577,7 +3577,7 @@ export type GetAdminConfigurationError = GetAdminConfigurationErrors[keyof GetAd
 
 export type GetAdminConfigurationResponses = {
     /**
-     * Complete effective configuration catalog with presentation metadata and write-only secrets masked
+     * Complete effective configuration catalog, including model and reasoning-effort quota multipliers, with presentation metadata and write-only secrets masked
      */
     200: ConfigurationCatalog;
 };
@@ -3605,7 +3605,7 @@ export type UpdateAdminConfigurationError = UpdateAdminConfigurationErrors[keyof
 
 export type UpdateAdminConfigurationResponses = {
     /**
-     * Atomic settings and encrypted-proxy update with compensated runtime apply
+     * Atomic settings and encrypted-proxy update with compensated runtime apply; multiplier changes affect only newly collected usage events
      */
     200: ConfigurationUpdateResponse;
 };

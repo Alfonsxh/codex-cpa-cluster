@@ -54,7 +54,7 @@ func TestWriterIngestsSchemaV10WithoutPersistingKeys(t *testing.T) {
 		context.Background(),
 		"alpha",
 		[]Event{maxEvent, duplicate, highEvent, ignored, unmapped, missingAPIKey},
-		map[string]float64{"high": 1.5},
+		WeightPolicy{ReasoningMultipliers: map[string]float64{"high": 1.5}},
 	)
 	if err != nil {
 		t.Fatalf("IngestEvents: %v", err)
@@ -106,7 +106,7 @@ func TestWriterIngestsSchemaV10WithoutPersistingKeys(t *testing.T) {
 	if stored[1].alias != "gpt-5.6-sol" || stored[1].multiplier != 1.5 || stored[1].weighted != 8 {
 		t.Fatalf("high event = %#v", stored[1])
 	}
-	if stored[0].policy != "reasoning-ac55ce6669f3" || stored[0].policy != stored[1].policy {
+	if !strings.HasPrefix(stored[0].policy, weightPolicyVersionPrefix) || stored[0].policy != stored[1].policy {
 		t.Fatalf("policy versions = %q, %q", stored[0].policy, stored[1].policy)
 	}
 
@@ -142,6 +142,81 @@ func TestWriterIngestsSchemaV10WithoutPersistingKeys(t *testing.T) {
 	}
 }
 
+func TestWriterCombinesModelAndReasoningMultipliers(t *testing.T) {
+	path := createWriterFixture(t, 10)
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	writer, err := OpenWriterPath(path, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("OpenWriterPath: %v", err)
+	}
+	defer writer.Close()
+
+	if _, err := writer.SyncIdentities(context.Background(), []Identity{{
+		Key: "alice-key", Label: "alice", UserEmail: "alice@example.com", Account: "alpha",
+	}}); err != nil {
+		t.Fatalf("SyncIdentities: %v", err)
+	}
+	astra := usageEvent("alice-key", "astra", now.Unix())
+	astra["model"] = " GPT-6-ASTRA "
+	sol := usageEvent("alice-key", "sol", now.Unix()+1)
+	unknown := usageEvent("alice-key", "unknown", now.Unix()+2)
+	unknown["model"] = "future-model"
+	aliasFallback := usageEvent("alice-key", "alias", now.Unix()+3)
+	aliasFallback["model"] = ""
+	aliasFallback["alias"] = "gpt-6-astra"
+
+	result, err := writer.IngestEvents(
+		context.Background(),
+		"alpha",
+		[]Event{astra, sol, unknown, aliasFallback},
+		WeightPolicy{},
+	)
+	if err != nil || result.Inserted != 4 {
+		t.Fatalf("IngestEvents = %#v, %v", result, err)
+	}
+
+	rows, err := writer.db.Query(`
+        SELECT request_id, quota_multiplier, weighted_tokens
+          FROM usage_events ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query weighted events: %v", err)
+	}
+	defer rows.Close()
+	want := []struct {
+		requestID  string
+		multiplier float64
+		weighted   int64
+	}{
+		{requestID: "astra", multiplier: 8, weighted: 120},
+		{requestID: "sol", multiplier: 2, weighted: 30},
+		{requestID: "unknown", multiplier: 2, weighted: 30},
+		{requestID: "alias", multiplier: 8, weighted: 120},
+	}
+	rowCount := 0
+	for rows.Next() {
+		index := rowCount
+		if index >= len(want) {
+			t.Fatal("query returned unexpected extra event")
+		}
+		var requestID string
+		var multiplier float64
+		var weighted int64
+		if err := rows.Scan(&requestID, &multiplier, &weighted); err != nil {
+			t.Fatalf("scan weighted event: %v", err)
+		}
+		if requestID != want[index].requestID || multiplier != want[index].multiplier || weighted != want[index].weighted {
+			t.Fatalf("weighted event %d = %q %.2f %d, want %#v", index, requestID, multiplier, weighted, want[index])
+		}
+		rowCount++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate weighted events: %v", err)
+	}
+	if rowCount != len(want) {
+		t.Fatalf("weighted event count = %d, want %d", rowCount, len(want))
+	}
+}
+
 func TestWriterDeduplicatesDigestEventsAndNormalizesBearerKeys(t *testing.T) {
 	path := createWriterFixture(t, 10)
 	now := time.Unix(1_800_000_000, 0)
@@ -161,11 +236,11 @@ func TestWriterDeduplicatesDigestEventsAndNormalizesBearerKeys(t *testing.T) {
 		"alpha:sha256:e551adaac06d32d6c54b49cf64ffa17529db3cf85ba526b111204f75fdef239e" {
 		t.Fatalf("stable digest event key = %s", got)
 	}
-	first, err := writer.IngestEvents(context.Background(), "alpha", []Event{event}, nil)
+	first, err := writer.IngestEvents(context.Background(), "alpha", []Event{event}, WeightPolicy{})
 	if err != nil || first.Inserted != 1 {
 		t.Fatalf("first ingest = %#v, %v", first, err)
 	}
-	second, err := writer.IngestEvents(context.Background(), "alpha", []Event{event}, nil)
+	second, err := writer.IngestEvents(context.Background(), "alpha", []Event{event}, WeightPolicy{})
 	if err != nil || second.Duplicate != 1 {
 		t.Fatalf("second ingest = %#v, %v", second, err)
 	}
@@ -229,7 +304,7 @@ func TestWriterWaitsForSQLiteBusyBeforeReadThenWriteIngest(t *testing.T) {
 			ctx,
 			"alpha",
 			[]Event{usageEvent("alice-key", "busy-ingest", now.Unix())},
-			nil,
+			WeightPolicy{},
 		)
 		done <- ingestResult{counters: counters, err: err}
 	}()
@@ -272,7 +347,7 @@ func TestWriterBuildsWeightedWeeklyQuotaAndCollectorStatus(t *testing.T) {
 		t.Fatalf("EnsureUsageBreakdownStarted: %v", err)
 	}
 	event := usageEvent("alice-key", "quota", now.Unix())
-	if _, err := writer.IngestEvents(context.Background(), "alpha", []Event{event}, nil); err != nil {
+	if _, err := writer.IngestEvents(context.Background(), "alpha", []Event{event}, WeightPolicy{}); err != nil {
 		t.Fatalf("IngestEvents: %v", err)
 	}
 	weekStart, weekEnd := naturalWeekBounds(now.Unix(), time.UTC)
@@ -364,7 +439,7 @@ func TestWriterRebuildsLegacyWeightAndRebucketsTimezone(t *testing.T) {
 		t.Fatalf("SyncIdentities: %v", err)
 	}
 	if _, err := writer.IngestEvents(
-		context.Background(), "alpha", []Event{usageEvent("legacy-key", "legacy", eventAt.Unix())}, nil,
+		context.Background(), "alpha", []Event{usageEvent("legacy-key", "legacy", eventAt.Unix())}, WeightPolicy{},
 	); err != nil {
 		t.Fatalf("IngestEvents: %v", err)
 	}

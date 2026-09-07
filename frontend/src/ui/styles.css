@@ -3529,6 +3529,27 @@ form.configuration-panel > .configuration-actions { flex-shrink: 0; margin-top: 
 .configuration-choice-address { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 9px; color: var(--faint); background: var(--surface-3); border: 1px solid var(--line); border-radius: 7px; }
 .configuration-choice-address span { flex: 0 0 auto; font-size: 8px; font-weight: 650; }
 .configuration-choice-address code { min-width: 0; overflow: hidden; color: var(--accent); font: 650 9px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.multiplier-strategy-editor { display: grid; min-width: 0; }
+.multiplier-policy-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; background: color-mix(in srgb, var(--accent-soft) 38%, var(--surface)); border-bottom: 1px solid var(--line); }
+.multiplier-policy-summary > div:first-child { display: grid; gap: 4px; }
+.multiplier-policy-summary span, .multiplier-policy-summary small { color: var(--faint); font-size: 8px; }
+.multiplier-policy-summary strong { font-size: 11px; }
+.multiplier-policy-feature { display: grid; flex: 0 0 auto; min-width: 118px; gap: 3px; padding: 9px 12px; text-align: right; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.multiplier-policy-feature strong { color: var(--accent); font: 800 16px/1 var(--mono); }
+.model-multiplier-editor { display: grid; min-width: 0; border-bottom: 1px solid var(--line); }
+.model-multiplier-editor > header { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 18px; }
+.model-multiplier-editor > header > div { display: grid; gap: 4px; }
+.model-multiplier-editor > header strong { font-size: 11px; }
+.model-multiplier-editor > header span, .model-multiplier-editor > header small { color: var(--faint); font-size: 8px; }
+.model-multiplier-table { display: grid; min-width: 0; }
+.model-multiplier-table-head, .model-multiplier-row { display: grid; min-width: 0; grid-template-columns: minmax(190px, 1fr) minmax(190px, .55fr); align-items: center; gap: 18px; padding-inline: 18px; }
+.model-multiplier-table-head { min-height: 38px; color: var(--faint); background: var(--surface-2); border-block: 1px solid var(--line); font-size: 8px; font-weight: 700; }
+.model-multiplier-row { min-height: 54px; border-bottom: 1px solid var(--line); }
+.model-multiplier-row:hover { background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface)); }
+.model-multiplier-name { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 10px; }
+.model-multiplier-name strong { overflow: hidden; font: 650 10px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.model-multiplier-name code { color: var(--faint); font: 8px/1.2 var(--mono); }
+.model-multiplier-editor > footer { display: flex; justify-content: flex-end; padding: 12px 18px; background: var(--surface-2); }
 .reasoning-strategy-editor { display: grid; min-width: 0; }
 .reasoning-color-preview { display: grid; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .reasoning-color-preview > div { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
@@ -3697,6 +3718,12 @@ form.configuration-panel > .configuration-actions { flex-shrink: 0; margin-top: 
   .branding-logo-actions { max-width: none; flex-direction: row; flex-wrap: wrap; }
   .reasoning-color-preview { padding-inline: 12px; }
   .reasoning-color-preview > div { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .multiplier-policy-summary { align-items: flex-start; padding-inline: 12px; }
+  .multiplier-policy-feature { min-width: 104px; }
+  .model-multiplier-editor > header { align-items: flex-start; padding-inline: 12px; }
+  .model-multiplier-table-head { display: none; }
+  .model-multiplier-row { grid-template-columns: minmax(0, 1fr) minmax(120px, .7fr); gap: 12px; padding: 8px 12px; }
+  .model-multiplier-editor > footer { padding-inline: 12px; }
   .reasoning-strategy-table-head { display: none; }
   .reasoning-strategy-row { grid-template-columns: 76px minmax(0, 1fr); gap: 4px 12px; padding: 10px 12px; }
   .reasoning-strategy-name { grid-row: 1 / 3; align-self: stretch; align-content: center; flex-direction: column; justify-content: center; gap: 5px; }

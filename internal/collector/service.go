@@ -16,12 +16,12 @@ type BatchDrainer interface {
 }
 
 type EventWriter interface {
-	IngestEvents(context.Context, string, []usage.Event, map[string]float64) (usage.IngestCounters, error)
+	IngestEvents(context.Context, string, []usage.Event, usage.WeightPolicy) (usage.IngestCounters, error)
 }
 
 type Service struct {
-	Writer      EventWriter
-	Multipliers map[string]float64
+	Writer EventWriter
+	Policy usage.WeightPolicy
 }
 
 // DrainAccount decodes only JSON objects and commits each queue batch through
@@ -61,7 +61,7 @@ func (service *Service) DrainAccount(
 			ctx,
 			account,
 			events,
-			service.Multipliers,
+			service.Policy,
 		)
 		if err != nil {
 			return err

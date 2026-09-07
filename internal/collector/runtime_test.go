@@ -120,6 +120,7 @@ func TestRuntimeConfigUsesControlSettingsAndValidatesBounds(t *testing.T) {
 		"user_quota.reset_personal_weekly_on_new_week": false,
 		"user_quota.default_weekly_tokens":             float64(900),
 		"user_quota.fail_open_after_seconds":           float64(600),
+		"user_quota.model_multiplier.gpt-6-astra":      5.0,
 		"user_quota.reasoning_multiplier.max":          2.5,
 	})
 	if err != nil {
@@ -128,11 +129,17 @@ func TestRuntimeConfigUsesControlSettingsAndValidatesBounds(t *testing.T) {
 	if interval != 1500*time.Millisecond || config.BatchSize != 250 ||
 		config.WeekTimezone != "Asia/Shanghai" || config.ResetPersonalWeeklyOnNewWeek ||
 		config.DefaultWeeklyTokens == nil || *config.DefaultWeeklyTokens != 900 ||
+		config.ModelMultipliers["user_quota.model_multiplier.gpt-6-astra"] != 5 ||
 		config.ReasoningMultipliers["user_quota.reasoning_multiplier.max"] != 2.5 {
 		t.Fatalf("runtime config = %#v, interval %s", config, interval)
 	}
 	if _, _, err := RuntimeConfigFromSettings(map[string]any{"collector.batch_size": float64(501)}); err == nil {
 		t.Fatal("oversized batch setting was accepted")
+	}
+	if _, _, err := RuntimeConfigFromSettings(map[string]any{
+		"user_quota.model_multiplier.gpt-6-astra": float64(10.1),
+	}); err == nil {
+		t.Fatal("oversized model multiplier was accepted")
 	}
 }
 
@@ -219,7 +226,7 @@ func (writer *stubRuntimeWriter) IngestEvents(
 	context.Context,
 	string,
 	[]usage.Event,
-	map[string]float64,
+	usage.WeightPolicy,
 ) (usage.IngestCounters, error) {
 	return usage.IngestCounters{Received: 1, Inserted: 1}, nil
 }

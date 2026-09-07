@@ -14,7 +14,9 @@ func TestServiceDecodesObjectsAndAggregatesBatches(t *testing.T) {
 		{Received: 1, Inserted: 1, Unmapped: 1, MissingAPIKey: 1},
 		{Received: 1, Duplicate: 1, Unmapped: 1, UnknownAPIKey: 1},
 	}}
-	service := &Service{Writer: writer, Multipliers: map[string]float64{"max": 2}}
+	service := &Service{Writer: writer, Policy: usage.WeightPolicy{
+		ReasoningMultipliers: map[string]float64{"max": 2},
+	}}
 	queue := stubDrainer{batches: [][][]byte{
 		{[]byte(`{"request_id":"one"}`), []byte(`not-json`), []byte(`[]`), []byte(`{"request_id":"trailing"}{}`)},
 		{[]byte(`{"request_id":"two"}`)},
@@ -33,8 +35,8 @@ func TestServiceDecodesObjectsAndAggregatesBatches(t *testing.T) {
 	if len(writer.events) != 2 || len(writer.events[0]) != 1 || len(writer.events[1]) != 1 {
 		t.Fatalf("writer events = %#v", writer.events)
 	}
-	if writer.accounts[0] != "alpha" || writer.multipliers[0]["max"] != 2 {
-		t.Fatalf("writer call = %#v, %#v", writer.accounts, writer.multipliers)
+	if writer.accounts[0] != "alpha" || writer.policies[0].ReasoningMultipliers["max"] != 2 {
+		t.Fatalf("writer call = %#v, %#v", writer.accounts, writer.policies)
 	}
 }
 
@@ -103,11 +105,11 @@ func (drainer stubDrainer) Drain(ctx context.Context, consume func([][]byte) err
 }
 
 type stubEventWriter struct {
-	results     []usage.IngestCounters
-	err         error
-	events      [][]usage.Event
-	accounts    []string
-	multipliers []map[string]float64
+	results  []usage.IngestCounters
+	err      error
+	events   [][]usage.Event
+	accounts []string
+	policies []usage.WeightPolicy
 }
 
 var errCollectorRestart = errors.New("simulated collector restart")
@@ -144,7 +146,7 @@ func (writer *deduplicatingEventWriter) IngestEvents(
 	_ context.Context,
 	_ string,
 	events []usage.Event,
-	_ map[string]float64,
+	_ usage.WeightPolicy,
 ) (usage.IngestCounters, error) {
 	result := usage.IngestCounters{Received: len(events)}
 	for _, event := range events {
@@ -163,11 +165,11 @@ func (writer *stubEventWriter) IngestEvents(
 	ctx context.Context,
 	account string,
 	events []usage.Event,
-	multipliers map[string]float64,
+	policy usage.WeightPolicy,
 ) (usage.IngestCounters, error) {
 	writer.accounts = append(writer.accounts, account)
 	writer.events = append(writer.events, events)
-	writer.multipliers = append(writer.multipliers, multipliers)
+	writer.policies = append(writer.policies, policy)
 	if writer.err != nil {
 		return usage.IngestCounters{}, writer.err
 	}

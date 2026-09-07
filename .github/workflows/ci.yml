@@ -31,6 +31,8 @@ jobs:
 
       - name: Install frontend and OpenAPI dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
           npm ci --prefix frontend --registry=https://registry.npmmirror.com
           npm ci --prefix tools/openapi --registry=https://registry.npmmirror.com
 

@@ -124,6 +124,16 @@ unset npm_workspace
 
 make -C "$SNAPSHOT_ROOT" -f scripts/build.mk verify
 
+# Shared dependency directories are linked only to run the immutable snapshot's
+# validation efficiently. Remove those links before the publication dirtiness
+# gate so it still rejects every unexpected source or generated-file change.
+for npm_workspace in frontend tools/openapi; do
+  if [ -L "$SNAPSHOT_ROOT/$npm_workspace/node_modules" ]; then
+    rm -- "$SNAPSHOT_ROOT/$npm_workspace/node_modules"
+  fi
+done
+unset npm_workspace
+
 if [ -z "$LOCAL_TAG_REVISION" ]; then
   # Tag 先保留在本地；镜像和发布包全部完成后才推送到 GitHub。
   git -C "$ROOT_DIR" tag -a "$VERSION" "$REVISION" -m "Release $VERSION"

@@ -175,7 +175,7 @@ const adminNavigation = [
 function currentAdminPage(pathname: string): AdminPage {
   if (pathname.startsWith("/setup")) return { eyebrow: "GETTING STARTED", title: "首次设置" };
   if (pathname.startsWith("/configuration") || pathname.startsWith("/settings") || pathname.startsWith("/notifications")) {
-    return { eyebrow: "CONTROL PLANE SETTINGS", title: "系统设置" };
+    return { eyebrow: "CONTROL PLANE SETTINGS", title: "配置中心" };
   }
   if (pathname.startsWith("/runtime")) return { eyebrow: "STACK CONTROL", title: "运行维护" };
   if (pathname.startsWith("/teams")) return { eyebrow: "TEAM MANAGEMENT", title: "团队管理" };

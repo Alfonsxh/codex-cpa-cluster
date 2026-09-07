@@ -147,7 +147,6 @@ func buildConfigurationDefinitions() []configurationDefinition {
 	}
 
 	definitions := []configurationDefinition{
-		simple(sitetime.SettingKey, "系统时区", "timezone", sitetime.DefaultName, "collector"),
 		text("branding.product_name", "产品名称", defaultProductName, 2, 64, "live", false),
 		text("branding.short_name", "产品简称", "Codex CPA", 2, 32, "live", false),
 		text("branding.environment_label", "环境说明", "Self-hosted service", 0, 64, "live", true),
@@ -157,6 +156,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		text("portal.provider_name", "客户端 Provider 名称", "Codex CPA", 2, 48, "live", false),
 		simple("portal.api_key_env", "客户端 Key 环境变量", "env_name", "CPA_API_KEY", "live"),
 		text("portal.default_model", "客户端默认模型", "gpt-5.6-sol", 1, 128, "live", false),
+		simple(sitetime.SettingKey, "系统时区", "timezone", sitetime.DefaultName, "collector"),
 		boolean("cpa.proxy_enabled", "启用默认上游代理", false, "accounts"),
 		simple("cpa.proxy_url", "默认上游代理 URL", "proxy_url_secret", "", "accounts"),
 		integer("cpa.request_retry", "请求重试次数", 2, 0, 10, "accounts"),

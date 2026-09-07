@@ -6,7 +6,7 @@ const routes = [
   { slug: "users", path: "/admin/users", ready: "添加用户", title: "用户管理" },
   { slug: "teams", path: "/admin/teams", ready: "创建团队", title: "团队管理" },
   { slug: "runtime", path: "/admin/runtime", ready: "容器服务", title: "运行维护" },
-  { slug: "configuration", path: "/admin/configuration", ready: "保存配置", title: "系统设置" },
+  { slug: "configuration", path: "/admin/configuration", ready: "保存配置", title: "配置中心" },
   { slug: "setup", path: "/admin/setup", ready: "完成基础配置", title: "首次设置" }
 ] as const;
 

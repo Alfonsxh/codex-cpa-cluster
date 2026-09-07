@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminShell } from "./App";
+import { useAdminToolbar } from "./AdminToolbarContext";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
 import { ThemeProvider } from "./ThemeProvider";
 
@@ -23,6 +25,18 @@ function renderShell(pathname: string, children: React.ReactNode = <div>页面�
       </ThemeProvider>
     </QueryClientProvider>
   );
+}
+
+function ConfigurationDetailFixture() {
+  const { setPageDetail } = useAdminToolbar();
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPageDetail({ title: "系统设置", eyebrow: "SYSTEM SETTINGS" }), 0);
+    return () => {
+      window.clearTimeout(timer);
+      setPageDetail(null);
+    };
+  }, [setPageDetail]);
+  return <div>系统设置内容</div>;
 }
 
 describe("AdminShell legacy visual contract", () => {
@@ -52,7 +66,7 @@ describe("AdminShell legacy visual contract", () => {
     const switcher = screen.getByRole("region", { name: "界面切换" });
     expect(within(switcher).getByRole("link", { name: /服务入口/ })).toHaveAttribute("href", "/");
     expect(within(switcher).getByRole("link", { name: /使用中心/ })).toHaveAttribute("href", "/usage/");
-    expect(screen.getByRole("heading", { name: "系统设置" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "配置中心" })).toBeInTheDocument();
     expect(screen.getByText("CONTROL PLANE SETTINGS")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Codex CPA 管理中心" }).querySelector("img"))
       .toHaveAttribute("src", "/portal/assets/codex-cpa-pool-mark.svg");
@@ -66,6 +80,12 @@ describe("AdminShell legacy visual contract", () => {
     expect(within(sectionNavigation).getByRole("link", { name: /运行配置/ })).toHaveAttribute("href", "/admin/configuration");
     expect(within(sectionNavigation).getByRole("link", { name: /通用设置/ })).toHaveAttribute("aria-current", "page");
     expect(within(sectionNavigation).getByRole("link", { name: /通知设置/ })).toHaveAttribute("href", "/admin/notifications");
+  });
+
+  it("shows the configuration center as the parent of the selected settings group", async () => {
+    renderShell("/configuration", <ConfigurationDetailFixture />);
+
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("配置中心/系统设置"));
   });
 
   it("restores the legacy overview refresh control in the top bar", async () => {

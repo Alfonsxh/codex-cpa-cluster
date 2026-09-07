@@ -85,6 +85,13 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	if catalog.Version != 2 || catalog.FieldCount != 78 || len(catalog.Groups) != 11 || catalog.GeneratedAt <= 0 {
 		t.Fatalf("configuration catalog summary = %#v", catalog)
 	}
+	groupNames := make([]string, 0, len(catalog.Groups))
+	for _, group := range catalog.Groups {
+		groupNames = append(groupNames, group.Name)
+	}
+	if !reflect.DeepEqual(groupNames[:2], []string{"品牌与身份", "系统设置"}) {
+		t.Fatalf("configuration catalog leading groups = %#v, want 品牌与身份 then 系统设置", groupNames[:2])
+	}
 
 	fields := make(map[string]configurationCatalogField, catalog.FieldCount)
 	for _, group := range catalog.Groups {

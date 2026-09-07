@@ -15,6 +15,7 @@ sh -n \
   "$ROOT_DIR/scripts/package-release.sh" \
   "$ROOT_DIR/scripts/release-images.sh" \
   "$ROOT_DIR/scripts/test-release-images.sh" \
+  "$ROOT_DIR/scripts/test-local-release.sh" \
   "$ROOT_DIR/scripts/test-run-runtime.sh" \
   "$ROOT_DIR/scripts/test-run.sh" \
   "$ROOT_DIR/scripts/test-run-compat.sh" \
@@ -28,6 +29,8 @@ sh "$ROOT_DIR/scripts/test-run-runtime.sh"
 sh "$ROOT_DIR/scripts/test-run.sh"
 sh "$ROOT_DIR/scripts/test-run-compat.sh"
 sh "$ROOT_DIR/scripts/test-release-images.sh"
+node --test "$ROOT_DIR/scripts/release-validation.test.mjs"
+sh "$ROOT_DIR/scripts/test-local-release.sh"
 UNFORMATTED_GO=$(find "$ROOT_DIR/cmd" "$ROOT_DIR/internal" -type f -name '*.go' -exec gofmt -l {} +)
 if [ -n "$UNFORMATTED_GO" ]; then
   echo "Go 文件未格式化：" >&2

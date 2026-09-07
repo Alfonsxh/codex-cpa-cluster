@@ -260,6 +260,9 @@ grep -Eq '(^| )web($| )' "$DOCKER_LOG" || { echo "missing Web did not select Web
 for COMPONENT in control gateway edge; do
   ! grep -Eq "(^| )$COMPONENT($| )" "$DOCKER_LOG" || { echo "missing Web selected $COMPONENT" >&2; exit 1; }
 done
+! grep -E '^bake-tag .*:v' "$DOCKER_LOG" || { echo "version tags caused duplicate layer publication" >&2; exit 1; }
+grep -Fq "imagetools create --prefer-index=false --tag $PREFIX_A/codex-cpa-web:$VERSION" "$DOCKER_LOG" \
+  || { echo "new Web version tag was not created remotely" >&2; exit 1; }
 : >"$DOCKER_LOG"
 : >"$RELEASECTL_LOG"
 run_publish "$PREFIX_A" >/dev/null

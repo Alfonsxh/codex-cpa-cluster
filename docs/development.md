@@ -82,3 +82,38 @@ go test -count=1 -run '^TestGoWorkerLeaseGroupTransfersAllScopesAndRejectsDuplic
 ```
 
 不得绕过所有权直接修改 SQLite，也不得用本地 Test 通过代替真实 API Key 的 `/v1/responses` 验收。
+
+## 发布验收与重试
+
+开发中的检查继续使用 `make -f scripts/build.mk verify` 和
+`npm --prefix frontend run test:e2e`。准备发布时，先把最终改动形成干净的本地提交，再执行：
+
+```sh
+make -f scripts/build.mk release-verify
+# 验收完成后，按仓库提交流程将同一提交推送到 main，并准备版本说明 Draft。
+make -f scripts/build.mk release-check VERSION=v2.0.0-rc.50 IMAGE_PREFIX=ghcr.io/owner
+make -f scripts/build.mk release VERSION=v2.0.0-rc.50 IMAGE_PREFIX=ghcr.io/owner
+```
+
+`release-verify` 可以在本地分支执行，不推送代码、Tag、镜像或 GitHub Release。
+它在固定提交的独立快照中运行完整源码和浏览器检查；依赖目录由该快照独占。
+直接运行 `release` 也会自动完成相同验收，无需预先重复执行两个检查命令。
+
+成功记录和生产前端产物保存在 Git common directory 的 `release-validation/` 中，
+不会进入源码或发布包。缓存绑定整个 Git 源码树、Node/npm/Go/Compose、浏览器文件、
+目标平台及相关环境配置。源码、工具链或产物校验变化时重新验收；只有完整验收通过
+且文件摘要匹配的静态产物才可交给 Web 镜像。相同源码在浏览器检查失败后，可复用
+已经成功的源码检查；镜像或 GitHub 上传失败后重试，也会复用成功的验收及不可变镜像。
+版本号、GitHub Draft 和远端镜像仍在每次发布时重新检查。
+
+发布路径直接使用验收生成的前端产物，避免 Docker 再次编译三套页面。
+普通 Docker 构建仍支持从源码构建前端。Control 的程序分别放入独立镜像层；
+新镜像只推送内容标签，再由 Registry 添加版本标签，既有镜像继续按摘要复用。
+只有 `v数字.数字.数字` 形式的规范正式版本可设为 GitHub Latest，RC 等使用 Pre-release。
+脚本输出验收、镜像、附件和公开阶段的耗时，便于区分编译与网络等待。
+
+Playwright 默认使用两个 worker；资源紧张时可使用 `CPAP_E2E_WORKERS=1`。
+浏览器上下文和接口覆盖按用例隔离，预览服务仅提供只读 fixture。
+Vitest 的 Ant Design 交互用例保持按文件串行，避免资源争用导致超时。
+同一源码的并发验收由锁保护；若进程被强制终止，确认已退出后可移除错误信息中
+标明的遗留锁目录。CI 继续只验证和打包，部署仍由目标环境操作入口执行。

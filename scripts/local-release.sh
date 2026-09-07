@@ -3,13 +3,26 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ACTION=${1:-publish}
-VERSION=${VERSION:?VERSION 不能为空，例如 v1.1.0}
-IMAGE_PREFIX=${IMAGE_PREFIX:?IMAGE_PREFIX 不能为空，例如 ghcr.io/owner}
+VERSION=${VERSION:-}
+IMAGE_PREFIX=${IMAGE_PREFIX:-}
 PLATFORM=${PLATFORM:-linux/amd64}
 GH_REPO=${GH_REPO:-Alfonsxh/codex-cpa-pool}
 GIT_REMOTE=${GIT_REMOTE:-origin}
 RELEASE_BRANCH=${RELEASE_BRANCH:-main}
 DIST_DIR=${DIST_DIR:-$ROOT_DIR/dist}
+
+run_stage() {
+  STAGE_LABEL=$1
+  shift
+  STAGE_START=$(date +%s)
+  if "$@"; then
+    printf '[发布] %s完成，耗时 %s 秒\n' "$STAGE_LABEL" "$(( $(date +%s) - STAGE_START ))"
+  else
+    STAGE_EXIT=$?
+    printf '[发布] %s失败，耗时 %s 秒\n' "$STAGE_LABEL" "$(( $(date +%s) - STAGE_START ))" >&2
+    return "$STAGE_EXIT"
+  fi
+}
 
 case "$DIST_DIR" in
   /*) ;;
@@ -17,33 +30,40 @@ case "$DIST_DIR" in
 esac
 
 case "$ACTION" in
-  check|publish) ;;
-  *) echo "动作必须是 check 或 publish：$ACTION" >&2; exit 1 ;;
+  check|verify|publish) ;;
+  *) echo "动作必须是 check、verify 或 publish：$ACTION" >&2; exit 1 ;;
 esac
-if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
-  echo "VERSION 必须是带 v 前缀的语义化 Tag：$VERSION" >&2
-  exit 1
-fi
-if ! printf '%s' "$IMAGE_PREFIX" | grep -Eq '^[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._/-]+$'; then
-  echo "IMAGE_PREFIX 无效：$IMAGE_PREFIX" >&2
-  exit 1
-fi
-if ! printf '%s' "$GH_REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
-  echo "GH_REPO 必须是 owner/repository：$GH_REPO" >&2
-  exit 1
+if [ "$ACTION" != verify ]; then
+  : "${VERSION:?VERSION 不能为空，例如 v1.1.0}"
+  : "${IMAGE_PREFIX:?IMAGE_PREFIX 不能为空，例如 ghcr.io/owner}"
+  if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+    echo "VERSION 必须是带 v 前缀的语义化 Tag：$VERSION" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$IMAGE_PREFIX" | grep -Eq '^[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._/-]+$'; then
+    echo "IMAGE_PREFIX 无效：$IMAGE_PREFIX" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$GH_REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
+    echo "GH_REPO 必须是 owner/repository：$GH_REPO" >&2
+    exit 1
+  fi
+
 fi
 
-for command in git docker gh go make npm; do
+for command in git docker go make npm node; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "缺少发布依赖：$command" >&2
     exit 1
   fi
 done
 docker buildx version >/dev/null
-gh auth status --hostname github.com >/dev/null
+if [ "$ACTION" != verify ]; then
+  gh auth status --hostname github.com >/dev/null
+fi
 
 CURRENT_BRANCH=$(git -C "$ROOT_DIR" symbolic-ref --quiet --short HEAD || true)
-if [ "$CURRENT_BRANCH" != "$RELEASE_BRANCH" ]; then
+if [ "$ACTION" != verify ] && [ "$CURRENT_BRANCH" != "$RELEASE_BRANCH" ]; then
   echo "只能从 $RELEASE_BRANCH 分支发布，当前分支：${CURRENT_BRANCH:-detached HEAD}" >&2
   exit 1
 fi
@@ -52,53 +72,58 @@ if [ -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=normal)" ]; t
   exit 1
 fi
 
-# 发布只接受已经推送到主分支的提交，避免 GitHub Release 指向本地独有 revision。
-git -C "$ROOT_DIR" fetch "$GIT_REMOTE" "$RELEASE_BRANCH" --tags
 REVISION=$(git -C "$ROOT_DIR" rev-parse HEAD)
-REMOTE_BRANCH_REVISION=$(git -C "$ROOT_DIR" rev-parse "$GIT_REMOTE/$RELEASE_BRANCH")
-if [ "$REVISION" != "$REMOTE_BRANCH_REVISION" ]; then
-  echo "当前提交尚未与 $GIT_REMOTE/$RELEASE_BRANCH 同步，拒绝发布" >&2
-  exit 1
-fi
-
-LOCAL_TAG_REVISION=$(
-  git -C "$ROOT_DIR" rev-parse --verify "$VERSION^{commit}" 2>/dev/null || true
-)
-if [ -n "$LOCAL_TAG_REVISION" ] && [ "$LOCAL_TAG_REVISION" != "$REVISION" ]; then
-  echo "本地 Tag 已指向其他提交：$VERSION" >&2
-  exit 1
-fi
-
-REMOTE_TAG_REVISION=$(
-  git -C "$ROOT_DIR" ls-remote "$GIT_REMOTE" \
-    "refs/tags/$VERSION" "refs/tags/$VERSION^{}" \
-    | awk -v direct="refs/tags/$VERSION" -v peeled="refs/tags/$VERSION^{}" '
-        $2 == direct { direct_revision = $1 }
-        $2 == peeled { peeled_revision = $1 }
-        END { print peeled_revision ? peeled_revision : direct_revision }
-      '
-)
-if [ -n "$REMOTE_TAG_REVISION" ] && [ "$REMOTE_TAG_REVISION" != "$REVISION" ]; then
-  echo "远端 Tag 已指向其他提交：$VERSION" >&2
-  exit 1
-fi
-
-RELEASE_STATE=missing
-if RELEASE_DRAFT=$(gh release view "$VERSION" --repo "$GH_REPO" --json isDraft --jq .isDraft 2>/dev/null); then
-  if [ "$RELEASE_DRAFT" = true ]; then
-    RELEASE_STATE=draft
-  else
-    echo "GitHub Release 已发布，拒绝覆盖：$VERSION" >&2
+if [ "$ACTION" != verify ]; then
+  # 发布只接受已经推送到主分支的提交，避免 GitHub Release 指向本地独有 revision。
+  git -C "$ROOT_DIR" fetch "$GIT_REMOTE" "$RELEASE_BRANCH" --tags
+  REMOTE_BRANCH_REVISION=$(git -C "$ROOT_DIR" rev-parse "$GIT_REMOTE/$RELEASE_BRANCH")
+  if [ "$REVISION" != "$REMOTE_BRANCH_REVISION" ]; then
+    echo "当前提交尚未与 $GIT_REMOTE/$RELEASE_BRANCH 同步，拒绝发布" >&2
     exit 1
   fi
+
+  LOCAL_TAG_REVISION=$(
+    git -C "$ROOT_DIR" rev-parse --verify "$VERSION^{commit}" 2>/dev/null || true
+  )
+  if [ -n "$LOCAL_TAG_REVISION" ] && [ "$LOCAL_TAG_REVISION" != "$REVISION" ]; then
+    echo "本地 Tag 已指向其他提交：$VERSION" >&2
+    exit 1
+  fi
+
+  REMOTE_TAG_REVISION=$(
+    git -C "$ROOT_DIR" ls-remote "$GIT_REMOTE" \
+      "refs/tags/$VERSION" "refs/tags/$VERSION^{}" \
+      | awk -v direct="refs/tags/$VERSION" -v peeled="refs/tags/$VERSION^{}" '
+          $2 == direct { direct_revision = $1 }
+          $2 == peeled { peeled_revision = $1 }
+          END { print peeled_revision ? peeled_revision : direct_revision }
+        '
+  )
+  if [ -n "$REMOTE_TAG_REVISION" ] && [ "$REMOTE_TAG_REVISION" != "$REVISION" ]; then
+    echo "远端 Tag 已指向其他提交：$VERSION" >&2
+    exit 1
+  fi
+
+  RELEASE_STATE=missing
+  if RELEASE_DRAFT=$(gh release view "$VERSION" --repo "$GH_REPO" --json isDraft --jq .isDraft 2>/dev/null); then
+    if [ "$RELEASE_DRAFT" = true ]; then
+      RELEASE_STATE=draft
+    else
+      echo "GitHub Release 已发布，拒绝覆盖：$VERSION" >&2
+      exit 1
+    fi
+  fi
+
+  printf 'version=%s\nrevision=%s\nimage_prefix=%s\ngithub_repo=%s\nrelease_state=%s\n' \
+    "$VERSION" "$REVISION" "$IMAGE_PREFIX" "$GH_REPO" "$RELEASE_STATE"
+  if [ "$ACTION" = check ]; then
+    printf '%s\n' '发布预检通过；未创建 Tag、镜像或 GitHub Release'
+    exit 0
+  fi
+
 fi
 
-printf 'version=%s\nrevision=%s\nimage_prefix=%s\ngithub_repo=%s\nrelease_state=%s\n' \
-  "$VERSION" "$REVISION" "$IMAGE_PREFIX" "$GH_REPO" "$RELEASE_STATE"
-if [ "$ACTION" = check ]; then
-  printf '%s\n' '发布预检通过；未创建 Tag、镜像或 GitHub Release'
-  exit 0
-fi
+CACHE_ROOT=$(git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-common-dir)/release-validation
 
 # Verification, image publication and release packaging must read one immutable
 # checkout. The operator's working tree can otherwise change between those
@@ -113,26 +138,17 @@ cleanup_snapshot() {
 }
 trap cleanup_snapshot EXIT HUP INT TERM
 git -C "$ROOT_DIR" worktree add --detach "$SNAPSHOT_ROOT" "$REVISION" >/dev/null
+# Each snapshot owns its dependency/cache directories, so acceptance cannot
+# interfere with the operator's development servers. npm reuses its download cache.
 for npm_workspace in frontend tools/openapi; do
-  if [ -d "$ROOT_DIR/$npm_workspace/node_modules" ]; then
-    ln -s "$ROOT_DIR/$npm_workspace/node_modules" "$SNAPSHOT_ROOT/$npm_workspace/node_modules"
-  else
-    npm --prefix "$SNAPSHOT_ROOT/$npm_workspace" ci
-  fi
+  npm --prefix "$SNAPSHOT_ROOT/$npm_workspace" ci --prefer-offline --no-audit --no-fund
 done
 unset npm_workspace
-
-make -C "$SNAPSHOT_ROOT" -f scripts/build.mk verify
-
-# Shared dependency directories are linked only to run the immutable snapshot's
-# validation efficiently. Remove those links before the publication dirtiness
-# gate so it still rejects every unexpected source or generated-file change.
-for npm_workspace in frontend tools/openapi; do
-  if [ -L "$SNAPSHOT_ROOT/$npm_workspace/node_modules" ]; then
-    rm -- "$SNAPSHOT_ROOT/$npm_workspace/node_modules"
-  fi
-done
-unset npm_workspace
+node "$SNAPSHOT_ROOT/scripts/release-validation.mjs" "$SNAPSHOT_ROOT" "$CACHE_ROOT" "$PLATFORM"
+if [ "$ACTION" = verify ]; then
+  echo "发布验收完成；未推送代码、Tag、镜像或 Release"
+  exit 0
+fi
 
 if [ -z "$LOCAL_TAG_REVISION" ]; then
   # Tag 先保留在本地；镜像和发布包全部完成后才推送到 GitHub。
@@ -144,7 +160,8 @@ fi
   VERSION="$VERSION" \
   PLATFORM="$PLATFORM" \
   IMAGE_PREFIXES="$IMAGE_PREFIX" \
-    sh scripts/release-images.sh publish
+  RELEASE_VALIDATION_CACHE="$CACHE_ROOT" \
+    run_stage "镜像准备与推送" sh scripts/release-images.sh publish
 )
 
 mkdir -p "$DIST_DIR"
@@ -153,7 +170,7 @@ RELEASE_DESCRIPTOR="$DIST_DIR/release-$VERSION.json"
 RELEASE_ENV="$DIST_DIR/release-$VERSION.env"
 RUN_ASSET="$DIST_DIR/run.sh"
 CHECKSUMS="$DIST_DIR/SHA256SUMS"
-(cd "$SNAPSHOT_ROOT" && sh scripts/package-release.sh "$ARCHIVE")
+(cd "$SNAPSHOT_ROOT" && run_stage "部署包生成与校验" sh scripts/package-release.sh "$ARCHIVE")
 (cd "$SNAPSHOT_ROOT" && go run ./cmd/releasectl manifest descriptor \
   --root "$SNAPSHOT_ROOT" \
   --output "$RELEASE_DESCRIPTOR" \
@@ -180,7 +197,7 @@ if [ -z "$REMOTE_TAG_REVISION" ]; then
 fi
 
 if [ "$RELEASE_STATE" = missing ]; then
-  gh release create "$VERSION" \
+  run_stage "附件创建与上传" gh release create "$VERSION" \
     "$ARCHIVE#Deployment archive" \
     "$RELEASE_DESCRIPTOR#Release descriptor" \
     "$RELEASE_ENV#deployment environment" \
@@ -192,7 +209,7 @@ if [ "$RELEASE_STATE" = missing ]; then
     --generate-notes \
     --title "$VERSION"
 else
-  gh release upload "$VERSION" \
+  run_stage "附件上传" gh release upload "$VERSION" \
     "$ARCHIVE#Deployment archive" \
     "$RELEASE_DESCRIPTOR#Release descriptor" \
     "$RELEASE_ENV#deployment environment" \
@@ -203,5 +220,10 @@ else
 fi
 
 # GitHub Release 最后公开，确保用户看见版本时全部附件已经可用。
-gh release edit "$VERSION" --repo "$GH_REPO" --draft=false --latest
+# SemVer prereleases cannot be GitHub Latest. Apply the policy to Drafts too.
+if printf '%s' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+  run_stage "公开正式版" gh release edit "$VERSION" --repo "$GH_REPO" --draft=false --prerelease=false --latest
+else
+  run_stage "公开预发布" gh release edit "$VERSION" --repo "$GH_REPO" --draft=false --prerelease --latest=false
+fi
 printf '发布完成：https://github.com/%s/releases/tag/%s\n' "$GH_REPO" "$VERSION"

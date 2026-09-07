@@ -63,6 +63,11 @@ COPY frontend ./
 RUN --mount=type=cache,id=cpap-npm-cache,target=/root/.npm \
     npm run build
 
+# A verified release may replace this stage with its validated static output.
+# Ordinary Docker builds continue to compile the frontend from source.
+FROM scratch AS web-assets
+COPY --from=web-builder /src/frontend/dist /dist
+
 FROM ${RUNTIME_IMAGE} AS go-runtime
 # Go embeds tzdata, but libc and shell tools also need the system zoneinfo.
 ENV TZ=UTC
@@ -87,10 +92,15 @@ USER cpa:cpa
 ENTRYPOINT ["/usr/local/bin/cpa-edge"]
 
 FROM go-runtime AS control
-COPY --from=control-builder /out/cpa-admin /out/cpa-bootstrap /out/cpa-collector /out/cpa-failover \
-  /out/cpa-log-maintenance /out/cpa-notifications \
-  /out/cpa-ownership /out/cpa-quota /out/cpa-releasectl \
-  /usr/local/bin/
+COPY --from=control-builder /out/cpa-admin /usr/local/bin/cpa-admin
+COPY --from=control-builder /out/cpa-bootstrap /usr/local/bin/cpa-bootstrap
+COPY --from=control-builder /out/cpa-collector /usr/local/bin/cpa-collector
+COPY --from=control-builder /out/cpa-failover /usr/local/bin/cpa-failover
+COPY --from=control-builder /out/cpa-log-maintenance /usr/local/bin/cpa-log-maintenance
+COPY --from=control-builder /out/cpa-notifications /usr/local/bin/cpa-notifications
+COPY --from=control-builder /out/cpa-ownership /usr/local/bin/cpa-ownership
+COPY --from=control-builder /out/cpa-quota /usr/local/bin/cpa-quota
+COPY --from=control-builder /out/cpa-releasectl /usr/local/bin/cpa-releasectl
 CMD ["/usr/local/bin/cpa-admin"]
 
 FROM go-runtime AS test-upstream
@@ -100,9 +110,9 @@ ENTRYPOINT ["/usr/local/bin/cpa-test-upstream"]
 
 FROM go-runtime AS web
 COPY --from=web-go-builder /out/cpa-web /usr/local/bin/cpa-web
-COPY --from=web-builder /src/frontend/dist/portal /srv/cpa-web/portal
-COPY --from=web-builder /src/frontend/dist/admin /srv/cpa-web/admin
-COPY --from=web-builder /src/frontend/dist/usage /srv/cpa-web/usage
+COPY --from=web-assets /dist/portal /srv/cpa-web/portal
+COPY --from=web-assets /dist/admin /srv/cpa-web/admin
+COPY --from=web-assets /dist/usage /srv/cpa-web/usage
 LABEL org.opencontainers.image.source="https://github.com/Alfonsxh/codex-cpa-pool" \
       org.opencontainers.image.version="" \
       org.opencontainers.image.revision=""

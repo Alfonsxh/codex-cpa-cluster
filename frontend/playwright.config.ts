@@ -24,8 +24,9 @@ export default defineConfig({
       maxDiffPixelRatio: 0.005
     }
   },
-  fullyParallel: false,
-  workers: 1,
+  // Contexts and route overrides are per test; the preview serves read-only fixtures.
+  fullyParallel: true,
+  workers: Number(process.env.CPAP_E2E_WORKERS || 2),
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://127.0.0.1:5193",

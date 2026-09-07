@@ -151,7 +151,7 @@ inspect_remote_image() {
 create_remote_tag() {
   CREATE_DESTINATION=$1
   CREATE_SOURCE=$2
-  CREATE_ERROR="$WORK_DIR/create.error"
+  CREATE_ERROR=$(mktemp "$WORK_DIR/create.XXXXXX")
   CREATE_ATTEMPT=1
   while [ "$CREATE_ATTEMPT" -le "$REGISTRY_RETRY_ATTEMPTS" ]; do
     if docker buildx imagetools create --prefer-index=false \
@@ -171,6 +171,31 @@ create_remote_tag() {
   echo "创建远端镜像标签失败：$CREATE_DESTINATION <- $CREATE_SOURCE" >&2
   cat "$CREATE_ERROR" >&2
   return 1
+}
+
+# Tag writes are independent after immutable metadata validation. Bound network
+# concurrency and collect every failure before allowing the next phase.
+run_tag_batch() {
+  TAG_REQUESTS=$1
+  TAG_PIDS=
+  TAG_COUNT=0
+  TAG_FAILED=false
+  while IFS="$TAB" read -r TAG_DESTINATION TAG_SOURCE; do
+    (create_remote_tag "$TAG_DESTINATION" "$TAG_SOURCE") &
+    TAG_PIDS="$TAG_PIDS $!"
+    TAG_COUNT=$((TAG_COUNT + 1))
+    if [ "$TAG_COUNT" -eq 4 ]; then
+      for TAG_PID in $TAG_PIDS; do
+        if ! wait "$TAG_PID"; then TAG_FAILED=true; fi
+      done
+      TAG_PIDS=
+      TAG_COUNT=0
+    fi
+  done <"$TAG_REQUESTS"
+  for TAG_PID in $TAG_PIDS; do
+    if ! wait "$TAG_PID"; then TAG_FAILED=true; fi
+  done
+  [ "$TAG_FAILED" = false ]
 }
 
 run_inspection_batch() {
@@ -290,21 +315,20 @@ done <"$INVENTORY_FILE"
 
 # Phase 1b: promote existing immutable content remotely. These operations move
 # manifests/config only and never pull image layers to the publisher.
+TAG_REQUESTS="$WORK_DIR/promote-requests.tsv"
+: >"$TAG_REQUESTS"
 while IFS="$TAB" read -r PREFIX COMPONENT DIGEST CONTENT_IMAGE VERSION_IMAGE PLAN_ACTION CONTENT_METADATA VERSION_METADATA; do
   case "$PLAN_ACTION" in
-    promote-version)
-      create_remote_tag "$VERSION_IMAGE" "$CONTENT_IMAGE"
-      ;;
-    promote-content)
-      create_remote_tag "$CONTENT_IMAGE" "$VERSION_IMAGE"
-      ;;
+    promote-version) printf '%s\t%s\n' "$VERSION_IMAGE" "$CONTENT_IMAGE" >>"$TAG_REQUESTS" ;;
+    promote-content) printf '%s\t%s\n' "$CONTENT_IMAGE" "$VERSION_IMAGE" >>"$TAG_REQUESTS" ;;
   esac
 done <"$PUBLISH_PLAN"
+run_tag_batch "$TAG_REQUESTS"
 
 # Phase 1c: build only components absent from at least one Registry. A generated
 # Bake override keeps every Registry tag as a distinct list item; comma-joining
 # tags would create one invalid literal tag. One Bake invocation shares common
-# stages and pushes content/version tags together.
+# stages and pushes only content tags; version tags are promoted remotely.
 BUILD_TARGETS="$WORK_DIR/build-targets"
 BUILD_TAG_PLAN="$WORK_DIR/build-tags.tsv"
 BAKE_OVERRIDE="$WORK_DIR/publish-tags.hcl"
@@ -314,7 +338,7 @@ BAKE_OVERRIDE="$WORK_DIR/publish-tags.hcl"
 for COMPONENT in $RELEASE_COMPONENTS; do
   COMPONENT_TAG_FILE="$WORK_DIR/build-${COMPONENT}-tags"
   awk -F '\t' -v component="$COMPONENT" '
-    $2 == component && $6 == "build" { print $4; print $5 }
+    $2 == component && $6 == "build" { print $4 }
   ' "$PUBLISH_PLAN" >"$COMPONENT_TAG_FILE"
   if [ -s "$COMPONENT_TAG_FILE" ]; then
     printf '%s\n' "$COMPONENT" >>"$BUILD_TARGETS"
@@ -330,6 +354,10 @@ set -- docker buildx bake \
   --file "$ROOT_DIR/docker-bake.hcl" \
   --file "$BAKE_OVERRIDE" \
   --push
+if [ -n "${RELEASE_VALIDATION_CACHE:-}" ]; then
+  node "$ROOT_DIR/scripts/release-validation.mjs" "$ROOT_DIR" "$RELEASE_VALIDATION_CACHE" "$PLATFORM" --check
+  set -- "$@" --set "web.contexts.web-assets=$ROOT_DIR/frontend"
+fi
 while IFS= read -r COMPONENT; do
   set -- "$@" "$COMPONENT"
 done <"$BUILD_TARGETS"
@@ -340,6 +368,28 @@ if [ -s "$BUILD_TARGETS" ]; then
 else
   echo "所有不可变组件镜像均已存在，跳过构建"
 fi
+
+# Inspect newly built content once, then add version tags without sending layers.
+BUILT_REQUESTS="$WORK_DIR/built-requests.tsv"
+TAG_REQUESTS="$WORK_DIR/built-tag-requests.tsv"
+: >"$BUILT_REQUESTS"
+: >"$TAG_REQUESTS"
+while IFS="$TAB" read -r PREFIX COMPONENT DIGEST CONTENT_IMAGE VERSION_IMAGE PLAN_ACTION CONTENT_METADATA VERSION_METADATA; do
+  if [ "$PLAN_ACTION" = build ]; then
+    printf '%s\t%s\n' "$CONTENT_IMAGE" "$CONTENT_METADATA" >>"$BUILT_REQUESTS"
+  fi
+done <"$PUBLISH_PLAN"
+run_inspection_batch "$BUILT_REQUESTS"
+while IFS="$TAB" read -r PREFIX COMPONENT DIGEST CONTENT_IMAGE VERSION_IMAGE PLAN_ACTION CONTENT_METADATA VERSION_METADATA; do
+  if [ "$PLAN_ACTION" = build ]; then
+    if [ "$(metadata_status "$CONTENT_METADATA")" != exists ]; then
+      ensure_remote_exists "$CONTENT_IMAGE" "$CONTENT_METADATA"
+    fi
+    validate_existing_metadata "$CONTENT_METADATA" "$CONTENT_IMAGE" "$COMPONENT" "$DIGEST"
+    printf '%s\t%s\n' "$VERSION_IMAGE" "$CONTENT_IMAGE" >>"$TAG_REQUESTS"
+  fi
+done <"$PUBLISH_PLAN"
+run_tag_batch "$TAG_REQUESTS"
 
 # Reinspect only references that changed. Reused immutable tags retain the
 # metadata already validated during the global fail-closed preflight.
@@ -354,7 +404,6 @@ while IFS="$TAB" read -r PREFIX COMPONENT DIGEST CONTENT_IMAGE VERSION_IMAGE PLA
       printf '%s\t%s\n' "$CONTENT_IMAGE" "$CONTENT_METADATA" >>"$PREPARE_REQUESTS"
       ;;
     build)
-      printf '%s\t%s\n' "$CONTENT_IMAGE" "$CONTENT_METADATA" >>"$PREPARE_REQUESTS"
       printf '%s\t%s\n' "$VERSION_IMAGE" "$VERSION_METADATA" >>"$PREPARE_REQUESTS"
       ;;
   esac

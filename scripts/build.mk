@@ -24,7 +24,7 @@ TEST_PROJECT ?= codex-cpa-test
 	target-activate target-up-core target-up-writers target-up-notifications \
 	target-smoke target-ps target-down lease-rehearsal worker-lease-rehearsal \
 	privacy-check package images publish publish-harbor publish-dockerhub \
-	publish-ghcr publish-all release-check release run
+	publish-ghcr publish-all release-check release-verify release run
 
 help:
 	@printf '%s\n' \
@@ -48,6 +48,7 @@ help:
 	  'make -f scripts/build.mk package VERSION=v1.0.0' \
 	  'make -f scripts/build.mk images VERSION=v1.0.0 [PLATFORM=linux/amd64]' \
 	  'make -f scripts/build.mk publish VERSION=v1.0.0 IMAGE_PREFIXES="registry.example.com/team docker.io/user"' \
+	  'make -f scripts/build.mk release-verify' \
 	  'make -f scripts/build.mk release-check VERSION=v1.1.0 IMAGE_PREFIX=ghcr.io/owner' \
 	  'make -f scripts/build.mk release VERSION=v1.1.0 IMAGE_PREFIX=ghcr.io/owner'
 
@@ -152,6 +153,9 @@ publish-all:
 	@test -n "$(HARBOR_PREFIX)" || { echo 'HARBOR_PREFIX 不能为空' >&2; exit 1; }
 	@test -n "$(DOCKERHUB_PREFIX)" || { echo 'DOCKERHUB_PREFIX 不能为空' >&2; exit 1; }
 	$(MAKE) -f "$(ROOT_DIR)/scripts/build.mk" publish VERSION="$(VERSION)" PLATFORM="$(PLATFORM)" IMAGE_PREFIXES="$(HARBOR_PREFIX) $(DOCKERHUB_PREFIX)"
+
+release-verify:
+	cd "$(ROOT_DIR)" && PLATFORM="$(PLATFORM)" sh scripts/local-release.sh verify
 
 release-check:
 	cd "$(ROOT_DIR)" && VERSION="$(VERSION)" IMAGE_PREFIX="$(IMAGE_PREFIX)" PLATFORM="$(PLATFORM)" GH_REPO="$(GH_REPO)" GIT_REMOTE="$(GIT_REMOTE)" RELEASE_BRANCH="$(RELEASE_BRANCH)" sh scripts/local-release.sh check

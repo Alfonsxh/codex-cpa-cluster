@@ -14,6 +14,10 @@ __pycache__
 *.pyc
 **/node_modules
 frontend/dist
+frontend/e2e
+frontend/coverage
+frontend/test-results
+frontend/playwright-report
 *.sqlite3
 *.sqlite3-*
 auth

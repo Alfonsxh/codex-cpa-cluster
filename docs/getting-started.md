@@ -45,18 +45,18 @@ make -f scripts/build.mk test-down
 curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
 ```
 
-产品名称为 Codex CPA Pool；下载继续使用现有 GitHub 发行源。下文的 `/home/cpap` 是新安装默认目录；旧版 `/home/cpac` 环境原址沿用，命令中的路径应替换为实际运维根目录。安装器使用 `CPAP_*` 参数与配置，并兼容旧 `CPAC_*`。详见[部署兼容规则](deployment.md#名称与现有部署兼容)。
+产品名称为 Codex CPA Pool；下载继续使用现有 GitHub 发行源。下文的 `/home/ccpa` 是新安装默认目录；旧版 `/home/cpac` 环境原址沿用，命令中的路径应替换为实际运维根目录。安装器使用 `CPAP_*` 参数与配置，并兼容旧 `CPAC_*`。详见[部署兼容规则](deployment.md#名称与现有部署兼容)。
 
-默认入口选择 GitHub Latest Release。已安装环境可以执行 `sudo /home/cpap/run.sh --tag`，按版本顺序查看高于当前部署版本的 GitHub Releases 并交互选择；非交互调用只打印候选，不执行升级。需要固定版本时使用 `sudo /home/cpap/run.sh --tag v2.0.0`；指定 Tag 必须存在对应 GitHub Release 及完整校验附件，脚本不会从孤立 Git Tag 或源码归档部署。
+默认入口选择 GitHub Latest Release。已安装环境可以执行 `sudo /home/ccpa/run.sh --tag`，按版本顺序查看高于当前部署版本的 GitHub Releases 并交互选择；非交互调用只打印候选，不执行升级。需要固定版本时使用 `sudo /home/ccpa/run.sh --tag v2.0.0`；指定 Tag 必须存在对应 GitHub Release 及完整校验附件，脚本不会从孤立 Git Tag 或源码归档部署。
 
-首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 Codex CPA Pool 管理 Nginx/TLS）；选择会与域名一起写入 `/home/cpap/config.env`。无交互环境必须使用例如 `sudo /home/cpap/run.sh run --domain qdata.example.com --ingress external`。部署保留宿主机时区，容器使用 UTC。首次 Web 设置通过可搜索下拉框选择系统时区（默认 `Asia/Shanghai`）；页面显示、额度自然周、每日统计和通知统一读取配置中心的 `system.timezone`。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无本项目托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移到实际运维根目录并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
+首次执行会提示域名，检测现有 Nginx/同域名站点/证书，并选择 `external`（复用既有反向代理）或 `managed`（由 Codex CPA Pool 管理 Nginx/TLS）；选择会与域名一起写入 `/home/ccpa/config.env`。无交互环境必须使用例如 `sudo /home/ccpa/run.sh run --domain qdata.example.com --ingress external`。部署保留宿主机时区，容器使用 UTC。首次 Web 设置通过可搜索下拉框选择系统时区（默认 `Asia/Shanghai`）；页面显示、额度自然周、每日统计和通知统一读取配置中心的 `system.timezone`。`external` 不安装、不启动、不修改 Nginx 或 Certbot，只输出对 `127.0.0.1:18317` 的反向代理契约并跳过公网检查；`managed` 才配置 Nginx/TLS，且拒绝覆盖无本项目托管标记的同名站点。旧版本保存在 `/etc/cpac/` 的域名配置和待领取管理员凭据会在下一次默认入口执行时安全迁移到实际运维根目录并删除旧文件。零账号目标的 Gateway 可以健康启动，但在创建账号和用户 API Key 前，模型请求仍返回 401。
 
 日后如确需切换入口，先处理好宿主机站点归属，再执行并确认：
 
 ```sh
-sudo /home/cpap/run.sh ingress set managed
+sudo /home/ccpa/run.sh ingress set managed
 # 或
-sudo /home/cpap/run.sh ingress set external
+sudo /home/ccpa/run.sh ingress set external
 ```
 
 ### 首次管理员设置

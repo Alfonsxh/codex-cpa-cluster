@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CustomUsageRangeModal } from "./CustomUsageRangeModal";
 
-const localEpoch = (year: number, month: number, day: number, hour = 0, minute = 0) => (
-  Math.floor(new Date(year, month, day, hour, minute).getTime() / 1000)
+const shanghaiEpoch = (year: number, month: number, day: number, hour = 0, minute = 0) => (
+  Math.floor(Date.UTC(year, month, day, hour - 8, minute) / 1000)
 );
 
 describe("CustomUsageRangeModal visual contract", () => {
@@ -17,7 +17,8 @@ describe("CustomUsageRangeModal visual contract", () => {
       <CustomUsageRangeModal
         open
         title="时间选择"
-        range={{ startAt: localEpoch(2026, 7, 20), endAt: localEpoch(2026, 7, 21) }}
+        range={{ startAt: shanghaiEpoch(2026, 7, 20), endAt: shanghaiEpoch(2026, 7, 21) }}
+        timezone="Asia/Shanghai"
         onCancel={onCancel}
         onApply={onApply}
       />
@@ -42,14 +43,15 @@ describe("CustomUsageRangeModal visual contract", () => {
     const onApply = vi.fn();
     const user = userEvent.setup();
     const range = {
-      startAt: localEpoch(2026, 7, 20, 8),
-      endAt: localEpoch(2026, 7, 21, 9)
+      startAt: shanghaiEpoch(2026, 7, 20, 8),
+      endAt: shanghaiEpoch(2026, 7, 21, 9)
     };
     render(
       <CustomUsageRangeModal
         open
         title="时间选择"
         range={range}
+        timezone="Asia/Shanghai"
         onCancel={() => undefined}
         onApply={onApply}
       />

@@ -4,9 +4,9 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cpa-deploy-contract.XXXXXX")
 trap 'rm -rf -- "$TEST_ROOT"' EXIT HUP INT TERM
-OPERATOR_ROOT="$TEST_ROOT/home/cpap"
+OPERATOR_ROOT="$TEST_ROOT/home/ccpa"
 CONFIG_FILE="$OPERATOR_ROOT/config.env"
-LEGACY_CONFIG_FILE="$TEST_ROOT/etc/cpap/config.env"
+LEGACY_CONFIG_FILE="$TEST_ROOT/etc/ccpa/config.env"
 mkdir -p "$OPERATOR_ROOT"
 
 run_operator_script() {

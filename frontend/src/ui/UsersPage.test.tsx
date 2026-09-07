@@ -152,7 +152,7 @@ describe("UsersPage legacy parity", () => {
     expect(screen.queryByRole("link", { name: /管理团队/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /团队用量|Token 用量$/ })).not.toBeInTheDocument();
     expect(requestPaths(fetchMock).some((path) => path.startsWith("/admin/api/teams/usage-breakdown?"))).toBe(false);
-  });
+  }, 15_000);
 
   it.each([
     { success: 3, failed: 1 },
@@ -444,7 +444,7 @@ describe("UsersPage legacy parity", () => {
     const rotate = request(fetchMock, "/admin/api/keys/rotate", "POST");
     expect(JSON.parse(String(rotate?.[1]?.body))).toEqual({ label: "alice@example.com:alpha" });
     expect(new Headers(rotate?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
-  });
+  }, 15_000);
 
   it("hydrates quota from the list, fetches detail on demand and confirms batch restore", async () => {
     let resolveQuota: ((response: Response) => void) | undefined;

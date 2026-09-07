@@ -49,7 +49,7 @@ bootstrap_from_stdin() {
   if [ -n "${CPAP_STAGING_ROOT:-}" ]; then
     bootstrap_root=$CPAP_STAGING_ROOT
   else
-    bootstrap_root=$(resolve_existing_root /home/cpap /home/cpac) || exit 1
+    bootstrap_root=$(resolve_existing_root /home/ccpa /home/cpac) || exit 1
   fi
   if [ -z "${CPAP_DEPLOY_ROOT:-}" ]; then
     bootstrap_deploy_root=$(resolve_existing_root "$bootstrap_root/runtime" /opt/codex-cpa-cluster) || exit 1

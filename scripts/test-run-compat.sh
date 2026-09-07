@@ -26,7 +26,7 @@ mkdir "$TEST_ROOT/current"
 reject resolve_existing_root "$TEST_ROOT/current" "$TEST_ROOT/legacy"
 
 # Exercise stdin selection itself, with isolated equivalents of the default paths.
-sed -e "s|/home/cpap|$TEST_ROOT/home/cpap|g" \
+sed -e "s|/home/ccpa|$TEST_ROOT/home/ccpa|g" \
   -e "s|/home/cpac|$TEST_ROOT/home/cpac|g" \
   -e "s|/opt/codex-cpa-cluster|$TEST_ROOT/opt/codex-cpa-cluster|g" \
   "$ROOT_DIR/scripts/run.sh" >"$TEST_ROOT/bootstrap.sh"
@@ -39,19 +39,19 @@ printf '%s\n' existing-key >"$TEST_ROOT/home/cpac/runtime/secrets/control-plane.
   CPAP_ALLOW_NON_ROOT=true CPAP_RUN_ASSET_URL="file://$ROOT_DIR/scripts/run.sh" \
     sh -s -- help <"$TEST_ROOT/bootstrap.sh" >/dev/null
 )
-[ ! -e "$TEST_ROOT/home/cpap" ] || fail 'bootstrap created a parallel operator root'
+[ ! -e "$TEST_ROOT/home/ccpa" ] || fail 'bootstrap created a parallel operator root'
 [ "$(cat "$TEST_ROOT/home/cpac/runtime/state/control-plane.sqlite3")" = existing-database ] \
   && [ "$(cat "$TEST_ROOT/home/cpac/runtime/secrets/control-plane.key")" = existing-key ] \
   || fail 'bootstrap changed existing database or master key'
 printf '%s\n' preserved-script >"$TEST_ROOT/home/cpac/run.sh"
-mkdir -p "$TEST_ROOT/home/cpap"
+mkdir -p "$TEST_ROOT/home/ccpa"
 if (
   unset CPAP_STAGING_ROOT CPAP_DEPLOY_ROOT
   CPAP_ALLOW_NON_ROOT=true CPAP_RUN_ASSET_URL="file://$ROOT_DIR/scripts/run.sh" \
     sh -s -- help <"$TEST_ROOT/bootstrap.sh"
 ) >"$TEST_ROOT/conflict.log" 2>&1; then fail 'bootstrap accepted two operator roots'; fi
 [ "$(cat "$TEST_ROOT/home/cpac/run.sh")" = preserved-script ] \
-  && [ ! -e "$TEST_ROOT/home/cpap/run.sh" ] || fail 'ambiguous bootstrap replaced an entrypoint'
+  && [ ! -e "$TEST_ROOT/home/ccpa/run.sh" ] || fail 'ambiguous bootstrap replaced an entrypoint'
 
 CONFIG="$TEST_ROOT/config.env"
 printf 'CPA_DOMAIN=example.test\nCPAC_INGRESS_MODE=external\n' >"$CONFIG"

@@ -615,7 +615,7 @@ run_operator_deploy() {
     CPAP_STAGING_ROOT="$OPERATOR_ROOT" \
     CPAP_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
     CPAP_BACKUP_DIR="$OPERATOR_ROOT/backups" \
-    CPAP_LEGACY_CONFIG_FILE="$TEST_ROOT/etc/cpap/config.env" \
+    CPAP_LEGACY_CONFIG_FILE="$TEST_ROOT/etc/ccpa/config.env" \
     CPAP_LOCK_FILE="$TEST_ROOT/cpa-deploy.lock" \
     CPAP_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
     CPAP_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
@@ -713,7 +713,7 @@ cmp -s "$OPERATOR_ROOT/run.sh" "$RELEASE_SERVER/run.sh" \
   || { echo "fresh deploy did not create the account management static directory" >&2; exit 1; }
 [ -f "$OPERATOR_ROOT/bootstrap-admin.key" ] \
   || { echo "fresh deploy did not preserve the pending admin key" >&2; exit 1; }
-[ ! -e "$TEST_ROOT/etc/cpap" ] \
+[ ! -e "$TEST_ROOT/etc/ccpa" ] \
   || { echo "fresh deploy created the removed external operator config directory" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
   || { echo "fresh deploy published a second target-side script directory" >&2; exit 1; }

@@ -113,11 +113,14 @@ cleanup_snapshot() {
 }
 trap cleanup_snapshot EXIT HUP INT TERM
 git -C "$ROOT_DIR" worktree add --detach "$SNAPSHOT_ROOT" "$REVISION" >/dev/null
-if [ -d "$ROOT_DIR/frontend/node_modules" ]; then
-  ln -s "$ROOT_DIR/frontend/node_modules" "$SNAPSHOT_ROOT/frontend/node_modules"
-else
-  npm --prefix "$SNAPSHOT_ROOT/frontend" ci
-fi
+for npm_workspace in frontend tools/openapi; do
+  if [ -d "$ROOT_DIR/$npm_workspace/node_modules" ]; then
+    ln -s "$ROOT_DIR/$npm_workspace/node_modules" "$SNAPSHOT_ROOT/$npm_workspace/node_modules"
+  else
+    npm --prefix "$SNAPSHOT_ROOT/$npm_workspace" ci
+  fi
+done
+unset npm_workspace
 
 make -C "$SNAPSHOT_ROOT" -f scripts/build.mk verify
 

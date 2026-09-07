@@ -24,14 +24,16 @@ export function timezoneOptions(value: string) {
   });
 }
 
-export function TimezoneSelect({ id, value, onChange, disabled = false }: {
+export function TimezoneSelect({ id, value, onChange, disabled = false, ariaInvalid, ariaDescribedBy }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   const options = useMemo(() => timezoneOptions(value), [value]);
-  return <Select id={id} aria-label="系统时区" value={value} options={options} onChange={onChange}
+  return <Select className="timezone-select" id={id} aria-label="系统时区" aria-invalid={ariaInvalid} aria-describedby={ariaDescribedBy} value={value} options={options} onChange={onChange}
     disabled={disabled} showSearch={{ optionFilterProp: "label" }} placeholder="搜索城市或时区"
     style={{ width: "100%", minWidth: 0 }} popupMatchSelectWidth />;
 }

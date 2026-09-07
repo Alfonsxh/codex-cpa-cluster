@@ -12,8 +12,9 @@ body {
 .usage-authentication-boundary { position: relative; overflow: hidden; }
 .usage-preview-topbar { position: relative; }
 .usage-preview-brand { min-width: 0; display: flex; align-items: center; gap: 18px; }
-.usage-preview-brand img { width: min(270px, 55vw); height: auto; }
-.usage-preview-brand strong { padding-left: 18px; border-left: 1px solid var(--line); font-size: 20px; letter-spacing: -.025em; }
+.usage-preview-brand .usage-product-brand { width: min(270px, 55vw); }
+.usage-preview-brand .usage-heading { padding-left: 18px; border-left: 1px solid var(--line); }
+.usage-preview-brand strong { font-size: 20px; letter-spacing: -.025em; }
 .usage-preview { padding: 28px clamp(20px, 4vw, 48px) 64px; }
 .usage-preview-summary,
 .usage-preview-accounts { border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: var(--shadow-soft); }
@@ -86,8 +87,11 @@ body {
 }
 .usage-center-content { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; padding-bottom: 18px; flex-direction: column; overscroll-behavior: contain; }
 .usage-brand-block { display: flex; min-width: 0; align-items: center; gap: 18px; }
-.usage-brand-block a { display: block; }
-.usage-brand-logo { display: block; width: min(182px, 42vw); height: auto; }
+.usage-product-brand { display: inline-flex; width: min(182px, 42vw); min-width: 0; max-width: 100%; align-items: center; gap: 10px; }
+.usage-brand-logo { display: block; flex: 0 0 auto; width: 32px; height: 32px; object-fit: contain; }
+.usage-product-name { display: block; min-width: 0; overflow: hidden; color: var(--ink); font: 700 14px/1.35 var(--sans); letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.usage-heading { display: grid; min-width: 0; gap: 7px; }
+.usage-heading-subtitle { color: var(--accent); font: 650 10px/1.2 var(--mono); letter-spacing: .08em; white-space: nowrap; }
 .usage-center-head h1 { margin: 0; font-size: clamp(25px, 3vw, 32px); line-height: 1; letter-spacing: -.05em; }
 .usage-user-actions,
 .usage-key-actions { display: flex; align-items: center; gap: 8px; }
@@ -618,7 +622,9 @@ body {
   .usage-mobile-panel-actions .usage-trend-windows { justify-self: end; }
   .usage-center-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; padding-bottom: 10px; }
   .usage-brand-block { display: grid; gap: 4px; }
-  .usage-brand-logo { width: min(110px, 32vw); }
+  .usage-product-brand { width: min(160px, 42vw); gap: 6px; }
+  .usage-brand-logo { width: 24px; height: 24px; }
+  .usage-product-name { font-size: 12px; }
   .usage-center-head h1 { font-size: 20px; }
   .usage-user-actions { width: auto; flex-wrap: nowrap; gap: 6px; }
   .usage-user-badge { max-width: 88px; padding: 9px 8px; }
@@ -691,7 +697,7 @@ body {
   .usage-error { align-items: stretch; flex-direction: column; }
   .usage-login-layout.auth-screen { padding: 16px; }
   .usage-login-card-overlay { padding: 28px; }
-  .usage-preview-brand strong { display: none; }
+  .usage-preview-brand .usage-heading { display: none; }
   .portal-config-guide { grid-template-columns: minmax(0, 1fr); }
   .portal-config-step { grid-template-columns: minmax(0, 1fr); }
   .portal-config-step header,

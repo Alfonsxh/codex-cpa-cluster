@@ -15,13 +15,15 @@
   </p>
 
   <p>
-    <a href="https://github.com/Alfonsxh/codex-cpa-pool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-pool?include_prereleases&sort=semver"></a>
+    <a href="https://github.com/Alfonsxh/codex-cpa-pool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-pool?sort=semver"></a>
     <a href="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml/badge.svg"></a>
     <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Alfonsxh/codex-cpa-pool">
     <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-pool"></a>
+    <a href="https://t.me/+vzojgInHfy44ZTM9"><img alt="Telegram community" src="https://img.shields.io/badge/Telegram-Community-26A5E4?logo=telegram&amp;logoColor=white"></a>
   </p>
 
   <img alt="Codex CPA Pool overview" src="./docs/assets/screenshot-overview.png" width="1440">
+  <p><sub>Dark mode · Synthetic accounts and usage data</sub></p>
 </div>
 
 **Codex CPA Pool** consolidates multiple [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account containers behind a single stable endpoint. Typical usage:
@@ -35,7 +37,7 @@
 
 The project and GitHub repository share the **Codex CPA Pool** name (`Alfonsxh/codex-cpa-pool`).
 
-Join the [Telegram community](https://t.me/+vzojgInHfy44ZTM9) for usage discussions, deployment help, and feature suggestions. Joining requires admin approval. Include your version and redacted logs when reporting a problem.
+Join the [Telegram community](https://t.me/+vzojgInHfy44ZTM9) for usage discussions, deployment help, and feature suggestions. Include your version and redacted logs when reporting a problem.
 
 ## Quick Start
 

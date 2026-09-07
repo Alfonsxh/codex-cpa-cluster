@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/identity"
 	"github.com/gin-gonic/gin"
 )
 
@@ -166,10 +167,10 @@ func generalSettingsFromMap(settings map[string]any) (generalSettingsValues, err
 
 func defaultGeneralSettings() generalSettingsValues {
 	return generalSettingsValues{
-		ProductName: defaultProductName, ShortName: "Codex CPA",
+		ProductName: defaultProductName, ShortName: "CCPA",
 		EnvironmentLabel: "Self-hosted service", PublicBaseURL: "",
-		AllowedEmailDomains: []string{}, KeyPrefix: "cpa_", ProviderName: "Codex CPA",
-		APIKeyEnv: "CPA_API_KEY", DefaultModel: "gpt-5.6-sol",
+		AllowedEmailDomains: []string{}, KeyPrefix: identity.DefaultUserKeyPrefix, ProviderName: "Codex CPA Pool",
+		APIKeyEnv: "CCPA_API_KEY", DefaultModel: "gpt-5.6-sol",
 	}
 }
 

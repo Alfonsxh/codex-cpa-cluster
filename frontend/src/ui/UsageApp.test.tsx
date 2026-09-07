@@ -16,12 +16,12 @@ const profile = {
 const siteConfiguration = {
   version: 1,
   product_name: "Codex CPA Pool",
-  short_name: "Codex CPA",
+  short_name: "CCPA",
   environment_label: "Test",
   public_base_url: "https://cpa.example.com",
   allowed_email_domains: ["example.com"],
-  provider_name: "Codex CPA",
-  api_key_env: "CPA_API_KEY",
+  provider_name: "Codex CPA Pool",
+  api_key_env: "CCPA_API_KEY",
   default_model: "gpt-5.6-sol",
   logo: {
     custom: false,

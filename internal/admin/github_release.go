@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -58,13 +60,21 @@ func (catalog *GitHubReleaseCatalog) LatestRelease(ctx context.Context) (string,
 		return "", fmt.Errorf("latest GitHub Release response exceeds %d bytes", githubReleaseBodyLimit)
 	}
 	var payload struct {
-		TagName string `json:"tag_name"`
+		TagName    string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", fmt.Errorf("decode latest GitHub Release: %w", err)
 	}
 	version := strings.TrimSpace(payload.TagName)
 	if !strings.HasPrefix(version, "v") || normalizedSemver(version) == "" {
+		return "", fmt.Errorf("latest GitHub Release tag is not semantic versioning")
+	}
+	if payload.Draft || payload.Prerelease || semver.Prerelease(version) != "" || semver.Build(version) != "" {
+		return "", fmt.Errorf("latest GitHub Release is not a published stable version")
+	}
+	if semver.Canonical(version) != version {
 		return "", fmt.Errorf("latest GitHub Release tag is not semantic versioning")
 	}
 	return version, nil

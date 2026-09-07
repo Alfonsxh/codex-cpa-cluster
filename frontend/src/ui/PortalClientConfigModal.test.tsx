@@ -13,7 +13,7 @@ const input = {
     product_name: "Codex CPA Pool",
     public_base_url: "https://cpa.example.com/",
     provider_name: "CPA Provider",
-    api_key_env: "CPA_API_KEY",
+    api_key_env: "CCPA_API_KEY",
     default_model: "gpt-5.6-sol"
   }
 };
@@ -31,7 +31,7 @@ describe("buildClientConfig", () => {
   it("keeps Claude Code isolated to its launcher and secret env file", () => {
     const result = buildClientConfig({ ...input, mode: "claude" });
     expect(result.sections).toHaveLength(5);
-    expect(result.sections?.[1].value).toBe("CPA_API_KEY='secret-api-key'\n");
+    expect(result.sections?.[1].value).toBe("CCPA_API_KEY='secret-api-key'\n");
     expect(result.value).toContain("export ANTHROPIC_BASE_URL='https://cpa.example.com'");
     expect(result.value).toContain('command claude --dangerously-skip-permissions --verbose --effort xhigh "$@"');
   });

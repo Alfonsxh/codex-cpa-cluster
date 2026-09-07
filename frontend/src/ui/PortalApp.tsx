@@ -27,7 +27,7 @@ export function PortalApp() {
 export function PortalLandingApp() {
   const branding = useBranding();
   const { theme } = useTheme();
-  usePageTitle(`服务入口 · ${branding.configuration.product_name}`);
+  usePageTitle("服务入口");
 
   return (
     <main className="portal-shell">
@@ -84,7 +84,7 @@ export function NativeAccountsPage() {
     retry: false,
     refetchOnWindowFocus: true
   });
-  usePageTitle(`业务 CPA · ${branding.configuration.product_name}`);
+  usePageTitle("业务 CPA");
   useNativeLightPresentation();
 
   const nativeAccounts = accounts.data?.accounts ?? [];

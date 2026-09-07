@@ -1,7 +1,7 @@
 import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
 import { Alert, Button, Form, Input, Modal } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -28,7 +28,10 @@ import {
   notificationSettingsQueryKey,
   readNotificationSettings,
   saveNotificationWebhook,
-  sendNotification
+  sendNotification,
+  testNotification,
+  type NotificationSettings,
+  type NotificationStatus
 } from "../api/notifications";
 import {
   readSettingsWorkspace,
@@ -41,7 +44,6 @@ import {
 } from "../api/users";
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
-import { NativeTableViewport } from "./components/NativeTableViewport";
 import { PageState } from "./components/PageState";
 import { tokenInputPresentation, tokenReadableText } from "./formatters";
 import { InitialPasswordModal } from "./InitialPasswordModal";
@@ -52,11 +54,13 @@ import { TimezoneSelect } from "./components/TimezoneSelect";
 import { publicSiteQueryKey } from "../api/public-site";
 import { useTheme } from "./ThemeProvider";
 
-import { configurationCategories, configurationSections, configurationSectionFor, legacyConfigurationSection, type ConfigurationCategory } from "./configuration-layout";
+import { configurationCategories, configurationControlWidth, configurationSections, configurationSectionFor, legacyConfigurationSection, type ConfigurationCategory } from "./configuration-layout";
+import "./configuration-page.css";
 
 type DraftValue = string | number | boolean | null;
 type Draft = Record<string, DraftValue>;
 type EditorField = ConfigurationField & { group: ConfigurationCategory; section: string };
+const ConfigurationSavingContext = createContext(false);
 
 const managementKeySchema = z.object({
   newKey: z.string().min(12, "至少输入 12 个字符").max(128, "最多输入 128 个字符").regex(/^\S+$/, "不能包含空白字符"),
@@ -91,7 +95,9 @@ export function ConfigurationPage({
   const { setRefreshing, setRefreshAction, setRefreshLabel, setPageDetail } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
   const [category, setCategory] = useState<ConfigurationCategory>("品牌与身份");
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [selectedSectionId, setSelectedSectionId] = useState("brand");
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>(() => Object.fromEntries(configurationCategories.map(({ name }) => [name, true])));
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState<Draft>({});
   const [focusKey, setFocusKey] = useState("");
@@ -102,6 +108,7 @@ export function ConfigurationPage({
   const [logoError, setLogoError] = useState("");
   const [logoResetOpen, setLogoResetOpen] = useState(false);
   const [webhookDraft, setWebhookDraft] = useState("");
+  const [webhookEditing, setWebhookEditing] = useState(false);
   const [webhookError, setWebhookError] = useState("");
   const [webhookClearOpen, setWebhookClearOpen] = useState(false);
   const [quotaResetOpen, setQuotaResetOpen] = useState(false);
@@ -137,17 +144,24 @@ export function ConfigurationPage({
     gcTime: 0,
     refetchOnWindowFocus: false
   });
+  const fields = useMemo(() => flattenConfiguration(catalog.data), [catalog.data]);
+  const availableSections = useMemo(() => configurationSections.filter((section) =>
+    fields.some((field) => field.section === section.id)
+    || ["access", "backups", "storage", "audit", "quota", "notifications"].includes(section.id)
+    || (section.id === "brand" && fields.length > 0)
+  ), [fields]);
+  const activeSection = availableSections.find((section) => section.category === category && section.id === selectedSectionId)
+    ?? availableSections.find((section) => section.category === category);
   const quotaOperations = useQuery({
     queryKey: userQuotaOperationsQueryKey,
     queryFn: ({ signal }) => readUserQuotaOperations(signal),
-    enabled: category === "用量与额度" && Boolean(expandedSections["quota-reset"]),
+    enabled: activeSection?.id === "quota",
     staleTime: 0,
     gcTime: 0,
     retry: false,
     refetchOnWindowFocus: false
   });
 
-  const fields = useMemo(() => flattenConfiguration(catalog.data), [catalog.data]);
   const dirtyFields = useMemo(
     () => fields.filter((field) => !sameConfigurationValue(normalizeDraftValue(field, draft[field.key]), field.value)),
     [draft, fields]
@@ -168,24 +182,28 @@ export function ConfigurationPage({
     handledDeepLink.current = signature;
     const key = searchParams.get("key") ?? "";
     const field = fields.find((item) => item.key === key);
-    const section = configurationSections.find((item) => item.id === searchParams.get("section"));
+    const requestedSection = searchParams.get("section") ?? "";
+    const section = availableSections.find((item) => item.id === requestedSection)
+      ?? legacyConfigurationSection(requestedSection);
     const group = searchParams.get("group") ?? "";
     const current = configurationCategories.find((item) => item.name === group);
     const legacy = current ? undefined : legacyConfigurationSection(group);
-    const destination = field?.group ?? section?.category ?? current?.name ?? legacy?.category;
-    if (!destination) return;
+    const destination = field?.group ?? section?.category ?? current?.name ?? legacy?.category ?? "品牌与身份";
     setCategory(destination);
-    const targetSection = field?.section ?? section?.id ?? legacy?.id;
-    if (targetSection) setExpandedSections((previous) => ({ ...previous, [targetSection]: true }));
-    setFocusKey(field?.key ?? section?.id ?? legacy?.id ?? "");
+    const targetSection = field?.section ?? section?.id ?? legacy?.id
+      ?? availableSections.find((item) => item.category === destination)?.id ?? "";
+    setSelectedSectionId(targetSection);
+    setExpandedCategories((previous) => ({ ...previous, [destination]: true }));
+    setFocusKey(field?.key ?? (requestedSection === "quota-reset" || group === "用量维护" ? "quota-reset" : ""));
     setSearch("");
-  }, [catalog.data, fields, searchParams]);
+    setMobileNavigationOpen(false);
+  }, [availableSections, catalog.data, fields, searchParams]);
 
   useEffect(() => {
     const current = configurationCategories.find((item) => item.name === category)!;
-    setPageDetail({ title: current.name, eyebrow: current.eyebrow });
+    setPageDetail({ title: current.name, sectionTitle: activeSection?.title, eyebrow: current.eyebrow });
     return () => setPageDetail(null);
-  }, [category, setPageDetail]);
+  }, [activeSection, category, setPageDetail]);
 
   const refreshWorkspace = useCallback(async (notify = false) => {
     setRefreshing(true);
@@ -220,10 +238,10 @@ export function ConfigurationPage({
     if (!target) return;
     target.classList.add("configuration-field-highlight");
     target.scrollIntoView?.({ block: "center", behavior: "smooth" });
-    target.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
+    target.querySelector<HTMLElement>('input:not([type="hidden"]):not([type="file"]):not(:disabled), select:not(.enhanced-select-native):not(:disabled), textarea:not(:disabled), button:not(:disabled)')?.focus({ preventScroll: true });
     const timer = window.setTimeout(() => target.classList.remove("configuration-field-highlight"), 1_600);
     return () => { window.clearTimeout(timer); target.classList.remove("configuration-field-highlight"); };
-  }, [focusKey, category, expandedSections, catalog.data, general.data, notification.data, workspace.data]);
+  }, [focusKey, category, selectedSectionId, catalog.data, general.data, notification.data, workspace.data]);
 
   const saveMutation = useMutation({
     onMutate: () => setSaveError(""),
@@ -268,7 +286,10 @@ export function ConfigurationPage({
     mutationFn: () => saveNotificationWebhook(webhookDraft, csrfToken),
     onSuccess: async (result) => {
       setWebhookDraft("");
+      setWebhookEditing(false);
       setWebhookError("");
+      queryClient.setQueryData<NotificationSettings>(notificationSettingsQueryKey, (current) =>
+        current && result.notifications ? { ...current, notifications: result.notifications } : current);
       showToast(result.message);
       await notification.refetch();
     },
@@ -279,7 +300,10 @@ export function ConfigurationPage({
     onSuccess: async (result) => {
       setWebhookClearOpen(false);
       setWebhookDraft("");
+      setWebhookEditing(false);
       setWebhookError("");
+      queryClient.setQueryData<NotificationSettings>(notificationSettingsQueryKey, (current) =>
+        current && result.notifications ? { ...current, notifications: result.notifications } : current);
       // Clearing the Webhook also disables notifications on the server. Rebase
       // this one field so a later global save cannot restore the old switch.
       queryClient.setQueryData<ConfigurationCatalog>(configurationQueryKey, (current) => current && ({
@@ -300,6 +324,14 @@ export function ConfigurationPage({
       await notification.refetch();
     },
     onError: (error) => showToast(error instanceof Error ? error.message : "账号信息发送失败", "error")
+  });
+  const notificationTestMutation = useMutation({
+    mutationFn: () => testNotification(csrfToken),
+    onSuccess: async (result) => {
+      showToast(result.message);
+      await notification.refetch();
+    },
+    onError: (error) => showToast(error instanceof Error ? error.message : "测试消息发送失败", "error")
   });
 
   const managementKeyForm = useForm<ManagementKeyValues>({
@@ -346,11 +378,7 @@ export function ConfigurationPage({
     );
   }
 
-  const selectedCategory = configurationCategories.find((item) => item.name === category)!;
-  const selectedSections = configurationSections.filter((section) => section.category === category
-    && (fields.some((field) => field.section === section.id)
-      || ["access", "backups", "storage", "audit", "quota-reset", "notifications"].includes(section.id)
-      || (section.id === "brand" && fields.length > 0)));
+  const selectedSections = activeSection ? [activeSection] : [];
   const dirtyCategories = new Set(dirtyFields.map((field) => field.group));
   const dirtyModes = new Map<string, number>();
   dirtyFields.forEach((field) => {
@@ -360,8 +388,9 @@ export function ConfigurationPage({
   const riskyEffects = configurationEffects(dirtyFields);
   const searchItems = [
     ...fields.map((field) => ({ key: field.key, label: field.label, group: field.group, section: field.section, description: field.description })),
-    ...configurationSections.filter((section) => ["access", "backups", "storage", "audit", "quota-reset", "notifications"].includes(section.id))
-      .map((section) => ({ key: section.id, label: section.title, group: section.category, section: section.id, description: section.description }))
+    ...configurationSections.filter((section) => ["access", "backups", "storage", "audit", "notifications"].includes(section.id))
+      .map((section) => ({ key: section.id, label: section.title, group: section.category, section: section.id, description: section.description })),
+    { key: "quota-reset", label: "用量维护", group: "用量与额度" as const, section: "quota", description: "异常补偿时清零全员本周已用量" }
   ];
   const searchMatches = search.trim() ? searchItems.filter((item) => [item.group, item.label, item.key, item.description,
     configurationSections.find((section) => section.id === item.section)?.title].join(" ").toLocaleLowerCase("zh-CN").includes(search.trim().toLocaleLowerCase("zh-CN"))) : [];
@@ -370,15 +399,26 @@ export function ConfigurationPage({
     ?? (managementKeyMutation.isError
       ? managementKeyMutation.error instanceof Error ? managementKeyMutation.error.message : "管理密钥未更新"
       : "");
-  const selectConfigurationGroup = (group: ConfigurationCategory, key = "") => {
+  const selectConfigurationGroup = (group: ConfigurationCategory, key = "", focus = true) => {
+    const field = fields.find((item) => item.key === key);
+    const section = availableSections.find((item) => item.id === (field?.section ?? legacyConfigurationSection(key)?.id ?? key))
+      ?? availableSections.find((item) => item.category === group);
+    const destination = section?.category ?? group;
     setSearch("");
-    setCategory(group);
-    setFocusKey(key);
-    const section = fields.find((field) => field.key === key)?.section
-      ?? configurationSections.find((item) => item.id === key)?.id;
-    if (section) setExpandedSections((previous) => ({ ...previous, [section]: true }));
-    setSearchParams(key ? { group, ...(fields.some((field) => field.key === key) ? { key } : { section: key }) } : { group }, { replace: true });
-    if (!key) workspaceContentRef.current?.scrollTo?.({ top: 0 });
+    setCategory(destination);
+    setSelectedSectionId(section?.id ?? "");
+    setFocusKey(focus ? key : "");
+    setExpandedCategories((previous) => ({ ...previous, [destination]: true }));
+    const params = new URLSearchParams({ group: destination });
+    if (section) params.set("section", section.id);
+    if (field) params.set("key", field.key);
+    handledDeepLink.current = params.toString();
+    setSearchParams(params, { replace: true });
+    setMobileNavigationOpen(false);
+    if (!focus || !key) {
+      workspaceContentRef.current?.scrollTo?.({ top: 0, left: 0 });
+      if (mobileNavigationOpen) requestAnimationFrame(() => workspaceContentRef.current?.focus({ preventScroll: true }));
+    }
   };
   const updateField = (field: ConfigurationField, value: DraftValue) => setDraft((current) => ({ ...current, [field.key]: value }));
   const requestSave = () => {
@@ -398,7 +438,7 @@ export function ConfigurationPage({
     <section className="page-content legacy-settings-page">
       <LegacyToastRegion toasts={toasts} />
       <div className="settings-workspace">
-        <aside className="settings-navigation" aria-label="配置中心导航">
+        <aside className="settings-navigation" aria-label="配置中心导航" data-mobile-open={mobileNavigationOpen}>
           <div className="settings-navigation-fixed">
             <label className="configuration-search">
               <span aria-hidden="true">⌕</span>
@@ -409,61 +449,75 @@ export function ConfigurationPage({
                 <button key={field.key} type="button" onClick={() => selectConfigurationGroup(field.group, field.key)}><span>{field.label}</span><small>{field.group} · {field.key}</small></button>
               )) : <p className="configuration-search-empty">没有匹配项</p>}
             </div>
-            <div className="settings-mobile-selector">
-              <span>当前分类</span>
-              <LegacyEnhancedSelect
-                id="settings-mobile-category"
-                label="选择配置分类"
-                value={category}
-                options={configurationCategories.map((item) => ({ value: item.name, label: item.name }))}
-                onChange={(value) => selectConfigurationGroup(value as ConfigurationCategory)} />
-            </div>
+            <button className="settings-mobile-navigation-toggle" type="button" aria-label="选择配置子项" aria-expanded={mobileNavigationOpen} aria-controls="configuration-navigation-tree" onClick={() => setMobileNavigationOpen((open) => !open)}>
+              <span>{category}{activeSection ? ` / ${activeSection.title}` : ""}</span>
+              <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m5 7 5 5 5-5" /></svg>
+            </button>
             <p className="settings-navigation-label settings-category-label">配置分类</p>
           </div>
           <div className="settings-navigation-scroll">
-            <div className="settings-navigation-desktop">
-              <nav className="configuration-navigation" aria-label="配置分类">
+              <nav id="configuration-navigation-tree" className="configuration-navigation" aria-label="配置分类">
                 {configurationCategories.map((item) => {
                   const dirtyCount = dirtyFields.filter((field) => field.group === item.name).length;
-                  const active = category === item.name;
-                  return <button key={item.name} className={active ? "active" : ""} type="button" aria-current={active ? "page" : undefined} onClick={() => selectConfigurationGroup(item.name)}><span>{item.name}</span>{dirtyCount ? <small className="dirty">{dirtyCount} 项修改</small> : null}</button>;
+                  const sections = availableSections.filter((section) => section.category === item.name);
+                  const expanded = expandedCategories[item.name] ?? false;
+                  const groupId = `configuration-navigation-${item.eyebrow.toLowerCase().replaceAll(" ", "-").replaceAll("&", "and")}`;
+                  return <div className="configuration-navigation-group" key={item.name}>
+                    <button className="configuration-category-toggle" type="button" aria-label={item.name} aria-expanded={expanded} aria-controls={groupId} aria-describedby={dirtyCount ? `${groupId}-dirty` : undefined} data-current={category === item.name} onClick={() => setExpandedCategories((previous) => ({ ...previous, [item.name]: !expanded }))}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m7 4 6 6-6 6" /></svg>
+                      <span>{item.name}</span>
+                      {dirtyCount ? <small id={`${groupId}-dirty`} className="dirty">{dirtyCount} 项修改</small> : null}
+                    </button>
+                    <ul id={groupId} className="configuration-subnavigation" hidden={!expanded}>
+                      {sections.map((section) => {
+                        const sectionDirtyCount = dirtyFields.filter((field) => field.section === section.id).length;
+                        const active = activeSection?.id === section.id;
+                        return <li key={section.id}>
+                          <button className={active ? "active" : ""} type="button" aria-label={section.title} aria-current={active ? "page" : undefined} aria-controls="configuration-detail" aria-describedby={sectionDirtyCount ? `configuration-dirty-${section.id}` : undefined} onClick={() => selectConfigurationGroup(item.name, section.id, false)}>
+                            <span>{section.title}</span>
+                            {sectionDirtyCount ? <small id={`configuration-dirty-${section.id}`} className="dirty">{sectionDirtyCount} 项修改</small> : null}
+                          </button>
+                        </li>;
+                      })}
+                      {!sections.length ? <li className="configuration-navigation-empty">暂无配置项</li> : null}
+                    </ul>
+                  </div>;
                 })}
               </nav>
-            </div>
           </div>
         </aside>
 
-        <form className="configuration-panel" noValidate onSubmit={(event) => { event.preventDefault(); requestSave(); }}>
-          <div className="settings-workspace-content" ref={workspaceContentRef}>
-            <header className="configuration-category-intro"><h2>{category}</h2><p>{selectedCategory.description}</p></header>
+        <form className="configuration-panel" noValidate aria-busy={saveMutation.isPending} onSubmit={(event) => { event.preventDefault(); requestSave(); }}>
+          <div id="configuration-detail" className="settings-workspace-content" ref={workspaceContentRef} role="region" tabIndex={0} aria-label={activeSection?.title ?? "配置内容"}>
+            <ConfigurationSavingContext.Provider value={saveMutation.isPending}>
             <fieldset className="configuration-section-list" disabled={saveMutation.isPending}>
               {selectedSections.map((section) => {
                 const sectionFields = fields.filter((field) => field.section === section.id);
-                const dirtyCount = dirtyFields.filter((field) => field.section === section.id).length;
-                const expanded = expandedSections[section.id] ?? Boolean(section.expanded);
-                const specialized = (field: EditorField) => section.id === "multipliers"
-                  ? field.key.startsWith(modelMultiplierPrefix) || field.key.startsWith(reasoningMultiplierPrefix)
+                const specialized = (field: EditorField) => section.id === "model-multipliers"
+                  ? field.key.startsWith(modelMultiplierPrefix)
+                  : section.id === "reasoning-multipliers" ? field.key.startsWith(reasoningMultiplierPrefix)
                   : section.id === "appearance" && field.key.startsWith(reasoningColorPrefix);
+                const ordinaryFields = sectionFields.filter((field) => !specialized(field));
                 return <section className="configuration-section" key={section.id} aria-label={section.title} data-configuration-field={section.id}>
-                  <h3 className="configuration-section-heading"><button type="button" aria-expanded={expanded} aria-controls={`configuration-section-${section.id}`} onClick={() => { setFocusKey(""); setExpandedSections((previous) => ({ ...previous, [section.id]: !expanded })); }}>
-                    <span><strong>{section.title}</strong><small>{section.description}</small></span>
-                    <span className="configuration-section-status">{dirtyCount ? <small>{dirtyCount} 项修改</small> : section.independent ? <small>独立操作</small> : null}<span aria-hidden="true">{expanded ? "−" : "+"}</span></span>
-                  </button></h3>
-                  <div id={`configuration-section-${section.id}`} hidden={!expanded}>
+                  <div id={`configuration-section-${section.id}`}>
                     {section.id === "brand" ? <BrandingLogoEditor custom={general.data.branding.custom_logo} sha256={general.data.branding.logo_sha256} pending={logoMutation.isPending || logoResetMutation.isPending} error={logoError} onFile={(file) => { const error = validateLogoFile(file); setLogoError(error); if (!error) logoMutation.mutate(file); }} onReset={() => setLogoResetOpen(true)} /> : null}
-                    {sectionFields.filter((field) => !specialized(field)).map((field) => <ConfigurationEditor key={field.key} field={field} value={draft[field.key]} error={errors[field.key]} dirty={dirtyFields.some((item) => item.key === field.key)} onChange={(value) => updateField(field, value)} />)}
-                    {section.id === "multipliers" ? <MultiplierStrategyEditor fields={sectionFields.filter(specialized)} draft={draft} onChange={updateField} /> : null}
-                    {section.id === "appearance" ? <ReasoningStrategyEditor fields={sectionFields.filter(specialized)} draft={draft} onChange={updateField} /> : null}
-                    {section.id === "notifications" ? <><p className="configuration-independent-note">Webhook 单独保存，立即生效。</p><NotificationIntegration status={notification.data.notifications} value={webhookDraft} error={webhookError} saving={webhookMutation.isPending} clearing={webhookClearMutation.isPending} sending={notificationSendMutation.isPending} onChange={(value) => { setWebhookDraft(value); setWebhookError(""); }} onSave={() => webhookMutation.mutate()} onClear={() => setWebhookClearOpen(true)} onSend={() => notificationSendMutation.mutate()} /></> : null}
+                    {ordinaryFields.length ? <div className="configuration-fields">
+                      <ConfigurationTableHeader />
+                      {ordinaryFields.map((field) => <ConfigurationEditor key={field.key} field={field} value={draft[field.key]} error={errors[field.key]} dirty={dirtyFields.some((item) => item.key === field.key)} onChange={(value) => updateField(field, value)} />)}
+                    </div> : null}
+                    {section.id === "model-multipliers" ? <ModelMultiplierEditor fields={sectionFields.filter(specialized)} draft={draft} onChange={updateField} /> : null}
+                    {section.id === "reasoning-multipliers" || section.id === "appearance" ? <ReasoningStrategyEditor fields={sectionFields.filter(specialized)} draft={draft} onChange={updateField} /> : null}
+                    {section.id === "notifications" ? <><p className="configuration-independent-note">Webhook 单独保存，立即生效。</p><NotificationIntegration status={notification.data.notifications} value={webhookDraft} error={webhookError} saving={webhookMutation.isPending} clearing={webhookClearMutation.isPending} sending={notificationSendMutation.isPending} testing={notificationTestMutation.isPending} editing={webhookEditing} onEdit={() => { setWebhookError(""); setWebhookEditing(true); }} onCancel={() => { setWebhookDraft(""); setWebhookError(""); setWebhookEditing(false); }} onTest={() => notificationTestMutation.mutate()} onChange={(value) => { setWebhookDraft(value); setWebhookError(""); }} onSave={() => webhookMutation.mutate()} onClear={() => setWebhookClearOpen(true)} onSend={() => notificationSendMutation.mutate()} /></> : null}
                     {section.id === "access" ? <AccessPanel managementKeyConfigured={general.data.security.management_key_configured} initialPasswordConfigured={general.data.security.initial_password_configured} onInitialPassword={() => setInitialPasswordOpen(true)} onManagementKey={() => setManagementKeyOpen(true)} /> : null}
                     {section.id === "backups" ? <BackupsPanel count={workspace.data.backups.count} latest={workspace.data.backups.latest} /> : null}
                     {section.id === "storage" ? <StoragePanel rows={workspace.data.storage} onRefresh={() => refreshWorkspace(true)} /> : null}
                     {section.id === "audit" ? <AuditPanel rows={workspace.data.recent_audit} onRefresh={() => refreshWorkspace(true)} /> : null}
-                    {section.id === "quota-reset" ? <QuotaSystemDanger summary={quotaOperations.data} pending={quotaOperations.isPending || quotaOperations.isFetching} failed={quotaOperations.isError} onReset={() => setQuotaResetOpen(true)} /> : null}
+                    {section.id === "quota" ? <QuotaSystemDanger summary={quotaOperations.data} pending={quotaOperations.isPending || quotaOperations.isFetching} failed={quotaOperations.isError} onReset={() => setQuotaResetOpen(true)} /> : null}
                   </div>
                 </section>;
               })}
             </fieldset>
+            </ConfigurationSavingContext.Provider>
             {!fields.length && category === "品牌与身份" ? <div className="configuration-empty-state" role="status"><h3>当前没有可配置项</h3><p>可在系统设置中管理访问凭据。</p><button className="button button-primary" type="button" onClick={() => selectConfigurationGroup("系统设置", "access")}>进入访问凭据</button></div> : null}
           </div>
           <div className="configuration-save-region">
@@ -512,7 +566,22 @@ export function ConfigurationPage({
 }
 
 function ConfigurationSkeleton() {
-  return <section className="page-content legacy-settings-page" aria-label="正在加载配置中心"><div className="settings-workspace settings-workspace-skeleton"><aside className="settings-navigation"><div className="skeleton skeleton-line" /><div className="skeleton skeleton-table" /></aside><div className="configuration-panel"><div className="skeleton skeleton-title" /><div className="skeleton skeleton-table" /></div></div></section>;
+  return <section className="page-content legacy-settings-page" aria-label="正在加载配置中心" aria-busy="true">
+    <div className="settings-workspace settings-workspace-skeleton" aria-hidden="true">
+      <aside className="settings-navigation"><div className="skeleton skeleton-line" /><div className="skeleton skeleton-table" /></aside>
+      <div className="configuration-panel">
+        <div className="settings-workspace-content"><div className="configuration-fields">
+          <ConfigurationTableHeader />
+          {Array.from({ length: 5 }, (_, index) => <div className="configuration-field" key={index}>
+            <div className="configuration-field-copy"><div className="skeleton skeleton-line" /><div className="skeleton skeleton-line" /></div>
+            <div className="configuration-field-meta"><div className="skeleton skeleton-line" /></div>
+            <div className="configuration-field-value"><div className="skeleton skeleton-line" /></div>
+          </div>)}
+        </div></div>
+        <div className="configuration-save-region"><div className="configuration-actions"><div className="skeleton skeleton-line" /><div className="skeleton skeleton-line" /></div></div>
+      </div>
+    </div>
+  </section>;
 }
 
 function BrandingLogoEditor({ custom, sha256, pending, error, onFile, onReset }: { custom: boolean; sha256?: string; pending: boolean; error: string; onFile: (file: File) => void; onReset: () => void }) {
@@ -522,37 +591,311 @@ function BrandingLogoEditor({ custom, sha256, pending, error, onFile, onReset }:
   return <article className="branding-logo-editor"><div className="branding-logo-preview"><img src={source} alt="当前 Logo" /></div><div className="branding-logo-copy"><strong>品牌 Logo</strong><small>上传或恢复后立即生效</small><span className={`status-chip ${custom ? "success" : "neutral"}`}>{custom ? "自定义 Logo" : "默认 Logo"}</span></div><div className="branding-logo-actions"><button className="button button-secondary" type="button" disabled={pending} onClick={() => fileInputRef.current?.click()}>{pending ? "正在上传…" : "选择并上传"}</button><input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" disabled={pending} hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} /><button className="button danger-outline" type="button" disabled={!custom || pending} onClick={onReset}>恢复默认</button><small className="form-error" role="alert">{error}</small></div></article>;
 }
 
-function NotificationIntegration({ status, value, error, saving, clearing, sending, onChange, onSave, onClear, onSend }: { status: { webhook_configured: boolean; last_success_at: number | null; next_schedule_at: number | null; last_error: string }; value: string; error: string; saving: boolean; clearing: boolean; sending: boolean; onChange: (value: string) => void; onSave: () => void; onClear: () => void; onSend: () => void }) {
-  return <article className="notification-integration"><div className="notification-integration-head"><div className="notification-integration-copy"><strong>企业微信群 Webhook</strong></div><span className={`status-chip ${status.webhook_configured ? "success" : "neutral"}`}>{status.webhook_configured ? "Webhook 已配置" : "Webhook 未配置"}</span></div><div className="notification-webhook-editor"><label htmlFor="notification-webhook-url-react">Webhook 地址</label><div className="notification-webhook-control"><input id="notification-webhook-url-react" type="url" maxLength={2048} autoComplete="off" value={value} placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSave(); } }} /><div className="notification-webhook-actions"><button className="button button-primary" type="button" disabled={saving || !value.trim()} onClick={onSave}>{saving ? "正在保存…" : "保存 Webhook"}</button><button className="button danger-outline" type="button" disabled={!status.webhook_configured || clearing} onClick={onClear}>清除 Webhook</button><button className="button button-quiet" type="button" disabled={!status.webhook_configured || sending} onClick={onSend}>{sending ? "正在发送…" : "发送账号信息"}</button></div></div><p className="form-error" role="alert">{error}</p></div><div className="notification-status-list"><span>最近成功<strong>{formatFullTime(status.last_success_at)}</strong></span><span>下次发送<strong>{formatFullTime(status.next_schedule_at)}</strong></span>{status.last_error ? <span>最近错误<strong>{status.last_error}</strong></span> : null}</div></article>;
+function NotificationIntegration({ status, value, error, saving, clearing, sending, testing, editing, onEdit, onCancel, onChange, onSave, onClear, onSend, onTest }: {
+  status: NotificationStatus;
+  value: string;
+  error: string;
+  saving: boolean;
+  clearing: boolean;
+  sending: boolean;
+  testing: boolean;
+  editing: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onClear: () => void;
+  onSend: () => void;
+  onTest: () => void;
+}) {
+  const showEditor = editing || !status.webhook_configured;
+  const busy = saving || clearing || sending || testing;
+  const canSave = !busy && Boolean(value.trim());
+  const canSend = status.webhook_configured && !showEditor && !busy;
+  return <article className="notification-integration" aria-busy={busy}>
+    <div className="notification-integration-head">
+      <div className="notification-integration-copy"><strong>企业微信群 Webhook</strong></div>
+      <span className={`status-chip ${status.webhook_configured ? "success" : "neutral"}`}>{status.webhook_configured ? "Webhook 已配置" : "Webhook 未配置"}</span>
+    </div>
+    <div className="notification-webhook-editor">
+      <span className="notification-webhook-label" id="notification-webhook-label">Webhook 地址</span>
+      <div className="notification-webhook-control">
+        {showEditor ? <input id="notification-webhook-url-react" aria-labelledby="notification-webhook-label" aria-invalid={Boolean(error)} aria-describedby={error ? "notification-webhook-error" : undefined}
+          type="url" maxLength={2048} autoComplete="off" spellCheck={false} autoFocus={editing} disabled={busy}
+          value={value} placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+          onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              if (canSave) onSave();
+            } else if (event.key === "Escape" && !busy) {
+              event.preventDefault();
+              event.stopPropagation();
+              onCancel();
+            }
+          }} /> : <code className="notification-webhook-saved" aria-labelledby="notification-webhook-label">
+            {status.webhook_display_url || "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=••••••"}
+          </code>}
+        <div className="notification-webhook-actions">
+          {showEditor ? <>
+            <button className="button button-primary" type="button" disabled={!canSave} onClick={onSave}>{saving ? "正在保存…" : "保存 Webhook"}</button>
+            {status.webhook_configured ? <button className="button button-quiet" type="button" disabled={busy} onClick={onCancel}>取消</button> : null}
+          </> : <button className="button button-secondary" type="button" disabled={busy} onClick={onEdit}>更换地址</button>}
+          <button className="button danger-outline" type="button" disabled={!canSend} onClick={onClear}>{clearing ? "正在清除…" : "清除 Webhook"}</button>
+          <button className="button button-quiet" type="button" disabled={!canSend} onClick={onTest}>{testing ? "正在发送测试…" : "发送测试消息"}</button>
+          <button className="button button-quiet" type="button" disabled={!canSend} onClick={onSend}>{sending ? "正在发送…" : "发送账号报告"}</button>
+        </div>
+      </div>
+      {error ? <p className="form-error" id="notification-webhook-error" role="alert">{error}</p> : null}
+    </div>
+    <div className="notification-status-list">
+      <span>最近成功<strong>{formatFullTime(status.last_success_at)}</strong></span>
+      <span>下次发送<strong>{formatFullTime(status.next_schedule_at)}</strong></span>
+      {status.last_error ? <span>最近错误<strong>{status.last_error}</strong></span> : null}
+    </div>
+  </article>;
+}
+
+function ConfigurationTableHeader({ label = "配置项", valueLabel = "配置值" }: { label?: ReactNode; valueLabel?: string }) {
+  return <div className="configuration-table-head">
+    <div>{label}</div>
+    <span className="configuration-status-heading">生效方式</span>
+    <span className="configuration-value-heading">{valueLabel}</span>
+  </div>;
+}
+
+function ConfigurationApplyMode({ field }: { field: ConfigurationField }) {
+  return <div className="configuration-field-meta"><span className="configuration-apply" title="保存后的生效方式">{applyModeLabel(field.apply_mode, field.key)}</span></div>;
+}
+
+function ConfigurationDirtyMark({ dirty }: { dirty: boolean }) {
+  return dirty ? <small className="configuration-dirty-mark">未保存</small> : null;
 }
 
 function ConfigurationEditor({ field, value, error, dirty, onChange }: { field: EditorField; value: DraftValue; error?: string; dirty: boolean; onChange: (value: DraftValue) => void }) {
-  return <article className={`configuration-field${dirty ? " configuration-field-dirty" : ""}`} data-configuration-field={field.key}><div className="configuration-field-copy"><label htmlFor={`configuration-${field.key}`}>{field.label}</label>{field.description ? <p>{field.description}</p> : null}</div><div className="configuration-field-value"><ConfigurationControl field={field} value={value} onChange={onChange} />{error ? <small className="configuration-control-error">{error}</small> : null}</div><div className="configuration-field-meta"><span className="configuration-apply">{applyModeLabel(field.apply_mode, field.key)}</span></div></article>;
+  return <article className={`configuration-field${dirty ? " configuration-field-dirty" : ""}`} data-configuration-field={field.key}>
+    <div className="configuration-field-copy">
+      <div className="configuration-field-name"><label htmlFor={`configuration-${field.key}`}>{field.label}</label><ConfigurationDirtyMark dirty={dirty} /></div>
+      {field.description ? <p>{field.description}</p> : null}
+    </div>
+    <ConfigurationApplyMode field={field} />
+    <ConfigurationValueEditor field={field} value={value} error={error} onChange={onChange} />
+  </article>;
+}
+
+function ConfigurationValueEditor({ field, value, error, onChange }: { field: ConfigurationField; value: DraftValue; error?: string; onChange: (value: DraftValue) => void }) {
+  const valueBeforeFocus = useRef(value);
+  const [editRevision, setEditRevision] = useState(0);
+  const saving = useContext(ConfigurationSavingContext);
+  return <div className="configuration-field-value"
+    onFocusCapture={(event) => {
+      if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) valueBeforeFocus.current = value;
+    }}
+    onKeyDown={(event) => {
+      const input = event.target;
+      // Composite selects own Enter/Escape. Text and numeric edits never submit the whole form.
+      if (saving || event.defaultPrevented || event.nativeEvent.isComposing || !(input instanceof HTMLInputElement)
+        || input.getAttribute("role") === "combobox" || ["checkbox", "radio", "color", "file"].includes(input.type)) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onChange(valueBeforeFocus.current);
+        // Also discard a duration's intermediate amount when its stored seconds have not changed.
+        setEditRevision((revision) => revision + 1);
+        input.blur();
+      }
+    }}>
+    <div className="configuration-control-slot" style={{ width: configurationControlWidth(field) }}>
+      <ConfigurationControl key={editRevision} field={field} value={value} onChange={onChange} />
+    </div>
+    {error ? <small className="configuration-control-error" id={`configuration-${field.key}-error`}>{error}</small> : null}
+  </div>;
 }
 
 function ConfigurationControl({ field, value, onChange }: { field: ConfigurationField; value: DraftValue; onChange: (value: DraftValue) => void }) {
+  const disabled = useContext(ConfigurationSavingContext);
   const id = `configuration-${field.key}`;
-  if (field.type === "timezone") return <TimezoneSelect id={id} value={String(value ?? "")} onChange={onChange} />;
-  if (field.type === "boolean") return <div className="configuration-field-control boolean-control"><label><input id={id} type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /><span>{value ? "已启用" : "已关闭"}</span></label></div>;
-  if (field.type === "choice") return <div className="configuration-choice-control"><LegacyEnhancedSelect id={id} label={field.label} value={String(value ?? "")} options={(field.choices ?? []).map((choice) => ({ value: choice.value, label: `${choice.label} · ${choice.value}` }))} onChange={onChange} />{field.choices?.some((choice) => /^https?:\/\//.test(choice.value)) ? <div className="configuration-choice-address"><span>{sameConfigurationValue(normalizeDraftValue(field, value), field.value) ? "当前地址" : "待切换地址"}</span><code>{String(value ?? "")}</code></div> : null}</div>;
-  if (field.type === "color") { const color = /^#[0-9a-f]{6}$/i.test(String(value ?? "")) ? String(value) : "#687287"; return <div className="reasoning-color-inputs"><label className="reasoning-color-swatch"><input type="color" value={color} aria-label={`选择${field.label}颜色`} onChange={(event) => onChange(event.target.value)} /></label><input id={id} aria-label={field.label} className="reasoning-color-hex" type="text" value={String(value ?? "")} maxLength={7} pattern="#[0-9A-Fa-f]{6}" onChange={(event) => onChange(event.target.value)} /></div>; }
+  const error = validateDraftValue(field, value);
+  const errorId = error ? `${id}-error` : undefined;
+  if (field.type === "timezone") return <TimezoneSelect id={id} value={String(value ?? "")} disabled={disabled} ariaInvalid={Boolean(error)} ariaDescribedBy={errorId} onChange={onChange} />;
+  if (field.type === "duration" || field.key === "portal.session_ttl_seconds") return <ConfigurationDurationControl field={field} value={value} onChange={onChange} />;
+  if (field.type === "boolean") return <div className="configuration-field-control boolean-control"><label><input id={id} type="checkbox" checked={Boolean(value)} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><span>{value ? "已启用" : "已关闭"}</span></label></div>;
+  if (field.type === "choice") return <div className="configuration-choice-control">
+    <LegacyEnhancedSelect id={id} label={field.label} value={String(value ?? "")} disabled={disabled} ariaInvalid={Boolean(error)} ariaDescribedBy={errorId} options={(field.choices ?? []).map((choice) => ({ value: choice.value, label: `${choice.label} · ${choice.value}` }))} onChange={onChange} />
+    {field.choices?.some((choice) => /^https?:\/\//.test(choice.value)) ? <div className="configuration-choice-address"><span>{sameConfigurationValue(normalizeDraftValue(field, value), field.value) ? "当前地址" : "待切换地址"}</span><code>{String(value ?? "")}</code></div> : null}
+  </div>;
+  if (field.type === "color") {
+    const color = /^#[0-9a-f]{6}$/i.test(String(value ?? "")) ? String(value) : "#687287";
+    return <div className="reasoning-color-inputs">
+      <label className="reasoning-color-swatch"><input type="color" value={color} disabled={disabled} aria-label={`选择${field.label}颜色`} onChange={(event) => onChange(event.target.value)} /></label>
+      <input id={id} aria-label={field.label} aria-invalid={Boolean(error)} aria-describedby={errorId} className="reasoning-color-hex" type="text" value={String(value ?? "")} disabled={disabled} maxLength={7} pattern="#[0-9A-Fa-f]{6}" onChange={(event) => onChange(event.target.value)} />
+    </div>;
+  }
+  if (field.type === "proxy_url_secret") return <LegacyPasswordInput id={id} value={value == null ? "" : String(value)} disabled={disabled} ariaLabel={field.label} ariaInvalid={Boolean(error)} ariaDescribedBy={errorId} placeholder={field.configured ? "已配置；留空保持不变" : "例如 socks5://user:pass@host:1080"} onValueChange={onChange} />;
   const numeric = ["integer", "number", "nullable_integer"].includes(field.type);
   const tokenInput = numeric && field.unit === "Token";
-  const input = field.type === "proxy_url_secret"
-    ? <LegacyPasswordInput id={id} value={value == null ? "" : String(value)} placeholder={field.configured ? "已配置；留空保持不变" : "例如 socks5://user:pass@host:1080"} onValueChange={onChange} />
-    : <input id={id} type={numeric ? "number" : "text"} value={value == null ? "" : String(value)} min={field.min} max={field.max} step={field.type === "number" ? "any" : numeric ? 1 : undefined} placeholder={field.type === "nullable_integer" ? "不限额" : undefined} autoComplete="off" onChange={(event) => onChange(event.target.value)} />;
-  if (tokenInput) { const presentation = tokenInputPresentation(typeof value === "boolean" ? null : value, field.type === "nullable_integer" ? "留空表示不限额" : "请输入 Token 数量"); return <div className="configuration-token-control token-input-control">{input}<div className="token-input-preview" data-state={presentation.state}>{presentation.state === "ready" ? <><strong>{presentation.compact}</strong>{presentation.localized ? <span>{presentation.localized}</span> : null}<small>精确值 {presentation.exact}</small></> : <small>{presentation.state === "empty" ? presentation.emptyLabel : "请输入有效的正整数 Token 数量"}</small>}</div></div>; }
-  return field.type === "nullable_integer" ? <div className="configuration-nullable-control">{input}<small>留空表示不限额</small></div> : field.unit ? <div className="configuration-unit-control">{input}<span>{field.unit}</span></div> : input;
+  const elevatedMultiplier = !error && field.unit === "倍"
+    && (field.key.startsWith(modelMultiplierPrefix) || field.key.startsWith(reasoningMultiplierPrefix))
+    && Number.isFinite(Number(value)) && Number(value) > 1;
+  const inputProps: InputHTMLAttributes<HTMLInputElement> & { value: string } = {
+    id, type: numeric ? "number" : "text", value: value == null ? "" : String(value), disabled,
+    min: field.min, max: field.max, maxLength: field.max_length,
+    step: field.type === "number" ? "any" : numeric ? 1 : undefined,
+    placeholder: field.type === "nullable_integer" ? "不限额" : undefined,
+    autoComplete: "off", title: value == null || value === "" ? "点击修改" : String(value),
+    "aria-label": field.label, "aria-invalid": Boolean(error),
+    "aria-describedby": [errorId, field.unit && !tokenInput ? `${id}-unit-label` : undefined, elevatedMultiplier ? `${id}-multiplier-mark` : undefined].filter(Boolean).join(" ") || undefined,
+    onChange: (event) => onChange(event.target.value)
+  };
+  const input = (numeric && !tokenInput) || field.type === "time_list" ? <ConfigurationInlineInput {...inputProps} /> : <input {...inputProps} />;
+  if (tokenInput) {
+    const presentation = tokenInputPresentation(typeof value === "boolean" ? null : value, field.type === "nullable_integer" ? "留空表示不限额" : "请输入 Token 数量");
+    return <div className="configuration-token-control token-input-control">{input}<div className="token-input-preview" data-state={presentation.state}>
+      {presentation.state === "ready" ? <><strong>{presentation.compact}</strong>{presentation.localized ? <span>{presentation.localized}</span> : null}<small>精确值 {presentation.exact}</small></> : <small>{presentation.state === "empty" ? presentation.emptyLabel : "请输入有效的正整数 Token 数量"}</small>}
+    </div></div>;
+  }
+  const control = field.unit ? <div className={`configuration-unit-control${elevatedMultiplier ? " configuration-multiplier-elevated" : ""}`}>
+    {input}<span className="configuration-unit-label" id={`${id}-unit-label`}>{field.unit}</span>
+    {elevatedMultiplier ? <span className="configuration-multiplier-mark" id={`${id}-multiplier-mark`} title="倍率大于 1">高倍率</span> : null}
+  </div> : input;
+  return field.type === "nullable_integer" ? <div className="configuration-nullable-control">{control}<small>留空表示不限额</small></div> : control;
+}
+
+function ConfigurationInlineInput({ value, placeholder, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, "value"> & { value: string }) {
+  return <span className="configuration-inline-editor">
+    <span className="configuration-inline-size" aria-hidden="true">{value || placeholder || "0"}</span>
+    <input {...props} value={value} placeholder={placeholder} autoComplete="off" title={props.title ?? "点击修改"} />
+  </span>;
+}
+
+const durationUnits = [
+  { value: "seconds", label: "秒", suffix: "s", seconds: 1 },
+  { value: "minutes", label: "分钟", suffix: "m", seconds: 60 },
+  { value: "hours", label: "小时", suffix: "h", seconds: 3600 },
+  { value: "days", label: "天", suffix: "d", seconds: 86400 }
+] as const;
+type DurationUnit = (typeof durationUnits)[number]["value"];
+const durationBounds = { min: 30, max: 30 * 86400 };
+
+function configurationDurationSeconds(field: ConfigurationField, value: unknown): number | null {
+  if (field.type === "duration") {
+    const match = /^(\d+)([smhd])$/i.exec(String(value ?? "").trim());
+    if (!match) return null;
+    const unit = durationUnits.find((item) => item.suffix === match[2].toLowerCase())!;
+    const seconds = Number(match[1]) * unit.seconds;
+    return Number.isSafeInteger(seconds) ? seconds : null;
+  }
+  if ((typeof value !== "number" && typeof value !== "string") || String(value).trim() === "") return null;
+  const seconds = Number(value);
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+function configurationDurationValue(field: ConfigurationField, seconds: number, current: DraftValue): DraftValue {
+  if (field.type !== "duration") return seconds;
+  // Preserve the existing spelling when the duration has not changed, including saved values such as 60m.
+  for (const original of [current, field.value]) {
+    if (typeof original === "string" && configurationDurationSeconds(field, original) === seconds) return original;
+  }
+  const unit = [...durationUnits].reverse().find((item) => seconds > 0 && seconds % item.seconds === 0)
+    ?? durationUnits[0];
+  return `${seconds / unit.seconds}${unit.suffix}`;
+}
+
+function durationAmount(value: DraftValue, secondsPerUnit: number): string {
+  if (value == null || value === "" || !Number.isFinite(Number(value))) return "";
+  // Eight decimal places keep the display readable without losing whole-second precision.
+  return String(Number((Number(value) / secondsPerUnit).toFixed(8)));
+}
+
+function durationLimit(seconds: number): string {
+  if (seconds % 86400 === 0) return `${seconds / 86400} 天`;
+  if (seconds % 3600 === 0) return `${seconds / 3600} 小时`;
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
+  return `${seconds} 秒`;
+}
+
+function ConfigurationDurationControl({ field, value, onChange }: { field: ConfigurationField; value: DraftValue; onChange: (value: DraftValue) => void }) {
+  const disabled = useContext(ConfigurationSavingContext);
+  const id = `configuration-${field.key}`;
+  const [unit, setUnit] = useState<DurationUnit>(() => field.type === "duration"
+    ? durationUnits.find((item) => item.suffix === String(value ?? field.value ?? "").trim().slice(-1).toLowerCase())?.value ?? "hours"
+    : "hours");
+  const [inputDraft, setInputDraft] = useState<{ value: DraftValue; amount: string } | null>(null);
+  const selectedUnit = durationUnits.find((item) => item.value === unit)!;
+  const seconds = configurationDurationSeconds(field, value);
+  const amount = inputDraft && inputDraft.value === value ? inputDraft.amount : durationAmount(seconds, selectedUnit.seconds);
+  const minimum = field.min ?? (field.type === "duration" ? durationBounds.min : undefined);
+  const maximum = field.max ?? (field.type === "duration" ? durationBounds.max : undefined);
+  const error = validateDraftValue(field, value);
+
+  return <div className="configuration-duration-control">
+      <ConfigurationInlineInput
+        id={id}
+        type="number"
+        value={amount}
+        min={minimum === undefined ? undefined : minimum / selectedUnit.seconds}
+        max={maximum === undefined ? undefined : maximum / selectedUnit.seconds}
+        step="any"
+        aria-label={field.label}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
+        disabled={disabled}
+        autoComplete="off"
+        onChange={(event) => {
+          const nextAmount = event.target.value;
+          const seconds = Number(nextAmount) * selectedUnit.seconds;
+          const nextValue = nextAmount === "" || !Number.isFinite(seconds) ? "" : configurationDurationValue(field, Math.round(seconds), value);
+          setInputDraft({ value: nextValue, amount: nextAmount });
+          onChange(nextValue);
+        }}
+      />
+      <LegacyEnhancedSelect<DurationUnit>
+        id={`${id}-unit`}
+        label={`${field.label}单位`}
+        value={unit}
+        disabled={disabled}
+        options={durationUnits.map(({ value: unitValue, label }) => ({ value: unitValue, label }))}
+        onChange={(nextUnit) => {
+          // Unit selection only changes the display; keep the API's original value and format.
+          setUnit(nextUnit);
+          setInputDraft(null);
+        }}
+      />
+  </div>;
 }
 
 function LegacyConfirmModal({ title, open, children, okText, danger = false, confirmLoading = false, onCancel, onOk }: { title: string; open: boolean; children: ReactNode; okText: string; danger?: boolean; confirmLoading?: boolean; onCancel: () => void; onOk: () => void }) {
   return <Modal className="legacy-confirm-modal" title={<span className="sr-only">{title}</span>} open={open} width={430} centered closeIcon={<span className="legacy-dialog-close" aria-hidden="true">×</span>} transitionName="" maskTransitionName="" onCancel={onCancel} destroyOnHidden footer={[<Button key="cancel" disabled={confirmLoading} onClick={onCancel}>取消</Button>, <Button key="confirm" type={danger ? "default" : "primary"} danger={danger} loading={confirmLoading} onClick={onOk}>{okText}</Button>]}><div className="legacy-confirm-body"><div className="legacy-confirm-icon" aria-hidden="true">!</div><h3>{title}</h3><div className="legacy-confirm-message">{children}</div></div></Modal>;
 }
 
-function MultiplierStrategyEditor({ fields, draft, onChange }: { fields: ConfigurationField[]; draft: Draft; onChange: (field: ConfigurationField, value: DraftValue) => void }) {
+function ModelMultiplierEditor({ fields, draft, onChange }: { fields: ConfigurationField[]; draft: Draft; onChange: (field: ConfigurationField, value: DraftValue) => void }) {
   const modelFields = fields.filter((field) => field.key.startsWith(modelMultiplierPrefix));
-  const astra = modelFields.find((field) => field.key === `${modelMultiplierPrefix}gpt-6-astra`);
-  return <section className="multiplier-strategy-editor" aria-label="模型与推理强度倍率"><div className="multiplier-policy-summary"><div><span>计费规则</span><strong>模型倍率 × 推理强度倍率</strong><small>只影响保存后新采集的事件，不重算历史用量</small></div>{astra ? <div className="multiplier-policy-feature"><span>GPT-6 Astra</span><strong>×{String(draft[astra.key] ?? astra.value)}</strong></div> : null}</div><section className="model-multiplier-editor" aria-label="模型倍率"><header><div><strong>模型倍率</strong><span>未匹配模型使用“其他 / 未匹配”倍率</span></div><small>下次采集生效</small></header><div className="model-multiplier-table"><div className="model-multiplier-table-head"><span>模型</span><span>用户额度倍率</span></div>{modelFields.map((field) => { const model = field.key.slice(modelMultiplierPrefix.length); const dirty = !sameConfigurationValue(normalizeDraftValue(field, draft[field.key]), field.value); return <div className="model-multiplier-row" key={field.key}><div className="model-multiplier-name"><strong>{model === "unknown" ? "其他 / 未匹配" : model}</strong>{model === "unknown" ? <code>fallback</code> : null}</div><div className={`reasoning-strategy-control${dirty ? " configuration-field-dirty" : ""}`} data-configuration-field={field.key}><div className="reasoning-multiplier-input"><input type="number" value={String(draft[field.key] ?? field.value)} min={field.min} max={field.max} step="any" aria-label={`${model === "unknown" ? "其他未匹配模型" : model}用户额度倍率`} aria-invalid={Boolean(validateDraftValue(field, draft[field.key]))} onChange={(event) => onChange(field, event.target.value)} /><span>倍</span></div>{validateDraftValue(field, draft[field.key]) ? <small className="configuration-control-error">{validateDraftValue(field, draft[field.key])}</small> : null}</div></div>; })}</div><footer><button className="button button-quiet" type="button" onClick={() => modelFields.forEach((field) => onChange(field, draftValueFromConfiguration(field.default, field.type)))}>恢复默认模型倍率</button></footer></section><ReasoningStrategyEditor fields={fields} draft={draft} onChange={onChange} /></section>;
+  return <section className="model-multiplier-editor" aria-label="模型倍率">
+    <div className="configuration-matrix-viewport" role="region" aria-label="模型倍率配置表">
+      <div className="configuration-matrix model-multiplier-table">
+        <ConfigurationTableHeader label="模型" valueLabel="用户额度倍率" />
+        {modelFields.map((field) => {
+          const model = field.key.slice(modelMultiplierPrefix.length);
+          const name = model === "unknown" ? "其他 / 未匹配" : model;
+          const value = draft[field.key] === undefined ? draftValueFromConfiguration(field.value, field.type) : draft[field.key];
+          const dirty = !sameConfigurationValue(normalizeDraftValue(field, value), field.value);
+          return <div className={`configuration-field model-multiplier-row${dirty ? " configuration-field-dirty" : ""}`} key={field.key} data-configuration-field={field.key}>
+            <div className="configuration-field-copy">
+              <div className="model-multiplier-name"><label htmlFor={`configuration-${field.key}`} title={name}>{name}</label>{model === "unknown" ? <code>fallback</code> : null}</div>
+              <ConfigurationDirtyMark dirty={dirty} />
+            </div>
+            <ConfigurationApplyMode field={field} />
+            <ConfigurationValueEditor field={{ ...field, label: `${model === "unknown" ? "其他未匹配模型" : model}用户额度倍率`, unit: "倍" }} value={value} error={validateDraftValue(field, value)} onChange={(next) => onChange(field, next)} />
+          </div>;
+        })}
+      </div>
+    </div>
+    <footer><button className="button button-quiet" type="button" onClick={() => modelFields.forEach((field) => onChange(field, draftValueFromConfiguration(field.default, field.type)))}>恢复默认模型倍率</button></footer>
+  </section>;
 }
 
 function ReasoningStrategyEditor({ fields, draft, onChange }: { fields: ConfigurationField[]; draft: Draft; onChange: (field: ConfigurationField, value: DraftValue) => void }) {
@@ -591,28 +934,34 @@ function ReasoningStrategyEditor({ fields, draft, onChange }: { fields: Configur
     observer.observe(canvas);
     return () => observer.disconnect();
   }, [draft, fields]);
-  return <section className="reasoning-strategy-editor" aria-label={hasColors ? "推理强度颜色" : "推理强度倍率"}>
+  return <section className="reasoning-strategy-editor" aria-label={hasColors ? "推理强度颜色" : "推理倍率"}>
     {hasColors ? <div className="reasoning-color-preview"><strong>配色预览</strong><canvas ref={canvasRef} height="58" role="img" aria-label="推理强度颜色预览" /></div> : null}
-    <div className="reasoning-strategy-table">
-      <div className="reasoning-strategy-table-head"><span>推理强度</span><span>{hasColors ? "账号明细颜色 · 立即生效" : "用户额度倍率 · 下次采集"}</span></div>
-      {fields.map((field) => {
-        const prefix = hasColors ? reasoningColorPrefix : reasoningMultiplierPrefix;
-        if (!field.key.startsWith(prefix)) return null;
-        const effort = field.key.slice(prefix.length);
-        const dirty = !sameConfigurationValue(normalizeDraftValue(field, draft[field.key]), field.value);
-        const error = validateDraftValue(field, draft[field.key]);
-        return <div className="reasoning-strategy-row" key={field.key}>
-          <div className="reasoning-strategy-name"><strong>{reasoningEffortLabel(effort)}</strong><code>{effort}</code></div>
-          <div className={`reasoning-strategy-control${dirty ? " configuration-field-dirty" : ""}`} data-configuration-field={field.key}>
-            {hasColors ? <ConfigurationControl field={field} value={draft[field.key]} onChange={(value) => onChange(field, value)} />
-              : <div className="reasoning-multiplier-input"><input type="number" value={String(draft[field.key] ?? field.value)} min={field.min} max={field.max} step="any" aria-label={`${reasoningEffortLabel(effort)}用户额度倍率`} onChange={(event) => onChange(field, event.target.value)} /><span>倍</span></div>}
-            {error ? <small className="configuration-control-error">{error}</small> : null}
-          </div>
-        </div>;
-      })}
+    <div className="configuration-matrix-viewport" role="region" aria-label={hasColors ? "推理强度配色配置表" : "推理强度倍率配置表"}>
+      <div className="configuration-matrix reasoning-strategy-table">
+        <ConfigurationTableHeader label={<div className="reasoning-strategy-names"><span>推理强度（中文）</span><span>推理强度（英文）</span></div>} valueLabel={hasColors ? "账号明细颜色" : "用户额度倍率"} />
+        {fields.map((field) => {
+          const prefix = hasColors ? reasoningColorPrefix : reasoningMultiplierPrefix;
+          if (!field.key.startsWith(prefix)) return null;
+          const effort = field.key.slice(prefix.length);
+          const value = draft[field.key] === undefined ? draftValueFromConfiguration(field.value, field.type) : draft[field.key];
+          const dirty = !sameConfigurationValue(normalizeDraftValue(field, value), field.value);
+          const editorField = hasColors ? field : { ...field, label: `${reasoningEffortLabel(effort)}用户额度倍率`, unit: "倍" };
+          return <div className={`configuration-field reasoning-strategy-row${dirty ? " configuration-field-dirty" : ""}`} key={field.key} data-configuration-field={field.key}>
+            <div className="configuration-field-copy">
+              <div className="reasoning-strategy-names">
+                <label className="reasoning-strategy-label" htmlFor={`configuration-${field.key}`}>{reasoningEffortLabel(effort)}</label>
+                <code className="reasoning-strategy-code">{effort}</code>
+              </div>
+              <ConfigurationDirtyMark dirty={dirty} />
+            </div>
+            <ConfigurationApplyMode field={field} />
+            <ConfigurationValueEditor field={editorField} value={value} error={validateDraftValue(field, value)} onChange={(next) => onChange(field, next)} />
+          </div>;
+        })}
+      </div>
     </div>
     <div className="reasoning-strategy-defaults">
-      {hasMultipliers ? <button className="button button-quiet" type="button" onClick={() => fields.filter((field) => field.key.startsWith(reasoningMultiplierPrefix)).forEach((field) => onChange(field, draftValueFromConfiguration(field.default, field.type)))}>恢复默认倍率</button> : null}
+      {hasMultipliers ? <button className="button button-quiet" type="button" onClick={() => fields.filter((field) => field.key.startsWith(reasoningMultiplierPrefix)).forEach((field) => onChange(field, draftValueFromConfiguration(field.default, field.type)))}>恢复默认推理倍率</button> : null}
       {hasColors ? <button className="button button-quiet" type="button" onClick={() => fields.filter((field) => field.key.startsWith(reasoningColorPrefix)).forEach((field) => onChange(field, draftValueFromConfiguration(field.default, field.type)))}>恢复默认配色</button> : null}
     </div>
   </section>;
@@ -621,7 +970,7 @@ function ReasoningStrategyEditor({ fields, draft, onChange }: { fields: Configur
 function QuotaSystemDanger({ summary, pending, failed, onReset }: { summary?: { total_users: number; users_with_usage: number; total_used_tokens: number; total_raw_used_tokens: number; week_end_at: number | null }; pending: boolean; failed: boolean; onReset: () => void }) {
   const available = Boolean(summary) && !failed;
   const canReset = available && Number(summary?.users_with_usage ?? 0) > 0;
-  return <section className="quota-system-danger" aria-label="全员额度危险操作"><div className="quota-system-danger-copy"><strong>全员本周用量清零</strong><p>仅用于异常补偿；保留原始事件、额度策略和追加额度。需填写原因并确认。</p><div className="quota-system-danger-metrics">{available && summary ? <><span>{summary.total_users.toLocaleString("zh-CN")} 位用户</span><span>{summary.users_with_usage.toLocaleString("zh-CN")} 位有用量</span><span>当前加权已用 {tokenReadableText(summary.total_used_tokens)}</span><span>未加权累计 {tokenReadableText(summary.total_raw_used_tokens)}</span><span>{formatFullTime(summary.week_end_at)} 自动换周</span></> : <span>{pending ? "正在确认影响范围" : "影响范围暂不可确认，请刷新配置后重试"}</span>}</div></div><button className="button danger-outline" type="button" disabled={!canReset || pending} onClick={onReset}>{pending ? "正在确认影响范围" : !available ? "影响范围暂不可确认" : canReset ? "清零全部用户本周已用量" : "当前无需清零"}</button></section>;
+  return <section className="quota-system-danger" aria-label="全员额度危险操作" data-configuration-field="quota-reset"><div className="quota-system-danger-copy"><strong>全员本周用量清零</strong><p>仅用于异常补偿；保留原始事件、额度策略和追加额度。需填写原因并确认。</p><div className="quota-system-danger-metrics">{available && summary ? <><span>{summary.total_users.toLocaleString("zh-CN")} 位用户</span><span>{summary.users_with_usage.toLocaleString("zh-CN")} 位有用量</span><span>当前加权已用 {tokenReadableText(summary.total_used_tokens)}</span><span>未加权累计 {tokenReadableText(summary.total_raw_used_tokens)}</span><span>{formatFullTime(summary.week_end_at)} 自动换周</span></> : <span>{pending ? "正在确认影响范围" : "影响范围暂不可确认，请刷新配置后重试"}</span>}</div></div><button className="button danger-outline" type="button" disabled={!canReset || pending} onClick={onReset}>{pending ? "正在确认影响范围" : !available ? "影响范围暂不可确认" : canReset ? "清零全部用户本周已用量" : "当前无需清零"}</button></section>;
 }
 
 function AccessPanel({ managementKeyConfigured, initialPasswordConfigured, onInitialPassword, onManagementKey }: { managementKeyConfigured: boolean; initialPasswordConfigured: boolean; onInitialPassword: () => void; onManagementKey: () => void }) {
@@ -646,7 +995,7 @@ function StoragePanel({ rows, onRefresh }: { rows: Array<{ label: string; path: 
       />
       {rows.length ? (
         <div className="settings-table-panel">
-          <NativeTableViewport className="table-wrap settings-table-viewport" aria-label="存储状态表格">
+          <div className="settings-table-viewport" role="region" aria-label="存储状态表格">
             <table className="storage-table">
               <thead><tr><th className="table-index-column">序号</th><th>数据</th><th>本地路径</th><th>状态</th><th>权限</th></tr></thead>
               <tbody>{rows.map((item, index) => (
@@ -659,7 +1008,7 @@ function StoragePanel({ rows, onRefresh }: { rows: Array<{ label: string; path: 
                 </tr>
               ))}</tbody>
             </table>
-          </NativeTableViewport>
+          </div>
         </div>
       ) : (
         <SettingsPanelEmptyState icon="▦" title="未发现本地数据项" description="请刷新；仍为空时检查版本支持。" actionLabel="刷新本地数据" onAction={onRefresh} />
@@ -681,7 +1030,7 @@ function AuditPanel({ rows, onRefresh }: { rows: Array<{ timestamp: number; acti
       />
       {rows.length ? (
         <div className="settings-table-panel">
-          <NativeTableViewport className="table-wrap settings-table-viewport" aria-label="管理审计表格">
+          <div className="settings-table-viewport" role="region" aria-label="管理审计表格">
             <table className="audit-table">
               <thead><tr><th className="table-index-column">序号</th><th>时间</th><th>动作</th><th>目标</th><th>结果</th></tr></thead>
               <tbody>{rows.map((item, index) => (
@@ -694,7 +1043,7 @@ function AuditPanel({ rows, onRefresh }: { rows: Array<{ timestamp: number; acti
                 </tr>
               ))}</tbody>
             </table>
-          </NativeTableViewport>
+          </div>
         </div>
       ) : (
         <SettingsPanelEmptyState
@@ -727,7 +1076,7 @@ function configurationDraft(catalog: ConfigurationCatalog): Draft { return Objec
 function draftValueFromConfiguration(value: ConfigurationValue, type: ConfigurationField["type"]): DraftValue { if (type === "domain_list") return Array.isArray(value) ? value.join(", ") : ""; if (type === "proxy_url_secret") return ""; if (Array.isArray(value)) return value.join(", "); return value; }
 function normalizeDraftValue(field: ConfigurationField, value: DraftValue): ConfigurationValue { if (field.type === "proxy_url_secret" && String(value ?? "").trim() === "") return field.value; if (field.type === "domain_list") return [...new Set(String(value ?? "").split(/[,，\s]+/).map((item) => item.trim().toLocaleLowerCase("zh-CN")).filter(Boolean))]; if (field.type === "boolean") return Boolean(value); if (["integer", "number", "nullable_integer"].includes(field.type)) { if (field.type === "nullable_integer" && String(value ?? "").trim() === "") return null; if (String(value ?? "").trim() === "") return ""; const number = Number(value); return Number.isFinite(number) ? number : String(value ?? "").trim(); } if (typeof value === "string") return value.trim(); return value; }
 function sameConfigurationValue(left: ConfigurationValue, right: ConfigurationValue): boolean { return JSON.stringify(left) === JSON.stringify(right); }
-function validateDraftValue(field: ConfigurationField, raw: DraftValue): string { if (field.type === "nullable_integer" && String(raw ?? "").trim() === "") return ""; if (["integer", "number", "nullable_integer"].includes(field.type)) { if (String(raw ?? "").trim() === "") return "请输入有效数字"; const value = Number(raw); if (!Number.isFinite(value)) return "请输入有效数字"; if ((field.type === "integer" || field.type === "nullable_integer") && !Number.isInteger(value)) return "请输入整数"; if (field.min !== undefined && value < field.min) return `不能小于 ${field.min}`; if (field.max !== undefined && value > field.max) return `不能大于 ${field.max}`; return ""; } if (field.type === "boolean" || field.type === "choice" || field.type === "domain_list") return ""; const value = String(raw ?? "").trim(); if (field.type === "proxy_url_secret" && value === "") return ""; if (["optional_text", "optional_image", "base_url"].includes(field.type) && value === "") return ""; if (!value) return "不能为空"; if (field.min_length !== undefined && [...value].length < field.min_length) return `至少输入 ${field.min_length} 个字符`; if (field.max_length !== undefined && [...value].length > field.max_length) return `最多输入 ${field.max_length} 个字符`; if (field.type === "key_prefix" && !/^[a-z][a-z0-9_]{1,30}_$/.test(value)) return "请输入 3-32 位小写前缀，并以下划线结尾"; if (field.type === "env_name" && !/^[A-Z][A-Z0-9_]{1,63}$/.test(value)) return "请输入有效的大写环境变量名"; if (field.type === "color" && !/^#[0-9a-fA-F]{6}$/.test(value)) return "请输入 #RRGGBB 颜色"; if (field.type === "duration" && !/^[1-9][0-9]*[smhd]$/.test(value)) return "请输入 30s、5m、1h 或 7d 格式"; if (field.type === "time_list" && !/^([01]?\d|2[0-3]):[0-5]\d(?:\s*[,，]\s*([01]?\d|2[0-3]):[0-5]\d)*$/.test(value)) return "请输入 HH:MM，多个时间使用逗号分隔"; if ((field.type === "base_url" || field.type === "proxy_url_secret") && !validConfigurationURL(value, field.type === "proxy_url_secret")) return "请输入有效的 HTTP(S) 或 SOCKS5 根地址"; if (field.type === "ip" && !validIPv4(value)) return "请输入有效 IPv4 地址"; if ((field.type === "image" || field.type === "optional_image") && !/^[A-Za-z0-9._:/@-]+$/.test(value)) return "镜像名称格式无效"; if (field.digest_required && !/^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/.test(value)) return "必须使用 name:tag@sha256:digest 固定镜像"; return ""; }
+function validateDraftValue(field: ConfigurationField, raw: DraftValue): string { if (field.type === "nullable_integer" && String(raw ?? "").trim() === "") return ""; if (["integer", "number", "nullable_integer"].includes(field.type)) { if (String(raw ?? "").trim() === "") return "请输入有效数字"; const value = Number(raw); if (!Number.isFinite(value)) return "请输入有效数字"; if ((field.type === "integer" || field.type === "nullable_integer") && !Number.isInteger(value)) return "请输入整数"; if (field.min !== undefined && value < field.min) return `不能小于 ${field.key === "portal.session_ttl_seconds" ? durationLimit(field.min) : field.min}`; if (field.max !== undefined && value > field.max) return `不能大于 ${field.key === "portal.session_ttl_seconds" ? durationLimit(field.max) : field.max}`; return ""; } if (field.type === "boolean" || field.type === "choice" || field.type === "domain_list") return ""; const value = String(raw ?? "").trim(); if (field.type === "proxy_url_secret" && value === "") return ""; if (["optional_text", "optional_image", "base_url"].includes(field.type) && value === "") return ""; if (!value) return "不能为空"; if (field.min_length !== undefined && [...value].length < field.min_length) return `至少输入 ${field.min_length} 个字符`; if (field.max_length !== undefined && [...value].length > field.max_length) return `最多输入 ${field.max_length} 个字符`; if (field.type === "key_prefix" && !/^[a-z][a-z0-9_]{1,30}_$/.test(value)) return "请输入 3-32 位小写前缀，并以下划线结尾"; if (field.type === "env_name" && !/^[A-Z][A-Z0-9_]{1,63}$/.test(value)) return "请输入有效的大写环境变量名"; if (field.type === "color" && !/^#[0-9a-fA-F]{6}$/.test(value)) return "请输入 #RRGGBB 颜色"; if (field.type === "duration") { const seconds = configurationDurationSeconds(field, value); if (seconds === null) return "请输入有效时长"; if (seconds < durationBounds.min) return `不能小于 ${durationLimit(durationBounds.min)}`; if (seconds > durationBounds.max) return `不能大于 ${durationLimit(durationBounds.max)}`; return ""; } if (field.type === "time_list" && !/^([01]?\d|2[0-3]):[0-5]\d(?:\s*[,，]\s*([01]?\d|2[0-3]):[0-5]\d)*$/.test(value)) return "请输入 HH:MM，多个时间使用逗号分隔"; if ((field.type === "base_url" || field.type === "proxy_url_secret") && !validConfigurationURL(value, field.type === "proxy_url_secret")) return "请输入有效的 HTTP(S) 或 SOCKS5 根地址"; if (field.type === "ip" && !validIPv4(value)) return "请输入有效 IPv4 地址"; if ((field.type === "image" || field.type === "optional_image") && !/^[A-Za-z0-9._:/@-]+$/.test(value)) return "镜像名称格式无效"; if (field.digest_required && !/^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/.test(value)) return "必须使用 name:tag@sha256:digest 固定镜像"; return ""; }
 function validConfigurationURL(value: string, proxy: boolean): boolean { try { const parsed = new URL(value); if (!["http:", "https:", ...(proxy ? ["socks5:"] : [])].includes(parsed.protocol)) return false; return Boolean(parsed.hostname) && parsed.pathname === "/" && !parsed.search && !parsed.hash && (proxy || (!parsed.username && !parsed.password)); } catch { return false; } }
 function validIPv4(value: string): boolean { const parts = value.split("."); return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255); }
 function applyModeLabel(mode: ConfigurationField["apply_mode"], key = ""): string { if (key === "runtime.cliproxy_image") return "镜像管理"; return ({ live: "立即生效", accounts: "重建业务 CPA", collector: "重启采集器", future: "仅新账号", deployment: "账号重建生效", quota: "下次采集生效" })[mode]; }

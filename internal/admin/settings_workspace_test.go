@@ -101,6 +101,17 @@ func TestSettingsWorkspaceReturnsRealBoundedRedactedRuntimeMetadata(t *testing.T
 	}
 }
 
+func TestAuditRedactsCurrentAndLegacyUserKeyPrefixes(t *testing.T) {
+	for _, prefix := range []string{"ccpa_", "cpa_"} {
+		t.Run(prefix, func(t *testing.T) {
+			key := prefix + "alice_00000000-0000-4000-8000-000000000000"
+			if got := sanitizeAuditText("rotated " + key); got != "rotated [REDACTED]" {
+				t.Fatalf("audit key was not redacted: %q", got)
+			}
+		})
+	}
+}
+
 func TestSettingsWorkspaceFailsClosedWithoutConfiguredRoot(t *testing.T) {
 	server, _ := newTestAdmin(t)
 	response := performAdminRequest(server, http.MethodGet, "/admin/api/settings/workspace", nil,

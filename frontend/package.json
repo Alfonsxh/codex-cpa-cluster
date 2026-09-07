@@ -14,6 +14,7 @@
     "check:dist": "node scripts/check-dist.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test --config playwright.config.ts",
+    "docs:screenshots": "CPAP_DOC_SCREENSHOTS=1 playwright test --config playwright.config.ts --grep 文档深色截图",
     "test:e2e:update": "playwright test --config playwright.config.ts --update-snapshots",
     "typecheck": "tsc --noEmit"
   },

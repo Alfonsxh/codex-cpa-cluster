@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { ApiError } from "../api/client";
 import { applicationHref } from "../application-links";
+import { defaultPublicSiteConfiguration, publicSiteQueryKey, readPublicSiteConfiguration } from "../api/public-site";
 import {
   logoutPortal,
   portalSessionQueryKey,
@@ -114,17 +115,16 @@ export function UsageApp() {
 }
 
 function UsageAuthenticationBoundary() {
-  const { theme } = useTheme();
   return (
     <div className="usage-shell usage-authentication-boundary">
       <header className="usage-topbar usage-preview-topbar">
-        <a className="usage-preview-brand" href={applicationHref("portal")} aria-label="返回 Codex CPA 首页">
-          <img
-            src={`/portal/assets/codex-cpa-pool-logo${theme === "dark" ? "-dark" : ""}.svg`}
-            alt="Codex CPA Pool"
-          />
-          <strong>使用中心</strong>
-        </a>
+        <div className="usage-preview-brand">
+          <UsageBrand />
+          <span className="usage-heading">
+            <strong>使用中心</strong>
+            <span className="usage-heading-subtitle" lang="en">USAGE CENTER</span>
+          </span>
+        </div>
         <ThemeToggle />
       </header>
       <main className="usage-main usage-preview" aria-hidden="true">
@@ -174,6 +174,27 @@ function UsageAuthenticationBoundary() {
   );
 }
 
+function UsageBrand() {
+  const { theme } = useTheme();
+  const publicSite = useQuery({
+    queryKey: publicSiteQueryKey,
+    queryFn: ({ signal }) => readPublicSiteConfiguration(signal),
+    retry: 1,
+    refetchOnWindowFocus: true
+  });
+  const productName = publicSite.data?.product_name ?? defaultPublicSiteConfiguration.product_name;
+  return (
+    <a className="usage-product-brand" href={applicationHref("portal")} aria-label={`${productName} 服务入口`} title={productName}>
+      <img
+        className="usage-brand-logo"
+        src={`/portal/assets/codex-cpa-pool-mark${theme === "dark" ? "-dark" : ""}.svg`}
+        alt=""
+      />
+      <span className="usage-product-name">{productName}</span>
+    </a>
+  );
+}
+
 function PreviewStat({ title, value, detail }: { title: string; value: string; detail?: string }) {
   return (
     <article>
@@ -198,19 +219,15 @@ function UsageShell({
   onChangePassword: () => void;
   children: React.ReactNode;
 }) {
-  const { theme } = useTheme();
   return (
     <main className="usage-shell usage-center-shell">
       <header className="usage-center-head">
         <div className="usage-brand-block">
-          <a href={applicationHref("portal")} aria-label="Codex CPA 使用中心">
-            <img
-              className="usage-brand-logo"
-              src={`/portal/assets/codex-cpa-pool-logo${theme === "dark" ? "-dark" : ""}.svg`}
-              alt="Codex CPA Pool"
-            />
-          </a>
-          <h1>使用中心</h1>
+          <UsageBrand />
+          <div className="usage-heading">
+            <h1>使用中心</h1>
+            <span className="usage-heading-subtitle" lang="en">USAGE CENTER</span>
+          </div>
         </div>
         <div className="usage-user-actions">
           <span className="usage-user-badge" title={user}>{user}</span>

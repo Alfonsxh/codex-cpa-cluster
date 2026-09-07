@@ -3360,6 +3360,10 @@ components:
           type: string
           maxLength: 0
           description: Always empty on reads so the Webhook credential never enters a browser cache.
+        webhook_display_url:
+          type: string
+          readOnly: true
+          description: Display-only saved Webhook address with its key masked except for the last four characters; omitted when unconfigured.
         heartbeat_at: { type: [integer, "null"], format: int64 }
         last_success_at: { type: [integer, "null"], format: int64 }
         last_error: { type: string }

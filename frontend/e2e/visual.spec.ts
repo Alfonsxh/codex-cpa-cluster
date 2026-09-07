@@ -1,3 +1,4 @@
+import path from "node:path";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const routes = [
@@ -167,7 +168,7 @@ for (const viewport of viewports) {
         if (route.slug === "configuration") {
           const configurationPanel = page.getByRole("region", { name: "站点品牌", exact: true });
           await expect(configurationPanel.getByLabel("产品名称", { exact: true })).toBeVisible();
-          await expect(page.getByRole("heading", { level: 1 })).toHaveText("配置中心/品牌与身份");
+          await expect(page.getByRole("heading", { level: 1 })).toHaveText("配置中心/品牌与身份/站点品牌");
           expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
         }
         await expect(page).toHaveScreenshot(
@@ -384,39 +385,49 @@ for (const viewport of [viewports[0], viewports[1], viewports[2]]) {
     const expectedKeys = catalog.groups.flatMap((group: { fields: Array<{ key: string }> }) => group.fields.map((field) => field.key));
     const seen: string[] = [];
     const categories = ["品牌与身份", "系统设置", "请求与账号", "用量与额度", "通知设置", "数据与审计"];
-    const selectCategory = async (category: string) => {
-      if (viewport.width > 1120) await page.getByRole("navigation", { name: "配置分类" }).getByRole("button", { name: category, exact: true }).click();
-      else {
-        await page.getByRole("button", { name: "选择配置分类" }).click();
-        await page.getByRole("option", { name: category, exact: true }).click();
+    const expandCategory = async (category: string) => {
+      if (viewport.width <= 1120) {
+        const toggle = page.getByRole("button", { name: "选择配置子项", exact: true });
+        if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
       }
+      const categoryButton = page.getByRole("navigation", { name: "配置分类" }).getByRole("button", { name: category, exact: true });
+      if (await categoryButton.getAttribute("aria-expanded") !== "true") await categoryButton.click();
+      return page.locator(`[id="${await categoryButton.getAttribute("aria-controls")}"]`);
+    };
+    const selectSection = async (category: string, section: string) => {
+      const children = await expandCategory(category);
+      await children.getByRole("button", { name: section, exact: true }).click();
     };
     for (const category of categories) {
-      await selectCategory(category);
-      await expect(page.getByRole("heading", { level: 1 })).toHaveText(`配置中心/${category}`);
-      while (await page.locator(".configuration-section-heading button[aria-expanded=false]").count()) await page.locator(".configuration-section-heading button[aria-expanded=false]").first().click();
-      const keys = await page.locator("[data-configuration-field]").evaluateAll((elements) => elements.map((element) => (element as HTMLElement).dataset.configurationField!));
-      seen.push(...keys.filter((key) => expectedKeys.includes(key)));
-      for (const key of keys.filter((key) => expectedKeys.includes(key))) {
-        await expect(page.locator(`[data-configuration-field="${key}"]`).locator("input, button, select").first()).toBeVisible();
+      const children = await expandCategory(category);
+      const sections = await children.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")!));
+      for (const section of sections) {
+        await selectSection(category, section);
+        await expect(page.getByRole("heading", { level: 1 })).toHaveText(`配置中心/${category}/${section}`);
+        await expect(page.locator(".configuration-section")).toHaveCount(1);
+        await expect(page.locator(".configuration-category-intro, .configuration-section-heading")).toHaveCount(0);
+        const keys = await page.locator("[data-configuration-field]").evaluateAll((elements) => elements.map((element) => (element as HTMLElement).dataset.configurationField!));
+        seen.push(...keys.filter((key) => expectedKeys.includes(key)));
+        for (const key of keys.filter((key) => expectedKeys.includes(key))) {
+          await expect(page.locator(`[data-configuration-field="${key}"]`).locator("input, button, select").first()).toBeVisible();
+        }
+        expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+        const geometry = await page.locator(".configuration-save-region").boundingBox();
+        expect(geometry!.y + geometry!.height).toBeLessThanOrEqual(viewport.height);
       }
-      expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
-      const geometry = await page.locator(".configuration-save-region").boundingBox();
-      expect(geometry!.y + geometry!.height).toBeLessThanOrEqual(viewport.height);
       await page.screenshot({ path: testInfo.outputPath(`configuration-${categories.indexOf(category)}-${viewport.name}.png`), animations: "disabled" });
     }
     expect(seen.sort()).toEqual(expectedKeys.sort());
-    await selectCategory("品牌与身份");
+    await selectSection("品牌与身份", "站点品牌");
     await page.getByLabel("产品名称", { exact: true }).fill("Draft Brand");
     await page.getByLabel("搜索配置", { exact: true }).fill("portal.session_ttl_seconds");
     await page.getByLabel("搜索配置", { exact: true }).press("Enter");
     const ttl = page.locator('[data-configuration-field="portal.session_ttl_seconds"] input');
     await expect(ttl).toBeFocused();
-    await ttl.fill("3600");
+    await ttl.fill("1");
     await expect(page.getByText("涉及 2 个分类", { exact: true })).toBeVisible();
-    // The mobile selector labels remain plain even when categories have drafts.
-    if (viewport.width > 1120) await page.getByRole("navigation", { name: "配置分类" }).getByRole("button", { name: /品牌与身份/ }).click();
-    else await selectCategory("品牌与身份");
+    // Category and child labels remain stable when their dirty counts change.
+    await selectSection("品牌与身份", "站点品牌");
     await expect(page.getByLabel("产品名称", { exact: true })).toHaveValue("Draft Brand");
     await page.getByRole("button", { name: "撤销未保存修改", exact: true }).click();
     await expect(page.getByRole("button", { name: "保存配置", exact: true })).toBeDisabled();
@@ -444,11 +455,10 @@ test("配置中心本地数据与审计记录沿用统一信息卡片", async ({
   await login(page, "/admin/configuration", "保存配置");
 
   const systemNavigation = page.getByRole("navigation", { name: "配置分类" });
-  await systemNavigation.getByRole("button", { name: "数据与审计" }).click();
-  await page.getByRole("button", { name: /安全归档/ }).click();
+  await expect(systemNavigation.getByRole("button", { name: "数据与审计" })).toHaveAttribute("aria-expanded", "true");
   const storageButton = page.getByRole("button", { name: /本地数据/ });
   await storageButton.click();
-  await expect(storageButton).toHaveAttribute("aria-expanded", "true");
+  await expect(storageButton).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".configuration-navigation .active")).toHaveCount(1);
   await expect(systemNavigation.locator(".active")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "持久化数据" })).toBeVisible();
@@ -467,7 +477,7 @@ test("配置中心本地数据与审计记录沿用统一信息卡片", async ({
   await expect(page).toHaveScreenshot("react-configuration-storage-desktop-dark.png", { fullPage: false });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const mobileStorageGeometry = await page.getByLabel("存储状态表格").evaluate((element) => ({
+  const mobileStorageGeometry = await page.locator(".settings-workspace-content").evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
     bodyScrollWidth: document.body.scrollWidth,
@@ -484,10 +494,9 @@ test("配置中心本地数据与审计记录沿用统一信息卡片", async ({
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(systemNavigation).toBeVisible();
 
-  await storageButton.click();
-  const auditButton = page.locator(".configuration-section-heading").getByRole("button", { name: /审计记录/ });
+  const auditButton = systemNavigation.getByRole("button", { name: "审计记录", exact: true });
   await auditButton.click();
-  await expect(auditButton).toHaveAttribute("aria-expanded", "true");
+  await expect(auditButton).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "暂无管理操作" })).toBeVisible();
   await expect(page.getByRole("button", { name: "刷新审计记录" })).toBeVisible();
   await expect(page).toHaveScreenshot("react-configuration-audit-empty-desktop-dark.png", { fullPage: false });
@@ -1365,6 +1374,7 @@ test("共享表格视口保持动态高度、右侧滚动槽和正确边界阴�
   const viewport = page.locator(".account-table-state .admin-table-viewport");
   const body = viewport.locator(".ant-table-body");
   await expect(viewport).toHaveAttribute("data-scroll-overflow", "false");
+  await expect(body.locator(".account-summary-row").first()).toBeVisible();
   const compactColumn = await page.evaluate(() => {
     const header = document.querySelector<HTMLElement>(".account-legacy-table .ant-table-header th:nth-child(8)");
     const token = document.querySelector<HTMLElement>(".account-legacy-table .ant-table-body .account-summary-row td:nth-child(8)");
@@ -1750,6 +1760,7 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
       tabWidths: tabButtons.map((button) => button.getBoundingClientRect().width),
       workspaceOverflowY: getComputedStyle(scroller).overflowY,
       detailOverflowY: getComputedStyle(table).overflowY,
+      tenRowHeight: table.querySelector("thead")!.getBoundingClientRect().height + 10 * table.querySelector("tbody tr")!.getBoundingClientRect().height,
       detailClientHeight: table.clientHeight,
       detailScrollHeight: table.scrollHeight
     };
@@ -1759,7 +1770,7 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   expect(Math.max(...geometry.tabWidths) - Math.min(...geometry.tabWidths)).toBeLessThanOrEqual(1);
   expect(geometry.workspaceOverflowY).toBe("visible");
   expect(geometry.detailOverflowY).toBe("auto");
-  expect(geometry.detailClientHeight).toBeLessThanOrEqual(380);
+  expect(Math.abs(geometry.detailClientHeight - geometry.tenRowHeight)).toBeLessThanOrEqual(1);
   expect(geometry.detailScrollHeight).toBeGreaterThan(geometry.detailClientHeight);
 
   await detailTable.evaluate((element) => {
@@ -1774,7 +1785,7 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   await expect(card.getByRole("tabpanel", { name: "用户 Token 统计" }).getByLabel("用户用量明细表格")).toBeVisible();
 });
 
-test("仅在存在更新时显示心跳入口、悬停展示精简版本信息", async ({ page }) => {
+test("管理中心左下角显示版本及正式更新链接，不再弹出版本详情", async ({ page }) => {
   let releasePayload = {
     configured: true,
     current_version: "v1.0.0",
@@ -1793,47 +1804,55 @@ test("仅在存在更新时显示心跳入口、悬停展示精简版本信息",
   await expect(page.locator(".release-notice")).toHaveCount(0);
   const desktopEntry = page.locator(".side-nav-footer .release-version-indicator");
   await expect(desktopEntry).toBeVisible();
-  await expect(desktopEntry).toHaveText("发现新版本");
+  await expect(desktopEntry).toHaveText("有版本更新");
   await expect(desktopEntry.locator(".release-version-heartbeat")).toBeVisible();
+  await expect(desktopEntry).toHaveAttribute("data-update", "true");
   const footerOrder = await page.locator(".side-nav-footer").evaluate((footer) => {
     const release = footer.querySelector<HTMLElement>(".release-version-indicator");
     const auth = footer.querySelector<HTMLElement>(".side-nav-auth-status");
+    const releaseBounds = release!.getBoundingClientRect();
+    const authBounds = auth!.getBoundingClientRect();
     return {
-      releaseTop: release?.getBoundingClientRect().top ?? 0,
-      authTop: auth?.getBoundingClientRect().top ?? 0
+      releaseLeft: releaseBounds.left,
+      authRight: authBounds.right,
+      releaseCenter: releaseBounds.top + releaseBounds.height / 2,
+      authCenter: authBounds.top + authBounds.height / 2
     };
   });
-  expect(footerOrder.releaseTop).toBeLessThan(footerOrder.authTop);
-  await desktopEntry.hover();
-  const details = page.getByRole("region", { name: "应用版本详情" });
-  await expect(details).toBeVisible();
-  await expect(details).toContainText("当前版本v1.0.0");
-  await expect(details).toContainText("最新版本v1.1.0");
-  await expect(details).not.toContainText("检查时间");
-  await expect(details).not.toContainText("版本 Revision");
-  await expect(details.getByRole("button")).toHaveCount(0);
+  expect(footerOrder.releaseLeft).toBeGreaterThan(footerOrder.authRight);
+  expect(Math.abs(footerOrder.releaseCenter - footerOrder.authCenter)).toBeLessThan(1);
+  await expect(desktopEntry).toHaveAttribute("href", "https://github.com/Alfonsxh/codex-cpa-pool/releases/tag/v1.1.0");
+  await expect(page.getByRole("region", { name: "应用版本详情" })).toHaveCount(0);
 
   releasePayload = { ...releasePayload, latest_version: "v1.0.0", available: false };
   await page.reload();
-  await expect(page.locator(".release-version-indicator")).toHaveCount(0);
+  await expect(desktopEntry).toHaveText("v1.0.0");
 
   releasePayload = { ...releasePayload, latest_version: "v1.1.0", available: true, status: "unavailable" };
   await page.reload();
-  await expect(page.locator(".release-version-indicator")).toHaveCount(0);
+  await expect(desktopEntry).toHaveText("v1.0.0");
 
-  releasePayload = { ...releasePayload, available: true, status: "ok" };
+  releasePayload = { ...releasePayload, current_version: "v2.0.0-rc.1", latest_version: "v1.1.0", available: false, status: "ok" };
+  await page.reload();
+  await expect(desktopEntry).toHaveText("v2.0.0-rc.1");
+
+  releasePayload = { ...releasePayload, current_version: "v1.0.0", available: true, status: "ok" };
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
-  await expect(page.locator(".side-nav-footer")).toBeHidden();
-  const mobileEntry = page.locator(".mobile-release-indicator");
-  await expect(mobileEntry).toBeVisible();
-  await mobileEntry.click();
-  await expect(page.getByRole("region", { name: "应用版本详情" })).toBeVisible();
+  await expect(page.locator(".side-nav-footer")).toBeVisible();
+  await expect(page.locator(".release-version-indicator")).toHaveCount(1);
+  await expect(page.locator(".top-bar .release-version-indicator")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "应用版本详情" })).toHaveCount(0);
   await expect(page.locator(".main-surface")).not.toHaveCSS("overflow-x", "scroll");
 
   releasePayload = { ...releasePayload, latest_version: "v1.0.0", available: false };
   await page.reload();
-  await expect(page.locator(".mobile-release-indicator")).toHaveCount(0);
+  await expect(desktopEntry).toHaveText("v1.0.0");
+  const footerBounds = await page.locator(".side-nav-footer").boundingBox();
+  const mainBounds = await page.locator(".main-surface").boundingBox();
+  expect(footerBounds!.x).toBe(0);
+  expect(footerBounds!.y + footerBounds!.height).toBe(844);
+  expect(mainBounds!.y + mainBounds!.height).toBeLessThanOrEqual(footerBounds!.y);
 });
 
 test("30 天图表 Tooltip 为单列 Top 10 且无滚动条", async ({ page }) => {
@@ -2381,11 +2400,11 @@ async function installUsageVisualBackend(page: Page, state: "normal" | "loading"
   await page.route("**/site-config.json", (route) => fulfillJSON(route, {
     version: 1,
     product_name: "Codex CPA Pool",
-    short_name: "Codex CPA",
+    short_name: "CCPA",
     environment_label: "本地模拟预览",
     public_base_url: "http://127.0.0.1:8317",
-    provider_name: "Codex CPA",
-    api_key_env: "CPA_API_KEY",
+    provider_name: "Codex CPA Pool",
+    api_key_env: "CCPA_API_KEY",
     default_model: "gpt-5.6-sol",
     logo: { custom: false, url: "/portal/assets/codex-cpa-pool-logo.svg", content_type: "image/svg+xml", sha256: "", updated_at: null }
   }));
@@ -2441,3 +2460,31 @@ async function installUsageVisualBackend(page: Page, state: "normal" | "loading"
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "visual_not_found", message: path } }) });
   });
 }
+
+// Opt-in documentation capture uses only the isolated, synthetic preview backend.
+test("文档深色截图", async ({ page }) => {
+  test.skip(process.env.CPAP_DOC_SCREENSHOTS !== "1", "仅按需生成公开文档截图");
+  await page.setViewportSize({ width: 1440, height: 1440 });
+  await setTheme(page, "dark");
+  await page.route("**/admin/api/release*", (route) => fulfillJSON(route, {
+    configured: true, status: "ok", current_version: "v2.0.0", latest_version: "v2.0.0", available: false, checked_at: 1787500800
+  }));
+  const capture = async (name: string) => {
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.evaluate(() => document.fonts.ready);
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: path.resolve("../docs/assets", `screenshot-${name}.png`), animations: "disabled", caret: "hide" });
+  };
+  await login(page, "/admin/overview", "Token 使用");
+  await capture("overview");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openRoute(page, routes[1]);
+  await capture("accounts");
+  await installUsageVisualBackend(page);
+  await page.goto("http://127.0.0.1:5194/usage/");
+  await page.getByRole("tab", { name: "每日用量" }).click();
+  await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
+  await expect(page.getByRole("img", { name: /个人每日 Token 用量趋势/ })).toBeVisible();
+  await capture("usage");
+});

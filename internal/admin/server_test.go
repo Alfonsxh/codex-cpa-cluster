@@ -1604,7 +1604,7 @@ func TestGeneralSettingsAPIUsesLiveAllowlistAndPreservesUnrelatedSettings(t *tes
 	}
 	var current generalSettingsResponse
 	decodeAdminResponse(t, response, &current)
-	if current.Values.ProductName != "Existing CPA" || current.Values.KeyPrefix != "cpa_" ||
+	if current.Values.ProductName != "Existing CPA" || current.Values.KeyPrefix != "ccpa_" ||
 		!current.Security.ManagementKeyConfigured || !current.Security.InitialPasswordConfigured ||
 		current.ApplyMode != "live" {
 		t.Fatalf("general settings = %#v", current)
@@ -1623,7 +1623,7 @@ func TestGeneralSettingsAPIUsesLiveAllowlistAndPreservesUnrelatedSettings(t *tes
 			"allowed_email_domains": []string{"Example.com"},
 			"key_prefix":            "cpa_",
 			"provider_name":         "CPA Provider",
-			"api_key_env":           "CPA_API_KEY",
+			"api_key_env":           "CCPA_API_KEY",
 			"default_model":         "gpt-test",
 		},
 	}, headers, nil)
@@ -2204,6 +2204,9 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 	if !savedWebhook.Notifications.WebhookConfigured || savedWebhook.Notifications.WebhookURL != "" {
 		t.Fatalf("saved webhook status leaked credential = %#v", savedWebhook.Notifications)
 	}
+	if savedWebhook.Notifications.WebhookDisplayURL != "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=••••••lder" {
+		t.Fatalf("saved webhook display = %q", savedWebhook.Notifications.WebhookDisplayURL)
+	}
 	stored, found, err := store.ReadSecret(context.Background(), "wecom_webhook")
 	if err != nil || !found || stored != webhook {
 		t.Fatalf("stored webhook = (%q, %v, %v)", stored, found, err)
@@ -2231,6 +2234,9 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 	if !redacted.Notifications.WebhookConfigured || redacted.Notifications.WebhookURL != "" ||
 		strings.Contains(response.Body.String(), webhook) {
 		t.Fatalf("read notification settings leaked webhook = %s", response.Body.String())
+	}
+	if redacted.Notifications.WebhookDisplayURL != savedWebhook.Notifications.WebhookDisplayURL {
+		t.Fatal("saved Webhook display was lost on reload")
 	}
 
 	resetAt := int64(1_900_000_000)

@@ -11,13 +11,13 @@ const current = {
   generated_at: 1_800_000_000,
   values: {
     product_name: "Codex CPA Pool",
-    short_name: "Codex CPA",
+    short_name: "CCPA",
     environment_label: "Internal",
     public_base_url: "https://cpa.example.com",
     allowed_email_domains: ["example.com"],
-    key_prefix: "cpa_",
-    provider_name: "Codex CPA",
-    api_key_env: "CPA_API_KEY",
+    key_prefix: "ccpa_",
+    provider_name: "Codex CPA Pool",
+    api_key_env: "CCPA_API_KEY",
     default_model: "gpt-5.6-sol"
   },
   security: {

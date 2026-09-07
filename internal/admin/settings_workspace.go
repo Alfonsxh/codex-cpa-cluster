@@ -19,7 +19,7 @@ import (
 
 const settingsAuditLimit = 20
 
-var auditSecretPattern = regexp.MustCompile(`(?i)(?:\b(?:sk|key)-[a-z0-9_-]{12,}\b|\bcpa_[a-z0-9_-]{12,}\b|\bbearer\s+[a-z0-9._~+/=-]{12,})`)
+var auditSecretPattern = regexp.MustCompile(`(?i)(?:\b(?:sk|key)-[a-z0-9_-]{12,}\b|\b(?:ccpa|cpa)_[a-z0-9_-]{12,}\b|\bbearer\s+[a-z0-9._~+/=-]{12,})`)
 
 type settingsWorkspaceStorage struct {
 	Label  string `json:"label"`

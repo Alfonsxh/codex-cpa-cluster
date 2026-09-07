@@ -68,6 +68,30 @@ func TestRotateUserKeyRejectsUnsafePrefixBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestNewUserKeyDefaultAndSavedPrefixes(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		settings map[string]any
+		want     string
+	}{
+		{name: "missing", want: "ccpa_"},
+		{name: "blank", settings: map[string]any{"identity.key_prefix": "  "}, want: "ccpa_"},
+		{name: "saved legacy", settings: map[string]any{"identity.key_prefix": "cpa_"}, want: "cpa_"},
+		{name: "custom", settings: map[string]any{"identity.key_prefix": "custom_"}, want: "custom_"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			first, err := NewUserKey(test.settings, "alice.smith@example.com")
+			if err != nil || !strings.HasPrefix(first, test.want+"alice_smith_") {
+				t.Fatalf("NewUserKey = (%q, %v)", first, err)
+			}
+			second, err := NewUserKey(test.settings, "alice.smith@example.com")
+			if err != nil || first == second {
+				t.Fatalf("new keys must remain distinct: %v", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeUserAndNewKeyUseConfiguredIdentityPolicy(t *testing.T) {
 	settings := map[string]any{
 		"identity.allowed_email_domains": []any{"example.com", "example.org"},

@@ -18,6 +18,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Alfonsxh/codex-cpa-pool/internal/identity"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
@@ -148,13 +149,13 @@ func buildConfigurationDefinitions() []configurationDefinition {
 
 	definitions := []configurationDefinition{
 		text("branding.product_name", "产品名称", defaultProductName, 2, 64, "live", false),
-		text("branding.short_name", "产品简称", "Codex CPA", 2, 32, "live", false),
+		text("branding.short_name", "产品简称", "CCPA", 2, 32, "live", false),
 		text("branding.environment_label", "环境说明", "Self-hosted service", 0, 64, "live", true),
 		simple("branding.public_base_url", "公开访问地址", "base_url", "", "live"),
 		simple("identity.allowed_email_domains", "允许的邮箱域名", "domain_list", []string{}, "live"),
-		simple("identity.key_prefix", "新 Key 前缀", "key_prefix", "cpa_", "live"),
-		text("portal.provider_name", "客户端 Provider 名称", "Codex CPA", 2, 48, "live", false),
-		simple("portal.api_key_env", "客户端 Key 环境变量", "env_name", "CPA_API_KEY", "live"),
+		simple("identity.key_prefix", "新 Key 前缀", "key_prefix", identity.DefaultUserKeyPrefix, "live"),
+		text("portal.provider_name", "客户端 Provider 名称", "Codex CPA Pool", 2, 48, "live", false),
+		simple("portal.api_key_env", "客户端 Key 环境变量", "env_name", "CCPA_API_KEY", "live"),
 		text("portal.default_model", "客户端默认模型", "gpt-5.6-sol", 1, 128, "live", false),
 		simple(sitetime.SettingKey, "系统时区", "timezone", sitetime.DefaultName, "collector"),
 		boolean("cpa.proxy_enabled", "启用默认上游代理", false, "accounts"),

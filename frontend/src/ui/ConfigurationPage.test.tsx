@@ -20,7 +20,7 @@ describe("ConfigurationPage", () => {
 
     const access = within(await screen.findByRole("navigation", { name: "配置分类" }))
       .getByRole("button", { name: "系统设置" });
-    await waitFor(() => expect(access).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(access).toHaveAttribute("aria-expanded", "true"));
     expect(screen.getByRole("button", { name: "设置用户初始密码" })).toBeInTheDocument();
   });
 
@@ -150,7 +150,7 @@ describe("ConfigurationPage", () => {
     expect(screen.getByText("上游失败重试次数。")).toBeInTheDocument();
     expect(screen.queryByText("branding.product_name", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("默认 Codex CPA Pool", { exact: true })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "通知设置" }));
+    await selectConfigurationItem(user, "通知设置", "企业微信通知");
     const enabled = screen.getByLabelText("启用企业微信通知");
     const webhook = screen.getByText("企业微信群 Webhook");
     expect(enabled.compareDocumentPosition(webhook) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -184,7 +184,7 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration");
     await user.type(await screen.findByLabelText("产品名称"), " Updated");
-    await user.click(screen.getByRole("button", { name: "通知设置" }));
+    await selectConfigurationItem(user, "通知设置", "企业微信通知");
     expect(screen.getByLabelText("启用企业微信通知")).toBeChecked();
     await user.click(screen.getByRole("button", { name: "清除 Webhook" }));
     await user.click(screen.getByRole("button", { name: "确认清除" }));
@@ -201,8 +201,6 @@ describe("ConfigurationPage", () => {
     let quotaReads = 0;
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
-      const supporting = supportingSettingsResponse(path);
-      if (supporting) return supporting;
       if (path === "/admin/api/settings/configuration") return jsonResponse(configurationFixture());
       if (path === "/admin/api/users/quota-actions" && init?.method === "POST") {
         return jsonResponse({
@@ -217,6 +215,8 @@ describe("ConfigurationPage", () => {
         quotaReads += 1;
         return jsonResponse(quotaSummary(quotaReads === 1 ? 2 : 0));
       }
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
       throw new Error(`unexpected request: ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -225,9 +225,9 @@ describe("ConfigurationPage", () => {
 
     await screen.findByPlaceholderText("已配置；留空保持不变");
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/users/quota-actions")).toBe(false);
-    await user.click(screen.getByRole("button", { name: "用量与额度" }));
+    expect(screen.getByRole("button", { name: "用量与额度" })).toHaveAttribute("aria-expanded", "true");
     expect(quotaReads).toBe(0);
-    await user.click(screen.getByRole("button", { name: /用量维护/ }));
+    await user.click(screen.getByRole("button", { name: "额度", exact: true }));
     expect(await screen.findByText("2 位有用量")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "清零全部用户本周已用量" }));
     const reason = screen.getByLabelText("操作原因");
@@ -259,18 +259,18 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" onManagementKeyRotated={rotated} />);
 
-    await user.click(await screen.findByRole("button", { name: "数据与审计" }));
+    expect(await screen.findByRole("button", { name: "数据与审计" })).toHaveAttribute("aria-expanded", "true");
     const storageButton = screen.getByRole("button", { name: /本地数据/ });
     await user.click(storageButton);
-    expect(storageButton).toHaveAttribute("aria-expanded", "true");
+    expect(storageButton).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "持久化数据" })).toBeInTheDocument();
     expect(screen.getByText("state/control-plane.sqlite3")).toBeInTheDocument();
     const auditButton = screen.getByRole("button", { name: /审计记录/ });
     await user.click(auditButton);
-    expect(auditButton).toHaveAttribute("aria-expanded", "true");
+    expect(auditButton).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "最近管理操作" })).toBeInTheDocument();
     expect(screen.getByText("configuration.update")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "系统设置" }));
+    await selectConfigurationItem(user, "系统设置", "访问凭据");
     await user.click(screen.getByRole("button", { name: "更换管理密钥" }));
     const newKey = screen.getByLabelText("新管理密钥");
     const confirmation = screen.getByLabelText("再次输入管理密钥");
@@ -308,7 +308,7 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
 
-    await user.click(await screen.findByRole("button", { name: "数据与审计" }));
+    expect(await screen.findByRole("button", { name: "数据与审计" })).toHaveAttribute("aria-expanded", "true");
     await user.click(screen.getByRole("button", { name: /审计记录/ }));
     expect(screen.getByRole("heading", { name: "最近管理操作" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "暂无管理操作" })).toBeInTheDocument();
@@ -341,9 +341,8 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
 
-    await user.click(await screen.findByRole("button", { name: "用量与额度" }));
-    await user.click(screen.getByRole("button", { name: /模型与推理倍率/ }));
-    expect(screen.getAllByText("模型倍率 × 推理强度倍率")[0]).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "用量与额度" })).toHaveAttribute("aria-expanded", "true");
+    await user.click(screen.getByRole("button", { name: "模型倍率", exact: true }));
     expect(screen.getByLabelText("gpt-6-astra用户额度倍率")).toHaveValue(4);
     expect(screen.getByLabelText("gpt-5.6-sol用户额度倍率")).toHaveValue(1);
     expect(screen.getByLabelText("其他未匹配模型用户额度倍率")).toHaveValue(1);
@@ -371,26 +370,31 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration");
     const navigation = within(await screen.findByRole("navigation", { name: "配置分类" }));
-    expect(navigation.getAllByRole("button").map((button) => button.textContent)).toEqual([
+    expect(navigation.getAllByRole("button").filter((button) => button.hasAttribute("aria-expanded")).map((button) => button.textContent)).toEqual([
       "品牌与身份", "系统设置", "请求与账号", "用量与额度", "通知设置", "数据与审计"
     ]);
     const product = await screen.findByLabelText("产品名称");
+    expect(navigation.getByRole("button", { name: "站点品牌", exact: true })).toHaveAttribute("aria-current", "page");
+    await user.click(navigation.getByRole("button", { name: "系统设置", exact: true }));
+    expect(product).toBeVisible();
+    expect(navigation.getByRole("button", { name: "系统设置", exact: true })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("heading", { name: "站点品牌", exact: true })).not.toBeInTheDocument();
     await user.clear(product);
     await user.type(product, "New Brand");
     await user.type(screen.getByLabelText("搜索配置"), "Max 推理强度颜色{Enter}");
-    expect(navigation.getByRole("button", { name: "系统设置" })).toHaveAttribute("aria-current", "page");
+    expect(navigation.getByRole("button", { name: "系统设置" })).toHaveAttribute("data-current", "true");
     const color = screen.getByRole("textbox", { name: "Max 推理强度颜色" });
     expect(color).toBeVisible();
     await user.clear(color);
     await user.type(color, "#123456");
     expect(screen.getByText("2 项未保存")).toBeInTheDocument();
     expect(screen.getByText("涉及 2 个分类")).toBeInTheDocument();
-    await user.click(navigation.getByRole("button", { name: /品牌与身份/ }));
+    await selectConfigurationItem(user, "品牌与身份", "站点品牌");
     expect(screen.getByLabelText("产品名称")).toHaveValue("New Brand");
-    await user.click(navigation.getByRole("button", { name: "数据与审计" }));
+    await selectConfigurationItem(user, "数据与审计", "审计记录");
     await user.click(screen.getByRole("button", { name: "撤销未保存修改" }));
     expect(screen.getByRole("button", { name: "保存配置" })).toBeDisabled();
-    await user.click(navigation.getByRole("button", { name: "品牌与身份" }));
+    await selectConfigurationItem(user, "品牌与身份", "站点品牌");
     expect(screen.getByLabelText("产品名称")).toHaveValue("Codex CPA Pool");
   });
 
@@ -411,7 +415,7 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
     await user.clear(await screen.findByLabelText("请求重试次数"));
-    await user.click(screen.getByRole("button", { name: "品牌与身份" }));
+    await selectConfigurationItem(user, "品牌与身份", "站点品牌");
     const product = screen.getByLabelText("产品名称");
     await user.clear(product);
     await user.type(product, "Changed Brand");
@@ -420,7 +424,7 @@ describe("ConfigurationPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     await user.type(screen.getByLabelText("请求重试次数"), "0");
-    await user.click(screen.getByRole("button", { name: "数据与审计" }));
+    await selectConfigurationItem(user, "数据与审计", "审计记录");
     await user.click(screen.getByRole("button", { name: "保存配置" }));
     await user.click(screen.getByRole("button", { name: "保存并应用" }));
     expect(await screen.findByText("已保存 2 项配置")).toBeInTheDocument();
@@ -436,7 +440,7 @@ describe("ConfigurationPage", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => supportingSettingsResponse(String(input)) ?? jsonResponse(configurationFixture())));
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, `/configuration?group=${group}&key=${key}`);
     const navigation = within(await screen.findByRole("navigation", { name: "配置分类" }));
-    await waitFor(() => expect(navigation.getByRole("button", { name: category })).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(navigation.getByRole("button", { name: category })).toHaveAttribute("data-current", "true"));
     const target = document.querySelector(`[data-configuration-field="${key}"]`)!;
     expect(target).toBeVisible();
     expect(target.contains(document.activeElement)).toBe(true);
@@ -624,6 +628,13 @@ function withUpdatedValues(catalog: ConfigurationCatalog, values: Record<string,
   };
 }
 
+async function selectConfigurationItem(user: ReturnType<typeof userEvent.setup>, category: string, section: string) {
+  const navigation = within(screen.getByRole("navigation", { name: "配置分类" }));
+  const categoryButton = navigation.getByRole("button", { name: category, exact: true });
+  if (categoryButton.getAttribute("aria-expanded") !== "true") await user.click(categoryButton);
+  await user.click(navigation.getByRole("button", { name: section, exact: true }));
+}
+
 function renderConfiguration(element: React.ReactNode, entry = "/configuration?group=CPA 请求") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
@@ -643,6 +654,7 @@ function jsonResponse(payload: unknown) {
 }
 
 function supportingSettingsResponse(path: string) {
+  if (path === "/admin/api/users/quota-actions") return jsonResponse(quotaSummary(0));
   if (path === "/admin/api/settings/general") {
     return jsonResponse({
       version: 1,
@@ -650,13 +662,13 @@ function supportingSettingsResponse(path: string) {
       generated_at: 1_800_000_000,
       values: {
         product_name: "Codex CPA Pool",
-        short_name: "Codex CPA",
+        short_name: "CCPA",
         environment_label: "Test",
         public_base_url: "https://example.test",
         allowed_email_domains: ["example.com"],
-        key_prefix: "cpa_",
-        provider_name: "Codex CPA",
-        api_key_env: "CPA_API_KEY",
+        key_prefix: "ccpa_",
+        provider_name: "Codex CPA Pool",
+        api_key_env: "CCPA_API_KEY",
         default_model: "gpt-5.6-sol"
       },
       security: { management_key_configured: true, initial_password_configured: true },

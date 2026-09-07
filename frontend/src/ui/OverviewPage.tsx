@@ -687,6 +687,7 @@ function SeriesTable({ subjectLabel, series, emptyText, statuses, tokenMode, can
           )}
         </tbody>
       </table>
+      {(visibleRows < sorted.length || canLoadMore) ? <button className="overview-token-load-more" type="button" onClick={loadNextPage} aria-label={`加载更多${subjectLabel}用量明细`}>加载更多</button> : null}
     </NativeTableViewport>
   );
 }

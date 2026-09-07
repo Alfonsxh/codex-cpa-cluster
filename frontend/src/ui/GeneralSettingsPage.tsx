@@ -376,7 +376,7 @@ function FormField({ control, name, label, placeholder }: {
 function emptyFormValues(): SettingsFormValues {
   return {
     product_name: "", short_name: "", environment_label: "", public_base_url: "",
-    allowed_email_domains: "", key_prefix: "cpa_", provider_name: "", api_key_env: "CPA_API_KEY", default_model: ""
+    allowed_email_domains: "", key_prefix: "ccpa_", provider_name: "", api_key_env: "CCPA_API_KEY", default_model: ""
   };
 }
 

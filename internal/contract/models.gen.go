@@ -2561,6 +2561,9 @@ type NotificationStatus struct {
 	NextScheduleAt    *int64 `json:"next_schedule_at"`
 	WebhookConfigured bool   `json:"webhook_configured"`
 
+	// WebhookDisplayUrl Display-only saved Webhook address with its key masked except for the last four characters; omitted when unconfigured.
+	WebhookDisplayUrl *string `json:"webhook_display_url,omitempty"`
+
 	// WebhookUrl Always empty on reads so the Webhook credential never enters a browser cache.
 	WebhookUrl string `json:"webhook_url"`
 }

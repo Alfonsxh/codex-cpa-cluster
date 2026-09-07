@@ -839,6 +839,10 @@ export type NotificationStatus = {
      * Always empty on reads so the Webhook credential never enters a browser cache.
      */
     webhook_url: string;
+    /**
+     * Display-only saved Webhook address with its key masked except for the last four characters; omitted when unconfigured.
+     */
+    readonly webhook_display_url?: string;
     heartbeat_at: number | null;
     last_success_at: number | null;
     last_error: string;
@@ -1611,6 +1615,18 @@ export type AccountProxyRepairRequestWritable = {
     confirm: string;
 };
 
+export type NotificationStatusWritable = {
+    webhook_configured: boolean;
+    /**
+     * Always empty on reads so the Webhook credential never enters a browser cache.
+     */
+    webhook_url: string;
+    heartbeat_at: number | null;
+    last_success_at: number | null;
+    last_error: string;
+    next_schedule_at: number | null;
+};
+
 export type NotificationValuesWritable = {
     enabled: boolean;
     daily_times: string;
@@ -1620,7 +1636,7 @@ export type NotificationValuesWritable = {
 };
 
 export type NotificationSettingsWritable = {
-    notifications: NotificationStatus;
+    notifications: NotificationStatusWritable;
     values: NotificationValuesWritable;
 };
 
@@ -1636,6 +1652,11 @@ export type NotificationSettingsMutationResponseWritable = NotificationSettingsW
 export type NotificationWebhookRequestWritable = {
     confirm: 'save';
     webhook_url: string;
+};
+
+export type NotificationWebhookResponseWritable = {
+    message: string;
+    notifications: NotificationStatusWritable;
 };
 
 export type PortalUsageWindowWritable = UsageWindow | 'today';

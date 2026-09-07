@@ -23,6 +23,8 @@ var (
 var keyPrefixPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{1,30}_$`)
 var userEmailPattern = regexp.MustCompile(`^[a-z0-9.!#$%&'*+/=?^_` + "`" + `{|}~-]+@([a-z0-9.-]+)$`)
 
+const DefaultUserKeyPrefix = "ccpa_"
+
 type RotationStore interface {
 	ReadSettings(context.Context) (map[string]any, error)
 	ApplyUserKeyRotationExpected(context.Context, string, string, string) (controlplane.UserKeyRotation, error)
@@ -139,7 +141,7 @@ func NormalizeUser(settings map[string]any, raw string) (string, error) {
 // users and rotations. The caller is responsible for returning it exactly
 // once and never logging it.
 func NewUserKey(settings map[string]any, user string) (string, error) {
-	prefix := "cpa_"
+	prefix := DefaultUserKeyPrefix
 	if value, ok := settings["identity.key_prefix"].(string); ok && strings.TrimSpace(value) != "" {
 		prefix = strings.ToLower(strings.TrimSpace(value))
 	}

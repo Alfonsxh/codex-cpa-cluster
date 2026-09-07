@@ -29,6 +29,8 @@ export type LegacyEnhancedSelectProps<Value extends string> = {
   autoFocus?: boolean;
   required?: boolean;
   title?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 };
 
 /** React implementation of the frozen v1 enhanceSelect() DOM and state machine. */
@@ -41,7 +43,9 @@ export function LegacyEnhancedSelect<Value extends string>({
   disabled = false,
   autoFocus = false,
   required = false,
-  title
+  title,
+  ariaInvalid,
+  ariaDescribedBy
 }: LegacyEnhancedSelectProps<Value>) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
@@ -53,6 +57,10 @@ export function LegacyEnhancedSelect<Value extends string>({
   const menuId = `${controlId}-menu`;
   const selected = options.find((option) => option.value === value) ?? options[0];
   const selectedLabel = selected?.label || "请选择";
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useEffect(() => {
     const closeOtherSelect = (event: Event) => {
@@ -117,6 +125,7 @@ export function LegacyEnhancedSelect<Value extends string>({
   };
 
   const selectOption = (nextValue: Value) => {
+    if (disabled) return;
     const previous = value;
     closeAndFocusTrigger();
     if (nextValue !== previous || nextValue === "custom") onChange(nextValue);
@@ -150,7 +159,7 @@ export function LegacyEnhancedSelect<Value extends string>({
     setOpen(false);
   };
 
-  const menu = open ? (
+  const menu = open && !disabled ? (
     <span
       ref={menuRef}
       className="enhanced-select-menu enhanced-select-menu-portal"
@@ -206,6 +215,8 @@ export function LegacyEnhancedSelect<Value extends string>({
           className="enhanced-select-trigger"
           type="button"
           aria-label={`${label}：${selectedLabel}`}
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={menuId}

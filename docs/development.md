@@ -133,3 +133,7 @@ Vitest 的 Ant Design 交互用例保持按文件串行，避免资源争用导�
 模型明细在 30 秒内复用；未使用的数据最多保留 5 分钟，过期后后台更新。手动刷新
 同时更新列表和已展开明细，并使其他时间范围缓存失效；账号切换同样使列表缓存失效。
 API Key 仍按需读取，退出登录和会话失效继续清理缓存。
+
+## 公开文档截图
+
+运行 `npm --prefix frontend run docs:screenshots`，使用 Playwright 的隔离演示后端生成 `docs/assets/screenshot-{overview,accounts,usage}.png`，两个语言的 README 共享这些图片。截图固定为深色模式，账号和统计均来自合成测试数据；不要改接真实环境。发布前逐张检查图片，确认没有真实邮箱、Key、Webhook、内部域名或目标地址。日常浏览器矩阵仍覆盖深浅两种主题，不将测试基准图片作为产品截图发布。

@@ -54,6 +54,21 @@ func RedactWebhook(value any) string {
 	return webhookRedactor.ReplaceAllString(fmt.Sprint(value), "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=[REDACTED]")
 }
 
+// MaskedWebhookURL is display-only. Never return the complete credential to a
+// settings reader or accept this masked representation as a replacement URL.
+func MaskedWebhookURL(value string) string {
+	validated, err := ValidateWebhookURL(value)
+	if err != nil {
+		return ""
+	}
+	parsed, err := url.Parse(validated)
+	if err != nil {
+		return ""
+	}
+	key := parsed.Query().Get("key")
+	return "https://" + webhookHost + webhookPath + "?key=••••••" + key[len(key)-4:]
+}
+
 func (sender *WebhookSender) Configured(ctx context.Context) (bool, error) {
 	_, err := sender.webhookURL(ctx)
 	if errors.Is(err, ErrWebhookNotConfigured) || errors.Is(err, ErrWebhookInvalid) {

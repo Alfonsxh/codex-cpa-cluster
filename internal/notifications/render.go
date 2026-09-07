@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,142 +16,107 @@ import (
 )
 
 func UsageCenterURL(publicBaseURL string) string {
-	value := strings.TrimSpace(publicBaseURL)
-	if value == "" {
+	parsed, err := url.Parse(strings.TrimSpace(publicBaseURL))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
 		return ""
 	}
-	return strings.TrimRight(value, "/") + "/usage/"
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	if !strings.HasSuffix(parsed.Path, "/usage") {
+		parsed.Path += "/usage"
+	}
+	parsed.Path += "/"
+	parsed.RawPath, parsed.RawQuery, parsed.Fragment = "", "", ""
+	parsed.ForceQuery = false
+	return parsed.String()
 }
 
+// Reports and alerts share one regular weekly window per account. Additional
+// model-specific windows never become extra accounts or independent alerts.
 func QuotaRows(snapshot Snapshot, thresholdPercent float64, onlyKeys map[string]struct{}) []Row {
-	rows := make([]Row, 0)
+	rows := make([]Row, 0, len(snapshot.Accounts))
+	seen := make(map[string]struct{}, len(snapshot.Accounts))
 	for _, account := range snapshot.Accounts {
-		windows := convertWindows(account.Quota)
-		hadWindows := len(windows) > 0
-		filtered := windows[:0]
-		for _, window := range windows {
-			if !strings.Contains(strings.ToLower(window.Label), "gpt-5.3") {
-				filtered = append(filtered, window)
-			}
-		}
-		windows = filtered
-		if len(windows) == 0 {
-			if hadWindows {
-				continue
-			}
-			key := account.ID + "|unavailable"
-			if len(onlyKeys) > 0 {
-				if _, found := onlyKeys[key]; !found {
-					continue
-				}
-			}
-			rows = append(rows, Row{
-				Key: key, Account: defaultString(account.ID, "unknown"), Label: "常规周限额",
-				ActiveUsers: account.ActiveUsers1H, ResetCount: account.Quota.ResetCreditCount,
-				Level: "unavailable",
-			})
+		id := defaultString(strings.TrimSpace(account.ID), "unknown")
+		if _, found := seen[id]; found {
 			continue
 		}
-		for _, window := range windows {
-			key := defaultString(account.ID, "unknown") + "|" + defaultString(window.Key, "default:primary_window")
-			if len(onlyKeys) > 0 {
-				if _, found := onlyKeys[key]; !found {
-					continue
+		seen[id] = struct{}{}
+		row := Row{
+			Key: id + "|unavailable", Account: id, Label: "常规周限额",
+			ActiveUsers: max(0, account.ActiveUsers1H), Level: "unavailable",
+		}
+		if account.Quota.Status == "ok" {
+			row.ResetCount = account.Quota.ResetCreditCount
+		}
+		if window, found := regularWeeklyWindow(account.Quota); found {
+			row.Key = id + "|" + window.Key
+			if account.Quota.Status == "ok" && !math.IsNaN(window.UsedPercent) && !math.IsInf(window.UsedPercent, 0) {
+				used := math.Max(0, math.Min(window.UsedPercent, 100))
+				row.Level = "normal"
+				switch {
+				case window.LimitReached || used >= 100:
+					used, row.Level = 100, "exhausted"
+				case used >= thresholdPercent:
+					row.Level = "warning"
 				}
+				row.UsedPercent, row.ResetAt, row.ResetKey = &used, window.ResetAt, window.ResetAt
 			}
-			used := math.Max(0, math.Min(window.UsedPercent, 100))
-			level := "normal"
-			switch {
-			case account.Quota.Status != "ok" || math.IsNaN(used) || math.IsInf(used, 0):
-				level = "unavailable"
-			case window.LimitReached || used >= 100:
-				level = "exhausted"
-			case used >= thresholdPercent:
-				level = "warning"
-			}
-			usedCopy := used
-			if level == "unavailable" {
-				usedCopy = 0
-			}
-			row := Row{
-				Key: key, Account: defaultString(account.ID, "unknown"), Label: quotaWindowLabel(window.Key, window.Label),
-				UsedPercent: &usedCopy, ActiveUsers: account.ActiveUsers1H,
-				ResetCount: account.Quota.ResetCreditCount, ResetAt: window.ResetAt,
-				ResetKey: window.ResetAt, Level: level,
-			}
-			if level == "unavailable" {
-				row.UsedPercent = nil
-			}
-			rows = append(rows, row)
 		}
+		if len(onlyKeys) > 0 {
+			if _, found := onlyKeys[row.Key]; !found {
+				continue
+			}
+		}
+		rows = append(rows, row)
 	}
+	priority := map[string]int{"exhausted": 0, "warning": 1, "unavailable": 2, "normal": 3}
 	sort.SliceStable(rows, func(left int, right int) bool {
-		leftUnavailable := rows[left].Level == "unavailable" || rows[left].UsedPercent == nil
-		rightUnavailable := rows[right].Level == "unavailable" || rows[right].UsedPercent == nil
-		if leftUnavailable != rightUnavailable {
-			return !leftUnavailable
+		if priority[rows[left].Level] != priority[rows[right].Level] {
+			return priority[rows[left].Level] < priority[rows[right].Level]
 		}
-		if !leftUnavailable && *rows[left].UsedPercent != *rows[right].UsedPercent {
-			return *rows[left].UsedPercent < *rows[right].UsedPercent
+		if rows[left].UsedPercent != nil && rows[right].UsedPercent != nil && *rows[left].UsedPercent != *rows[right].UsedPercent {
+			return *rows[left].UsedPercent > *rows[right].UsedPercent
 		}
-		if compared := naturalCompare(rows[left].Account, rows[right].Account); compared != 0 {
-			return compared < 0
-		}
-		return naturalCompare(rows[left].Label, rows[right].Label) < 0
+		return naturalCompare(rows[left].Account, rows[right].Account) < 0
 	})
 	return rows
 }
 
-func quotaWindowLabel(windowKey string, sourceLabel string) string {
-	key := strings.ToLower(strings.TrimSpace(windowKey))
-	label := strings.TrimSpace(sourceLabel)
-	if key == "" || strings.HasPrefix(key, "default:") {
-		return "常规周限额"
+func regularWeeklyWindow(accountQuota quota.AccountQuota) (quota.WeeklyWindow, bool) {
+	windows := accountQuota.WeeklyWindows
+	if len(windows) == 0 && accountQuota.Weekly != nil {
+		windows = []quota.WeeklyWindow{*accountQuota.Weekly}
 	}
-	if strings.HasPrefix(key, "additional:") {
-		source := label
-		if source == "" {
-			parts := strings.SplitN(key, ":", 3)
-			if len(parts) > 1 {
-				source = strings.ReplaceAll(parts[1], "_", "-")
-			}
-		}
-		if strings.EqualFold(source, "gpt-reserve") {
-			source = "gpt-reserve"
-		}
-		if source == "" {
-			source = "未命名"
-		}
-		return "附加额度窗口（" + source + "）"
-	}
-	return defaultString(label, "常规周限额")
-}
-
-type quotaWindow struct {
-	Key          string
-	Label        string
-	UsedPercent  float64
-	ResetAt      *int64
-	LimitReached bool
-}
-
-func convertWindows(accountQuota quota.AccountQuota) []quotaWindow {
-	sources := accountQuota.WeeklyWindows
-	if len(sources) == 0 && accountQuota.Weekly != nil {
-		sources = []quota.WeeklyWindow{*accountQuota.Weekly}
-	}
-	result := make([]quotaWindow, 0, len(sources))
-	for _, window := range sources {
-		key := window.Key
+	var selected quota.WeeklyWindow
+	found := false
+	for _, window := range windows {
+		key := strings.ToLower(strings.TrimSpace(window.Key))
 		if key == "" {
 			key = "default:primary_window"
 		}
-		result = append(result, quotaWindow{
-			Key: key, Label: window.Label, UsedPercent: window.UsedPercent,
-			ResetAt: window.ResetAt, LimitReached: window.LimitReached,
-		})
+		if !strings.HasPrefix(key, "default:") || strings.Contains(strings.ToLower(window.Label), "gpt-5.3") ||
+			(window.WindowSeconds != 0 && window.WindowSeconds != quota.WeeklyWindowSeconds) {
+			continue
+		}
+		window.Key = key
+		if !found || key == "default:primary_window" {
+			selected, found = window, true
+		}
+		if key == "default:primary_window" {
+			break
+		}
 	}
-	return result
+	return selected, found
+}
+
+type ReportOptions struct {
+	PreviousWindows map[string]WindowRecord
+}
+
+var transitionLabels = map[string]string{
+	"warning": "🟠 达到预警", "exhausted": "🔴 额度耗尽",
+	"recovered": "🟢 额度恢复", "recovered_warning": "🟠 额度恢复，仍处于预警范围",
+	"refreshed": "🔄 周额度已重置",
 }
 
 func BuildMarkdownV2(
@@ -162,65 +128,141 @@ func BuildMarkdownV2(
 	onlyKeys map[string]struct{},
 	transitionEvents map[string]string,
 	usageCenterURL string,
+	options ...ReportOptions,
 ) (string, error) {
 	if location == nil {
 		location = time.UTC
 	}
-	rows := QuotaRows(snapshot, thresholdPercent, onlyKeys)
-	transitions := make(map[string]string, len(transitionEvents))
-	for key, value := range transitionEvents {
-		transitions[key] = value
+	allRows := QuotaRows(snapshot, thresholdPercent, nil)
+	rows := allRows
+	if len(onlyKeys) > 0 {
+		rows = make([]Row, 0, len(onlyKeys))
+		for _, row := range allRows {
+			if _, found := onlyKeys[row.Key]; found {
+				rows = append(rows, row)
+			}
+		}
 	}
-	transitionLabels := map[string]string{
-		"warning": "🟠 达到预警", "exhausted": "🔴 额度耗尽",
-		"recovered": "🟢 额度恢复", "recovered_warning": "🟠 恢复至预警",
-		"refreshed": "🔄 额度刷新",
+	sections := messageHeader(title, location, now, usageCenterURL, thresholdPercent)
+	sections = append(sections, accountSummary(allRows))
+	if len(onlyKeys) > 0 {
+		sections = append(sections, fmt.Sprintf("> 本次涉及：**%d 个账号**", len(rows)))
 	}
+	if len(onlyKeys) > 0 && len(rows) == 1 {
+		var previous map[string]WindowRecord
+		if len(options) > 0 {
+			previous = options[0].PreviousWindows
+		}
+		sections = append(sections, accountTransition(rows[0], transitionEvents[rows[0].Key], previous, location, now))
+	} else {
+		sections = append(sections, accountTable(rows, transitionEvents, location, now, len(onlyKeys) > 0))
+	}
+	return boundedMessage(sections)
+}
+
+func messageHeader(title string, location *time.Location, now time.Time, usageCenterURL string, threshold ...float64) []string {
+	sections := []string{"# " + safeCell(title, 64), "> 统计时间：" + notificationTime(now, location)}
+	if len(threshold) > 0 {
+		sections = append(sections, fmt.Sprintf("> 预警阈值：%s", formatPercentValue(threshold[0])))
+	}
+	if usageCenterURL = strings.TrimSpace(usageCenterURL); usageCenterURL != "" {
+		link := strings.NewReplacer("(", "%28", ")", "%29", "[", "%5B", "]", "%5D").Replace(usageCenterURL)
+		sections = append(sections, fmt.Sprintf("> 应用地址：[%s](%s)", link, link))
+	}
+	return sections
+}
+
+func notificationTime(now time.Time, location *time.Location) string {
+	if location == nil {
+		location = time.UTC
+	}
+	label := location.String()
+	if label == "Asia/Shanghai" {
+		label = "北京时间"
+	}
+	return now.In(location).Format("2006-01-02 15:04:05") + "（" + label + "）"
+}
+
+func accountSummary(rows []Row) string {
+	counts := make(map[string]int)
+	active := 0
+	for _, row := range rows {
+		counts[row.Level]++
+		if row.ActiveUsers > 0 {
+			active++
+		}
+	}
+	return fmt.Sprintf("> **账号总数 %d**　近 1 小时活跃账号 %d\n> 🟢 额度正常 %d　🟠 预警 %d　🔴 耗尽 %d　⚪ 数据不可用 %d",
+		len(rows), active, counts["normal"], counts["warning"], counts["exhausted"], counts["unavailable"])
+}
+
+func accountTable(rows []Row, transitions map[string]string, location *time.Location, now time.Time, eventsOnly bool) string {
 	icons := map[string]string{"normal": "🟢", "warning": "🟠", "exhausted": "🔴", "unavailable": "⚪"}
 	table := []string{
-		"| CPA 账号 | 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
-		"| :--- | :--- | ---: | ---: | ---: | :--- |",
+		"| 账号 | 周额度已用 | 近1h用户 | 剩余重置次数 | 额度重置时间 |",
+		"| :--- | ---: | ---: | ---: | :--- |",
 	}
 	if len(transitions) > 0 {
 		table = []string{
-			"| 事件 | CPA 账号 | 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
-			"| :--- | :--- | :--- | ---: | ---: | ---: | :--- |",
+			"| 账号 | 变化 | 周额度已用 | 近1h用户 | 剩余重置次数 | 额度重置时间 |",
+			"| :--- | :--- | ---: | ---: | ---: | :--- |",
 		}
 	}
+	if eventsOnly {
+		table = []string{"| 账号 | 变化 | 当前已用 |", "| :--- | :--- | ---: |"}
+	}
 	for _, row := range rows {
-		account := fmt.Sprintf("%s %s", icons[row.Level], safeCell(row.Account, 32))
-		cells := []string{
-			account, safeCell(row.Label, 34), formatPercent(row.UsedPercent), strconv.Itoa(row.ActiveUsers),
-			formatOptionalInt(row.ResetCount), formatReset(row.ResetAt, location, now),
+		if eventsOnly {
+			table = append(table, "| "+strings.Join([]string{safeCell(row.Account, 32),
+				defaultString(transitionLabels[transitions[row.Key]], "—"), formatPercent(row.UsedPercent)}, " | ")+" |")
+			continue
 		}
+		cells := []string{icons[row.Level] + " " + safeCell(row.Account, 32)}
 		if len(transitions) > 0 {
-			label := transitionLabels[transitions[row.Key]]
-			if label == "" {
-				label = "—"
-			}
-			cells = append([]string{label}, cells...)
+			cells = append(cells, defaultString(transitionLabels[transitions[row.Key]], "—"))
 		}
+		cells = append(cells, formatPercent(row.UsedPercent), strconv.Itoa(row.ActiveUsers),
+			formatOptionalInt(row.ResetCount), formatReset(row.ResetAt, location, now))
 		table = append(table, "| "+strings.Join(cells, " | ")+" |")
 	}
 	if len(rows) == 0 {
-		if len(transitions) > 0 {
-			table = append(table, "| — | ⚪ 暂无匹配账号 | — | — | 0 | — | — |")
+		if eventsOnly {
+			table = append(table, "| 暂无匹配账号 | — | — |")
+		} else if len(transitions) > 0 {
+			table = append(table, "| 暂无匹配账号 | — | — | — | — | — |")
 		} else {
-			table = append(table, "| ⚪ 暂无匹配账号 | — | — | 0 | — | — |")
+			table = append(table, "| 暂无匹配账号 | — | — | — | — |")
 		}
 	}
-	legend := "> 🟢 正常　🟠 超过阈值　🔴 额度耗尽　⚪ 数据不可用"
-	if len(transitions) > 0 {
-		legend += "　🔄 额度刷新"
+	return strings.Join(table, "\n")
+}
+
+func accountTransition(row Row, event string, previous map[string]WindowRecord, location *time.Location, now time.Time) string {
+	used := formatPercent(row.UsedPercent)
+	if before, found := previous[row.Key]; found && row.UsedPercent != nil &&
+		!math.IsNaN(before.UsedPercent) && !math.IsInf(before.UsedPercent, 0) && before.UsedPercent != *row.UsedPercent {
+		used = formatPercentValue(before.UsedPercent) + " → " + used
 	}
-	sections := []string{
-		"# " + safeCell(title, 64),
-		fmt.Sprintf("> 统计时间：%s　预警阈值：%s", now.In(location).Format("2006-01-02 15:04"), formatPercentValue(thresholdPercent)),
+	remaining := "—"
+	if row.UsedPercent != nil {
+		remaining = formatPercentValue(100 - *row.UsedPercent)
 	}
-	if usageCenterURL = strings.TrimSpace(usageCenterURL); usageCenterURL != "" {
-		sections = append(sections, fmt.Sprintf("> 应用地址：[%s](%s)", usageCenterURL, usageCenterURL))
-	}
-	sections = append(sections, strings.Join(table, "\n"), legend)
+	return strings.Join([]string{
+		"**" + safeCell(row.Account, 32) + "** · " + defaultString(transitionLabels[event], "额度状态变更"),
+		"周额度已用：" + used + "　当前剩余：" + remaining,
+		fmt.Sprintf("近 1 小时用户：%d", row.ActiveUsers),
+		"剩余重置次数：" + formatOptionalInt(row.ResetCount),
+		"额度重置时间：" + formatReset(row.ResetAt, location, now),
+	}, "\n\n")
+}
+
+func BuildTestMarkdownV2(config Config, now time.Time) (string, error) {
+	sections := messageHeader("✅ "+config.ShortName+" · 通知测试", config.Timezone, now, UsageCenterURL(config.PublicBaseURL))
+	sections = append(sections, "企业微信通知通道连接正常。", "> 消息类型：通道测试")
+	return boundedMessage(sections)
+}
+
+func boundedMessage(sections []string) (string, error) {
 	content := strings.Join(sections, "\n\n")
 	if len([]byte(content)) > MarkdownV2MaximumSize {
 		return "", errors.New("企业微信 markdown_v2 内容超过 4096 字节")
@@ -269,7 +311,7 @@ func formatReset(timestamp *int64, location *time.Location, now time.Time) strin
 		return "—"
 	}
 	if *timestamp <= now.Unix() {
-		return "等待刷新"
+		return "等待额度更新"
 	}
 	return time.Unix(*timestamp, 0).In(location).Format("01-02 15:04")
 }

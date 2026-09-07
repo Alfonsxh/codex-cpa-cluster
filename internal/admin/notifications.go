@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 type notificationStatus struct {
 	WebhookConfigured bool   `json:"webhook_configured"`
 	WebhookURL        string `json:"webhook_url"`
+	WebhookDisplayURL string `json:"webhook_display_url,omitempty"`
 	HeartbeatAt       *int64 `json:"heartbeat_at"`
 	LastSuccessAt     *int64 `json:"last_success_at"`
 	LastError         string `json:"last_error"`
@@ -89,9 +89,8 @@ func (server *Server) notificationStatus(ctx context.Context) (notificationStatu
 		return notificationStatus{}, err
 	}
 	if found {
-		if _, validationError := notifications.ValidateWebhookURL(webhook); validationError == nil {
-			status.WebhookConfigured = true
-		}
+		status.WebhookDisplayURL = notifications.MaskedWebhookURL(webhook)
+		status.WebhookConfigured = status.WebhookDisplayURL != ""
 	}
 	return status, nil
 }
@@ -306,7 +305,7 @@ func (server *Server) sendNotification(c *gin.Context) {
 		writeError(c, http.StatusBadGateway, err.Error(), "notification_send_failed")
 		return
 	}
-	server.deliverNotification(c, content, "账号信息已发送到企业微信群")
+	server.deliverNotification(c, content, "账号报告已发送到企业微信群")
 }
 
 func (server *Server) testNotification(c *gin.Context) {
@@ -329,13 +328,11 @@ func (server *Server) testNotification(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err.Error(), "invalid_request")
 		return
 	}
-	timestamp := server.now().In(config.Timezone).Format("2006-01-02 15:04:05 MST")
-	shortName := strings.Join(strings.Fields(config.ShortName), " ")
-	content := fmt.Sprintf(
-		"# %s · 通知测试\n\n企业微信通知通道连接正常。\n\n> 测试时间：%s",
-		shortName,
-		timestamp,
-	)
+	content, err := notifications.BuildTestMarkdownV2(config, server.now())
+	if err != nil {
+		writeError(c, http.StatusBadGateway, err.Error(), "notification_send_failed")
+		return
+	}
 	server.deliverNotification(c, content, "测试消息已发送到企业微信群")
 }
 

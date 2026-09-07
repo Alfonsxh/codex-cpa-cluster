@@ -1,16 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Popover } from "antd";
 import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 import { useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ApiError, subscribeUnauthorized } from "../api/client";
-import { readReleaseStatus, type ReleaseStatus } from "../api/overview";
 import { onboardingQueryKey, readOnboarding } from "../api/onboarding";
+import { defaultPublicSiteConfiguration, publicSiteQueryKey, readPublicSiteConfiguration } from "../api/public-site";
 import { logout, readSession, refreshSession, sessionQueryKey } from "../api/session";
 import { applicationHref } from "../application-links";
-import { AdminToolbarContext } from "./AdminToolbarContext";
+import { AdminToolbarContext, type AdminPageDetail } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
+import { ReleaseVersionIndicator } from "./components/ReleaseVersionIndicator";
 import { LoginPage } from "./LoginPage";
 import { ThemeToggle, useTheme } from "./ThemeProvider";
 
@@ -204,6 +204,13 @@ export function AdminShell({
   const queryClient = useQueryClient();
   const { toasts, showToast } = useLegacyToasts();
   const { theme } = useTheme();
+  const publicSite = useQuery({
+    queryKey: publicSiteQueryKey,
+    queryFn: ({ signal }) => readPublicSiteConfiguration(signal),
+    retry: 1,
+    refetchOnWindowFocus: true
+  });
+  const productName = publicSite.data?.product_name ?? defaultPublicSiteConfiguration.product_name;
   const location = useLocation();
   const isOnboarding = location.pathname.startsWith("/setup");
   const page = currentAdminPage(location.pathname);
@@ -213,18 +220,10 @@ export function AdminShell({
   const [pageRefreshing, setPageRefreshing] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [refreshLabel, setRefreshLabel] = useState("等待刷新");
-  const [pageDetail, setPageDetail] = useState<{ title: string; eyebrow: string } | null>(null);
+  const [pageDetail, setPageDetail] = useState<AdminPageDetail | null>(null);
   const setRefreshAction = useCallback((action: (() => Promise<void>) | null) => {
     refreshActionRef.current = action;
   }, []);
-  const releaseStatus = useQuery({
-    queryKey: ["admin-release-status"],
-    queryFn: ({ signal }) => readReleaseStatus(false, signal),
-    enabled: !isOnboarding,
-    retry: false,
-    refetchInterval: 15 * 60 * 1_000,
-    refetchOnWindowFocus: false
-  });
   useEffect(() => {
     const navigation = navigationRef.current;
     const selectedItem = navigation?.querySelector<HTMLElement>('[aria-current="page"]');
@@ -265,7 +264,7 @@ export function AdminShell({
   return (
     <div className="app-shell">
       <aside className="side-nav" aria-label="管理中心导航">
-        <Link className="brand side-nav-brand" to="/overview" aria-label="Codex CPA 管理中心">
+        <Link className="brand side-nav-brand" to="/overview" aria-label={`${productName} 管理中心`}>
           <span className="brand-mark">
             <img
               src={`/portal/assets/codex-cpa-pool-mark${theme === "dark" ? "-dark" : ""}.svg`}
@@ -273,7 +272,7 @@ export function AdminShell({
             />
           </span>
           <span className="brand-copy">
-            <strong>Codex CPA Pool</strong>
+            <strong title={productName}>{productName}</strong>
             <small>Control Plane</small>
           </span>
         </Link>
@@ -306,14 +305,12 @@ export function AdminShell({
           </div>
         </section>
         <div className="side-nav-footer">
-          <ReleaseVersionIndicator
-            className="side-nav-release"
-            status={releaseStatus.data}
-          />
           <div className="side-nav-auth-status">
             <span className="status-dot" aria-hidden="true" />
             <span>管理 API 已鉴权</span>
           </div>
+          <span className="side-nav-footer-separator" aria-hidden="true">|</span>
+          <ReleaseVersionIndicator className="side-nav-release" />
         </div>
       </aside>
       <main className="main-surface">
@@ -322,6 +319,7 @@ export function AdminShell({
             <h1>
               <span>{page.title}</span>
               {visiblePageDetail ? <span className="page-heading-path"><span className="page-heading-separator" aria-hidden="true">/</span><span>{visiblePageDetail.title}</span></span> : null}
+              {visiblePageDetail?.sectionTitle ? <span className="page-heading-path page-heading-section"><span className="page-heading-separator" aria-hidden="true">/</span><span>{visiblePageDetail.sectionTitle}</span></span> : null}
             </h1>
             <span className="eyebrow">
               <span>{page.eyebrow}</span>
@@ -330,10 +328,6 @@ export function AdminShell({
           </div>
           <div className="top-bar-actions">
             <span className="top-bar-refresh-state">{refreshing ? "正在刷新" : refreshLabel}</span>
-            <ReleaseVersionIndicator
-              className="mobile-release-indicator"
-              status={releaseStatus.data}
-            />
             <ThemeToggle />
             <button
               className="button button-quiet top-bar-refresh"
@@ -354,35 +348,6 @@ export function AdminShell({
         <LegacyToastRegion toasts={toasts} />
       </main>
     </div>
-  );
-}
-
-function ReleaseVersionIndicator({
-  className,
-  status
-}: {
-  className?: string;
-  status?: ReleaseStatus;
-}) {
-  if (status?.status !== "ok" || !status.available) return null;
-
-  const content = (
-    <section className="release-version-popover" aria-label="应用版本详情">
-      <div><span>当前版本</span><strong>{status?.current_version || "未知"}</strong></div>
-      <div><span>最新版本</span><strong>{status?.latest_version || "未知"}</strong></div>
-    </section>
-  );
-  return (
-    <Popover content={content} placement="topLeft" trigger={["hover", "focus"]} arrow>
-      <button
-        className={["release-version-indicator", className].filter(Boolean).join(" ")}
-        type="button"
-        aria-label={`发现新版本，当前版本 ${status.current_version || "未知"}，最新版本 ${status.latest_version || "未知"}`}
-      >
-        <span className="release-version-heartbeat" aria-hidden="true" />
-        <span>发现新版本</span>
-      </button>
-    </Popover>
   );
 }
 

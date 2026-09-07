@@ -47,7 +47,7 @@ func ParseConfig(settings map[string]any) (Config, error) {
 		QuotaAlertEnabled:  boolSetting(settings["notification.quota_alert_enabled"], true),
 		ThresholdPercent:   threshold,
 		QuotaCheckInterval: time.Duration(quotaSeconds * float64(time.Second)),
-		ShortName:          stringSetting(settings["branding.short_name"], "Codex CPA"),
+		ShortName:          stringSetting(settings["branding.short_name"], "CCPA"),
 		PublicBaseURL:      stringSetting(settings["branding.public_base_url"], ""),
 	}, nil
 }

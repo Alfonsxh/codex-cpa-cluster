@@ -204,7 +204,7 @@ describe("OnboardingPage", () => {
       { "user_quota.default_weekly_tokens": 20_000_000 },
       {
         "branding.product_name": "QData CPA",
-        "branding.short_name": "Codex CPA",
+        "branding.short_name": "CCPA",
         "branding.environment_label": "研发团队专用"
       },
       {
@@ -348,7 +348,7 @@ function configurationCatalog(): ConfigurationCatalog {
         description: "品牌配置",
         fields: [
           configurationField("branding.product_name", "产品名称", "text", "Codex CPA Pool", "Codex CPA Pool"),
-          configurationField("branding.short_name", "产品简称", "text", "Codex CPA", "Codex CPA"),
+          configurationField("branding.short_name", "产品简称", "text", "CCPA", "CCPA"),
           configurationField("branding.environment_label", "环境说明", "optional_text", "Self-hosted service", "Self-hosted service"),
           configurationField("branding.public_base_url", "公开访问地址", "base_url", "", "")
         ]

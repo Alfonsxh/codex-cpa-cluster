@@ -232,8 +232,8 @@ export function buildClientConfig({
   const origin = publicBaseURL(siteConfig.public_base_url, browserOrigin);
   const baseURL = `${origin}/v1`;
   const model = siteConfig.default_model || "gpt-5.6-sol";
-  const provider = `${siteConfig.provider_name || "Codex CPA"} · ${user.split("@", 1)[0] || "user"}`;
-  const environment = siteConfig.api_key_env || "CPA_API_KEY";
+  const provider = `${siteConfig.provider_name || "Codex CPA Pool"} · ${user.split("@", 1)[0] || "user"}`;
+  const environment = siteConfig.api_key_env || "CCPA_API_KEY";
   const codex = buildCodexConfig(provider, baseURL, model, apiKey);
   if (mode === "codex") {
     return {

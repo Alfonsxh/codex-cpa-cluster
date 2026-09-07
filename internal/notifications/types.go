@@ -30,6 +30,7 @@ type AlertRecord struct {
 type WindowRecord struct {
 	UsedPercent float64 `json:"used_percent"`
 	ObservedAt  int64   `json:"observed_at"`
+	ResetAt     *int64  `json:"reset_at,omitempty"`
 }
 
 type RuntimeState struct {

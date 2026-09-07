@@ -122,20 +122,23 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 				}
 			}
 			previous, found := previousWindows[key]
-			if row.Level != "unavailable" && row.UsedPercent != nil && found &&
-				*row.UsedPercent < previous.UsedPercent && *row.UsedPercent < 10 {
+			// A percentage drop alone is not proof of a new weekly cycle. Old
+			// records without ResetAt establish a baseline on their next read.
+			if row.Level == "normal" && found && previous.ResetAt != nil && row.ResetAt != nil &&
+				*previous.ResetAt > 0 && *previous.ResetAt <= nowUnix &&
+				*row.ResetAt > nowUnix && *row.ResetAt > *previous.ResetAt {
 				transitionEvents[key] = "refreshed"
 			}
 		}
 		updatedWindows := make(map[string]WindowRecord)
 		for key, value := range previousWindows {
-			if _, found := currentAccounts[accountFromSignalKey(key)]; found {
+			if _, found := currentAccounts[accountFromSignalKey(key)]; found && regularSignalKey(key) {
 				updatedWindows[key] = value
 			}
 		}
 		for key, row := range currentSignals {
 			if row.Level != "unavailable" && row.UsedPercent != nil {
-				updatedWindows[key] = WindowRecord{UsedPercent: *row.UsedPercent, ObservedAt: nowUnix}
+				updatedWindows[key] = WindowRecord{UsedPercent: *row.UsedPercent, ObservedAt: nowUnix, ResetAt: row.ResetAt}
 			}
 		}
 		state.QuotaWindows = updatedWindows
@@ -147,6 +150,7 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 		content, buildError := BuildMarkdownV2(
 			snapshot, config.ShortName+" · 账号额度报告", config.Timezone,
 			threshold, nowTime, nil, transitionEvents, UsageCenterURL(config.PublicBaseURL),
+			ReportOptions{PreviousWindows: previousWindows},
 		)
 		if buildError != nil {
 			return result, worker.recordError(ctx, state, buildError)
@@ -170,6 +174,7 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 		content, buildError := BuildMarkdownV2(
 			snapshot, title, config.Timezone, threshold, nowTime,
 			onlyKeys, transitionEvents, UsageCenterURL(config.PublicBaseURL),
+			ReportOptions{PreviousWindows: previousWindows},
 		)
 		if buildError != nil {
 			return result, worker.recordError(ctx, state, buildError)
@@ -182,7 +187,7 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 	if evaluateAlerts {
 		updatedAlerts := make(map[string]AlertRecord)
 		for key, value := range previousAlerts {
-			if _, found := currentAccounts[accountFromSignalKey(key)]; found {
+			if _, found := currentAccounts[accountFromSignalKey(key)]; found && regularSignalKey(key) {
 				updatedAlerts[key] = value
 			}
 		}
@@ -380,6 +385,11 @@ func pruneScheduled(values map[string]ScheduledRecord, now int64) map[string]Sch
 	return result
 }
 
+func regularSignalKey(key string) bool {
+	_, window, found := strings.Cut(key, "|")
+	return found && strings.HasPrefix(strings.ToLower(window), "default:")
+}
+
 func transitionTitle(shortName string, transitions map[string]string) (string, string) {
 	types := make(map[string]struct{})
 	for _, value := range transitions {
@@ -387,15 +397,17 @@ func transitionTitle(shortName string, transitions map[string]string) (string, s
 	}
 	switch {
 	case reflect.DeepEqual(types, map[string]struct{}{"warning": {}}):
-		return "CPA 周额度预警", "quota_alert"
+		return "🟠 " + shortName + " · 周额度预警", "quota_alert"
 	case reflect.DeepEqual(types, map[string]struct{}{"exhausted": {}}):
-		return "CPA 周额度耗尽", "quota_exhausted"
+		return "🔴 " + shortName + " · 周额度耗尽", "quota_exhausted"
+	case reflect.DeepEqual(types, map[string]struct{}{"recovered_warning": {}}):
+		return "🟠 " + shortName + " · 额度恢复，仍处于预警范围", "quota_recovered"
 	case subset(types, "recovered", "recovered_warning"):
-		return "CPA 额度恢复", "quota_recovered"
+		return "🟢 " + shortName + " · 额度恢复", "quota_recovered"
 	case reflect.DeepEqual(types, map[string]struct{}{"refreshed": {}}):
-		return shortName + " · 账号额度刷新", "quota_refreshed"
+		return "🔄 " + shortName + " · 周额度已重置", "quota_refreshed"
 	default:
-		return "CPA 额度状态变更", "quota_transition"
+		return shortName + " · 账号额度变更", "quota_transition"
 	}
 }
 

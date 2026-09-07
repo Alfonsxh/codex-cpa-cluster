@@ -106,6 +106,10 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 		t.Fatalf("configuration catalog fields = %d", len(fields))
 	}
 	proxy := fields["cpa.proxy_url"]
+	keyPrefix := fields["identity.key_prefix"]
+	if keyPrefix.Value != "ccpa_" || keyPrefix.Default != "ccpa_" {
+		t.Fatalf("new key prefix = %#v", keyPrefix)
+	}
 	if proxy.Value != "" || proxy.Configured == nil || !*proxy.Configured || proxy.ValueType != "proxy_url_secret" {
 		t.Fatalf("sanitized proxy field = %#v", proxy)
 	}

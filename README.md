@@ -15,10 +15,11 @@
   </p>
 
   <p>
-    <a href="https://github.com/Alfonsxh/codex-cpa-pool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-pool?include_prereleases&sort=semver"></a>
+    <a href="https://github.com/Alfonsxh/codex-cpa-pool/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alfonsxh/codex-cpa-pool?sort=semver"></a>
     <a href="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml/badge.svg"></a>
     <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Alfonsxh/codex-cpa-pool">
     <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-pool"></a>
+    <a href="https://t.me/+vzojgInHfy44ZTM9"><img alt="Telegram 交流群" src="https://img.shields.io/badge/Telegram-%E4%BA%A4%E6%B5%81%E7%BE%A4-26A5E4?logo=telegram&amp;logoColor=white"></a>
   </p>
 
   <p>
@@ -26,11 +27,11 @@
     <a href="#features">核心能力</a> ·
     <a href="#architecture">运行架构</a> ·
     <a href="#documentation">文档</a> ·
-    <a href="./CONTRIBUTING.md">参与贡献</a> ·
-    <a href="https://t.me/+vzojgInHfy44ZTM9">Telegram 交流群</a>
+    <a href="./CONTRIBUTING.md">参与贡献</a>
   </p>
 
   <img alt="Codex CPA Pool 运行总览" src="./docs/assets/screenshot-overview.png" width="1440">
+  <p><sub>深色模式 · 演示数据，非真实账号与用量</sub></p>
 </div>
 
 **Codex CPA Pool** 将多个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 账号容器收敛到一个稳定入口。典型用法是：
@@ -44,7 +45,7 @@
 
 项目与 GitHub 仓库统一使用 **Codex CPA Pool**（`Alfonsxh/codex-cpa-pool`）。
 
-加入 [Telegram 项目交流群](https://t.me/+vzojgInHfy44ZTM9)，交流使用经验、部署问题与功能建议。入群需管理员批准；反馈问题时请提供版本和脱敏日志。
+加入 [Telegram 项目交流群](https://t.me/+vzojgInHfy44ZTM9)，交流使用经验、部署问题与功能建议。反馈问题时请提供版本和脱敏日志。
 
 <a id="quick-start"></a>
 

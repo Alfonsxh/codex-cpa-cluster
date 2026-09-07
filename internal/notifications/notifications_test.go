@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -93,7 +94,7 @@ func TestFencedSenderRejectsStaleLeaseBeforeWebhook(t *testing.T) {
 	}
 }
 
-func TestQuotaRowsAndMarkdownMatchV1Contract(t *testing.T) {
+func TestQuotaRowsAndMarkdownUseAccountSummary(t *testing.T) {
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	snapshot := Snapshot{Accounts: []AccountSnapshot{
 		testAccountSnapshot("cpa-10", 100, "常规周限额"),
@@ -107,7 +108,7 @@ func TestQuotaRowsAndMarkdownMatchV1Contract(t *testing.T) {
 	for _, row := range rows {
 		got = append(got, row.Account+":"+row.Level)
 	}
-	want := []string{"cpa-1:normal", "cpa-2:normal", "cpa-10:exhausted", "cpa-3:unavailable"}
+	want := []string{"cpa-10:exhausted", "cpa-3:unavailable", "cpa-1:normal", "cpa-2:normal"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("row ordering = %v", got)
 	}
@@ -119,37 +120,39 @@ func TestQuotaRowsAndMarkdownMatchV1Contract(t *testing.T) {
 		t.Fatalf("BuildMarkdownV2: %v", err)
 	}
 	for _, expected := range []string{
-		"| CPA 账号 | 额度窗口 | 已用 | 1h用户 | 重置次数 | 下次刷新 |",
+		"| 账号 | 周额度已用 | 近1h用户 | 剩余重置次数 | 额度重置时间 |",
 		"> 应用地址：[http://cpa.example.com/usage/](http://cpa.example.com/usage/)",
-		"| 🔴 cpa-10 | 常规周限额 |", "100% | 3 | 2",
+		"| 🔴 cpa-10 | 100% | 3 | 2", "账号总数 4", "额度正常 2", "耗尽 1", "数据不可用 1",
+		"2026-07-20 10:00:00", "> 预警阈值：90%",
 	} {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("markdown is missing %q:\n%s", expected, content)
 		}
 	}
-	if !(strings.Index(content, "cpa-1") < strings.Index(content, "cpa-2") &&
-		strings.Index(content, "cpa-2") < strings.Index(content, "cpa-10") &&
-		strings.Index(content, "cpa-10") < strings.Index(content, "cpa-3")) {
+	if !(strings.Index(content, "| 🔴 cpa-10 |") < strings.Index(content, "| ⚪ cpa-3 |") &&
+		strings.Index(content, "| ⚪ cpa-3 |") < strings.Index(content, "| 🟢 cpa-1 |") &&
+		strings.Index(content, "| 🟢 cpa-1 |") < strings.Index(content, "| 🟢 cpa-2 |")) {
 		t.Fatalf("markdown row ordering:\n%s", content)
 	}
 }
 
-func TestQuotaRowsDistinguishDefaultAndAdditionalWindowLabels(t *testing.T) {
+func TestQuotaRowsExcludeAdditionalWindowsAndDeduplicateAccounts(t *testing.T) {
 	snapshot := Snapshot{Accounts: []AccountSnapshot{testAccountSnapshot("alpha", 25, "upstream default")}}
 	snapshot.Accounts[0].Quota.WeeklyWindows = append(
 		snapshot.Accounts[0].Quota.WeeklyWindows,
 		quota.WeeklyWindow{Key: "additional:gpt-reserve:primary_window", Label: "gpt-reserve", UsedPercent: 30},
 		quota.WeeklyWindow{Key: "additional:codex-models:primary_window", Label: "Codex Models", UsedPercent: 40},
 	)
+	snapshot.Accounts = append(snapshot.Accounts, snapshot.Accounts[0])
 	rows := QuotaRows(snapshot, 90, nil)
-	want := []string{"常规周限额", "附加额度窗口（gpt-reserve）", "附加额度窗口（Codex Models）"}
-	if len(rows) != len(want) {
+	if len(rows) != 1 || rows[0].Key != "alpha|default:primary_window" || *rows[0].UsedPercent != 25 {
 		t.Fatalf("rows = %#v", rows)
 	}
-	for index := range want {
-		if rows[index].Label != want[index] {
-			t.Fatalf("rows[%d].Label = %q, want %q", index, rows[index].Label, want[index])
-		}
+	snapshot.Accounts[0].Quota.WeeklyWindows = snapshot.Accounts[0].Quota.WeeklyWindows[1:]
+	snapshot.Accounts = snapshot.Accounts[:1]
+	rows = QuotaRows(snapshot, 90, nil)
+	if len(rows) != 1 || rows[0].Level != "unavailable" || rows[0].UsedPercent != nil {
+		t.Fatalf("missing regular quota must not fall back to additional quota: %#v", rows)
 	}
 }
 
@@ -168,7 +171,7 @@ func TestMarkdownFiltersGPT53AndEnforcesOfficialLimit(t *testing.T) {
 	large := Snapshot{Accounts: make([]AccountSnapshot, 0, 100)}
 	for index := 0; index < 100; index++ {
 		large.Accounts = append(large.Accounts, testAccountSnapshot(
-			strings.Repeat("account-long-name-", 2)+string(rune('a'+index%26)), 25, "常规周限额",
+			strconv.Itoa(index)+strings.Repeat("account-long-name-", 2), 25, "常规周限额",
 		))
 	}
 	if _, err := BuildMarkdownV2(large, "报告", time.UTC, 90, time.Now(), nil, nil, ""); err == nil || !strings.Contains(err.Error(), "4096") {
@@ -252,9 +255,10 @@ func TestWorkerRefreshBaselineAdvancesEvenWhenWebhookFails(t *testing.T) {
 	store, activity, sender := workerFixtures()
 	store.settings["notification.daily_times"] = "23:59"
 	worker := &Worker{Store: store, Activity: activity, Sender: sender}
-	setQuota(store, "alpha", 40, "ok")
+	cycleEnd := fixedNow("Asia/Shanghai", 2026, 7, 20, 10, 1, 0)().Unix()
+	setQuota(store, "alpha", 40, "ok", cycleEnd)
 	runWorkerAt(t, worker, 10, 0, nil)
-	setQuota(store, "alpha", 3, "ok")
+	setQuota(store, "alpha", 3, "ok", cycleEnd+quota.WeeklyWindowSeconds)
 	sender.sendError = errors.New("temporary webhook failure")
 	worker.Now = fixedNow("Asia/Shanghai", 2026, 7, 20, 10, 1, 0)
 	if _, err := worker.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "temporary") {
@@ -466,10 +470,13 @@ func workerFixtures() (*fakeStore, *fakeActivity, *fakeSender) {
 	return store, &fakeActivity{values: map[string]int{"alpha": 3}}, &fakeSender{configured: true}
 }
 
-func setQuota(store *fakeStore, account string, used float64, status string) {
+func setQuota(store *fakeStore, account string, used float64, status string, resetTimes ...int64) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	resetAt := int64(1_900_000_000)
+	if len(resetTimes) > 0 {
+		resetAt = resetTimes[0]
+	}
 	resetCount := int64(2)
 	state := quota.RuntimeState{
 		Version: 1,

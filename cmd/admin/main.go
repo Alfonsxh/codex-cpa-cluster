@@ -296,10 +296,12 @@ func runOwnedAdmin(
 		return err
 	}
 	oauthLoader := quotaapi.OAuthLoader{Root: config.Root}
-	var stateProvider failover.AccountStateProvider = liveAccountStateProvider{
+	stateProvider := liveAccountStateProvider{
 		Base: persistedStateProvider, Accounts: store, Runtime: runtimeManager,
 		OAuth: oauthLoader, Observer: runtimeObserver,
 	}
+	listStateProvider := stateProvider
+	listStateProvider.Observer = displayAccountObserver{runtimeObserver}
 	var rebalancer adminapi.AccountRebalancer
 	var routeChanger *failover.Service
 	if usageReader != nil {
@@ -336,7 +338,8 @@ func runOwnedAdmin(
 			Quotas:      fencedPortalStore,
 			PublicUsage: usageReader, Inflight: gatewayDrainer,
 			States: stateProvider, Activity: usageReader, Routes: routeChanger,
-			Keys: identityService, QuotaStore: store,
+			ListStates: listStateProvider,
+			Keys:       identityService, QuotaStore: store,
 			Logger: logger, SessionTTL: config.PortalSessionTTL,
 			SecureCookies: config.SecureCookies,
 		})
@@ -504,6 +507,15 @@ type oauthAccountLoader interface {
 
 type accountRuntimeObserver interface {
 	Observe(context.Context, map[string]string) map[string]accountstatus.State
+}
+
+// Only the read-only Usage account list may use a briefly stale runtime overlay.
+type displayAccountObserver struct {
+	observer *accountstatus.Observer
+}
+
+func (display displayAccountObserver) Observe(ctx context.Context, services map[string]string) map[string]accountstatus.State {
+	return display.observer.ObserveForDisplay(ctx, services)
 }
 
 // liveAccountStateProvider preserves the v1 ordering for user-visible route

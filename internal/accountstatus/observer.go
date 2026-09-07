@@ -164,17 +164,7 @@ func (observer *Observer) Observe(ctx context.Context, accountServices map[strin
 	}
 	observer.mu.Unlock()
 
-	resultChannel := observer.refresh.DoChan(fingerprint, func() (any, error) {
-		refreshContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), observer.probeTimeout+time.Second)
-		defer cancel()
-		refreshed := observer.refreshStates(refreshContext, accountServices, observer.now())
-		observer.mu.Lock()
-		observer.cacheFingerprint = fingerprint
-		observer.cacheExpiresAt = observer.now().Add(observer.cacheTTL)
-		observer.cache = cloneStates(refreshed)
-		observer.mu.Unlock()
-		return refreshed, nil
-	})
+	resultChannel := observer.refreshSnapshot(ctx, fingerprint, accountServices)
 	select {
 	case <-ctx.Done():
 		return unknownStates(accountServices)
@@ -185,6 +175,46 @@ func (observer *Observer) Observe(ctx context.Context, accountServices map[strin
 		states, _ := result.Val.(map[string]State)
 		return cloneStates(states)
 	}
+}
+
+// ObserveForDisplay serves a snapshot for at most two cache periods while its
+// replacement is fetched in the background. Cold or older snapshots still wait
+// for a complete observation. Route changes must use Observe instead, so an
+// expired healthy display snapshot cannot authorize a switch.
+func (observer *Observer) ObserveForDisplay(ctx context.Context, accountServices map[string]string) map[string]State {
+	fingerprint := serviceFingerprint(accountServices)
+	now := observer.now()
+	observer.mu.Lock()
+	expiresAt := observer.cacheExpiresAt
+	usable := fingerprint == observer.cacheFingerprint && now.Before(expiresAt.Add(observer.cacheTTL))
+	cached := cloneStates(observer.cache)
+	observer.mu.Unlock()
+	if !usable {
+		return observer.Observe(ctx, accountServices)
+	}
+	if !now.Before(expiresAt) {
+		observer.refreshSnapshot(ctx, fingerprint, accountServices)
+	}
+	return cached
+}
+
+func (observer *Observer) refreshSnapshot(ctx context.Context, fingerprint string, accountServices map[string]string) <-chan singleflight.Result {
+	// The refresh can outlive the request that supplied this map.
+	services := make(map[string]string, len(accountServices))
+	for account, service := range accountServices {
+		services[account] = service
+	}
+	return observer.refresh.DoChan(fingerprint, func() (any, error) {
+		refreshContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), observer.probeTimeout+time.Second)
+		defer cancel()
+		refreshed := observer.refreshStates(refreshContext, services, observer.now())
+		observer.mu.Lock()
+		observer.cacheFingerprint = fingerprint
+		observer.cacheExpiresAt = observer.now().Add(observer.cacheTTL)
+		observer.cache = cloneStates(refreshed)
+		observer.mu.Unlock()
+		return refreshed, nil
+	})
 }
 
 func (observer *Observer) refreshStates(

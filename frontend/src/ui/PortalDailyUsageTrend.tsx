@@ -65,11 +65,13 @@ export type PortalTrendUpdateStatus = {
 };
 
 export function PortalDailyUsageTrend({
+  user,
   expanded,
   window,
   onSessionExpired,
   onUpdateStatusChange
 }: {
+  user: string;
   expanded: boolean;
   window: PortalUsageTrendWindow;
   onSessionExpired: () => void;
@@ -79,7 +81,7 @@ export function PortalDailyUsageTrend({
   const [dimension, setDimension] = useState<PortalUsageTrendDimension>("total");
   const [modelMetric, setModelMetric] = useState<PortalTrendMetric>("weighted");
   const query = useQuery({
-    queryKey: portalUsageTrendQueryKey(window, dimension),
+    queryKey: [...portalUsageTrendQueryKey(window, dimension), user],
     queryFn: ({ signal }) => readPortalUsageTrend(window, dimension, signal),
     enabled: expanded,
     staleTime: 30_000,

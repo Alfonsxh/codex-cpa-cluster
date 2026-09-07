@@ -287,7 +287,7 @@ describe("UsageDashboard", () => {
       clipboard: { writeText: vi.fn(async () => undefined) }
     });
     const user = userEvent.setup();
-    renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
+    renderPortal(<UsageDashboard user="alice@example.com" onSessionExpired={() => undefined} />);
 
     expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
     expect(screen.getByText("个人周用量")).toBeInTheDocument();
@@ -409,7 +409,7 @@ describe("UsageDashboard", () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => portalReadResponse(String(input)));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
+    renderPortal(<UsageDashboard user="alice@example.com" onSessionExpired={() => undefined} />);
 
     const tabs = await screen.findAllByRole("tab");
     expect(tabs).toHaveLength(2);
@@ -482,7 +482,7 @@ describe("UsageDashboard", () => {
       return portalReadResponse(path);
     });
     vi.stubGlobal("fetch", fetchMock);
-    renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
+    renderPortal(<UsageDashboard user="alice@example.com" onSessionExpired={() => undefined} />);
 
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/route/auto-assign")).toHaveLength(1));
     expect(fetchMock).toHaveBeenCalledWith("/usage/me/route/auto-assign", expect.objectContaining({ method: "POST" }));
@@ -507,19 +507,66 @@ describe("UsageDashboard", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    renderPortal(<UsageDashboard onSessionExpired={() => undefined} />);
+    renderPortal(<UsageDashboard user="alice@example.com" onSessionExpired={() => undefined} />);
 
     expect(await screen.findByText(/账号额度状态尚未就绪/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "重试自动分配" }));
     expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
     expect(requestPaths(fetchMock, "/usage/me/route/auto-assign")).toHaveLength(2);
   });
+
+  it("reuses per-window data and expanded details, while manual refresh invalidates both", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => portalReadResponse(String(input)));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPortal(<UsageDashboard user="alice@example.com" onSessionExpired={() => undefined} />);
+    await screen.findByText("alpha.cpa@example.com");
+    await user.click(screen.getByRole("button", { name: "7 天" }));
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/accounts?window=604800")).toHaveLength(1));
+    await screen.findByText("alpha.cpa@example.com");
+    await user.click(screen.getByRole("button", { name: "今日" }));
+    expect(screen.getByText("alpha.cpa@example.com")).toBeInTheDocument();
+    expect(requestPaths(fetchMock, "/usage/me/accounts?window=today")).toHaveLength(1);
+    await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
+    await screen.findByText("gpt-5.6");
+    await user.click(screen.getByRole("button", { name: "收起使用明细" }));
+    await user.click(screen.getAllByRole("button", { name: "使用明细" })[0]);
+    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
+    expect(requestPaths(fetchMock, "/usage/me/usage-breakdown?")).toHaveLength(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/accounts?window=today")).toHaveLength(2));
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-breakdown?")).toHaveLength(2));
+    await user.click(screen.getByRole("button", { name: "7 天" }));
+    await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/accounts?window=604800")).toHaveLength(2));
+  });
+
+  it("never displays one user's cached account usage to another authenticated user", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    let bob = false;
+    let finishAccounts: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (bob && path.startsWith("/usage/me/accounts?")) return new Promise<Response>((resolve) => { finishAccounts = resolve; });
+      return portalReadResponse(path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const aliceView = renderPortal(<UsageDashboard user="alice@example.com" onSessionExpired={() => undefined} />, client);
+    await screen.findByText("alpha.cpa@example.com");
+    aliceView.unmount();
+    bob = true;
+    renderPortal(<UsageDashboard user="bob@example.com" onSessionExpired={() => undefined} />, client);
+    expect(screen.queryByText("alpha.cpa@example.com")).not.toBeInTheDocument();
+    await waitFor(() => expect(finishAccounts).toBeDefined());
+    finishAccounts?.(jsonResponse({ ...accounts, accounts: [] }));
+    expect(await screen.findByText("暂无可用账号")).toBeInTheDocument();
+    expect(requestPaths(fetchMock, "/usage/me/accounts?window=today")).toHaveLength(2);
+  });
 });
 
-function renderPortal(element: React.ReactNode) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } }
-  });
+function renderPortal(element: React.ReactNode, queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } }
+})) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ConfigProvider>

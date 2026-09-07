@@ -100,7 +100,7 @@ export function UsageApp() {
               onSuccess={() => updateSession({ password_change_required: false })}
             />
           </section>
-        ) : <UsageDashboard onSessionExpired={expireSession} />}
+        ) : <UsageDashboard key={session.data.user} user={session.data.user} onSessionExpired={expireSession} />}
       </Suspense>
       <Suspense fallback={null}>
         <PortalPasswordModal

@@ -879,6 +879,21 @@ func (store *Store) RefreshActiveUsersLastHour(ctx context.Context) (map[string]
 	return result, nil
 }
 
+// Keep the time range separate from grouping. OFFSET prevents SQLite from
+// flattening this subquery and choosing an account-first historical scan to
+// serve GROUP BY. LIMIT -1 retains every row in the requested time range.
+const activeUserEmailsLastHourQuery = `
+        WITH recent_activity AS (
+            SELECT account, user_email
+              FROM usage_events
+             WHERE occurred_at >= ? AND TRIM(user_email) != ''
+             LIMIT -1 OFFSET 0
+        )
+        SELECT account, LOWER(TRIM(user_email)) AS user_email
+          FROM recent_activity
+         GROUP BY account, LOWER(TRIM(user_email))
+         ORDER BY account, LOWER(TRIM(user_email))`
+
 // ActiveUserEmailsLastHour returns the same rolling-hour distinct-user set
 // used by RefreshActiveUsersLastHour. Admin is authenticated and may expose
 // these identities on demand in the account activity tooltip; public usage
@@ -888,12 +903,7 @@ func (store *Store) ActiveUserEmailsLastHour(ctx context.Context) (map[string][]
 		Account string `db:"account"`
 		Email   string `db:"user_email"`
 	}, 0)
-	if err := store.db.SelectContext(ctx, &rows, `
-        SELECT account, LOWER(TRIM(user_email)) AS user_email
-          FROM usage_events
-         WHERE occurred_at >= ? AND TRIM(user_email) != ''
-         GROUP BY account, LOWER(TRIM(user_email))
-         ORDER BY account, LOWER(TRIM(user_email))`, store.now().Unix()-int64(time.Hour/time.Second)); err != nil {
+	if err := store.db.SelectContext(ctx, &rows, activeUserEmailsLastHourQuery, store.now().Unix()-int64(time.Hour/time.Second)); err != nil {
 		return nil, fmt.Errorf("query one-hour active user emails: %w", err)
 	}
 	result := make(map[string][]string)

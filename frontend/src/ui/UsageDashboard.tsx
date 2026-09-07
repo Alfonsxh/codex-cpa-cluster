@@ -11,6 +11,7 @@ import {
   portalAccountsQueryKey,
   portalAccountsQueryRoot,
   portalBreakdownQueryKey,
+  portalBreakdownQueryRoot,
   portalProfileQueryKey,
   portalQuotaQueryKey,
   portalRouteQueryKey,
@@ -45,7 +46,7 @@ const portalTrendWindowOptions: Array<{ value: PortalUsageTrendWindow; label: st
   { value: "90d", label: "90天" }
 ];
 
-export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => void }) {
+export function UsageDashboard({ user, onSessionExpired }: { user: string; onSessionExpired: () => void }) {
   useSiteTimezone();
   const queryClient = useQueryClient();
   const { message } = AntApp.useApp();
@@ -67,32 +68,37 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const [clientConfigMode, setClientConfigMode] = useState<PortalClientConfigMode | null>(null);
   const [switchTarget, setSwitchTarget] = useState<PortalAccount | null>(null);
 
+  // Personal query caches are isolated by the authenticated user.
+  const profileQueryKey = [...portalProfileQueryKey, user];
+  const quotaQueryKey = [...portalQuotaQueryKey, user];
+  const routeQueryKey = [...portalRouteQueryKey, user];
+
   const profile = useQuery({
-    queryKey: portalProfileQueryKey,
+    queryKey: profileQueryKey,
     queryFn: ({ signal }) => readPortalProfile(signal),
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: "always",
+    staleTime: 15_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true
   });
   const accounts = useQuery({
-    queryKey: portalAccountsQueryKey(window),
+    queryKey: [...portalAccountsQueryKey(window), user],
     queryFn: ({ signal }) => readPortalAccounts(window, signal),
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: "always",
+    staleTime: 15_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true
   });
   const quota = useQuery({
-    queryKey: portalQuotaQueryKey,
+    queryKey: quotaQueryKey,
     queryFn: ({ signal }) => readPortalQuota(signal),
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: "always",
+    staleTime: 15_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true
   });
   const route = useQuery({
-    queryKey: portalRouteQueryKey,
+    queryKey: routeQueryKey,
     queryFn: ({ signal }) => readPortalRoute(signal),
     staleTime: 0,
     gcTime: 0,
@@ -116,15 +122,15 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const accountSwitch = useMutation({
     mutationFn: (account: PortalAccount) => switchPortalAccount(account.id),
     onSuccess: async (result) => {
-      queryClient.setQueryData(portalRouteQueryKey, {
+      queryClient.setQueryData(routeQueryKey, {
         current_group: result.current_group,
         generated_at: Math.floor(Date.now() / 1000)
       });
       setSwitchTarget(null);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: portalProfileQueryKey, exact: true }),
-        queryClient.invalidateQueries({ queryKey: portalQuotaQueryKey, exact: true }),
-        queryClient.invalidateQueries({ queryKey: portalAccountsQueryKey(window), exact: true })
+        queryClient.invalidateQueries({ queryKey: profileQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: quotaQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: portalAccountsQueryRoot })
       ]);
       void message.success(result.changed ? "账号已切换并完成 Gateway 激活确认" : "当前已使用该账号");
     }
@@ -132,13 +138,13 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
   const autoAssignment = useMutation({
     mutationFn: autoAssignPortalAccount,
     onSuccess: async (result) => {
-      queryClient.setQueryData(portalRouteQueryKey, {
+      queryClient.setQueryData(routeQueryKey, {
         current_group: result.current_group,
         generated_at: Math.floor(Date.now() / 1000)
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: portalProfileQueryKey, exact: true }),
-        queryClient.invalidateQueries({ queryKey: portalQuotaQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: profileQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: quotaQueryKey, exact: true }),
         queryClient.invalidateQueries({ queryKey: portalAccountsQueryRoot })
       ]);
       void message.success(result.changed ? `已自动分配 ${accountLabelByID(accounts.data?.accounts ?? [], result.current_group)}` : "已恢复当前 CPA 账号");
@@ -205,7 +211,11 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
     });
     setKeyOpen(false);
   };
-  const refresh = () => void Promise.all([profile.refetch(), quota.refetch(), accounts.refetch(), route.refetch()]);
+  const refresh = () => void Promise.all([
+    profile.refetch(), quota.refetch(), route.refetch(),
+    queryClient.invalidateQueries({ queryKey: portalAccountsQueryRoot }),
+    queryClient.invalidateQueries({ queryKey: portalBreakdownQueryRoot })
+  ]);
   const toggleExpanded = (accountID: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -333,6 +343,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
                             <AccountRows
                               key={account.id}
                               account={account}
+                              user={user}
                               index={index}
                               currentGroup={currentGroup}
                               window={window}
@@ -357,6 +368,7 @@ export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => v
                   {compactTabs ? <TrendWindowControl className="usage-mobile-panel-actions" window={trendWindow} onChange={setTrendWindow} updateStatus={trendUpdateStatus} /> : null}
                   <PortalDailyUsageTrend
                     expanded={primarySection === "trend"}
+                    user={user}
                     window={trendWindow}
                     onSessionExpired={onSessionExpired}
                     onUpdateStatusChange={setTrendUpdateStatus}
@@ -561,7 +573,7 @@ function SortableHeader({ field, label, detail, className = "", sort, onSort }: 
   );
 }
 
-function AccountRows({ account, index, currentGroup, window, expanded, onToggle, onSwitch }: { account: PortalAccount; index: number; currentGroup: string; window: PortalUsageWindow; expanded: boolean; onToggle: () => void; onSwitch: () => void }) {
+function AccountRows({ user, account, index, currentGroup, window, expanded, onToggle, onSwitch }: { user: string; account: PortalAccount; index: number; currentGroup: string; window: PortalUsageWindow; expanded: boolean; onToggle: () => void; onSwitch: () => void }) {
   const current = account.id === currentGroup;
   const used = accountUsedPercent(account);
   const remaining = account.status.remaining_percent ?? Math.max(0, 100 - used);
@@ -592,17 +604,17 @@ function AccountRows({ account, index, currentGroup, window, expanded, onToggle,
         <td data-label="我的最后使用"><time className="usage-last-used">{formatServerTimestamp(account.usage.last_used_at)}</time></td>
         <td><button className="usage-expand-button" type="button" aria-label={expanded ? "收起使用明细" : "使用明细"} aria-expanded={expanded} onClick={onToggle}>{expanded ? "−" : "+"}</button></td>
       </tr>
-      {expanded ? <UsageBreakdownRow account={account} window={window} /> : null}
+      {expanded ? <UsageBreakdownRow user={user} account={account} window={window} /> : null}
     </>
   );
 }
 
-function UsageBreakdownRow({ account, window }: { account: PortalAccount; window: PortalUsageWindow }) {
+function UsageBreakdownRow({ user, account, window }: { user: string; account: PortalAccount; window: PortalUsageWindow }) {
   const query = useQuery({
-    queryKey: portalBreakdownQueryKey(account.id, window),
+    queryKey: [...portalBreakdownQueryKey(account.id, window), user],
     queryFn: ({ signal }) => readPortalBreakdown(account.id, window, signal),
     staleTime: 30_000,
-    gcTime: 30_000,
+    gcTime: 5 * 60_000,
     retry: false,
     refetchOnWindowFocus: false
   });

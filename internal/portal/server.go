@@ -88,6 +88,7 @@ type Config struct {
 	Usage         UsageReader
 	Quotas        QuotaReader
 	States        failover.AccountStateProvider
+	ListStates    failover.AccountStateProvider
 	Activity      failover.ActivityProvider
 	Routes        RouteChanger
 	Keys          KeyRotator
@@ -107,6 +108,7 @@ type Server struct {
 	usage         UsageReader
 	quotas        QuotaReader
 	states        failover.AccountStateProvider
+	listStates    failover.AccountStateProvider
 	activity      failover.ActivityProvider
 	routes        RouteChanger
 	keys          KeyRotator
@@ -165,9 +167,13 @@ func New(config Config) (*Server, error) {
 	if config.LoginLimiter == nil {
 		config.LoginLimiter = NewLoginLimiter(config.Now)
 	}
+	if config.ListStates == nil {
+		config.ListStates = config.States
+	}
 	return &Server{
 		identity: config.Identity, sessions: config.Sessions, usage: config.Usage, quotas: config.Quotas,
 		states: config.States, activity: config.Activity, routes: config.Routes, keys: config.Keys,
+		listStates:  config.ListStates,
 		quotaStore:  config.QuotaStore,
 		publicUsage: config.PublicUsage, inflight: config.Inflight,
 		logger: config.Logger, now: config.Now, sessionTTL: config.SessionTTL,
@@ -559,8 +565,8 @@ func (server *Server) readAccounts(c *gin.Context) {
 	}
 	states := make(map[string]failover.AccountState)
 	warnings := make([]string, 0, 2)
-	if server.states != nil {
-		if loaded, stateError := server.states.AccountStates(c.Request.Context()); stateError == nil {
+	if server.listStates != nil {
+		if loaded, stateError := server.listStates.AccountStates(c.Request.Context()); stateError == nil {
 			states = loaded
 		} else {
 			warnings = append(warnings, "账号额度状态暂不可用，已按状态未知展示")

@@ -55,8 +55,8 @@ export function LoginPage({ notice = "", onAuthenticated }: { notice?: string; o
       <section className="login-card auth-card">
         <img
           className="auth-brand-logo"
-          src={`/portal/assets/codex-cpa-cluster-logo${theme === "dark" ? "-dark" : ""}.svg`}
-          alt="Codex CPA Cluster"
+          src={`/portal/assets/codex-cpa-pool-logo${theme === "dark" ? "-dark" : ""}.svg`}
+          alt="Codex CPA Pool"
         />
         <h1>进入管理中心</h1>
         <p className="eyebrow">CONTROL PLANE</p>

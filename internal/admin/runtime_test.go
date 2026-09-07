@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
 )
 
 func TestRuntimeAPIsRequireAdminAndUseFineGrainedCatalogAndLogs(t *testing.T) {

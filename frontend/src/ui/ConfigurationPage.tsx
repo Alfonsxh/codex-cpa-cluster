@@ -1,5 +1,6 @@
+import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
 import { Alert, Button, Form, Input, Modal } from "antd";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,6 +48,9 @@ import { InitialPasswordModal } from "./InitialPasswordModal";
 import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
 import { LegacyPasswordInput } from "./components/LegacyPasswordInput";
 
+import { TimezoneSelect } from "./components/TimezoneSelect";
+import { publicSiteQueryKey } from "../api/public-site";
+
 type DraftValue = string | number | boolean | null;
 type Draft = Record<string, DraftValue>;
 type SystemSection = "access" | "backups" | "storage" | "audit";
@@ -82,6 +86,8 @@ export function ConfigurationPage({
   csrfToken: string;
   onManagementKeyRotated?: (message: string) => void;
 }) {
+  useSiteTimezone();
+  const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel, setPageDetail } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
   const [selection, setSelection] = useState<SectionSelection>({ kind: "configuration", group: "" });
@@ -240,6 +246,7 @@ export function ConfigurationPage({
       setConfirmOpen(false);
       setSaveError("");
       showToast(result.message);
+      await queryClient.invalidateQueries({ queryKey: publicSiteQueryKey });
       const refreshed = await catalog.refetch();
       if (refreshed.data) setDraft(configurationDraft(refreshed.data));
       if (dirtyFields.some((field) => field.key.startsWith(reasoningColorPrefix))) {
@@ -460,14 +467,14 @@ export function ConfigurationPage({
               {selectedGroup.name === "用户额度" ? <QuotaSystemDanger summary={quotaOperations.data} pending={quotaOperations.isPending || quotaOperations.isFetching} failed={quotaOperations.isError} onReset={() => setQuotaResetOpen(true)} /> : null}
               {saveMutation.isError && !confirmOpen ? <p className="form-error" role="alert">{saveMutation.error instanceof Error ? saveMutation.error.message : "配置未保存"}</p> : null}
               <p className="form-error" role="alert">{saveError}</p>
-              <div className="configuration-actions"><div className="configuration-change-summary"><span className={`status-chip ${dirtyFields.length ? "warning" : "neutral"}`}>{dirtyFields.length ? `${dirtyFields.length} 项未保存` : "未修改"}</span><div className="configuration-impact-summary">{dirtyModes.size ? [...dirtyModes.entries()].map(([label, count]) => <span key={label}><strong>{count}</strong>{label}</span>) : <span>修改后将在这里汇总生效影响</span>}</div></div><div className="configuration-action-buttons"><button className="button button-primary" type="submit" disabled={!dirtyFields.length || saveMutation.isPending}>{saveMutation.isPending ? "正在保存…" : "保存配置"}</button><button className="button button-quiet" type="button" disabled={!dirtyFields.length || saveMutation.isPending} onClick={() => { setDraft(configurationDraft(catalog.data)); setSaveError(""); }}>撤销未保存修改</button></div></div>
+              <div className="configuration-actions"><div className="configuration-change-summary"><span className={`status-chip ${dirtyFields.length ? "warning" : "neutral"}`}>{dirtyFields.length ? `${dirtyFields.length} 项未保存` : "未修改"}</span><div className="configuration-impact-summary">{dirtyModes.size ? [...dirtyModes.entries()].map(([label, count]) => <span key={label}><strong>{count}</strong>{label}</span>) : <span>修改后显示生效范围</span>}</div></div><div className="configuration-action-buttons"><button className="button button-primary" type="submit" disabled={!dirtyFields.length || saveMutation.isPending}>{saveMutation.isPending ? "正在保存…" : "保存配置"}</button><button className="button button-quiet" type="button" disabled={!dirtyFields.length || saveMutation.isPending} onClick={() => { setDraft(configurationDraft(catalog.data)); setSaveError(""); }}>撤销未保存修改</button></div></div>
             </form>
           ) : null}
           {selection.kind === "configuration" && !selectedGroup ? (
             <div className="configuration-empty-state" role="status">
               <div className="empty-icon" aria-hidden="true">⚙</div>
               <h3>当前没有可配置项</h3>
-              <p>仍可进入系统管理查看访问凭据、归档、本地数据和审计记录。</p>
+              <p>可在系统管理中查看凭据与运行数据。</p>
               <button className="button button-primary" type="button" onClick={() => selectSystemSection("access")}>进入访问凭据</button>
             </div>
           ) : null}
@@ -496,18 +503,18 @@ export function ConfigurationPage({
           <Button key="submit" type="primary" htmlType="submit" form="settings-management-key-form" disabled={managementKeyMutation.isPending}>{managementKeyMutation.isPending ? "正在更新…" : "更新并重新进入"}</Button>
         ]}
       >
-        <p className="warning-banner">更新后当前及其他管理会话立即失效；API Key、用户会话和数据面流量不变。</p>
+        <p className="warning-banner">所有管理会话将立即退出；API Key、用户会话和请求不受影响。</p>
         <form id="settings-management-key-form" noValidate onSubmit={managementKeyForm.handleSubmit(() => managementKeyMutation.mutate())}>
           <div className="field"><label htmlFor="settings-management-key">新管理密钥</label><Controller control={managementKeyForm.control} name="newKey" render={({ field }) => <LegacyPasswordInput id="settings-management-key" value={field.value} name={field.name} inputRef={field.ref} onBlur={field.onBlur} minLength={12} maxLength={128} onValueChange={field.onChange} />} /></div>
           <div className="field account-email-field"><label htmlFor="settings-management-key-confirmation">再次输入</label><Controller control={managementKeyForm.control} name="confirmation" render={({ field }) => <LegacyPasswordInput id="settings-management-key-confirmation" ariaLabel="再次输入管理密钥" value={field.value} name={field.name} inputRef={field.ref} onBlur={field.onBlur} minLength={12} maxLength={128} onValueChange={field.onChange} />} /></div>
           <p className="form-error" role="alert">{managementKeyError}</p>
         </form>
       </Modal>
-      <LegacyConfirmModal title={`保存 ${dirtyFields.length} 项配置？`} open={confirmOpen} okText="保存并应用" confirmLoading={saveMutation.isPending} onCancel={() => setConfirmOpen(false)} onOk={() => saveMutation.mutate()}><p>{riskyEffects.join("；")}。如果应用失败，系统会尝试恢复原配置。</p>{saveMutation.isError ? <Alert type="error" showIcon title={saveMutation.error instanceof Error ? saveMutation.error.message : "配置未保存"} /> : null}</LegacyConfirmModal>
-      <LegacyConfirmModal title="恢复默认 Logo？" open={logoResetOpen} okText="恢复默认" confirmLoading={logoResetMutation.isPending} onCancel={() => !logoResetMutation.isPending && setLogoResetOpen(false)} onOk={() => { setLogoResetOpen(false); logoResetMutation.mutate(); }}><p>已上传的 Logo 将从控制面数据库删除，页面立即恢复开源默认 Logo。</p></LegacyConfirmModal>
-      <LegacyConfirmModal title="清除企业微信 Webhook？" open={webhookClearOpen} okText="确认清除" danger confirmLoading={webhookClearMutation.isPending} onCancel={() => !webhookClearMutation.isPending && setWebhookClearOpen(false)} onOk={() => { setWebhookClearOpen(false); webhookClearMutation.mutate(); }}><p>Webhook 地址会从本地删除，同时关闭企业微信通知。</p></LegacyConfirmModal>
+      <LegacyConfirmModal title={`保存 ${dirtyFields.length} 项配置？`} open={confirmOpen} okText="保存并应用" confirmLoading={saveMutation.isPending} onCancel={() => setConfirmOpen(false)} onOk={() => saveMutation.mutate()}><p>{riskyEffects.join("；")}。应用失败时将尝试恢复原配置。</p>{saveMutation.isError ? <Alert type="error" showIcon title={saveMutation.error instanceof Error ? saveMutation.error.message : "配置未保存"} /> : null}</LegacyConfirmModal>
+      <LegacyConfirmModal title="恢复默认 Logo？" open={logoResetOpen} okText="恢复默认" confirmLoading={logoResetMutation.isPending} onCancel={() => !logoResetMutation.isPending && setLogoResetOpen(false)} onOk={() => { setLogoResetOpen(false); logoResetMutation.mutate(); }}><p>删除自定义 Logo，立即恢复默认。</p></LegacyConfirmModal>
+      <LegacyConfirmModal title="清除企业微信 Webhook？" open={webhookClearOpen} okText="确认清除" danger confirmLoading={webhookClearMutation.isPending} onCancel={() => !webhookClearMutation.isPending && setWebhookClearOpen(false)} onOk={() => { setWebhookClearOpen(false); webhookClearMutation.mutate(); }}><p>删除 Webhook 并关闭企业微信通知。</p></LegacyConfirmModal>
       <Modal className="legacy-settings-modal" open={quotaResetOpen} title="清零全部用户本周已用量" okText="确认清零" cancelText="取消" okButtonProps={{ danger: true }} confirmLoading={quotaResetMutation.isPending} onCancel={() => { if (quotaResetMutation.isPending) return; setQuotaResetOpen(false); quotaResetForm.reset(); quotaResetMutation.reset(); }} onOk={() => void quotaResetForm.handleSubmit(() => quotaResetMutation.mutate())()} destroyOnHidden>
-        <p className="warning-banner">该操作不删除原始事件，但会立即改变所有有用量用户的本周剩余额度。操作不可撤销。</p>
+        <p className="warning-banner">全员本周剩余额度将立即改变；原始事件保留，不可撤销。</p>
         {quotaResetMutation.isError ? <Alert type="error" showIcon message={quotaResetMutation.error instanceof Error ? quotaResetMutation.error.message : "本周用量未清零"} /> : null}
         <Form layout="vertical" requiredMark={false}><Controller control={quotaResetForm.control} name="reason" render={({ field, fieldState }) => <Form.Item label="操作原因" validateStatus={fieldState.error ? "error" : undefined} help={fieldState.error?.message}><Input.TextArea {...field} aria-label="操作原因" autoSize={{ minRows: 3, maxRows: 5 }} /></Form.Item>} /><Controller control={quotaResetForm.control} name="confirmation" render={({ field, fieldState }) => <Form.Item label="输入 RESET ALL USERS 确认" validateStatus={fieldState.error ? "error" : undefined} help={fieldState.error?.message}><Input {...field} aria-label="清零确认文字" autoComplete="off" /></Form.Item>} /></Form>
       </Modal>
@@ -524,7 +531,7 @@ function SystemNavigationButton({ active, label, detail, onClick }: { active: bo
 }
 
 function BrandingLogoEditor({ custom, sha256, pending, error, onFile, onReset }: { custom: boolean; sha256?: string; pending: boolean; error: string; onFile: (file: File) => void; onReset: () => void }) {
-  const source = custom ? `/branding/logo${sha256 ? `?v=${encodeURIComponent(sha256.slice(0, 16))}` : ""}` : "/portal/assets/codex-cpa-cluster-logo.svg";
+  const source = custom ? `/branding/logo${sha256 ? `?v=${encodeURIComponent(sha256.slice(0, 16))}` : ""}` : "/portal/assets/codex-cpa-pool-logo.svg";
   return <article className="branding-logo-editor"><div className="branding-logo-preview"><img src={source} alt="当前 Logo" /></div><div className="branding-logo-copy"><strong>品牌 Logo</strong><span className={`status-chip ${custom ? "success" : "neutral"}`}>{custom ? "自定义 Logo" : "默认 Logo"}</span></div><div className="branding-logo-actions"><label className="button button-secondary" aria-disabled={pending}>{pending ? "正在上传…" : "选择并上传"}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" disabled={pending} hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} /></label><button className="button danger-outline" type="button" disabled={!custom || pending} onClick={onReset}>恢复默认</button><small className="form-error" role="alert">{error}</small></div></article>;
 }
 
@@ -538,6 +545,7 @@ function ConfigurationEditor({ field, value, error, dirty, onChange }: { field: 
 
 function ConfigurationControl({ field, value, onChange }: { field: ConfigurationField; value: DraftValue; onChange: (value: DraftValue) => void }) {
   const id = `configuration-${field.key}`;
+  if (field.type === "timezone") return <TimezoneSelect id={id} value={String(value ?? "")} onChange={onChange} />;
   if (field.type === "boolean") return <div className="configuration-field-control boolean-control"><label><input id={id} type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /><span>{value ? "已启用" : "已关闭"}</span></label></div>;
   if (field.type === "choice") return <div className="configuration-choice-control"><LegacyEnhancedSelect id={id} label={field.label} value={String(value ?? "")} options={(field.choices ?? []).map((choice) => ({ value: choice.value, label: `${choice.label} · ${choice.value}` }))} onChange={onChange} /><div className="configuration-choice-address"><span>{sameConfigurationValue(normalizeDraftValue(field, value), field.value) ? "当前地址" : "待切换地址"}</span><code>{String(value ?? "")}</code></div></div>;
   if (field.type === "color") { const color = /^#[0-9a-f]{6}$/i.test(String(value ?? "")) ? String(value) : "#687287"; return <div className="reasoning-color-inputs"><label className="reasoning-color-swatch"><input type="color" value={color} aria-label={`选择${field.label}颜色`} onChange={(event) => onChange(event.target.value)} /></label><input id={id} className="reasoning-color-hex" type="text" value={String(value ?? "")} maxLength={7} pattern="#[0-9A-Fa-f]{6}" onChange={(event) => onChange(event.target.value)} /></div>; }
@@ -594,7 +602,7 @@ function ReasoningStrategyEditor({ fields, draft, onChange }: { fields: Configur
 function QuotaSystemDanger({ summary, pending, failed, onReset }: { summary?: { total_users: number; users_with_usage: number; total_used_tokens: number; total_raw_used_tokens: number; week_end_at: number | null }; pending: boolean; failed: boolean; onReset: () => void }) {
   const available = Boolean(summary) && !failed;
   const canReset = available && Number(summary?.users_with_usage ?? 0) > 0;
-  return <section className="quota-system-danger" aria-label="全员额度危险操作"><div className="quota-system-danger-copy"><strong>全员本周用量清零</strong><p>仅用于系统异常后的统一补偿。原始 Token 事件、用户额度策略和本周追加额度都会保留；提交前必须填写原因并输入确认文字。</p><div className="quota-system-danger-metrics">{available && summary ? <><span>{summary.total_users.toLocaleString("zh-CN")} 位用户</span><span>{summary.users_with_usage.toLocaleString("zh-CN")} 位有用量</span><span>当前加权已用 {tokenReadableText(summary.total_used_tokens)}</span><span>未加权累计 {tokenReadableText(summary.total_raw_used_tokens)}</span><span>{formatFullTime(summary.week_end_at)} 自动换周</span></> : <span>{pending ? "正在确认影响范围" : "影响范围暂不可确认，请刷新配置后重试"}</span>}</div></div><button className="button danger-outline" type="button" disabled={!canReset || pending} onClick={onReset}>{pending ? "正在确认影响范围" : !available ? "影响范围暂不可确认" : canReset ? "清零全部用户本周已用量" : "当前无需清零"}</button></section>;
+  return <section className="quota-system-danger" aria-label="全员额度危险操作"><div className="quota-system-danger-copy"><strong>全员本周用量清零</strong><p>仅用于异常补偿；保留原始事件、额度策略和追加额度。需填写原因并确认。</p><div className="quota-system-danger-metrics">{available && summary ? <><span>{summary.total_users.toLocaleString("zh-CN")} 位用户</span><span>{summary.users_with_usage.toLocaleString("zh-CN")} 位有用量</span><span>当前加权已用 {tokenReadableText(summary.total_used_tokens)}</span><span>未加权累计 {tokenReadableText(summary.total_raw_used_tokens)}</span><span>{formatFullTime(summary.week_end_at)} 自动换周</span></> : <span>{pending ? "正在确认影响范围" : "影响范围暂不可确认，请刷新配置后重试"}</span>}</div></div><button className="button danger-outline" type="button" disabled={!canReset || pending} onClick={onReset}>{pending ? "正在确认影响范围" : !available ? "影响范围暂不可确认" : canReset ? "清零全部用户本周已用量" : "当前无需清零"}</button></section>;
 }
 
 function AccessPanel({ managementKeyConfigured, initialPasswordConfigured, onInitialPassword, onManagementKey }: { managementKeyConfigured: boolean; initialPasswordConfigured: boolean; onInitialPassword: () => void; onManagementKey: () => void }) {
@@ -609,7 +617,7 @@ function StoragePanel({ rows, onRefresh }: { rows: Array<{ label: string; path: 
         id="settings-storage-title"
         eyebrow="TARGET STORAGE"
         title="持久化数据"
-        description="检查控制面状态、密钥和审计文件在当前部署根目录中的存放状态。"
+        description="查看数据路径、状态和权限。"
         summary={`${createdCount}/${rows.length}`}
         summaryLabel="已创建"
       />
@@ -631,7 +639,7 @@ function StoragePanel({ rows, onRefresh }: { rows: Array<{ label: string; path: 
           </NativeTableViewport>
         </div>
       ) : (
-        <SettingsPanelEmptyState icon="▦" title="未发现本地数据项" description="刷新后仍为空时，请确认当前版本是否提供存储状态。" actionLabel="刷新本地数据" onAction={onRefresh} />
+        <SettingsPanelEmptyState icon="▦" title="未发现本地数据项" description="请刷新；仍为空时检查版本支持。" actionLabel="刷新本地数据" onAction={onRefresh} />
       )}
     </section>
   );
@@ -644,7 +652,7 @@ function AuditPanel({ rows, onRefresh }: { rows: Array<{ timestamp: number; acti
         id="settings-audit-title"
         eyebrow="ADMIN ACTIVITY"
         title="最近管理操作"
-        description="核对配置与维护动作的时间、目标和执行结果。"
+        description="查看操作时间、目标和结果。"
         summary={String(rows.length)}
         summaryLabel="条记录"
       />
@@ -669,7 +677,7 @@ function AuditPanel({ rows, onRefresh }: { rows: Array<{ timestamp: number; acti
         <SettingsPanelEmptyState
           icon="◎"
           title="暂无管理操作"
-          description="新的配置和维护操作会显示在这里。"
+          description="配置与维护操作将在此记录。"
           actionLabel="刷新审计记录"
           onAction={onRefresh}
         />
@@ -695,11 +703,11 @@ function validateDraftValue(field: ConfigurationField, raw: DraftValue): string 
 function validConfigurationURL(value: string, proxy: boolean): boolean { try { const parsed = new URL(value); if (!["http:", "https:", ...(proxy ? ["socks5:"] : [])].includes(parsed.protocol)) return false; return Boolean(parsed.hostname) && parsed.pathname === "/" && !parsed.search && !parsed.hash && (proxy || (!parsed.username && !parsed.password)); } catch { return false; } }
 function validIPv4(value: string): boolean { const parts = value.split("."); return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255); }
 function applyModeLabel(mode: ConfigurationField["apply_mode"], key = ""): string { if (key === "runtime.cliproxy_image") return "镜像管理"; return ({ live: "立即生效", accounts: "重建业务 CPA", collector: "重启采集器", future: "仅新账号", deployment: "账号重建生效", quota: "下次采集生效" })[mode]; }
-function configurationEffects(fields: EditorField[]): string[] { const modes = new Set(fields.map((field) => field.apply_mode)); return [modes.has("accounts") ? "业务 CPA 会依次重建" : "", modes.has("collector") ? "用量采集器会重启" : "", modes.has("quota") ? "用户额度将在下次采集后生效" : "", modes.has("deployment") ? "业务 CPA 参数写入私有投影，账号重建后生效" : ""].filter(Boolean); }
+function configurationEffects(fields: EditorField[]): string[] { const modes = new Set(fields.map((field) => field.apply_mode)); return [modes.has("accounts") ? "业务 CPA 会依次重建" : "", modes.has("collector") ? "用量采集器会重启" : "", modes.has("quota") ? "用户额度下次采集后生效" : "", modes.has("deployment") ? "CPA 参数在账号重建后生效" : ""].filter(Boolean); }
 function validateLogoFile(file: File): string { if (!supportedLogoTypes.has(file.type)) return "仅支持 PNG、JPEG、GIF、WebP 或 SVG 文件"; if (file.size < 1) return "Logo 文件不能为空"; if (file.size > maxLogoBytes) return "Logo 文件不能超过 2 MiB"; if ([...file.name].length > 128) return "Logo 文件名不能超过 128 个字符"; return ""; }
 function reasoningEffortLabel(effort: string): string { return ({ none: "无", minimal: "最小", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最大", ultra: "超高", auto: "自动", unknown: "未知" } as Record<string, string>)[effort] ?? effort; }
-function configurationHeadingEyebrow(name: string): string { return ({ "品牌与身份": "BRAND & IDENTITY", "CPA 请求": "CPA REQUESTS", "用量与额度": "USAGE & QUOTAS", "账号自动切换": "ACCOUNT FAILOVER", "用户额度": "USER QUOTAS", "推理强度策略": "REASONING EFFORT", "企业微信通知": "WECOM NOTIFICATIONS", "会话与采集": "SESSIONS & COLLECTION", "账号供应": "ACCOUNT PROVISIONING", "账号与发布": "ACCOUNT RUNTIME & RELEASE", "系统约束": "SYSTEM CONSTRAINTS" } as Record<string, string>)[name] ?? "CONFIGURATION GROUP"; }
+function configurationHeadingEyebrow(name: string): string { return ({ "系统设置": "SYSTEM SETTINGS", "品牌与身份": "BRAND & IDENTITY", "CPA 请求": "CPA REQUESTS", "用量与额度": "USAGE & QUOTAS", "账号自动切换": "ACCOUNT FAILOVER", "用户额度": "USER QUOTAS", "推理强度策略": "REASONING EFFORT", "企业微信通知": "WECOM NOTIFICATIONS", "会话与采集": "SESSIONS & COLLECTION", "账号供应": "ACCOUNT PROVISIONING", "账号与发布": "ACCOUNT RUNTIME & RELEASE", "系统约束": "SYSTEM CONSTRAINTS" } as Record<string, string>)[name] ?? "CONFIGURATION GROUP"; }
 function settingsSectionHeading(section: SystemSection): { title: string; eyebrow: string } { return ({ access: { title: "访问凭据", eyebrow: "ACCESS CONTROL" }, backups: { title: "安全归档", eyebrow: "RECOVERY" }, storage: { title: "本地数据", eyebrow: "LOCAL STORAGE" }, audit: { title: "审计记录", eyebrow: "AUDIT TRAIL" } })[section]; }
 function reasoningColorPresentation(value: string, fallback = "#687287") { const color = /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : fallback; const channels = [1, 3, 5].map((index) => Number.parseInt(color.slice(index, index + 2), 16) / 255).map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4); const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]; return { color, text: luminance > 0.179 ? "#171d2b" : "#ffffff" }; }
-function formatTime(timestamp: number): string { if (!timestamp) return "—"; return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1_000)); }
-function formatFullTime(timestamp: number | null): string { if (!timestamp) return "—"; return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(timestamp * 1_000)); }
+function formatTime(timestamp: number): string { if (!timestamp) return "—"; return siteDateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1_000)); }
+function formatFullTime(timestamp: number | null): string { if (!timestamp) return "—"; return siteDateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(timestamp * 1_000)); }

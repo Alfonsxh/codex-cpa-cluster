@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
 	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite"
 )
@@ -27,7 +28,7 @@ const (
 	weeklyUsageBackfillVersion    = "2"
 	weeklyUsageLastEventIDKey     = "weekly_usage_last_event_id"
 	weeklyUsageTimezoneKey        = "weekly_usage_timezone"
-	defaultWeekTimezone           = "Asia/Shanghai"
+	defaultWeekTimezone           = sitetime.DefaultName
 	reasoningPolicyVersionPrefix  = "reasoning-"
 	reasoningMultiplierConfigBase = "user_quota.reasoning_multiplier."
 )

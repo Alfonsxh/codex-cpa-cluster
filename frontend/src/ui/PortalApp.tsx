@@ -239,7 +239,7 @@ function usePageTitle(title: string) {
 
 function brandLogoURL(configuration: PublicSiteConfiguration, theme: ThemeMode): string {
   if (!configuration.logo.custom || !configuration.logo.sha256) {
-    if (theme === "dark" && configuration.logo.url.endsWith("codex-cpa-cluster-logo.svg")) {
+    if (theme === "dark" && configuration.logo.url.endsWith("codex-cpa-pool-logo.svg")) {
       return configuration.logo.url.replace(/\.svg$/, "-dark.svg");
     }
     return configuration.logo.url;

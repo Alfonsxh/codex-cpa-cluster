@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
 	"github.com/alitto/pond/v2"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

@@ -14,14 +14,14 @@ ENV CGO_ENABLED=0 \
     GOSUMDB=${GOSUMDB}
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
+RUN --mount=type=cache,id=cpap-go-mod,target=/go/pkg/mod \
     go mod download
 
 FROM go-base AS control-builder
 COPY cmd ./cmd
 COPY internal ./internal
-RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=cpap-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=cpap-go-build,target=/root/.cache/go-build \
     mkdir -p /out \
     && for command in admin bootstrap collector failover log-maintenance notifications ownership quota releasectl; do \
          go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o "/out/cpa-${command}" "./cmd/${command}"; \
@@ -30,45 +30,45 @@ RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
 FROM go-base AS gateway-builder
 COPY cmd/gateway ./cmd/gateway
 COPY internal/gateway ./internal/gateway
-RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=cpap-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=cpap-go-build,target=/root/.cache/go-build \
     go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-gateway ./cmd/gateway
 
 FROM go-base AS edge-builder
 COPY cmd/edge ./cmd/edge
 COPY internal/edge ./internal/edge
-RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=cpap-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=cpap-go-build,target=/root/.cache/go-build \
     go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-edge ./cmd/edge
 
 FROM go-base AS web-go-builder
 COPY cmd/web ./cmd/web
 COPY internal/web ./internal/web
-RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=cpap-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=cpap-go-build,target=/root/.cache/go-build \
     go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-web ./cmd/web
 
 FROM go-base AS test-upstream-builder
 COPY cmd/test-upstream ./cmd/test-upstream
-RUN --mount=type=cache,id=cpac-go-mod,target=/go/pkg/mod \
-    --mount=type=cache,id=cpac-go-build,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=cpap-go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=cpap-go-build,target=/root/.cache/go-build \
     go build -tags timetzdata -trimpath -buildvcs=false -ldflags='-s -w' -o /out/cpa-test-upstream ./cmd/test-upstream
 
 FROM --platform=$BUILDPLATFORM ${NODE_BUILDER_IMAGE} AS web-builder
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN --mount=type=cache,id=cpac-npm-cache,target=/root/.npm \
+RUN --mount=type=cache,id=cpap-npm-cache,target=/root/.npm \
     npm ci --registry=https://registry.npmmirror.com
 COPY frontend ./
-RUN --mount=type=cache,id=cpac-npm-cache,target=/root/.npm \
+RUN --mount=type=cache,id=cpap-npm-cache,target=/root/.npm \
     npm run build
 
 FROM ${RUNTIME_IMAGE} AS go-runtime
 # Go embeds tzdata, but libc and shell tools also need the system zoneinfo.
-ENV TZ=Asia/Shanghai
+ENV TZ=UTC
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apk/repositories \
     && apk add --no-cache tzdata \
-    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && ln -snf /usr/share/zoneinfo/UTC /etc/localtime \
     && test -s /etc/ssl/certs/ca-certificates.crt \
     && addgroup -S -g 10001 cpa \
     && adduser -S -D -H -u 10001 -G cpa cpa

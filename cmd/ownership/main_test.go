@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/ownership"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/ownership"
 )
 
 func TestOwnershipActivationStatusAndReleaseNeverPrintToken(t *testing.T) {

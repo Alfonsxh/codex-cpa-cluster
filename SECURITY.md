@@ -4,7 +4,7 @@
 
 请不要通过公开 Issue 报告安全漏洞，也不要附带真实管理密钥、用户 Key、OAuth 文件、Webhook、邮箱、私有域名或生产日志。
 
-优先使用 GitHub 的私有漏洞报告入口：
+Codex CPA Pool 继续沿用现有 GitHub 仓库。优先使用其私有漏洞报告入口：
 
 https://github.com/Alfonsxh/codex-cpa-cluster/security/advisories/new
 

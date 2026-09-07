@@ -41,7 +41,7 @@ health=$(curl --noproxy '*' -fsS "${PUBLIC_URL}/__health")
 test "$health" = "ok"
 
 curl --noproxy '*' -fsS -D "$TEMP_DIR/landing.headers" "${PUBLIC_URL}/" >"$TEMP_DIR/landing.html"
-grep -F '<title>Codex CPA Cluster</title>' "$TEMP_DIR/landing.html" >/dev/null
+grep -F '<title>Codex CPA Pool</title>' "$TEMP_DIR/landing.html" >/dev/null
 grep -i '^Cache-Control: no-cache' "$TEMP_DIR/landing.headers" >/dev/null
 grep -Eo '(src|href)="/portal/assets/[^"]+"' "$TEMP_DIR/landing.html" \
   | sed -E 's/^(src|href)="([^"]+)"$/\2/' \
@@ -50,7 +50,7 @@ test "$(wc -l <"$TEMP_DIR/portal-assets.txt" | tr -d ' ')" -ge 2
 while IFS= read -r asset; do
   curl --noproxy '*' -fsS -D "$TEMP_DIR/asset.headers" "${PUBLIC_URL}${asset}" >/dev/null
   case "$asset" in
-    /portal/assets/codex-cpa-cluster-*.svg)
+    /portal/assets/codex-cpa-pool-*.svg)
       grep -i '^Cache-Control: no-cache' "$TEMP_DIR/asset.headers" >/dev/null
       grep -i '^Content-Type: image/svg+xml' "$TEMP_DIR/asset.headers" >/dev/null
       ;;

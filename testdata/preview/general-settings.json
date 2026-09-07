@@ -3,7 +3,7 @@
   "apply_mode": "live",
   "generated_at": 1800000000,
   "values": {
-    "product_name": "Codex CPA Cluster",
+    "product_name": "Codex CPA Pool",
     "short_name": "Codex CPA",
     "environment_label": "Test",
     "public_base_url": "https://example.test",

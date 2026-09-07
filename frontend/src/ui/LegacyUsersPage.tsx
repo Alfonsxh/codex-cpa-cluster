@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
 import { DownOutlined } from "@ant-design/icons";
 import {
   Button,
@@ -127,6 +128,7 @@ const usageWindowOptions: Array<{ value: Exclude<UsageWindow, "custom">; label: 
 ];
 
 export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
+  const siteTimezone = useSiteTimezone();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
@@ -244,7 +246,7 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
     if (!users.data) return;
     reportedError.current = null;
     setRefreshLabel(userRefreshLabel(users.data.summary_generated_at || users.data.generated_at, users.data.summary_cached));
-  }, [setRefreshLabel, users.data]);
+  }, [setRefreshLabel, siteTimezone, users.data]);
   useEffect(() => {
     if (!users.isError || reportedError.current === users.error) return;
     reportedError.current = users.error;
@@ -658,7 +660,7 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
       <CustomUsageRangeModal
         open={customRangeOpen}
         title="选择时间范围"
-        timezone="Asia/Shanghai"
+        timezone={getSiteTimezone()}
         range={customRange}
         onCancel={() => setCustomRangeOpen(false)}
         onApply={(range) => {
@@ -2754,7 +2756,7 @@ function formatNumber(value: number | null | undefined) {
 
 function formatTimestamp(timestamp: number | null | undefined) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -2765,7 +2767,7 @@ function formatTimestamp(timestamp: number | null | undefined) {
 
 function formatFullTimestamp(timestamp: number | null | undefined) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -2786,8 +2788,8 @@ function UserLastUsed({ timestamp }: { timestamp: number | null | undefined }) {
 
 function formatLastUsed(timestamp: number | null | undefined, full = false) {
   if (!timestamp) return "从未使用";
-  return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: full ? "Asia/Shanghai" : undefined,
+  return siteDateTimeFormat("zh-CN", {
+    timeZone: full ? getSiteTimezone() : undefined,
     year: full ? "numeric" : undefined,
     month: "2-digit",
     day: "2-digit",

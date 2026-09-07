@@ -20,11 +20,11 @@ CPA_OPENAPI_TS_OUTPUT="$CODEGEN_TMP/frontend" \
   npm --prefix "$ROOT_DIR/tools/openapi" run generate
 
 if ! cmp -s "$ROOT_DIR/internal/contract/models.gen.go" "$CODEGEN_TMP/models.gen.go"; then
-  echo "Go API 契约代码已过期；请运行 make generate-api" >&2
+  echo "Go API 契约代码已过期；请运行 make -f scripts/build.mk generate-api" >&2
   diff -u "$ROOT_DIR/internal/contract/models.gen.go" "$CODEGEN_TMP/models.gen.go" || true
   exit 1
 fi
 if ! diff -ru "$ROOT_DIR/frontend/src/api/generated" "$CODEGEN_TMP/frontend"; then
-  echo "TypeScript API 契约代码已过期；请运行 make generate-api" >&2
+  echo "TypeScript API 契约代码已过期；请运行 make -f scripts/build.mk generate-api" >&2
   exit 1
 fi

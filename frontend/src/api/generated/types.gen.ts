@@ -18,6 +18,10 @@ export type PublicSiteLogo = {
 
 export type PublicSiteConfiguration = {
     version: 1;
+    /**
+     * IANA timezone configured by system.timezone for all business dates and displays
+     */
+    timezone: string;
     product_name: string;
     short_name: string;
     environment_label: string;
@@ -843,7 +847,10 @@ export type NotificationStatus = {
 
 export type NotificationValues = {
     enabled: boolean;
-    timezone: string;
+    /**
+     * Derived from system.timezone; edit the system setting through Configuration Center
+     */
+    readonly timezone: string;
     daily_times: string;
     schedule_grace_minutes: number;
     quota_alert_enabled: boolean;
@@ -1588,6 +1595,28 @@ export type AccountProxyRepairRequestWritable = {
      * Must equal repair-proxy followed by a colon and the exact account id.
      */
     confirm: string;
+};
+
+export type NotificationValuesWritable = {
+    enabled: boolean;
+    daily_times: string;
+    schedule_grace_minutes: number;
+    quota_alert_enabled: boolean;
+    weekly_threshold_percent: number;
+};
+
+export type NotificationSettingsWritable = {
+    notifications: NotificationStatus;
+    values: NotificationValuesWritable;
+};
+
+export type NotificationSettingsUpdateRequestWritable = {
+    confirm: 'save';
+    values: NotificationValuesWritable;
+};
+
+export type NotificationSettingsMutationResponseWritable = NotificationSettingsWritable & {
+    message: string;
 };
 
 export type NotificationWebhookRequestWritable = {
@@ -3049,7 +3078,7 @@ export type GetAdminNotificationSettingsResponses = {
 export type GetAdminNotificationSettingsResponse = GetAdminNotificationSettingsResponses[keyof GetAdminNotificationSettingsResponses];
 
 export type UpdateAdminNotificationSettingsData = {
-    body: NotificationSettingsUpdateRequest;
+    body: NotificationSettingsUpdateRequestWritable;
     headers: {
         'X-CSRF-Token': string;
     };

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 )
 
 func TestResetterRevalidatesCreditAndWindowBeforeSingleConsume(t *testing.T) {

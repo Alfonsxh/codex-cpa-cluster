@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CheckOutlined,
@@ -131,7 +132,7 @@ const emptyAccountCatalog: AccountCatalog = {
   window_start_at: null,
   window_start_at_by_account: null,
   window_end_at: null,
-  window_timezone: "Asia/Shanghai",
+  window_timezone: getSiteTimezone(),
   quota_generated_at: null,
   quota_cached: false,
   quota_refreshing: false,
@@ -149,6 +150,7 @@ const emptyAccountCatalog: AccountCatalog = {
 };
 
 export function AccountsPage({ csrfToken }: { csrfToken: string }) {
+  const siteTimezone = useSiteTimezone();
   const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
@@ -233,7 +235,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
     if (!accounts.data) return;
     reportedCatalogError.current = null;
     setRefreshLabel(accountRefreshLabel(accounts.data));
-  }, [accounts.data, setRefreshLabel]);
+  }, [accounts.data, setRefreshLabel, siteTimezone]);
   useEffect(() => {
     if (!accounts.isError || reportedCatalogError.current === accounts.error) return;
     reportedCatalogError.current = accounts.error;
@@ -1540,7 +1542,7 @@ function formatPercent(value: number) {
 
 function formatCompactTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -1551,8 +1553,8 @@ function formatCompactTimestamp(timestamp: number) {
 
 function formatTaskTimestamp(timestamp?: number | null) {
   if (!timestamp) return "—";
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Shanghai",
+  const parts = siteDateTimeFormat("en-US", {
+    timeZone: getSiteTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -1597,7 +1599,7 @@ function accountRefreshLabel(catalog: AccountCatalog) {
 
 function formatFullTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

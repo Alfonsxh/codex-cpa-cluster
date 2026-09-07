@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	containertypes "github.com/moby/moby/api/types/container"
 	dockerclient "github.com/moby/moby/client"

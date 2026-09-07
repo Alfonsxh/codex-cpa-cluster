@@ -120,8 +120,8 @@ function UsageAuthenticationBoundary() {
       <header className="usage-topbar usage-preview-topbar">
         <a className="usage-preview-brand" href={applicationHref("portal")} aria-label="返回 Codex CPA 首页">
           <img
-            src={`/portal/assets/codex-cpa-cluster-logo${theme === "dark" ? "-dark" : ""}.svg`}
-            alt="Codex CPA Cluster"
+            src={`/portal/assets/codex-cpa-pool-logo${theme === "dark" ? "-dark" : ""}.svg`}
+            alt="Codex CPA Pool"
           />
           <strong>使用中心</strong>
         </a>
@@ -206,8 +206,8 @@ function UsageShell({
           <a href={applicationHref("portal")} aria-label="Codex CPA 使用中心">
             <img
               className="usage-brand-logo"
-              src={`/portal/assets/codex-cpa-cluster-logo${theme === "dark" ? "-dark" : ""}.svg`}
-              alt="Codex CPA Cluster"
+              src={`/portal/assets/codex-cpa-pool-logo${theme === "dark" ? "-dark" : ""}.svg`}
+              alt="Codex CPA Pool"
             />
           </a>
           <h1>使用中心</h1>

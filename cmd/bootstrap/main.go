@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/bootstrap"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/bootstrap"
 )
 
 func main() {

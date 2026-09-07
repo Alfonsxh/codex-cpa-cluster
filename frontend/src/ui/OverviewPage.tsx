@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
 import { Alert, Button, Empty, Result, Skeleton, Spin, Typography } from "antd";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -49,7 +50,6 @@ type SortState = {
 type TokenMode = "unweighted" | "weighted";
 type UsageSeriesView = "aggregate" | "account" | "user";
 
-const overviewDisplayTimezone = "Asia/Shanghai";
 
 const standardWindows: Array<{ value: Exclude<OverviewUsageWindow, "custom">; label: string }> = [
   { value: "3600", label: "1 小时" },
@@ -71,6 +71,7 @@ const EChartsUsageChart = lazy(() => import("./components/UsageChart").then((mod
 })));
 
 export function OverviewPage() {
+  const siteTimezone = useSiteTimezone();
   const queryClient = useQueryClient();
   const [usageWindow, setUsageWindow] = useState<OverviewUsageWindow>("today");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
@@ -199,7 +200,7 @@ export function OverviewPage() {
   useEffect(() => {
     const generatedAt = Math.max(overview.data?.generated_at ?? 0, status.data?.generated_at ?? 0, usage.data?.generated_at ?? 0);
     if (generatedAt > 0) setRefreshLabel(`总览更新于 ${formatToolbarTime(generatedAt)}`);
-  }, [overview.data?.generated_at, setRefreshLabel, status.data?.generated_at, usage.data?.generated_at]);
+  }, [overview.data?.generated_at, setRefreshLabel, siteTimezone, status.data?.generated_at, usage.data?.generated_at]);
   useEffect(() => () => {
     setRefreshing(false);
     setRefreshLabel("");
@@ -277,7 +278,7 @@ export function OverviewPage() {
               </span>
               <time aria-label="最近采集时间">
                 {usage.data?.collector.heartbeat_at
-                  ? formatOverviewCollectorTime(usage.data.collector.heartbeat_at, overviewDisplayTimezone)
+                  ? formatOverviewCollectorTime(usage.data.collector.heartbeat_at, getSiteTimezone())
                   : "—"}
               </time>
             </div>
@@ -310,7 +311,7 @@ export function OverviewPage() {
               <div className="overview-token-window-boundaries" aria-label="Token 使用时间边界" aria-live="polite" aria-busy={usageBoundaryUpdating}>
                 <UsageTimeBoundary
                   label="起始时间"
-                  value={usage.data ? formatOverviewUsageBoundary(usage.data.window_start_at, overviewDisplayTimezone) : "—"}
+                  value={usage.data ? formatOverviewUsageBoundary(usage.data.window_start_at, getSiteTimezone()) : "—"}
                   updating={usageBoundaryUpdating}
                 />
                 <UsageTimeBoundary
@@ -318,7 +319,7 @@ export function OverviewPage() {
                   value={usage.data
                     ? formatOverviewUsageBoundary(
                         usageWindow === "custom" && customRange ? customRange.endAt : usage.data.generated_at,
-                        overviewDisplayTimezone
+                        getSiteTimezone()
                       )
                     : "—"}
                   updating={usageBoundaryUpdating}
@@ -365,7 +366,7 @@ export function OverviewPage() {
                 error={catalog.isError}
                 onChange={setSelectedUsers}
               />
-              <div className="overview-legacy-refresh-cluster usage-refresh-cluster">
+              <div className="overview-legacy-refresh-controls usage-refresh-controls">
                 <span className="overview-refresh-label">自动刷新</span>
                 <div className="overview-refresh-actions">
                   <div className="overview-legacy-filter usage-variable-select usage-refresh-control">
@@ -448,7 +449,7 @@ export function OverviewPage() {
         open={customOpen}
         title="时间选择"
         range={customRange}
-        timezone={overviewDisplayTimezone}
+        timezone={getSiteTimezone()}
         onCancel={() => setCustomOpen(false)}
         onApply={(range) => {
           setCustomRange(range);
@@ -866,22 +867,22 @@ function actionLabel(action: RuntimeJob["action"]) {
   return labels[action];
 }
 
-export function formatOverviewUsageRange(startAt: number, endAt: number, timezone = overviewDisplayTimezone) {
+export function formatOverviewUsageRange(startAt: number, endAt: number, timezone = getSiteTimezone()) {
   if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || startAt <= 0 || endAt < startAt) return "统计边界暂不可用";
   return `${formatOverviewUsageBoundary(startAt, timezone)} — ${formatOverviewUsageBoundary(endAt, timezone)}`;
 }
 
-export function formatOverviewUsageBoundary(timestamp: number, timezone = overviewDisplayTimezone) {
+export function formatOverviewUsageBoundary(timestamp: number, timezone = getSiteTimezone()) {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     ...(timezone ? { timeZone: timezone } : {})
   }).format(new Date(timestamp * 1000));
 }
 
-function formatOverviewCollectorTime(timestamp: number, timezone = overviewDisplayTimezone) {
+function formatOverviewCollectorTime(timestamp: number, timezone = getSiteTimezone()) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     ...(timezone ? { timeZone: timezone } : {})
   }).format(new Date(timestamp * 1000));
@@ -896,14 +897,14 @@ function formatBucketInterval(seconds: number) {
 
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
   }).format(new Date(timestamp * 1000));
 }
 
 function formatToolbarTime(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
   }).format(new Date(timestamp * 1000));
 }

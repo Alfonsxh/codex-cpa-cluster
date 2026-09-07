@@ -414,7 +414,7 @@ function validateLogoFile(file: File) {
 }
 
 function logoPreviewURL(settings: GeneralSettings) {
-  if (!settings.branding.custom_logo) return "/portal/assets/codex-cpa-cluster-mark.svg";
+  if (!settings.branding.custom_logo) return "/portal/assets/codex-cpa-pool-mark.svg";
   const digest = settings.branding.logo_sha256 ?? "";
   return digest ? `/branding/logo?v=${encodeURIComponent(digest.slice(0, 16))}` : "/branding/logo";
 }

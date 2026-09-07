@@ -18,7 +18,7 @@ const branding = {
   default_model: "gpt-test",
   logo: {
     custom: false,
-    url: "/portal/assets/codex-cpa-cluster-logo.svg",
+    url: "/portal/assets/codex-cpa-pool-logo.svg",
     content_type: "image/svg+xml",
     sha256: "",
     updated_at: null

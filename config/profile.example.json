@@ -1,7 +1,7 @@
 {
   "version": 1,
   "values": {
-    "branding.product_name": "Codex CPA Cluster",
+    "branding.product_name": "Codex CPA Pool",
     "branding.short_name": "Codex CPA",
     "branding.environment_label": "Self-hosted service",
     "branding.public_base_url": "https://cpa.example.com",

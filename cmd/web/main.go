@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	webapi "github.com/Alfonsxh/codex-cpa-cluster/internal/web"
+	webapi "github.com/Alfonsxh/codex-cpa-pool/internal/web"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"

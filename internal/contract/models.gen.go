@@ -2567,11 +2567,13 @@ type NotificationStatus struct {
 
 // NotificationValues defines model for NotificationValues.
 type NotificationValues struct {
-	DailyTimes             string  `json:"daily_times"`
-	Enabled                bool    `json:"enabled"`
-	QuotaAlertEnabled      bool    `json:"quota_alert_enabled"`
-	ScheduleGraceMinutes   int     `json:"schedule_grace_minutes"`
-	Timezone               string  `json:"timezone"`
+	DailyTimes           string `json:"daily_times"`
+	Enabled              bool   `json:"enabled"`
+	QuotaAlertEnabled    bool   `json:"quota_alert_enabled"`
+	ScheduleGraceMinutes int    `json:"schedule_grace_minutes"`
+
+	// Timezone Derived from system.timezone; edit the system setting through Configuration Center
+	Timezone               *string `json:"timezone,omitempty"`
 	WeeklyThresholdPercent float32 `json:"weekly_threshold_percent"`
 }
 
@@ -3018,16 +3020,19 @@ type PublicGatewayUsageTotals struct {
 // PublicSiteConfiguration defines model for PublicSiteConfiguration.
 type PublicSiteConfiguration struct {
 	// AllowedEmailDomains Public email suffixes accepted by user creation and Usage Center login
-	AllowedEmailDomains []string                       `json:"allowed_email_domains"`
-	ApiKeyEnv           string                         `json:"api_key_env"`
-	DefaultModel        string                         `json:"default_model"`
-	EnvironmentLabel    string                         `json:"environment_label"`
-	Logo                PublicSiteLogo                 `json:"logo"`
-	ProductName         string                         `json:"product_name"`
-	ProviderName        string                         `json:"provider_name"`
-	PublicBaseUrl       string                         `json:"public_base_url"`
-	ShortName           string                         `json:"short_name"`
-	Version             PublicSiteConfigurationVersion `json:"version"`
+	AllowedEmailDomains []string       `json:"allowed_email_domains"`
+	ApiKeyEnv           string         `json:"api_key_env"`
+	DefaultModel        string         `json:"default_model"`
+	EnvironmentLabel    string         `json:"environment_label"`
+	Logo                PublicSiteLogo `json:"logo"`
+	ProductName         string         `json:"product_name"`
+	ProviderName        string         `json:"provider_name"`
+	PublicBaseUrl       string         `json:"public_base_url"`
+	ShortName           string         `json:"short_name"`
+
+	// Timezone IANA timezone configured by system.timezone for all business dates and displays
+	Timezone string                         `json:"timezone"`
+	Version  PublicSiteConfigurationVersion `json:"version"`
 }
 
 // PublicSiteConfigurationVersion defines model for PublicSiteConfiguration.Version.

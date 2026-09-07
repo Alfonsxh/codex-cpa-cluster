@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
 import {
   Alert,
   Button,
@@ -38,6 +39,7 @@ export function UsageBreakdownDrawer({
   subject: string | null;
   onClose: () => void;
 }) {
+  useSiteTimezone();
   const [window, setWindow] = useState<UsageWindow>("86400");
   const open = Boolean(subject);
   const query = useQuery({
@@ -188,7 +190,7 @@ const effortLabels: Record<string, string> = {
 
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

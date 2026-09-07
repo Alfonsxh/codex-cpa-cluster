@@ -9,11 +9,16 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata"
+
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
 )
 
 func ParseConfig(settings map[string]any) (Config, error) {
-	timezoneName := stringSetting(settings["notification.timezone"], "Asia/Shanghai")
-	location, err := time.LoadLocation(timezoneName)
+	timezoneName, err := sitetime.Name(settings)
+	if err != nil {
+		return Config{}, err
+	}
+	location, err := sitetime.Validate(timezoneName)
 	if err != nil {
 		return Config{}, fmt.Errorf("通知时区无效: %w", err)
 	}

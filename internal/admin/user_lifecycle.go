@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/identity"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/portal"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/identity"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/portal"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 )
 
 var (

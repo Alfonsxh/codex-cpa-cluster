@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/edge"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/edge"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"

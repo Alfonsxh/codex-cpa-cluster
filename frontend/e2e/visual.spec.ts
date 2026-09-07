@@ -46,6 +46,79 @@ test("管理登录表单下移后保持完整、均衡的卡片布局", async ({
   }
 });
 
+for (const viewport of [viewports[0], viewports[2]]) {
+  test(`系统时区在首次设置与配置中心共享选择 ${viewport.name}`, async ({ page }, testInfo) => {
+    let timezone = "Asia/Shanghai";
+    let selected = false;
+    const saved: string[] = [];
+    await page.setViewportSize(viewport);
+    await page.route("**/site-config.json", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), timezone } });
+    });
+    await page.route("**/admin/api/settings/configuration", async (route) => {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON();
+        expect(Object.keys(body.values)).toEqual(["system.timezone"]);
+        timezone = body.values["system.timezone"];
+        saved.push(timezone);
+        selected = true;
+        await route.fulfill({ json: { message: "已保存系统时区", changed: ["system.timezone"], applied: ["collector"], pending_deployment: false } });
+        return;
+      }
+      const response = await route.fetch();
+      const payload = await response.json();
+      for (const group of payload.groups) {
+        for (const field of group.fields) if (field.key === "system.timezone") field.value = timezone;
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    await page.route("**/admin/api/onboarding", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json();
+      payload.steps.find((step: { id: string }) => step.id === "quota_timezone").status = selected ? "complete" : "incomplete";
+      payload.recommended.complete = payload.recommended.total - (selected ? 0 : 1);
+      await route.fulfill({ response, json: payload });
+    });
+    await login(page, "/admin/overview");
+    await page.goto("/admin/setup?step=quota_timezone");
+    const selector = page.getByRole("combobox", { name: "系统时区" });
+    await selector.click();
+    await selector.fill("America/New_York");
+    await expect(page.getByText(/纽约 · America\/New_York/).last()).toBeVisible();
+    const dropdown = await page.locator(".ant-select-dropdown:visible").boundingBox();
+    expect(dropdown).not.toBeNull();
+    expect(dropdown!.x).toBeGreaterThanOrEqual(0);
+    expect(dropdown!.x + dropdown!.width).toBeLessThanOrEqual(viewport.width);
+    await page.screenshot({ path: testInfo.outputPath(`setup-timezone-${viewport.name}.png`), animations: "disabled" });
+    await selector.press("Enter");
+    await page.getByRole("button", { name: "保存时区", exact: true }).click();
+    await expect.poll(() => saved).toEqual(["America/New_York"]);
+    await expect(page).toHaveURL(/step=weekly_quota/);
+
+    await page.goto("/admin/configuration?group=系统设置");
+    await expect(page.locator(".configuration-field-value .ant-select")).toContainText("America/New_York");
+    await selector.click();
+    await selector.fill("协调世界时");
+    await selector.press("Enter");
+    await page.getByRole("button", { name: "保存配置", exact: true }).click();
+    await page.getByRole("button", { name: "保存并应用", exact: true }).click();
+    await expect.poll(() => saved).toEqual(["America/New_York", "UTC"]);
+    await expect(page.locator(".configuration-field-value .ant-select")).toContainText("UTC");
+
+    // The browser context still uses Shanghai. A UTC site must display the
+    // collector timestamp in UTC after reopening another surface.
+    const overviewResponse = page.waitForResponse((response) => response.url().includes("/admin/api/overview/usage?") && response.status() === 200);
+    await page.goto("/admin/overview");
+    const overview = await (await overviewResponse).json();
+    const expectedTime = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    }).format(new Date(overview.collector.heartbeat_at * 1000));
+    await expect(page.getByLabel("最近采集时间")).toContainText(expectedTime);
+  });
+}
+
 for (const viewport of viewports) {
   for (const theme of ["light", "dark"] as const) {
     test(`React 页面矩阵 ${viewport.name} ${theme}`, async ({ page }) => {
@@ -92,10 +165,9 @@ for (const viewport of viewports) {
           await expect(page.getByRole("navigation", { name: "初始化配置" })).toBeVisible();
         }
         if (route.slug === "configuration") {
-          const configurationPanel = page.getByRole("region", { name: "CPA 请求" });
-          await expect(configurationPanel.locator(".configuration-field")).toHaveCount(2);
-          await expect(configurationPanel.getByLabel("默认上游代理 URL")).toBeVisible();
-          await expect(configurationPanel.getByLabel("请求重试次数")).toBeVisible();
+          const configurationPanel = page.getByRole("region", { name: "系统设置", exact: true });
+          await expect(configurationPanel.locator(".configuration-field")).toHaveCount(1);
+          await expect(configurationPanel.getByRole("combobox", { name: "系统时区" })).toBeVisible();
           expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
         }
         await expect(page).toHaveScreenshot(
@@ -231,7 +303,7 @@ test("首次管理登录进入独立配置页，状态接口失败时不阻塞�
   expect(publicURLGeometry.submitTop).toBeGreaterThanOrEqual(publicURLGeometry.helpBottom);
   expect(publicURLGeometry.submitRightGap).toBeLessThanOrEqual(24);
   for (const recommendation of [
-    { step: /额度时区/, field: "用户额度时区" },
+    { step: /系统时区/, field: "系统时区" },
     { step: /默认额度/, field: "新用户默认周额度" },
     { step: /^通知/, field: "企业微信群 Webhook" },
     { step: /^品牌/, field: "产品名称" },
@@ -1359,7 +1431,7 @@ for (const viewport of [
       const layout = await card.locator(".usage-monitor-filters").evaluate((filters) => {
         const time = filters.querySelector(".overview-token-window-row")!.getBoundingClientRect();
         const scope = filters.querySelector(".overview-token-scope-filters")!.getBoundingClientRect();
-        const controls = [...filters.querySelectorAll(".overview-token-mode-control, .usage-variable, .overview-legacy-refresh-cluster")];
+        const controls = [...filters.querySelectorAll(".overview-token-mode-control, .usage-variable, .overview-legacy-refresh-controls")];
         const bounds = filters.getBoundingClientRect();
         return {
           scopeRightOfTime: scope.left >= time.right + 12 && Math.abs(scope.top - time.top) <= 1,
@@ -2251,14 +2323,14 @@ function usageTrendFixture(window: string, dimension: string) {
 async function installUsageVisualBackend(page: Page, state: "normal" | "loading" | "empty" | "error" = "normal") {
   await page.route("**/site-config.json", (route) => fulfillJSON(route, {
     version: 1,
-    product_name: "Codex CPA Cluster",
+    product_name: "Codex CPA Pool",
     short_name: "Codex CPA",
     environment_label: "本地模拟预览",
     public_base_url: "http://127.0.0.1:8317",
     provider_name: "Codex CPA",
     api_key_env: "CPA_API_KEY",
     default_model: "gpt-5.6-sol",
-    logo: { custom: false, url: "/portal/assets/codex-cpa-cluster-logo.svg", content_type: "image/svg+xml", sha256: "", updated_at: null }
+    logo: { custom: false, url: "/portal/assets/codex-cpa-pool-logo.svg", content_type: "image/svg+xml", sha256: "", updated_at: null }
   }));
   await page.route(/\/usage\/(?:session|me)(?:\/|\?|$)/, async (route) => {
     const request = route.request();

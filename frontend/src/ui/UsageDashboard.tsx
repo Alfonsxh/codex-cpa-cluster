@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
 import { Alert, App as AntApp, Button, Form, Input, Modal, Skeleton, Space, Tabs, Tooltip } from "antd";
 import { CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -44,6 +45,7 @@ const portalTrendWindowOptions: Array<{ value: PortalUsageTrendWindow; label: st
 ];
 
 export function UsageDashboard({ onSessionExpired }: { onSessionExpired: () => void }) {
+  useSiteTimezone();
   const queryClient = useQueryClient();
   const { message } = AntApp.useApp();
   const [window, setWindow] = useState<PortalUsageWindow>("today");
@@ -814,8 +816,8 @@ function formatCompact(value: number) {
 
 export function formatServerTimestamp(timestamp: number, { withSeconds = false }: { withSeconds?: boolean } = {}) {
   if (!timestamp) return "—";
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Shanghai",
+  const parts = siteDateTimeFormat("en-US", {
+    timeZone: getSiteTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

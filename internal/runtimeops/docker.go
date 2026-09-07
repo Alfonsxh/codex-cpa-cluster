@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	dockerclient "github.com/moby/moby/client"
 )

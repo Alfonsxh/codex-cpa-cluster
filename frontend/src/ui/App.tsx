@@ -268,12 +268,12 @@ export function AdminShell({
         <Link className="brand side-nav-brand" to="/overview" aria-label="Codex CPA 管理中心">
           <span className="brand-mark">
             <img
-              src={`/portal/assets/codex-cpa-cluster-mark${theme === "dark" ? "-dark" : ""}.svg`}
+              src={`/portal/assets/codex-cpa-pool-mark${theme === "dark" ? "-dark" : ""}.svg`}
               alt=""
             />
           </span>
           <span className="brand-copy">
-            <strong>Codex CPA Cluster</strong>
+            <strong>Codex CPA Pool</strong>
             <small>Control Plane</small>
           </span>
         </Link>

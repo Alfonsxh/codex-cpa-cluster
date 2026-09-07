@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/logmaintenance"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/ownership"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/scheduler"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/logmaintenance"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/ownership"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/scheduler"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -79,7 +79,7 @@ func newCommand() *cobra.Command {
 	}
 	flags := command.Flags()
 	flags.String("config", "", "optional YAML, JSON, or TOML configuration file")
-	flags.String("root", "/opt/codex-cpa-cluster", "existing CPA deployment root")
+	flags.String("root", "/opt/codex-cpa-pool", "existing CPA deployment root")
 	flags.String("log-level", "info", "Zap log level")
 	flags.Duration("interval", time.Minute, "robfig/cron @every maintenance interval")
 	flags.Int64("max-file-size-mb", 32, "maximum size of each active log in MiB")

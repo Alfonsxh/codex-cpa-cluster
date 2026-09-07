@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"golang.org/x/mod/semver"

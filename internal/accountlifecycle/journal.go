@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountprojection"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountprojection"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/google/uuid"
 )
 

@@ -3,10 +3,10 @@
 所有命令都必须使用当前操作者提供的 Test/Production 私有环境文件。先确认目标，再执行只读诊断；不要从旧归档或 Git 历史推断主机和目录。
 
 ```sh
-make target-config TARGET_ENV=/absolute/path/to/target.env
-make target-ownership-status TARGET_ENV=/absolute/path/to/target.env
-make target-ps TARGET_ENV=/absolute/path/to/target.env
-make target-smoke TARGET_ENV=/absolute/path/to/target.env
+make -f scripts/build.mk target-config TARGET_ENV=/absolute/path/to/target.env
+make -f scripts/build.mk target-ownership-status TARGET_ENV=/absolute/path/to/target.env
+make -f scripts/build.mk target-ps TARGET_ENV=/absolute/path/to/target.env
+make -f scripts/build.mk target-smoke TARGET_ENV=/absolute/path/to/target.env
 ```
 
 查看 Go 服务日志：
@@ -44,7 +44,7 @@ docker compose --env-file /absolute/path/to/target.env -f docker-compose.yml \
 
 ```sh
 curl --noproxy '*' -I http://127.0.0.1:<public-port>/admin/
-curl --noproxy '*' -I http://127.0.0.1:<public-port>/portal/assets/codex-cpa-cluster-logo.svg
+curl --noproxy '*' -I http://127.0.0.1:<public-port>/portal/assets/codex-cpa-pool-logo.svg
 ```
 
 入口 HTML 应为 `no-cache`，带内容指纹的 JS/CSS 应为长期不可变缓存，稳定品牌 SVG 应为 `no-cache`。检查 `web` 镜像是否与发布 Manifest 的 Web 源码摘要一致。

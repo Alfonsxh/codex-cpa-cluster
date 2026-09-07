@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/branding"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/branding"
 	"github.com/gin-gonic/gin"
 )
 

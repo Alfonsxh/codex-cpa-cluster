@@ -42,7 +42,7 @@ if [ ! -f "$ROOT_DIR/docker-bake.hcl" ] || [ -L "$ROOT_DIR/docker-bake.hcl" ]; t
   exit 1
 fi
 
-WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cpac-release-images.XXXXXX")
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cpap-release-images.XXXXXX")
 cleanup() {
   rm -rf -- "$WORK_DIR"
 }
@@ -334,8 +334,8 @@ while IFS= read -r COMPONENT; do
   set -- "$@" "$COMPONENT"
 done <"$BUILD_TARGETS"
 if [ -s "$BUILD_TARGETS" ]; then
-  CPAC_BAKE_TAG_PLAN=$BUILD_TAG_PLAN
-  export CPAC_BAKE_TAG_PLAN
+  CPAP_BAKE_TAG_PLAN=$BUILD_TAG_PLAN
+  export CPAP_BAKE_TAG_PLAN
   "$@"
 else
   echo "所有不可变组件镜像均已存在，跳过构建"

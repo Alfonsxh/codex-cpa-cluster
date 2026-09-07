@@ -8,7 +8,7 @@
 
 ## 验证
 
-- [ ] `make verify`
+- [ ] `make -f scripts/build.mk verify`
 - [ ] 已补充或更新相关测试
 - [ ] UI 变化已提供截图或人工验证步骤
 

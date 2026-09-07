@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Codex CPA Cluster v2 API
+  title: Codex CPA Pool v2 API
   version: 2.0.0-dev
   description: >-
     Contract for the Go Admin, self-service and public configuration APIs.
@@ -1958,6 +1958,7 @@ components:
       additionalProperties: false
       required:
         - version
+        - timezone
         - product_name
         - short_name
         - environment_label
@@ -1969,6 +1970,9 @@ components:
         - logo
       properties:
         version: { type: integer, const: 1 }
+        timezone:
+          type: string
+          description: IANA timezone configured by system.timezone for all business dates and displays
         product_name: { type: string }
         short_name: { type: string }
         environment_label: { type: string }
@@ -3372,7 +3376,10 @@ components:
         - weekly_threshold_percent
       properties:
         enabled: { type: boolean }
-        timezone: { type: string }
+        timezone:
+          type: string
+          readOnly: true
+          description: Derived from system.timezone; edit the system setting through Configuration Center
         daily_times: { type: string }
         schedule_grace_minutes: { type: integer }
         quota_alert_enabled: { type: boolean }

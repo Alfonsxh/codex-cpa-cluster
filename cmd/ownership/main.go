@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/ownership"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/ownership"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -67,7 +67,7 @@ func newCommand(output io.Writer) *cobra.Command {
 	}
 	flags := command.PersistentFlags()
 	flags.String("config", "", "optional YAML, JSON, or TOML configuration file")
-	flags.String("root", "/opt/codex-cpa-cluster", "existing CPA deployment root")
+	flags.String("root", "/opt/codex-cpa-pool", "existing CPA deployment root")
 	flags.Duration("ttl", 30*time.Second, "runtime ownership lease lifetime")
 	if err := settings.BindPFlags(flags); err != nil {
 		panic(err)

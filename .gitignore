@@ -1,6 +1,9 @@
 *.sqlite3
 
+# Local environment overrides, including frontend/.env.
 .env
+.env.local
+.env.*.local
 target.env
 dist/
 node_modules/

@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 )
 
 const runtimeReasoningMultiplierPrefix = "user_quota.reasoning_multiplier."
@@ -320,7 +321,7 @@ func safeRuntimeError(scope string, err error, secret string) string {
 
 func DefaultRuntimeConfig() RuntimeConfig {
 	return RuntimeConfig{
-		BatchSize: 100, WeekTimezone: "Asia/Shanghai", ResetPersonalWeeklyOnNewWeek: true,
+		BatchSize: 100, WeekTimezone: sitetime.DefaultName, ResetPersonalWeeklyOnNewWeek: true,
 		HeartbeatStaleAfterSeconds: 15, QuotaFailOpenAfterSeconds: 300,
 		ReasoningMultipliers: make(map[string]float64),
 	}
@@ -339,11 +340,11 @@ func RuntimeConfigFromSettings(settings map[string]any) (RuntimeConfig, time.Dur
 	} else if found {
 		config.BatchSize = int(value)
 	}
-	if value, found, err := stringSetting(settings, "user_quota.timezone"); err != nil {
+	timezone, err := sitetime.Name(settings)
+	if err != nil {
 		return config, 0, err
-	} else if found {
-		config.WeekTimezone = value
 	}
+	config.WeekTimezone = timezone
 	if value, found, err := booleanSetting(settings, "user_quota.reset_personal_weekly_on_new_week"); err != nil {
 		return config, 0, err
 	} else if found {

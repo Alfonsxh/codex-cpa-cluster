@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 )
 
 type WriteFence interface {

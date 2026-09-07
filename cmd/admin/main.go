@@ -12,19 +12,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountlifecycle"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountprojection"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountstatus"
-	adminapi "github.com/Alfonsxh/codex-cpa-cluster/internal/admin"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/identity"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/notifications"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/ownership"
-	portalapi "github.com/Alfonsxh/codex-cpa-cluster/internal/portal"
-	quotaapi "github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
-	usagestore "github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountlifecycle"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountprojection"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountstatus"
+	adminapi "github.com/Alfonsxh/codex-cpa-pool/internal/admin"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/identity"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/notifications"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/ownership"
+	portalapi "github.com/Alfonsxh/codex-cpa-pool/internal/portal"
+	quotaapi "github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
+	usagestore "github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -112,7 +112,7 @@ func newCommand() *cobra.Command {
 	flags := command.Flags()
 	flags.String("config", "", "optional YAML, JSON, or TOML configuration file")
 	flags.String("address", ":8318", "Admin API listen address")
-	flags.String("root", "/opt/codex-cpa-cluster", "existing CPA deployment root")
+	flags.String("root", "/opt/codex-cpa-pool", "existing CPA deployment root")
 	flags.String("log-level", "info", "Zap log level")
 	flags.Duration("session-ttl", 30*time.Minute, "Admin browser inactivity timeout")
 	flags.Duration("session-absolute-ttl", 8*time.Hour, "Admin browser absolute session lifetime")

@@ -35,7 +35,7 @@ jobs:
           npm ci --prefix tools/openapi --registry=https://registry.npmmirror.com
 
       - name: Run local quality gate
-        run: make verify
+        run: make -f scripts/build.mk verify
 
   browser:
     needs: validate
@@ -86,11 +86,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Build release archive
-        run: sh scripts/package-release.sh "dist/codex-cpa-cluster-${GITHUB_SHA::12}.tar.gz"
+        run: sh scripts/package-release.sh "dist/codex-cpa-pool-${GITHUB_SHA::12}.tar.gz"
 
       - name: Verify Go-only release archive
         run: |
-          archive="dist/codex-cpa-cluster-${GITHUB_SHA::12}.tar.gz"
+          archive="dist/codex-cpa-pool-${GITHUB_SHA::12}.tar.gz"
           go run ./cmd/releasectl archive verify "$archive"
           tar -tzf "$archive" | grep -Fx docker-compose.yml
           tar -tzf "$archive" | grep -Fx release-manifest.json
@@ -116,7 +116,7 @@ jobs:
       - name: Upload release archive
         uses: actions/upload-artifact@v7
         with:
-          name: codex-cpa-cluster-${{ github.sha }}
+          name: codex-cpa-pool-${{ github.sha }}
           path: dist/*.tar.gz
           if-no-files-found: error
           retention-days: 30

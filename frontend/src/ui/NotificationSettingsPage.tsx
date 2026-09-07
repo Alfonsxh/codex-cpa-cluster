@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   BellOutlined,
@@ -66,6 +67,7 @@ const webhookSchema = z.object({
 type WebhookValues = z.infer<typeof webhookSchema>;
 
 export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
+  useSiteTimezone();
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
@@ -83,7 +85,7 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
     resetOptions: { keepDirtyValues: true },
     defaultValues: {
       enabled: false,
-      timezone: "UTC",
+      timezone: getSiteTimezone(),
       daily_times: "09:00,14:00,18:00",
       schedule_grace_minutes: 15,
       quota_alert_enabled: true,
@@ -268,17 +270,8 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
               />
               <Row gutter={16}>
                 <Col xs={24} md={12}>
-                  <Form.Item
-                    label="IANA 时区"
-                    htmlFor="notification-timezone"
-                    validateStatus={form.formState.errors.timezone ? "error" : undefined}
-                    help={form.formState.errors.timezone?.message}
-                  >
-                    <Controller
-                      control={form.control}
-                      name="timezone"
-                      render={({ field }) => <Input {...field} id="notification-timezone" placeholder="Asia/Shanghai" />}
-                    />
+                  <Form.Item label="系统时区">
+                    <span>{settings.data?.values.timezone || getSiteTimezone()}（在配置中心统一设置）</span>
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
@@ -368,7 +361,7 @@ function WebhookTag({ configured }: { configured: boolean }) {
 
 function formatTimestamp(timestamp: number | null) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit"
   }).format(new Date(timestamp * 1000));
 }

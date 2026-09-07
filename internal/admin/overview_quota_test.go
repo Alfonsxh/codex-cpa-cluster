@@ -3,8 +3,8 @@ package admin
 import (
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
 )
 
 func TestBuildOverviewAccountQuotaSummary(t *testing.T) {

@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/notifications"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/notifications"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -113,6 +114,8 @@ func (server *Server) updateNotificationSettings(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "请确认保存通知配置", "invalid_request")
 		return
 	}
+	server.configurationLock.Lock()
+	defer server.configurationLock.Unlock()
 	changes, err := server.validatedNotificationChanges(c.Request.Context(), body)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, err.Error(), "invalid_request")
@@ -162,7 +165,17 @@ func (server *Server) validatedNotificationChanges(
 		if _, err := time.LoadLocation(value); err != nil {
 			return nil, errors.New("通知时区无效")
 		}
-		changes["notification.timezone"] = value
+		settings, err := server.store.ReadSettings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		configured, err := sitetime.Name(settings)
+		if err != nil {
+			return nil, err
+		}
+		if value != configured {
+			return nil, errors.New("通知使用系统时区，请在配置中心修改系统时区")
+		}
 	}
 	if body.Values.DailyTimes != nil {
 		clocks, err := notifications.ParseClockTimes(*body.Values.DailyTimes)

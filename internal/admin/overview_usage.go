@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/gin-gonic/gin"
 )
 

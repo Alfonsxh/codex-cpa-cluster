@@ -1,10 +1,10 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/codex-cpa-cluster-mark-dark.svg">
-    <img alt="Codex CPA Cluster 标志" src="./docs/assets/codex-cpa-cluster-mark.svg" width="96">
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/codex-cpa-pool-mark-dark.svg">
+    <img alt="Codex CPA Pool 标志" src="./docs/assets/codex-cpa-pool-mark.svg" width="96">
   </picture>
 
-  <h1>Codex CPA Cluster</h1>
+  <h1>Codex CPA Pool</h1>
 
   <p>
     自托管的多账号 CLIProxyAPI 控制平面、稳定网关与用量中心。<br>
@@ -29,10 +29,10 @@
     <a href="./CONTRIBUTING.md">参与贡献</a>
   </p>
 
-  <img alt="CPAC 运行总览" src="./docs/assets/screenshot-overview.png" width="1440">
+  <img alt="Codex CPA Pool 运行总览" src="./docs/assets/screenshot-overview.png" width="1440">
 </div>
 
-**CPAC** 将多个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 账号容器收敛到一个稳定入口。典型用法是：
+**Codex CPA Pool** 将多个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 账号容器收敛到一个稳定入口。典型用法是：
 
 - 把若干个 Codex 账号集中托管为一个共享账号池；
 - 为每位成员发放独立 API Key，并分配周额度；
@@ -40,6 +40,8 @@
 - 管理者在一个面板里查看所有成员的用量与消耗趋势。
 
 > PS：个人聚合多账号同样适用。
+
+项目名称为 **Codex CPA Pool**。GitHub 仓库与发行下载继续沿用 `Alfonsxh/codex-cpa-cluster`，以保持现有发布、徽章和安全报告入口可用。
 
 <a id="quick-start"></a>
 
@@ -52,7 +54,7 @@ curl -fsSLO https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/downlo
 sudo sh run.sh
 ```
 
-也可以一行直接完成（脚本不落盘）：
+也可以一条命令启动，安装器会先将 `run.sh` 保存到运维目录再继续执行：
 
 ```sh
 curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
@@ -124,7 +126,7 @@ flowchart LR
 ```sh
 npm ci --prefix frontend
 npm ci --prefix tools/openapi
-make verify
+make -f scripts/build.mk verify
 ```
 
 ## License

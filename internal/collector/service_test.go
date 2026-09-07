@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 )
 
 func TestServiceDecodesObjectsAndAggregatesBatches(t *testing.T) {

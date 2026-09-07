@@ -10,10 +10,11 @@ export function readNotificationSettings(signal?: AbortSignal): Promise<Notifica
 }
 
 export function saveNotificationSettings(values: NotificationValues, csrfToken: string) {
+  const { timezone: _derivedTimezone, ...editableValues } = values;
   return apiRequest<NotificationSettings & { message: string }>("/admin/api/settings/notifications", {
     method: "PUT",
     headers: { "X-CSRF-Token": csrfToken },
-    body: JSON.stringify({ confirm: "save", values })
+    body: JSON.stringify({ confirm: "save", values: editableValues })
   });
 }
 

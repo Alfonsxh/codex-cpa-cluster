@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -210,7 +210,7 @@ func TestWorkerScheduledReportsAreIdempotentAcrossOverlappingSlotsAndTimezones(t
 	if len(state.Scheduled) != 2 {
 		t.Fatalf("scheduled records = %#v", state.Scheduled)
 	}
-	store.settings["notification.timezone"] = "UTC"
+	store.settings["system.timezone"] = "UTC"
 	store.settings["notification.daily_times"] = "09:00"
 	worker.Now = fixedNow("UTC", 2026, 7, 20, 9, 0, 0)
 	third, err := worker.RunOnce(context.Background())

@@ -100,7 +100,7 @@ if [ "$ACTION" = check ]; then
   exit 0
 fi
 
-make -C "$ROOT_DIR" verify
+make -C "$ROOT_DIR" -f scripts/build.mk verify
 
 if [ -z "$LOCAL_TAG_REVISION" ]; then
   # Tag 先保留在本地；镜像和发布包全部完成后才推送到 GitHub。
@@ -113,7 +113,7 @@ IMAGE_PREFIXES="$IMAGE_PREFIX" \
   sh "$ROOT_DIR/scripts/release-images.sh" publish
 
 mkdir -p "$DIST_DIR"
-ARCHIVE="$DIST_DIR/codex-cpa-cluster-$VERSION.tar.gz"
+ARCHIVE="$DIST_DIR/codex-cpa-pool-$VERSION.tar.gz"
 RELEASE_DESCRIPTOR="$DIST_DIR/release-$VERSION.json"
 RELEASE_ENV="$DIST_DIR/release-$VERSION.env"
 RUN_ASSET="$DIST_DIR/run.sh"

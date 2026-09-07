@@ -9,7 +9,7 @@
   },
   "values": {
     "enabled": false,
-    "timezone": "UTC",
+    "timezone": "Asia/Shanghai",
     "daily_times": "09:00",
     "schedule_grace_minutes": 15,
     "quota_alert_enabled": true,

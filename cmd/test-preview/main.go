@@ -112,12 +112,12 @@ func newPreviewServer(fixtureDirectory string, portalAssetDirectory string) (*pr
 		server.fixtures[name] = content
 	}
 	for _, name := range []string{
-		"codex-cpa-cluster-favicon-dark.svg",
-		"codex-cpa-cluster-favicon.svg",
-		"codex-cpa-cluster-logo-dark.svg",
-		"codex-cpa-cluster-logo.svg",
-		"codex-cpa-cluster-mark-dark.svg",
-		"codex-cpa-cluster-mark.svg",
+		"codex-cpa-pool-favicon-dark.svg",
+		"codex-cpa-pool-favicon.svg",
+		"codex-cpa-pool-logo-dark.svg",
+		"codex-cpa-pool-logo.svg",
+		"codex-cpa-pool-mark-dark.svg",
+		"codex-cpa-pool-mark.svg",
 	} {
 		content, err := os.ReadFile(filepath.Join(portalAssetDirectory, name))
 		if err != nil {

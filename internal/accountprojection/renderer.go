@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountconfig"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountconfig"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/google/renameio/v2"
 	"gopkg.in/yaml.v3"
 )

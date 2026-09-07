@@ -15,7 +15,7 @@ const profile = {
 
 const siteConfiguration = {
   version: 1,
-  product_name: "Codex CPA Cluster",
+  product_name: "Codex CPA Pool",
   short_name: "Codex CPA",
   environment_label: "Test",
   public_base_url: "https://cpa.example.com",
@@ -25,7 +25,7 @@ const siteConfiguration = {
   default_model: "gpt-5.6-sol",
   logo: {
     custom: false,
-    url: "/portal/assets/codex-cpa-cluster-logo.svg",
+    url: "/portal/assets/codex-cpa-pool-logo.svg",
     content_type: "image/svg+xml",
     sha256: "",
     updated_at: null

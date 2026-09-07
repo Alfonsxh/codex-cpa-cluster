@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
 import { Button, Empty, Modal, Spin, Tooltip } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -69,6 +70,7 @@ function initialMemberCriteria(team: Team | null): MemberCriteria {
 }
 
 export function TeamsPage({ csrfToken }: { csrfToken: string }) {
+  useSiteTimezone();
   const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
@@ -641,7 +643,7 @@ function sameCriteria(left: MemberCriteria, right: MemberCriteria) {
 
 function formatTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
+  return siteDateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
 }
 
 function formatNumber(value: number) {

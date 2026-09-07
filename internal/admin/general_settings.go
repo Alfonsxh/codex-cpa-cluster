@@ -10,11 +10,16 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/gin-gonic/gin"
 )
 
-const generalSettingsVersion = 1
+const (
+	generalSettingsVersion = 1
+	defaultProductName     = "Codex CPA Pool"
+	// Legacy built-in values remain readable after upgrading an existing settings database.
+	legacyProductName = "Codex CPA Cluster"
+)
 
 var (
 	domainPattern    = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -161,7 +166,7 @@ func generalSettingsFromMap(settings map[string]any) (generalSettingsValues, err
 
 func defaultGeneralSettings() generalSettingsValues {
 	return generalSettingsValues{
-		ProductName: "Codex CPA Cluster", ShortName: "Codex CPA",
+		ProductName: defaultProductName, ShortName: "Codex CPA",
 		EnvironmentLabel: "Self-hosted service", PublicBaseURL: "",
 		AllowedEmailDomains: []string{}, KeyPrefix: "cpa_", ProviderName: "Codex CPA",
 		APIKeyEnv: "CPA_API_KEY", DefaultModel: "gpt-5.6-sol",
@@ -173,6 +178,7 @@ func normalizeGeneralSettings(values generalSettingsValues) (generalSettingsValu
 	if values.ProductName, err = normalizeText(values.ProductName, "产品名称", 2, 64, true); err != nil {
 		return values, err
 	}
+	values.ProductName = normalizeProductName(values.ProductName)
 	if values.ShortName, err = normalizeText(values.ShortName, "产品简称", 2, 32, true); err != nil {
 		return values, err
 	}
@@ -201,6 +207,15 @@ func normalizeGeneralSettings(values generalSettingsValues) (generalSettingsValu
 		return values, err
 	}
 	return values, nil
+}
+
+// normalizeProductName recognizes only the exact former built-in name. Custom
+// brands, including names containing the old name, remain operator-owned.
+func normalizeProductName(value string) string {
+	if value == legacyProductName {
+		return defaultProductName
+	}
+	return value
 }
 
 func normalizeText(value string, label string, minimum int, maximum int, required bool) (string, error) {

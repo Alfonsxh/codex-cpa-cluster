@@ -7,11 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
 	"github.com/gin-gonic/gin"
 )
 
 const (
-	defaultPortalLogoURL         = "/portal/assets/codex-cpa-cluster-logo.svg"
+	defaultPortalLogoURL         = "/portal/assets/codex-cpa-pool-logo.svg"
 	defaultPortalLogoContentType = "image/svg+xml"
 	defaultAccountListenAddress  = "127.0.0.1"
 )
@@ -26,6 +27,7 @@ type publicSiteLogo struct {
 
 type publicSiteConfiguration struct {
 	Version             int            `json:"version"`
+	Timezone            string         `json:"timezone"`
 	ProductName         string         `json:"product_name"`
 	ShortName           string         `json:"short_name"`
 	EnvironmentLabel    string         `json:"environment_label"`
@@ -53,6 +55,11 @@ func (server *Server) publicSiteConfiguration(c *gin.Context) {
 		server.internalError(c, "read public site settings", err)
 		return
 	}
+	timezone, err := sitetime.Name(settings)
+	if err != nil {
+		server.internalError(c, "read site timezone", err)
+		return
+	}
 	values, err := publicGeneralSettingsFromMap(settings)
 	if err != nil {
 		server.internalError(c, "validate public site settings", err)
@@ -76,7 +83,7 @@ func (server *Server) publicSiteConfiguration(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, publicSiteConfiguration{
-		Version: generalSettingsVersion, ProductName: values.ProductName,
+		Version: generalSettingsVersion, Timezone: timezone, ProductName: values.ProductName,
 		ShortName: values.ShortName, EnvironmentLabel: values.EnvironmentLabel,
 		PublicBaseURL: values.PublicBaseURL, AllowedEmailDomains: values.AllowedEmailDomains,
 		ProviderName: values.ProviderName, APIKeyEnv: values.APIKeyEnv,

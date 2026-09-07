@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
 )
 
 func TestRotateUserKeyPublishesActivatedSnapshot(t *testing.T) {

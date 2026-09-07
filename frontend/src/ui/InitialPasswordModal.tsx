@@ -85,7 +85,7 @@ export function InitialPasswordModal({
         >{mutation.isPending ? "正在保存…" : "安全保存"}</Button>
       ]}
     >
-      <div className="warning-banner">仅影响后续新建或重置的用户。密码以 AES-GCM 加密保存在控制面数据库中，页面不会读取或回显现值。</div>
+      <div className="warning-banner">用于新建用户和密码重置；加密保存，不回显。</div>
       <form id="settings-initial-password-form" noValidate onSubmit={form.handleSubmit(() => mutation.mutate())}>
         <div className="field">
           <label htmlFor="settings-initial-password">新初始密码</label>

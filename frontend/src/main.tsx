@@ -1,3 +1,4 @@
+import { SiteTimezoneSync } from "./ui/SiteTimezoneSync";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -28,6 +29,7 @@ if (!root) {
 createRoot(root).render(
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
+      <SiteTimezoneSync />
       <BrowserRouter basename="/admin">
         <App />
       </BrowserRouter>

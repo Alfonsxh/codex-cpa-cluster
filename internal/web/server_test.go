@@ -49,7 +49,7 @@ func TestServerServesOnlyExpectedStaticSurfaces(t *testing.T) {
 	}{
 		{path: "/", body: "landing", cache: "no-cache", status: http.StatusOK},
 		{path: "/portal/assets/app-12345678.js", body: "portal-script", cache: "public, max-age=31536000, immutable", status: http.StatusOK},
-		{path: "/portal/assets/codex-cpa-cluster-logo.svg", body: "portal-logo", cache: "no-cache", status: http.StatusOK},
+		{path: "/portal/assets/codex-cpa-pool-logo.svg", body: "portal-logo", cache: "no-cache", status: http.StatusOK},
 		{path: "/portal/private.txt", status: http.StatusNotFound},
 		{path: "/native/", body: "landing", cache: "no-cache", status: http.StatusOK},
 		{path: "/native/accounts.json", status: http.StatusNotFound},
@@ -240,15 +240,15 @@ func createWebFixture(t *testing.T) webRoots {
 		}
 	}
 	for path, content := range map[string]string{
-		filepath.Join(roots.portal, "index.html"):                           "landing",
-		filepath.Join(roots.portal, "assets", "app-12345678.js"):            "portal-script",
-		filepath.Join(roots.portal, "assets", "codex-cpa-cluster-logo.svg"): "portal-logo",
-		filepath.Join(roots.portal, "private.txt"):                          "private",
-		filepath.Join(roots.portal, ".secret"):                              "hidden",
-		filepath.Join(roots.admin, "index.html"):                            "admin-index",
-		filepath.Join(roots.admin, "assets", "app-12345678.js"):             "admin-script",
-		filepath.Join(roots.usage, "index.html"):                            "usage-index",
-		filepath.Join(roots.usage, "assets", "app-12345678.css"):            "usage-style",
+		filepath.Join(roots.portal, "index.html"):                        "landing",
+		filepath.Join(roots.portal, "assets", "app-12345678.js"):         "portal-script",
+		filepath.Join(roots.portal, "assets", "codex-cpa-pool-logo.svg"): "portal-logo",
+		filepath.Join(roots.portal, "private.txt"):                       "private",
+		filepath.Join(roots.portal, ".secret"):                           "hidden",
+		filepath.Join(roots.admin, "index.html"):                         "admin-index",
+		filepath.Join(roots.admin, "assets", "app-12345678.js"):          "admin-script",
+		filepath.Join(roots.usage, "index.html"):                         "usage-index",
+		filepath.Join(roots.usage, "assets", "app-12345678.css"):         "usage-style",
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("create Web fixture file: %v", err)

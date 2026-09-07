@@ -18,12 +18,12 @@ func TestPreviewServesSettingsAndPortalAssetsWithGoOnly(t *testing.T) {
 		t.Fatalf("new preview server: %v", err)
 	}
 
-	assetRequest := httptest.NewRequest(http.MethodGet, "/portal/assets/codex-cpa-cluster-logo.svg", nil)
+	assetRequest := httptest.NewRequest(http.MethodGet, "/portal/assets/codex-cpa-pool-logo.svg", nil)
 	assetResponse := httptest.NewRecorder()
 	server.ServeHTTP(assetResponse, assetRequest)
 	if assetResponse.Code != http.StatusOK ||
 		assetResponse.Header().Get("Content-Type") != "image/svg+xml; charset=utf-8" ||
-		!strings.Contains(assetResponse.Body.String(), "Codex CPA Cluster") {
+		!strings.Contains(assetResponse.Body.String(), "Codex CPA Pool") {
 		t.Fatalf("portal asset = %d %#v %q", assetResponse.Code, assetResponse.Header(), assetResponse.Body.String())
 	}
 

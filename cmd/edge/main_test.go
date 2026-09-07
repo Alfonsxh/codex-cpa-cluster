@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	edgeapi "github.com/Alfonsxh/codex-cpa-cluster/internal/edge"
+	edgeapi "github.com/Alfonsxh/codex-cpa-pool/internal/edge"
 )
 
 func TestCommandUsesExistingStableEdgeContractDefaults(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	imagetypes "github.com/moby/moby/api/types/image"
 	dockerclient "github.com/moby/moby/client"
 )

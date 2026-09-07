@@ -5,6 +5,8 @@
 AGENTS.md
 .claude
 .env
+.env.local
+.env.*.local
 target.env
 .DS_Store
 ._*

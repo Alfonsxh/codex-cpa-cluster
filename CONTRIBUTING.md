@@ -1,16 +1,16 @@
 # 贡献指南
 
-感谢你改进 Codex CPA Cluster。提交前请先搜索已有 Issue，较大的架构变化建议先创建讨论 Issue。
+感谢你改进 Codex CPA Pool。提交前请先搜索已有 Issue，较大的架构变化建议先创建讨论 Issue。
 
 ## 开发流程
 
 1. 从 `main` 创建短生命周期分支。
 2. 只修改解决当前问题所需的最小范围。
 3. 为行为变化补充测试和必要注释。
-4. 运行 `make verify`。
+4. 运行 `make -f scripts/build.mk verify`。
 5. 提交 Pull Request，说明问题、方案、验证和部署影响。
 
-`make verify` 需要 Node.js 22、Go（版本以 `go.mod` 为准）、可用的 Docker daemon，以及
+`make -f scripts/build.mk verify` 需要 Node.js 22、Go（版本以 `go.mod` 为准）、可用的 Docker daemon，以及
 Docker Compose。首次验证前在 `frontend/` 和 `tools/openapi/` 执行 `npm ci`。Go 与 React
 代码始终纳入同一质量门禁。
 

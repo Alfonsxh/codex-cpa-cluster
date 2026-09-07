@@ -147,9 +147,9 @@ describe("ConfigurationPage", () => {
 
     await screen.findByLabelText("请求重试次数");
     expect(screen.queryByText("统一作用于所有业务 CPA。")).not.toBeInTheDocument();
-    expect(screen.getByText("单次上游请求失败后的重试次数。")).toBeInTheDocument();
+    expect(screen.getByText("上游失败重试次数。")).toBeInTheDocument();
     expect(screen.queryByText("branding.product_name", { exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByText("默认 Codex CPA Cluster", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("默认 Codex CPA Pool", { exact: true })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /企业微信通知/ }));
     const enabled = screen.getByLabelText("启用企业微信通知");
     const webhook = screen.getByText("企业微信群 Webhook");
@@ -267,7 +267,7 @@ describe("ConfigurationPage", () => {
     await user.click(await screen.findByRole("button", { name: /审计记录/ }));
     expect(screen.getByRole("heading", { name: "最近管理操作" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "暂无管理操作" })).toBeInTheDocument();
-    expect(screen.getByText("新的配置和维护操作会显示在这里。")).toBeInTheDocument();
+    expect(screen.getByText("配置与维护操作将在此记录。")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "刷新审计记录" }));
 
     await waitFor(() => expect(workspaceReads).toBe(2));
@@ -317,7 +317,7 @@ function configurationFixture(): ConfigurationCatalog {
           {
             key: "cpa.request_retry",
             label: "请求重试次数",
-            description: "单次上游请求失败后的重试次数。",
+            description: "上游失败重试次数。",
             type: "integer",
             value: 2,
             default: 2,
@@ -337,8 +337,8 @@ function configurationFixture(): ConfigurationCatalog {
             label: "产品名称",
             description: "所有页面显示的完整名称。",
             type: "text",
-            value: "Codex CPA Cluster",
-            default: "Codex CPA Cluster",
+            value: "Codex CPA Pool",
+            default: "Codex CPA Pool",
             apply_mode: "live",
             editable: true,
             min_length: 2,
@@ -443,7 +443,7 @@ function supportingSettingsResponse(path: string) {
       apply_mode: "live",
       generated_at: 1_800_000_000,
       values: {
-        product_name: "Codex CPA Cluster",
+        product_name: "Codex CPA Pool",
         short_name: "Codex CPA",
         environment_label: "Test",
         public_base_url: "https://example.test",

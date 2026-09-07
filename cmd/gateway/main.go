@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/gateway"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/gateway"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"

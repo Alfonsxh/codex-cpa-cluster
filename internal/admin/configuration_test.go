@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 )
 
 func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
-	if len(configurationDefinitions) != 67 {
-		t.Fatalf("configuration definition count = %d, want 67", len(configurationDefinitions))
+	if len(configurationDefinitions) != 66 {
+		t.Fatalf("configuration definition count = %d, want 66", len(configurationDefinitions))
 	}
 	if len(configurationPresentationByKey) != len(configurationDefinitions) {
 		t.Fatalf("configuration presentation count = %d, want %d", len(configurationPresentationByKey), len(configurationDefinitions))
@@ -74,7 +74,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	}
 	var catalog configurationCatalogResponse
 	decodeAdminResponse(t, response, &catalog)
-	if catalog.Version != 2 || catalog.FieldCount != 67 || len(catalog.Groups) != 10 || catalog.GeneratedAt <= 0 {
+	if catalog.Version != 2 || catalog.FieldCount != 66 || len(catalog.Groups) != 11 || catalog.GeneratedAt <= 0 {
 		t.Fatalf("configuration catalog summary = %#v", catalog)
 	}
 
@@ -87,14 +87,14 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 			fields[field.Key] = field
 		}
 	}
-	if len(fields) != 67 {
+	if len(fields) != 66 {
 		t.Fatalf("configuration catalog fields = %d", len(fields))
 	}
 	proxy := fields["cpa.proxy_url"]
 	if proxy.Value != "" || proxy.Configured == nil || !*proxy.Configured || proxy.ValueType != "proxy_url_secret" {
 		t.Fatalf("sanitized proxy field = %#v", proxy)
 	}
-	for _, key := range []string{"user_quota.timezone", "notification.timezone"} {
+	for _, key := range []string{"system.timezone"} {
 		field := fields[key]
 		if field.Default != "Asia/Shanghai" || field.Value != "Asia/Shanghai" {
 			t.Fatalf("initial timezone %s = %#v", key, field)
@@ -130,7 +130,7 @@ func TestConfigurationValueNormalizationCoversSupportedTypesAndBoundaries(t *tes
 		{key: "cpa.proxy_url", raw: "socks5://user:secret@127.0.0.1:1080", want: "socks5://user:secret@127.0.0.1:1080"},
 		{key: "cpa.session_affinity_ttl", raw: "30s", want: "30s"},
 		{key: "cpa.session_affinity_ttl", raw: "29s", wantErr: true},
-		{key: "notification.timezone", raw: "Asia/Shanghai", want: "Asia/Shanghai"},
+		{key: "system.timezone", raw: "Asia/Shanghai", want: "Asia/Shanghai"},
 		{key: "notification.daily_times", raw: "18:00,9:00,09:00", want: "09:00,18:00"},
 		{key: "runtime.cliproxy_image", raw: "invalid image", wantErr: true},
 		{key: "admin.account_usage.reasoning_effort_color.max", raw: "#B2731E", want: "#b2731e"},
@@ -161,22 +161,22 @@ func TestConfigurationEndpointPersistsExplicitDefaultSelection(t *testing.T) {
 	}
 	t.Cleanup(server.Close)
 	response := performAdminRequest(server, http.MethodPost, "/admin/api/settings/configuration", map[string]any{
-		"confirm": "save", "values": map[string]any{"user_quota.timezone": "Asia/Shanghai"},
+		"confirm": "save", "values": map[string]any{"system.timezone": "Asia/Shanghai"},
 	}, map[string]string{"X-Management-Key": "test-management-key"}, nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("explicit default update = %d %s", response.Code, response.Body.String())
 	}
 	var payload configurationUpdateResponse
 	decodeAdminResponse(t, response, &payload)
-	if !reflect.DeepEqual(payload.Changed, []string{"user_quota.timezone"}) ||
+	if !reflect.DeepEqual(payload.Changed, []string{"system.timezone"}) ||
 		!reflect.DeepEqual(payload.Applied, []string{"collector"}) {
 		t.Fatalf("explicit default response = %#v", payload)
 	}
 	settings, err := store.ReadSettings(context.Background())
-	if err != nil || settings["user_quota.timezone"] != "Asia/Shanghai" {
-		t.Fatalf("explicit default setting = %#v, %v", settings["user_quota.timezone"], err)
+	if err != nil || settings["system.timezone"] != "Asia/Shanghai" {
+		t.Fatalf("explicit default setting = %#v, %v", settings["system.timezone"], err)
 	}
-	if len(applier.calls) != 1 || !reflect.DeepEqual(applier.calls[0].Changed, []string{"user_quota.timezone"}) {
+	if len(applier.calls) != 1 || !reflect.DeepEqual(applier.calls[0].Changed, []string{"system.timezone"}) {
 		t.Fatalf("explicit default apply calls = %#v", applier.calls)
 	}
 	onboarding, err := server.onboardingStatus(context.Background())

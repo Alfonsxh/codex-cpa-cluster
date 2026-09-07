@@ -15,11 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/identity"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/identity"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -1025,8 +1026,8 @@ func (server *Server) usageTimezone(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("读取用量时区失败")
 	}
-	timezone := stringSetting(settings["user_quota.timezone"], "Asia/Shanghai")
-	if _, err := time.LoadLocation(timezone); err != nil {
+	timezone, err := sitetime.Name(settings)
+	if err != nil {
 		return "", errors.New("用量时区配置无效")
 	}
 	return timezone, nil

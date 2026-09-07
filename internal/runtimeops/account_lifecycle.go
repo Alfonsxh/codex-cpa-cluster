@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountconfig"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountlifecycle"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountconfig"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountlifecycle"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/containerd/errdefs"
 	"github.com/go-resty/resty/v2"
 	"github.com/google/uuid"
@@ -35,7 +35,7 @@ const (
 	defaultAccountListen       = "127.0.0.1"
 	defaultAccountProbeTimeout = 12 * time.Second
 	accountContainerPort       = "8317/tcp"
-	serviceTimezone            = "Asia/Shanghai"
+	serviceTimezone            = "UTC"
 	maximumOAuthSnapshotBytes  = 2 * 1024 * 1024
 )
 

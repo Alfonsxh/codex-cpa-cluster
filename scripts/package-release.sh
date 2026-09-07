@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-OUTPUT=${1:-"$ROOT_DIR/dist/codex-cpa-cluster.tar.gz"}
+OUTPUT=${1:-"$ROOT_DIR/dist/codex-cpa-pool.tar.gz"}
 MANIFEST_FILE="$ROOT_DIR/release-manifest.json"
 MANIFEST_CREATED=false
 
@@ -38,6 +38,9 @@ COPYFILE_DISABLE=1 tar --no-xattrs \
   --exclude='frontend/coverage' \
   --exclude='frontend/playwright-report' \
   --exclude='frontend/test-results' \
+  --exclude='frontend/.env' \
+  --exclude='frontend/.env.local' \
+  --exclude='frontend/.env.*.local' \
   -czf "$OUTPUT" -C "$ROOT_DIR" \
   .dockerignore \
   .env.example \

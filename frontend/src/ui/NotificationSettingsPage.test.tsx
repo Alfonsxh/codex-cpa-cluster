@@ -55,7 +55,8 @@ describe("NotificationSettingsPage", () => {
     );
 
     expect(await screen.findByText("已配置")).toBeInTheDocument();
-    expect(await screen.findByDisplayValue("Asia/Shanghai")).toBeInTheDocument();
+    expect(await screen.findByText("Asia/Shanghai（在配置中心统一设置）")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /时区/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "发送账号信息" }));

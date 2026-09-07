@@ -7,7 +7,7 @@ x-json-logging: &json-logging
     max-file: "3"
 
 x-service-environment: &service-environment
-  TZ: ${CPA_TIMEZONE:-Asia/Shanghai}
+  TZ: UTC
 
 x-control-service: &control-service
   image: ${CPA_CONTROL_IMAGE:?CPA_CONTROL_IMAGE is required}

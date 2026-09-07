@@ -55,7 +55,7 @@ describe("AdminShell legacy visual contract", () => {
     expect(screen.getByRole("heading", { name: "系统设置" })).toBeInTheDocument();
     expect(screen.getByText("CONTROL PLANE SETTINGS")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Codex CPA 管理中心" }).querySelector("img"))
-      .toHaveAttribute("src", "/portal/assets/codex-cpa-cluster-mark.svg");
+      .toHaveAttribute("src", "/portal/assets/codex-cpa-pool-mark.svg");
   });
 
   it("keeps all configuration pages discoverable inside the single center", () => {

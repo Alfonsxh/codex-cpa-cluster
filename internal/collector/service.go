@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 )
 
 type BatchDrainer interface {

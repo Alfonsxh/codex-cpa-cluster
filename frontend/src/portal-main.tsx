@@ -1,3 +1,4 @@
+import { SiteTimezoneSync } from "./ui/SiteTimezoneSync";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -28,6 +29,7 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
+        <SiteTimezoneSync />
         <BrowserRouter>
           <PortalApp />
         </BrowserRouter>

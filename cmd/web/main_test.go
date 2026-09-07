@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	webapi "github.com/Alfonsxh/codex-cpa-cluster/internal/web"
+	webapi "github.com/Alfonsxh/codex-cpa-pool/internal/web"
 )
 
 func TestCommandUsesGoWebContractDefaults(t *testing.T) {

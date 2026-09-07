@@ -1,3 +1,4 @@
+import { SiteTimezoneSync } from "./ui/SiteTimezoneSync";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -26,6 +27,7 @@ if (!root) throw new Error("React root element is missing");
 createRoot(root).render(
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
+      <SiteTimezoneSync />
       <UsageApp />
     </ThemeProvider>
   </QueryClientProvider>

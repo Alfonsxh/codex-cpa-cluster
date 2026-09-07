@@ -34,8 +34,8 @@ function applyDocumentTheme(theme: ThemeMode) {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   const favicon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
-  if (favicon?.href.includes("codex-cpa-cluster-favicon")) {
-    favicon.href = `/portal/assets/codex-cpa-cluster-favicon${theme === "dark" ? "-dark" : ""}.svg`;
+  if (favicon?.href.includes("codex-cpa-pool-favicon")) {
+    favicon.href = `/portal/assets/codex-cpa-pool-favicon${theme === "dark" ? "-dark" : ""}.svg`;
   }
 }
 

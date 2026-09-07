@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountprojection"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/portal"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountprojection"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/portal"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 )
 
 func TestUserManagerRunsCreateRotateResetRevokeAndDeleteLifecycle(t *testing.T) {

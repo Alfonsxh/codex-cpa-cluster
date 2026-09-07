@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "../site-time";
 import { DatePicker, Modal } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import timezonePlugin from "dayjs/plugin/timezone";
@@ -29,6 +30,7 @@ export function CustomUsageRangeModal({
   onCancel: () => void;
   onApply: (range: CustomUsageRange) => void;
 }) {
+  useSiteTimezone();
   const zone = normalizeTimezone(timezone);
   const [draft, setDraft] = useState<PickerRange>(() => createPickerRange(range, zone));
   const [error, setError] = useState("");
@@ -130,9 +132,9 @@ function pickerTimestamps(range: PickerRange, zone: string): CustomUsageRange | 
 }
 
 function normalizeTimezone(value?: string) {
-  const candidate = value?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const candidate = value?.trim() || getSiteTimezone();
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: candidate }).format();
+    siteDateTimeFormat("en-US", { timeZone: candidate }).format();
     return candidate;
   } catch {
     return "UTC";

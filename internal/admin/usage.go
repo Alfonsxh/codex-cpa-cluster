@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -285,12 +286,12 @@ func (server *Server) usageTimezone(c *gin.Context) (*time.Location, string, err
 		server.internalError(c, "read usage timezone", err)
 		return nil, "", err
 	}
-	name, _ := settings["user_quota.timezone"].(string)
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "Asia/Shanghai"
+	name, err := sitetime.Name(settings)
+	if err != nil {
+		server.internalError(c, "read usage timezone", err)
+		return nil, "", err
 	}
-	location, err := time.LoadLocation(name)
+	location, err := sitetime.Validate(name)
 	if err != nil {
 		server.internalError(c, "load usage timezone", err)
 		return nil, "", err

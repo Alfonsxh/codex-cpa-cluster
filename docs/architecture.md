@@ -2,7 +2,7 @@
 
 ## 目标与边界
 
-Codex CPA Cluster 是单机 Docker Compose 部署的 Go 控制面与数据面。它管理多账号 CPA、用户 API Key、额度、用量、Web 页面和发布切换；上游 CLIProxyAPI 账号进程及外部代理不属于本仓库实现。
+Codex CPA Pool 是单机 Docker Compose 部署的 Go 控制面与数据面。它管理多账号 CPA、用户 API Key、额度、用量、Web 页面和发布切换；上游 CLIProxyAPI 账号进程及外部代理不属于本仓库实现。
 
 设计约束：
 
@@ -77,13 +77,13 @@ sequenceDiagram
 ## 验证入口
 
 ```sh
-make verify
+make -f scripts/build.mk verify
 npm --prefix frontend run test:e2e
-make test-build
-make test-up
-make test-smoke
-make test-faults
-make test-down
+make -f scripts/build.mk test-build
+make -f scripts/build.mk test-up
+make -f scripts/build.mk test-smoke
+make -f scripts/build.mk test-faults
+make -f scripts/build.mk test-down
 ```
 
 真实上线还必须使用同一个真实 API Key 验证 `/v1/models`、非流式 `/v1/responses` 和 SSE；容器健康或隔离 Test 不能替代业务验收。

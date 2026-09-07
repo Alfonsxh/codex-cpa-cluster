@@ -23,7 +23,7 @@ describe("OnboardingPage", () => {
   ])("uses Beijing time for %s configuration without replacing a saved custom timezone", async (_name, value, expected) => {
     const catalog = configurationCatalog();
     for (const group of catalog.groups) {
-      group.fields = group.fields.flatMap((field) => field.key !== "user_quota.timezone"
+      group.fields = group.fields.flatMap((field) => field.key !== "system.timezone"
         ? [field]
         : value === null ? [] : [{ ...field, value }]);
     }
@@ -33,9 +33,9 @@ describe("OnboardingPage", () => {
       if (path === "/admin/api/onboarding") return jsonResponse(status);
       if (path === "/admin/api/settings/configuration" && !init?.method) return jsonResponse(catalog);
       if (path === "/admin/api/settings/configuration" && init?.method === "POST") {
-        expect(JSON.parse(String(init.body))).toEqual({ confirm: "save", values: { "user_quota.timezone": expected } });
+        expect(JSON.parse(String(init.body))).toEqual({ confirm: "save", values: { "system.timezone": expected } });
         status = completeRecommendedStep(status, "quota_timezone");
-        return jsonResponse({ message: "已保存时区", changed: ["user_quota.timezone"], applied: ["collector"], pending_deployment: false });
+        return jsonResponse({ message: "已保存时区", changed: ["system.timezone"], applied: ["collector"], pending_deployment: false });
       }
       throw new Error(`unexpected request: ${path}`);
     });
@@ -43,7 +43,7 @@ describe("OnboardingPage", () => {
     const user = userEvent.setup();
     renderOnboarding("/setup?step=quota_timezone");
 
-    await waitFor(() => expect(screen.getByLabelText("用户额度时区")).toHaveValue(expected));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "系统时区" }).closest(".ant-select")).toHaveTextContent(expected));
     await user.click(screen.getByRole("button", { name: "保存时区" }));
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=weekly_quota"));
   });
@@ -162,9 +162,10 @@ describe("OnboardingPage", () => {
     const webhookURL = ["https://qyapi.weixin.qq.com", "/cgi-bin/webhook/send", "?key=", "unit-test"].join("");
     renderOnboarding("/setup?step=quota_timezone");
 
-    const timezone = await screen.findByLabelText("用户额度时区");
-    await user.clear(timezone);
-    await user.type(timezone, "Asia/Shanghai");
+    const timezone = await screen.findByLabelText("系统时区");
+    await user.click(timezone);
+    await user.paste("Asia/Tokyo");
+    await user.click(await screen.findByText("东京 · Asia/Tokyo (UTC+09:00)"));
     await user.click(screen.getByRole("button", { name: "保存时区" }));
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=weekly_quota"));
 
@@ -199,7 +200,7 @@ describe("OnboardingPage", () => {
     await waitFor(() => expect(screen.getByText("此步骤已完成")).toBeInTheDocument());
 
     expect(configurationBodies).toEqual([
-      { "user_quota.timezone": "Asia/Shanghai" },
+      { "system.timezone": "Asia/Tokyo" },
       { "user_quota.default_weekly_tokens": 20_000_000 },
       {
         "branding.product_name": "QData CPA",
@@ -218,7 +219,7 @@ describe("OnboardingPage", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/setup?step=proxy");
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
-  });
+  }, 15_000);
 
   it("keeps the Admin recoverable when status loading fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
@@ -258,7 +259,7 @@ function freshStatus(): OnboardingStatus {
   ] as const;
   const recommended = [
     ["public_base_url", "公开访问地址"],
-    ["quota_timezone", "用户额度时区"],
+    ["quota_timezone", "系统时区"],
     ["weekly_quota", "默认周额度"],
     ["notifications", "企业微信通知"],
     ["branding", "品牌信息"],
@@ -327,7 +328,7 @@ function completeRecommendedStep(status: OnboardingStatus, stepID: string): Onbo
 
 function configurationStepForValues(values: Record<string, unknown>) {
   const keys = Object.keys(values);
-  if (keys.includes("user_quota.timezone")) return "quota_timezone";
+  if (keys.includes("system.timezone")) return "quota_timezone";
   if (keys.includes("user_quota.default_weekly_tokens")) return "weekly_quota";
   if (keys.includes("branding.product_name")) return "branding";
   if (keys.includes("cpa.proxy_enabled")) return "proxy";
@@ -346,7 +347,7 @@ function configurationCatalog(): ConfigurationCatalog {
         name: "品牌与身份",
         description: "品牌配置",
         fields: [
-          configurationField("branding.product_name", "产品名称", "text", "Codex CPA Cluster", "Codex CPA Cluster"),
+          configurationField("branding.product_name", "产品名称", "text", "Codex CPA Pool", "Codex CPA Pool"),
           configurationField("branding.short_name", "产品简称", "text", "Codex CPA", "Codex CPA"),
           configurationField("branding.environment_label", "环境说明", "optional_text", "Self-hosted service", "Self-hosted service"),
           configurationField("branding.public_base_url", "公开访问地址", "base_url", "", "")
@@ -356,7 +357,7 @@ function configurationCatalog(): ConfigurationCatalog {
         name: "用户额度",
         description: "额度配置",
         fields: [
-          configurationField("user_quota.timezone", "用户额度时区", "timezone", "Asia/Shanghai", "Asia/Shanghai"),
+          configurationField("system.timezone", "系统时区", "timezone", "Asia/Shanghai", "Asia/Shanghai"),
           configurationField("user_quota.default_weekly_tokens", "默认周额度", "nullable_integer", null, null)
         ]
       },

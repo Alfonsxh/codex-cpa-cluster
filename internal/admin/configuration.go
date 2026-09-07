@@ -15,11 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -146,7 +146,8 @@ func buildConfigurationDefinitions() []configurationDefinition {
 	}
 
 	definitions := []configurationDefinition{
-		text("branding.product_name", "产品名称", "Codex CPA Cluster", 2, 64, "live", false),
+		simple(sitetime.SettingKey, "系统时区", "timezone", sitetime.DefaultName, "collector"),
+		text("branding.product_name", "产品名称", defaultProductName, 2, 64, "live", false),
 		text("branding.short_name", "产品简称", "Codex CPA", 2, 32, "live", false),
 		text("branding.environment_label", "环境说明", "Self-hosted service", 0, 64, "live", true),
 		simple("branding.public_base_url", "公开访问地址", "base_url", "", "live"),
@@ -178,7 +179,6 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		integer("account_failover.stale_after_seconds", "额度数据失效时间", 120, 60, 7200, "live"),
 		{Key: "user_quota.default_weekly_tokens", Label: "用户周额度系统默认值", ValueType: "nullable_integer", ApplyMode: "quota", Default: nil, Minimum: 1, Maximum: 1_000_000_000_000, HasMinimum: true, HasMaximum: true},
 		boolean("user_quota.reset_personal_weekly_on_new_week", "新周恢复默认个人额度", true, "quota"),
-		simple("user_quota.timezone", "用户自然周时区", "timezone", "Asia/Shanghai", "collector"),
 		integer("user_quota.fail_open_after_seconds", "额度故障放行等待", 300, 30, 3600, "quota"),
 	}
 	for _, effort := range []struct {
@@ -210,7 +210,6 @@ func buildConfigurationDefinitions() []configurationDefinition {
 	}
 	definitions = append(definitions,
 		boolean("notification.enabled", "启用企业微信通知", false, "live"),
-		simple("notification.timezone", "通知时区", "timezone", "Asia/Shanghai", "live"),
 		simple("notification.daily_times", "每日发送时间", "time_list", "09:00,14:00,18:00", "live"),
 		integer("notification.schedule_grace_minutes", "定时补发窗口", 15, 0, 120, "live"),
 		boolean("notification.quota_alert_enabled", "启用周额度预警", true, "live"),
@@ -377,6 +376,9 @@ func (server *Server) currentConfiguration(
 		return nil, nil, "", false, err
 	}
 	originalStored := cloneConfiguration(stored)
+	if err := sitetime.Migrate(stored); err != nil {
+		return nil, nil, "", false, err
+	}
 	legacyProxy := ""
 	cleaned := make(map[string]any, len(stored))
 	for key, value := range stored {
@@ -491,6 +493,9 @@ func normalizeConfigurationValue(definition configurationDefinition, raw any) (a
 	}
 
 	value := strings.TrimSpace(valueString(raw))
+	if definition.Key == "branding.product_name" {
+		value = normalizeProductName(value)
+	}
 	switch definition.ValueType {
 	case "text", "optional_text":
 		if definition.ValueType == "text" && value == "" {
@@ -568,7 +573,7 @@ func normalizeConfigurationValue(definition configurationDefinition, raw any) (a
 		if value == "" || len(value) > 64 {
 			return nil, fmt.Errorf("%s 必须为有效 IANA 时区", definition.Label)
 		}
-		if _, err := time.LoadLocation(value); err != nil {
+		if _, err := sitetime.Validate(value); err != nil {
 			return nil, fmt.Errorf("%s 必须为有效 IANA 时区", definition.Label)
 		}
 		return value, nil
@@ -689,8 +694,12 @@ func changedConfigurationKeys(before, after, stored, requested map[string]any) [
 		_, alreadyStored := stored[definition.Key]
 		// Selecting the effective timezone default is still a durable onboarding decision;
 		// without the row, the recommended timezone step would remain incomplete.
-		if !reflect.DeepEqual(before[definition.Key], after[definition.Key]) ||
-			(explicitlyRequested && !alreadyStored && definition.Key == "user_quota.timezone") {
+		// An explicit brand save also replaces a legacy built-in value whose
+		// effective display already uses the new product name.
+		brandNeedsSave := explicitlyRequested && alreadyStored && definition.Key == "branding.product_name" &&
+			!reflect.DeepEqual(stored[definition.Key], after[definition.Key])
+		if !reflect.DeepEqual(before[definition.Key], after[definition.Key]) || brandNeedsSave ||
+			(explicitlyRequested && !alreadyStored && definition.Key == sitetime.SettingKey) {
 			result = append(result, definition.Key)
 		}
 	}

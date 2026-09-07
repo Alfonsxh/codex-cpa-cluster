@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cpac-release-images-test.XXXXXX")
+TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cpap-release-images-test.XXXXXX")
 cleanup() {
   rm -rf -- "$TEST_ROOT"
 }
@@ -142,13 +142,13 @@ case "${1:-}" in
       echo "forced bake failure" >&2
       exit 93
     }
-    if [ -n "${CPAC_BAKE_TAG_PLAN:-}" ] && [ -f "$CPAC_BAKE_TAG_PLAN" ]; then
+    if [ -n "${CPAP_BAKE_TAG_PLAN:-}" ] && [ -f "$CPAP_BAKE_TAG_PLAN" ]; then
       while IFS=$(printf '\t') read -r COMPONENT REFERENCE; do
         DIGEST=$(component_digest "$COMPONENT")
         printf 'sha256:%s\t%s\t%s\t%s\n' "$DIGEST" "$COMPONENT" "$DIGEST" "$DIGEST" \
           >"$(reference_path "$REFERENCE")"
         printf 'bake-tag %s %s\n' "$COMPONENT" "$REFERENCE" >>"$FAKE_DOCKER_LOG"
-      done <"$CPAC_BAKE_TAG_PLAN"
+      done <"$CPAP_BAKE_TAG_PLAN"
     fi
     shift
     while [ "$#" -gt 0 ]; do

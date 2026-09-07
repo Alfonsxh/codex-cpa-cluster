@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountstatus"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
-	quotaapi "github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountstatus"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
+	quotaapi "github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
 )
 
 func TestLiveAccountStateProviderOverlaysRuntimeAndOAuthBeforeQuota(t *testing.T) {

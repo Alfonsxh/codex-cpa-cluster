@@ -10,7 +10,7 @@ const current = {
   apply_mode: "live",
   generated_at: 1_800_000_000,
   values: {
-    product_name: "Codex CPA Cluster",
+    product_name: "Codex CPA Pool",
     short_name: "Codex CPA",
     environment_label: "Internal",
     public_base_url: "https://cpa.example.com",
@@ -53,7 +53,7 @@ describe("GeneralSettingsPage", () => {
     );
 
     const productName = await screen.findByLabelText("产品名称");
-    expect(productName).toHaveValue("Codex CPA Cluster");
+    expect(productName).toHaveValue("Codex CPA Pool");
     expect(screen.getByText("未配置")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 

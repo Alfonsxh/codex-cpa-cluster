@@ -10,7 +10,7 @@ const input = {
   browserOrigin: "http://127.0.0.1:5194",
   siteConfig: {
     ...defaultPublicSiteConfiguration,
-    product_name: "Codex CPA Cluster",
+    product_name: "Codex CPA Pool",
     public_base_url: "https://cpa.example.com/",
     provider_name: "CPA Provider",
     api_key_env: "CPA_API_KEY",

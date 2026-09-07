@@ -11,6 +11,12 @@
 
 Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入口启动，以便独立健康检查、重启和最小影响更新。
 
+## 名称与现有部署兼容
+
+产品统一使用 Codex CPA Pool；GitHub 发行源仍为 `Alfonsxh/codex-cpa-cluster`，现有下载链接保持有效。新发布归档使用 `codex-cpa-pool` 前缀，安装器仍可读取历史归档。新安装的默认运维根目录是 `/home/cpap`，安装器参数和配置使用 `CPAP_*`。旧 `CPAC_*` 参数、配置与 `/home/cpac` 中的已安装环境继续被识别并原址沿用；改名不会移动运行数据或重建 SQLite、API Key、OAuth。升级只替换既有 `target.env` 的 Control、Web、Gateway、Edge 四个镜像字段，保留目标身份、网络、端口和维护确认配置；指定的历史 Release 若附带旧安装器，则保留当前 Pool 安装器，避免退回旧安装协议。
+
+下文以新默认目录为例，已安装环境应使用部署完成卡片中报告的实际运维根目录。
+
 ## 全新目标
 
 全新单机目标使用唯一的部署脚本，不要手工创建 SQLite、主密钥或快照：
@@ -19,11 +25,11 @@ Control 镜像包含 Admin 与各 Worker 二进制；不同容器使用不同入
 curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
 ```
 
-管道入口会把 Release 中的 `run.sh` 原子安装到内部运维目录，再重新连接当前终端并执行，因此首次安装仍可交互输入域名和入口模式。`scripts/run.sh` 随后校验 GitHub Release 中的脚本、归档和机器可读发布环境，将宿主机时区统一为 `Asia/Shanghai`，并把同一时区注入全部 CPAC 服务及后续创建的业务 CPA 容器。在 `/home/cpac/` 同一文件系统创建临时根目录后，通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/cpac/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。
+管道入口会把 Release 中的 `run.sh` 原子安装到内部运维目录，再重新连接当前终端并执行，因此首次安装仍可交互输入域名和入口模式。`scripts/run.sh` 随后校验 GitHub Release 中的脚本、归档和机器可读发布环境，保留宿主机时区，全部 Codex CPA Pool 服务及后续创建的业务 CPA 容器使用 UTC。业务时区由首次 Web 设置及配置中心的 `system.timezone` 统一管理，不再读取 `CPA_TIMEZONE`。在 `/home/cpap/` 同一文件系统创建临时根目录后，通过 Control 镜像内的 `cpa-bootstrap` 一次性生成两份当前 Schema 的 SQLite、32 字节主密钥、随机管理凭据、空 Gateway 快照、初始蓝槽文件和账号容器只读挂载所需的 `management/config/static` 目录。临时目标完整后才原子重命名为 `/home/cpap/runtime`。初始化工具拒绝任何已有权威文件和符号链接运行目录，不能用于修复或覆盖既有目标；旧版本升级时，统一脚本在备份后幂等补齐缺失的空运行目录。
 
 交互执行使用分阶段终端界面：成功阶段隐藏底层命令噪声，失败阶段展开完整诊断；`managed` 模式的最终完成卡片显示 `https://<域名>/admin/`，`external` 模式明确要求从既有反向代理的入口访问 `/admin/`。`NO_COLOR=1` 仅关闭 ANSI 颜色，不改变步骤、错误或安全语义。
 
-域名和入口模式写入 `/home/cpac/config.env`，待领取的首次管理员凭据临时写入 `/home/cpac/bootstrap-admin.key`。首次交互部署先检测 Nginx、同域名站点与证书，再选择 `managed` 或 `external`；无交互部署必须明确传入 `--ingress managed|external`。旧版本位于 `/etc/cpac/` 的两个文件会先经过一致性校验，再迁移到统一目录并删除旧副本；任何冲突都会停止部署。`managed` 模式才会安装/启动 Nginx 和 Certbot、把 CPAC 专属站点指向 `127.0.0.1:18317` 并申请或复用证书。该站点带 `# Managed by CPAC run.sh` 标记；同名未托管站点会失败关闭，绝不覆盖。`external` 模式不安装、不启动、不改动 Nginx/Certbot，不申请证书，也不对公网发起健康检查；操作者将既有反向代理指向 `127.0.0.1:18317`，保留 `Host`、`X-Forwarded-*`，支持 WebSocket/SSE 和 3600 秒流式超时，并自行验证 `<既有入口>/__health` 返回 `200`。
+域名和入口模式写入 `/home/cpap/config.env`，待领取的首次管理员凭据临时写入 `/home/cpap/bootstrap-admin.key`。首次交互部署先检测 Nginx、同域名站点与证书，再选择 `managed` 或 `external`；无交互部署必须明确传入 `--ingress managed|external`。旧版本位于 `/etc/cpac/` 的两个文件会先经过一致性校验，再迁移到解析后的实际运维根目录并删除旧副本；任何冲突都会停止部署。`managed` 模式才会安装/启动 Nginx 和 Certbot、把 Codex CPA Pool 专属站点指向 `127.0.0.1:<CPA_PUBLIC_PORT>` 并申请或复用证书。新站点带 `# Managed by Codex CPA Pool run.sh` 标记，旧托管标记继续用于识别既有站点；同名未托管站点会失败关闭，绝不覆盖。`external` 模式不安装、不启动、不改动 Nginx/Certbot，不申请证书，也不对公网发起健康检查；操作者将既有反向代理指向 `127.0.0.1:<CPA_PUBLIC_PORT>`，保留 `Host`、`X-Forwarded-*`，支持 WebSocket/SSE 和 3600 秒流式超时，并自行验证 `<既有入口>/__health` 返回 `200`。 Nginx 配置与 `external` 提示均读取既有 `target.env` 的 `CPA_PUBLIC_PORT`；新安装默认为 `18317`，即 `127.0.0.1:18317`，既有环境使用其实际端口。
 
 ## 底层目标前置条件
 
@@ -48,10 +54,10 @@ logs/gateway/
 ## 镜像发布
 
 ```sh
-make verify
-make images VERSION=v2.0.0 PLATFORM=linux/amd64
-make publish VERSION=v2.0.0 IMAGE_PREFIXES=ghcr.io/owner
-make package VERSION=v2.0.0
+make -f scripts/build.mk verify
+make -f scripts/build.mk images VERSION=v2.0.0 PLATFORM=linux/amd64
+make -f scripts/build.mk publish VERSION=v2.0.0 IMAGE_PREFIXES=ghcr.io/owner
+make -f scripts/build.mk package VERSION=v2.0.0
 ```
 
 四个组件均按源码摘要构建不可变标签。发布开始时只生成一次四组件摘要计划，并通过远端
@@ -70,13 +76,13 @@ Manifest/Config 判断 `reuse`、`promote` 或 `build`：已存在且标签一�
 普通升级执行：
 
 ```sh
-make target-config TARGET_ENV=/absolute/path/to/test.env
-make target-pull TARGET_ENV=/absolute/path/to/test.env
-make target-verify-images TARGET_ENV=/absolute/path/to/test.env
-make target-activate TARGET_ENV=/absolute/path/to/test.env
-make target-up-core TARGET_ENV=/absolute/path/to/test.env
-make target-up-writers TARGET_ENV=/absolute/path/to/test.env
-make target-smoke TARGET_ENV=/absolute/path/to/test.env
+make -f scripts/build.mk target-config TARGET_ENV=/absolute/path/to/test.env
+make -f scripts/build.mk target-pull TARGET_ENV=/absolute/path/to/test.env
+make -f scripts/build.mk target-verify-images TARGET_ENV=/absolute/path/to/test.env
+make -f scripts/build.mk target-activate TARGET_ENV=/absolute/path/to/test.env
+make -f scripts/build.mk target-up-core TARGET_ENV=/absolute/path/to/test.env
+make -f scripts/build.mk target-up-writers TARGET_ENV=/absolute/path/to/test.env
+make -f scripts/build.mk target-smoke TARGET_ENV=/absolute/path/to/test.env
 ```
 
 通知带外部副作用，单独执行 `up-notifications`。

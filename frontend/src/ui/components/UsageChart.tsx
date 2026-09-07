@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat } from "../site-time";
 import * as echarts from "echarts/core";
 import { LineChart, type LineSeriesOption } from "echarts/charts";
 import {
@@ -43,6 +44,8 @@ export type UsageChartProps = {
 };
 
 export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, valueLabel, timezone, ariaLabel, footer }: UsageChartProps) {
+  const siteTimezone = useSiteTimezone();
+  timezone = timezone || siteTimezone;
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
@@ -379,7 +382,7 @@ function formatChartTime(timestamp: number, includeDate: boolean, timezone?: str
     ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }
     : { hour: "2-digit", minute: "2-digit", hour12: false };
   if (timezone) options.timeZone = timezone;
-  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
+  return siteDateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
 }
 
 function formatTimestamp(timestamp: number, timezone?: string, includeYear = false) {
@@ -394,7 +397,7 @@ function formatTimestamp(timestamp: number, timezone?: string, includeYear = fal
     hour12: false
   };
   if (timezone) options.timeZone = timezone;
-  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
+  return siteDateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
 }
 
 function escapeHtml(value: string) {

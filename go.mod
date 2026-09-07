@@ -1,4 +1,4 @@
-module github.com/Alfonsxh/codex-cpa-cluster
+module github.com/Alfonsxh/codex-cpa-pool
 
 go 1.25.0
 

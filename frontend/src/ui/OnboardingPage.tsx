@@ -16,6 +16,7 @@ import {
   type ConfigurationCatalog
 } from "../api/configuration";
 import { saveNotificationWebhook } from "../api/notifications";
+import { publicSiteQueryKey } from "../api/public-site";
 import {
   onboardingQueryKey,
   readOnboarding,
@@ -25,8 +26,8 @@ import {
 } from "../api/onboarding";
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { InitialPasswordModal } from "./InitialPasswordModal";
-
-const defaultQuotaTimezone = "Asia/Shanghai";
+import { TimezoneSelect } from "./components/TimezoneSelect";
+import { defaultSiteTimezone, siteDateTimeFormat, useSiteTimezone } from "./site-time";
 
 const requiredLabels: Record<string, string> = {
   email_domains: "访问范围",
@@ -35,7 +36,7 @@ const requiredLabels: Record<string, string> = {
 
 const recommendationLabels: Record<string, string> = {
   public_base_url: "访问地址",
-  quota_timezone: "额度时区",
+  quota_timezone: "系统时区",
   weekly_quota: "默认额度",
   notifications: "通知",
   branding: "品牌",
@@ -59,6 +60,7 @@ type OnboardingPreferenceUpdate = {
 };
 
 export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
+  const siteTimezone = useSiteTimezone();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -68,7 +70,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   const [domains, setDomains] = useState("");
   const [drafts, setDrafts] = useState<OnboardingDrafts>({
     publicURL: window.location.origin,
-    quotaTimezone: defaultQuotaTimezone,
+    quotaTimezone: defaultSiteTimezone,
     weeklyQuota: null,
     webhookURL: "",
     productName: "",
@@ -104,7 +106,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
   useEffect(() => {
     if (onboarding.data) setRefreshLabel(`初始化状态更新于 ${formatStatusTime(onboarding.data.generated_at)}`);
     return () => setRefreshLabel("");
-  }, [onboarding.data, setRefreshLabel]);
+  }, [onboarding.data, setRefreshLabel, siteTimezone]);
   useEffect(() => {
     setRefreshAction(async () => {
       const results = await Promise.all([onboarding.refetch(), catalog.refetch()]);
@@ -123,7 +125,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
     setDrafts((current) => ({
       ...current,
       publicURL: configurationStringValue(catalog.data, "branding.public_base_url") || window.location.origin,
-      quotaTimezone: configurationStringValue(catalog.data, "user_quota.timezone").trim() || defaultQuotaTimezone,
+      quotaTimezone: configurationStringValue(catalog.data, "system.timezone").trim() || defaultSiteTimezone,
       weeklyQuota: configurationNumberValue(catalog.data, "user_quota.default_weekly_tokens"),
       productName: configurationStringValue(catalog.data, "branding.product_name"),
       shortName: configurationStringValue(catalog.data, "branding.short_name"),
@@ -154,7 +156,8 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
       setNotice(`${result.message}，完成状态已重新检查`);
       await Promise.all([
         catalog.refetch(),
-        queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true })
+        queryClient.invalidateQueries({ queryKey: onboardingQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: publicSiteQueryKey })
       ]);
       advanceAfterSave();
     }
@@ -438,10 +441,10 @@ function OnboardingStepAction({
   if (step.id === "quota_timezone") {
     return (
       <div className="onboarding-inline-form">
-        <label htmlFor="onboarding-quota-timezone">用户额度时区</label>
-        <Input id="onboarding-quota-timezone" value={drafts.quotaTimezone} onChange={(event) => onDraftChange("quotaTimezone", event.target.value)} placeholder="Asia/Shanghai" />
-        <small>默认使用北京时间（Asia/Shanghai，UTC+8），今日从 00:00 开始，自然周从周一 00:00 开始。</small>
-        <Button type="primary" loading={pending} disabled={!drafts.quotaTimezone.trim()} onClick={() => onSaveConfiguration({ "user_quota.timezone": drafts.quotaTimezone.trim() })}>保存时区</Button>
+        <label htmlFor="onboarding-system-timezone">系统时区</label>
+        <TimezoneSelect id="onboarding-system-timezone" value={drafts.quotaTimezone} onChange={(value) => onDraftChange("quotaTimezone", value)} disabled={pending} />
+        <small>页面时间、用量统计、自然周额度和通知统一使用此时区。今日从 00:00 开始，自然周从周一 00:00 开始；夏令时自动调整。</small>
+        <Button type="primary" loading={pending} disabled={!drafts.quotaTimezone.trim()} onClick={() => onSaveConfiguration({ "system.timezone": drafts.quotaTimezone.trim() })}>保存时区</Button>
       </div>
     );
   }
@@ -549,6 +552,6 @@ function configurationNumberValue(catalog: ConfigurationCatalog, key: string): n
 }
 
 function formatStatusTime(timestamp: number) {
-  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+  return siteDateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
     .format(new Date(timestamp * 1000));
 }

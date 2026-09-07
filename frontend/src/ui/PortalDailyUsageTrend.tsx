@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
 import * as echarts from "echarts/core";
 import { LineChart, type LineSeriesOption } from "echarts/charts";
 import {
@@ -65,6 +66,7 @@ export function PortalDailyUsageTrend({
   window: PortalUsageTrendWindow;
   onSessionExpired: () => void;
 }) {
+  useSiteTimezone();
   const [dimension, setDimension] = useState<PortalUsageTrendDimension>("total");
   const [modelMetric, setModelMetric] = useState<PortalTrendMetric>("total");
   const query = useQuery({
@@ -522,13 +524,13 @@ function formatTrendDate(date: string) {
 
 function formatTrendTimestamp(timestamp: number) {
   if (!timestamp) return "—";
-  return new Date(timestamp * 1000).toLocaleString("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false
-  });
+  }).format(new Date(timestamp * 1000));
 }
 
 function errorMessage(error: unknown) {

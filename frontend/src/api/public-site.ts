@@ -1,3 +1,4 @@
+import { defaultSiteTimezone } from "../ui/site-time";
 import { apiRequest } from "./client";
 import type { NativeAccountCatalog, PublicSiteConfiguration } from "./generated";
 
@@ -8,7 +9,8 @@ export const nativeAccountsQueryKey = ["native-accounts"] as const;
 
 export const defaultPublicSiteConfiguration: PublicSiteConfiguration = {
   version: 1,
-  product_name: "Codex CPA Cluster",
+  timezone: defaultSiteTimezone,
+  product_name: "Codex CPA Pool",
   short_name: "Codex CPA",
   environment_label: "Self-hosted service",
   public_base_url: "",
@@ -18,15 +20,18 @@ export const defaultPublicSiteConfiguration: PublicSiteConfiguration = {
   default_model: "gpt-5.6-sol",
   logo: {
     custom: false,
-    url: "/portal/assets/codex-cpa-cluster-logo.svg",
+    url: "/portal/assets/codex-cpa-pool-logo.svg",
     content_type: "image/svg+xml",
     sha256: "",
     updated_at: null
   }
 };
 
-export function readPublicSiteConfiguration(signal?: AbortSignal): Promise<PublicSiteConfiguration> {
-  return apiRequest<PublicSiteConfiguration>("/site-config.json", { signal, cache: "no-store" });
+export async function readPublicSiteConfiguration(signal?: AbortSignal): Promise<PublicSiteConfiguration> {
+  const configuration = await apiRequest<PublicSiteConfiguration>("/site-config.json", { signal, cache: "no-store" });
+  // Reject an unsupported zone as a query error; keep the last valid display zone.
+  new Intl.DateTimeFormat("en", { timeZone: configuration.timezone || defaultSiteTimezone }).format();
+  return configuration;
 }
 
 export function emailDomainHint(domains: readonly string[] | undefined): string {

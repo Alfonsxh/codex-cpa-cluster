@@ -6,6 +6,9 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 printf '%s\n' '[1/7] 语法、格式与生成代码'
 sh -n \
   "$ROOT_DIR/scripts/check-generated-api.sh" \
+  "$ROOT_DIR/scripts/check-product-name.sh" \
+  "$ROOT_DIR/scripts/test-product-name.sh" \
+  "$ROOT_DIR/scripts/test-removed-runtime.sh" \
   "$ROOT_DIR/scripts/run.sh" \
   "$ROOT_DIR/scripts/generate-api.sh" \
   "$ROOT_DIR/scripts/local-release.sh" \
@@ -14,12 +17,16 @@ sh -n \
   "$ROOT_DIR/scripts/test-release-images.sh" \
   "$ROOT_DIR/scripts/test-run-runtime.sh" \
   "$ROOT_DIR/scripts/test-run.sh" \
+  "$ROOT_DIR/scripts/test-run-compat.sh" \
   "$ROOT_DIR/scripts/test-faults.sh" \
   "$ROOT_DIR/scripts/test-smoke.sh" \
   "$ROOT_DIR/scripts/verify.sh"
+sh "$ROOT_DIR/scripts/check-product-name.sh"
+sh "$ROOT_DIR/scripts/test-product-name.sh"
 (cd "$ROOT_DIR" && sh scripts/check-generated-api.sh)
 sh "$ROOT_DIR/scripts/test-run-runtime.sh"
 sh "$ROOT_DIR/scripts/test-run.sh"
+sh "$ROOT_DIR/scripts/test-run-compat.sh"
 sh "$ROOT_DIR/scripts/test-release-images.sh"
 UNFORMATTED_GO=$(find "$ROOT_DIR/cmd" "$ROOT_DIR/internal" -type f -name '*.go' -exec gofmt -l {} +)
 if [ -n "$UNFORMATTED_GO" ]; then
@@ -54,6 +61,7 @@ docker compose \
   config --quiet
 
 printf '%s\n' '[6/7] 已移除运行时残留'
+sh "$ROOT_DIR/scripts/test-removed-runtime.sh"
 REMOVED_SOURCE_SUFFIX=$(printf '.%s%s' p y)
 REMOVED_BYTECODE_SUFFIX=$(printf '.%s%sc' p y)
 REMOVED_DATA_PLANE_SUFFIX=$(printf '.%s%s%s' l u a)
@@ -70,7 +78,8 @@ if find "$ROOT_DIR" \
   echo "发现已移除运行时的源码或依赖文件" >&2
   exit 1
 fi
-FORBIDDEN_RUNTIME=$(printf '\160\171\164\150\157\156\63\77\174\163\145\164\165\160\55\160\171\164\150\157\156\174\160\151\160\40\151\156\163\164\141\154\154\174\160\171\164\145\163\164\174\165\156\151\164\164\145\163\164')
+# Match interpreter command tokens, while allowing historical document filenames.
+FORBIDDEN_RUNTIME=$(printf '(^|[^[:alnum:]_.-])\160\171\164\150\157\156\63\77([^[:alnum:]_.-]|$)\174\163\145\164\165\160\55\160\171\164\150\157\156\174\160\151\160\40\151\156\163\164\141\154\154\174\160\171\164\145\163\164\174\165\156\151\164\164\145\163\164')
 if rg --hidden -n "$FORBIDDEN_RUNTIME" \
   --glob '!frontend/node_modules/**' \
   --glob '!tools/openapi/node_modules/**' \
@@ -88,7 +97,29 @@ if rg --hidden -n "$FORBIDDEN_DEPLOYMENT_NAMESPACE" \
   --glob '!.git/**' \
   --glob '!.harness/**' \
   --glob '!dist/**' \
-  "$ROOT_DIR"; then
+  "$ROOT_DIR" \
+  | CPA_FORBIDDEN_NAMESPACE="$FORBIDDEN_DEPLOYMENT_NAMESPACE" CPA_SCAN_ROOT="$ROOT_DIR" awk '
+    BEGIN {
+      forbidden=ENVIRON["CPA_FORBIDDEN_NAMESPACE"]
+      root=ENVIRON["CPA_SCAN_ROOT"] "/"
+      history="Go v" 2
+      title="# Python v1 到 " history " 的保留数据迁移方案"
+      intro="Python v1 首次切换到 " history " 必须先完成 [保留数据迁移方案](python-to-go-migration.md) 中的兼容转换、演练和受控接管。"
+    }
+    {
+      path=$0; sub(/:[0-9]+:.*/, "", path)
+      if (index(path, root) == 1) path=substr(path, length(root) + 1)
+      line=$0; sub(/^[^:]+:[0-9]+:/, "", line)
+      # Only the historical label in these two established migration summaries
+      # is allowed. Every other namespace on the same line is still checked.
+      if ((path == "docs/python-to-go-migration.md" && index(line, title) == 1) ||
+          (path == "docs/upgrade.md" && index(line, intro) == 1)) {
+        sub(history, "Go", line)
+      }
+      if (line ~ forbidden) { print $0; found=1 }
+    }
+    END { exit (found ? 0 : 1) }
+  '; then
   echo "发现迁移期部署命名或已移除的 Docker 只读代理" >&2
   exit 1
 fi

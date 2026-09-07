@@ -1,3 +1,4 @@
+import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
 import { Button, Modal, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -52,6 +53,7 @@ const serviceStateRank: Record<string, number> = {
 };
 
 export function RuntimePage({ csrfToken }: { csrfToken: string }) {
+  const siteTimezone = useSiteTimezone();
   const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
@@ -124,8 +126,8 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
   useEffect(() => {
     if (!services.data) return;
     reportedServiceError.current = null;
-    setRefreshLabel(`运行状态更新于 ${formatCompactTimestamp(Date.now() / 1_000)}`);
-  }, [services.data, setRefreshLabel]);
+    setRefreshLabel(`运行状态更新于 ${formatCompactTimestamp(services.dataUpdatedAt / 1_000)}`);
+  }, [services.data, services.dataUpdatedAt, setRefreshLabel, siteTimezone]);
   useEffect(() => {
     if (!services.isError || reportedServiceError.current === services.error) return;
     reportedServiceError.current = services.error;
@@ -621,7 +623,7 @@ function serviceTarget(service: string) {
 
 function formatCompactTimestamp(timestamp?: number | null) {
   if (!timestamp) return "—";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return siteDateTimeFormat("zh-CN", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",

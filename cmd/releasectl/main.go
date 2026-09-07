@@ -74,7 +74,7 @@ var componentInputs = map[string][]string{
 		"internal/bootstrap", "internal/controlplane", "internal/failover",
 		"internal/gateway", "internal/identity", "internal/logmaintenance", "internal/notifications",
 		"internal/ownership", "internal/portal", "internal/quota", "internal/runtimeops",
-		"internal/scheduler", "internal/snapshotfile", "internal/usage",
+		"internal/scheduler", "internal/sitetime", "internal/snapshotfile", "internal/usage",
 	},
 	"web": {
 		".dockerignore", "Dockerfile", "docker-bake.hcl", "go.mod", "go.sum", "cmd/web", "internal/web",
@@ -272,9 +272,9 @@ func writeDeployEnvironment(path string, descriptor releaseDescriptor) error {
 		name  string
 		value string
 	}{
-		{"CPAC_RELEASE_VERSION", descriptor.ReleaseVersion},
-		{"CPAC_RELEASE_REVISION", descriptor.Revision},
-		{"CPAC_RELEASE_ARCHIVE", descriptor.ArchiveName},
+		{"CPAP_RELEASE_VERSION", descriptor.ReleaseVersion},
+		{"CPAP_RELEASE_REVISION", descriptor.Revision},
+		{"CPAP_RELEASE_ARCHIVE", descriptor.ArchiveName},
 	}
 	for _, component := range []string{"control", "web", "gateway", "edge"} {
 		record, found := descriptor.Components[component]
@@ -284,7 +284,7 @@ func writeDeployEnvironment(path string, descriptor releaseDescriptor) error {
 		values = append(values, struct {
 			name  string
 			value string
-		}{"CPAC_" + strings.ToUpper(component) + "_IMAGE", record.Image})
+		}{"CPAP_" + strings.ToUpper(component) + "_IMAGE", record.Image})
 	}
 	lines := make([]string, 0, len(values))
 	for _, value := range values {

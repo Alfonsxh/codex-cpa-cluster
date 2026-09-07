@@ -15,15 +15,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountlifecycle"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/accountstatus"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/identity"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/notifications"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/quota"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/runtimeops"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountlifecycle"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountstatus"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/identity"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/notifications"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/runtimeops"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -2222,7 +2222,7 @@ func TestNotificationSettingsWebhookAndManualSendContract(t *testing.T) {
 	}
 	settings, err := store.ReadSettings(context.Background())
 	if err != nil || settings["notification.daily_times"] != "09:00,18:00" ||
-		settings["notification.timezone"] != "Asia/Shanghai" {
+		settings["notification.timezone"] != nil {
 		t.Fatalf("stored notification settings = (%#v, %v)", settings, err)
 	}
 	response = performAdminRequest(server, http.MethodGet, "/admin/api/settings/notifications", nil, headers, nil)

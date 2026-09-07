@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/gateway"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/snapshotfile"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/gateway"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/snapshotfile"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/google/uuid"
 )
 

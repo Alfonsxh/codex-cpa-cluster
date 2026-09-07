@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 )
 
 const testLifecycleOperationID = "00000000-0000-4000-8000-000000000001"

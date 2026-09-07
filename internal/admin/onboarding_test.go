@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 )
 
 func TestOnboardingStatusGuidesFreshTargetWithoutLeakingSecrets(t *testing.T) {

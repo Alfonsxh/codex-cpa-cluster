@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Alfonsxh/codex-cpa-pool/internal/sitetime"
 	"github.com/gin-gonic/gin"
 )
 
@@ -135,7 +136,7 @@ func (server *Server) onboardingStatus(ctx context.Context) (onboardingStatusRes
 
 	recommendedConfigured := map[string]bool{
 		"public_base_url": strings.TrimSpace(values.PublicBaseURL) != "",
-		"quota_timezone":  configuredNonEmptyString(settings, "user_quota.timezone"),
+		"quota_timezone":  configuredNonEmptyString(settings, sitetime.SettingKey) || configuredNonEmptyString(settings, "user_quota.timezone") || configuredNonEmptyString(settings, "notification.timezone"),
 		"weekly_quota":    configuredPositiveNumber(settings, "user_quota.default_weekly_tokens"),
 		"notifications":   hasSecretStatus(secretStatuses, "wecom_webhook"),
 		"branding":        customLogo || brandingCustomized(values),
@@ -143,7 +144,7 @@ func (server *Server) onboardingStatus(ctx context.Context) (onboardingStatusRes
 	}
 	recommendedDefinitions := []onboardingStep{
 		{ID: "public_base_url", Kind: onboardingRecommendedKind, Title: "公开访问地址", Description: "用于通知和客户端配置导出；留空时浏览器仍使用当前来源。", ActionPath: "/configuration?group=品牌与身份&key=branding.public_base_url"},
-		{ID: "quota_timezone", Kind: onboardingRecommendedKind, Title: "用户额度时区", Description: "决定自然周额度和今日用量的日期边界。", ActionPath: "/configuration?group=用户额度&key=user_quota.timezone"},
+		{ID: "quota_timezone", Kind: onboardingRecommendedKind, Title: "系统时区", Description: "统一页面时间、用量统计、自然周额度与通知调度。", ActionPath: "/configuration?group=系统设置&key=system.timezone"},
 		{ID: "weekly_quota", Kind: onboardingRecommendedKind, Title: "默认周额度", Description: "为新用户设置组织级默认 Token 上限；留空表示默认不限额。", ActionPath: "/configuration?group=用户额度&key=user_quota.default_weekly_tokens"},
 		{ID: "notifications", Kind: onboardingRecommendedKind, Title: "企业微信通知", Description: "配置额度报告和异常提醒 Webhook。", ActionPath: "/configuration?group=企业微信通知"},
 		{ID: "branding", Kind: onboardingRecommendedKind, Title: "品牌信息", Description: "按需设置产品名称、环境说明和 Logo。", ActionPath: "/configuration?group=品牌与身份"},

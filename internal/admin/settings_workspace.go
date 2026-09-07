@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/notifications"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/notifications"
 	"github.com/gin-gonic/gin"
 )
 

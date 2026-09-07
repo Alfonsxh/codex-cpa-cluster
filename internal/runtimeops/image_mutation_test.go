@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/containerd/errdefs"
 	"github.com/go-resty/resty/v2"
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"

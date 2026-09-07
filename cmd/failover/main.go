@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/controlplane"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/failover"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/ownership"
-	"github.com/Alfonsxh/codex-cpa-cluster/internal/scheduler"
-	usagestore "github.com/Alfonsxh/codex-cpa-cluster/internal/usage"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/ownership"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/scheduler"
+	usagestore "github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -90,7 +90,7 @@ func newCommand() *cobra.Command {
 	}
 	flags := command.Flags()
 	flags.String("config", "", "optional YAML, JSON, or TOML configuration file")
-	flags.String("root", "/opt/codex-cpa-cluster", "existing CPA deployment root")
+	flags.String("root", "/opt/codex-cpa-pool", "existing CPA deployment root")
 	flags.String("log-level", "info", "Zap log level")
 	flags.Duration("scheduler-interval", 5*time.Second, "controller due-check interval")
 	flags.Duration("max-health-age", 3*time.Minute, "maximum healthy heartbeat age")

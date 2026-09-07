@@ -1,20 +1,69 @@
 #!/usr/bin/env sh
 set -eu
 
-DEFAULT_REPOSITORY=${CPAC_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}
-RUN_ASSET_URL=${CPAC_RUN_ASSET_URL:-https://github.com/$DEFAULT_REPOSITORY/releases/latest/download/run.sh}
+# CPAP_OPERATOR_PROTOCOL=1
+# Compatibility boundary: accept the former operator prefix only as input.
+# Values are never evaluated as shell code; the suffix list is fixed here.
+for operator_suffix in GITHUB_REPOSITORY RUN_ASSET_URL STAGING_ROOT DEPLOY_ROOT \
+  BACKUP_DIR CONFIG_FILE LEGACY_CONFIG_FILE ACME_ROOT NGINX_AVAILABLE_DIRECTORY \
+  NGINX_ENABLED_DIRECTORY CERTIFICATE_ROOT ALLOW_NON_ROOT CERTBOT_EMAIL DOMAIN \
+  INGRESS_MODE LOCK_FILE; do
+  eval "operator_current_set=\${CPAP_${operator_suffix}+set}"
+  eval "operator_legacy_set=\${CPAC_${operator_suffix}+set}"
+  eval "operator_current_value=\${CPAP_${operator_suffix}-}"
+  eval "operator_legacy_value=\${CPAC_${operator_suffix}-}"
+  if [ "$operator_current_set" = set ] && [ "$operator_legacy_set" = set ] \
+    && [ "$operator_current_value" != "$operator_legacy_value" ]; then
+    printf 'ERROR  CPAP_%s 与旧前缀配置冲突，拒绝继续\n' "$operator_suffix" >&2
+    exit 1
+  fi
+  if [ "$operator_current_set" != set ] && [ "$operator_legacy_set" = set ]; then
+    export "CPAP_$operator_suffix=$operator_legacy_value"
+  fi
+done
+unset operator_suffix operator_current_set operator_legacy_set operator_current_value operator_legacy_value
+
+# The existing publication repository remains authoritative until it is moved.
+DEFAULT_REPOSITORY=${CPAP_GITHUB_REPOSITORY:-Alfonsxh/codex-cpa-cluster}
+RUN_ASSET_URL=${CPAP_RUN_ASSET_URL:-https://github.com/$DEFAULT_REPOSITORY/releases/latest/download/run.sh}
+
+# Compatibility boundary: retain existing operator/runtime roots in place.
+# An ambiguous pair fails before mkdir, download or script replacement.
+resolve_existing_root() {
+  current_root=$1
+  former_root=$2
+  if [ "$current_root" != "$former_root" ] \
+    && { [ -e "$former_root" ] || [ -L "$former_root" ]; }; then
+    if [ -e "$current_root" ] || [ -L "$current_root" ]; then
+      printf 'ERROR  新旧目录同时存在，请显式指定已有部署目录：%s / %s\n' \
+        "$current_root" "$former_root" >&2
+      return 1
+    fi
+    printf '%s\n' "$former_root"
+  else
+    printf '%s\n' "$current_root"
+  fi
+}
 
 bootstrap_from_stdin() {
-  bootstrap_root=${CPAC_STAGING_ROOT:-/home/cpac}
+  if [ -n "${CPAP_STAGING_ROOT:-}" ]; then
+    bootstrap_root=$CPAP_STAGING_ROOT
+  else
+    bootstrap_root=$(resolve_existing_root /home/cpap /home/cpac) || exit 1
+  fi
+  if [ -z "${CPAP_DEPLOY_ROOT:-}" ]; then
+    bootstrap_deploy_root=$(resolve_existing_root "$bootstrap_root/runtime" /opt/codex-cpa-cluster) || exit 1
+    export CPAP_DEPLOY_ROOT="$bootstrap_deploy_root"
+  fi
   case "$bootstrap_root" in
     /*) ;;
-    *) printf 'ERROR  CPAC_STAGING_ROOT 必须是绝对路径\n' >&2; exit 1 ;;
+    *) printf 'ERROR  CPAP_STAGING_ROOT 必须是绝对路径\n' >&2; exit 1 ;;
   esac
   [ "$bootstrap_root" != / ] || {
-    printf 'ERROR  CPAC_STAGING_ROOT 不能是文件系统根目录\n' >&2
+    printf 'ERROR  CPAP_STAGING_ROOT 不能是文件系统根目录\n' >&2
     exit 1
   }
-  if [ "$(id -u)" -ne 0 ] && [ "${CPAC_ALLOW_NON_ROOT:-false}" != true ]; then
+  if [ "$(id -u)" -ne 0 ] && [ "${CPAP_ALLOW_NON_ROOT:-false}" != true ]; then
     printf 'ERROR  请通过 sudo 运行安装脚本\n' >&2
     exit 1
   fi
@@ -85,16 +134,21 @@ esac
 
 SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 SCRIPT_PATH="$SCRIPT_DIRECTORY/$(basename -- "$0")"
-STAGING_ROOT=${CPAC_STAGING_ROOT:-$SCRIPT_DIRECTORY}
-DEFAULT_DEPLOY_ROOT=${CPAC_DEPLOY_ROOT:-$STAGING_ROOT/runtime}
-DEFAULT_BACKUP_ROOT=${CPAC_BACKUP_DIR:-$STAGING_ROOT/backups}
-DEFAULT_CONFIG_FILE=${CPAC_CONFIG_FILE:-$STAGING_ROOT/config.env}
-LEGACY_CONFIG_FILE=${CPAC_LEGACY_CONFIG_FILE:-/etc/cpac/config.env}
-ACME_ROOT=${CPAC_ACME_ROOT:-/var/www/letsencrypt}
-NGINX_AVAILABLE_DIRECTORY=${CPAC_NGINX_AVAILABLE_DIRECTORY:-/etc/nginx/sites-available}
-NGINX_ENABLED_DIRECTORY=${CPAC_NGINX_ENABLED_DIRECTORY:-/etc/nginx/sites-enabled}
-CERTIFICATE_ROOT=${CPAC_CERTIFICATE_ROOT:-/etc/letsencrypt/live}
-SERVER_TIMEZONE=Asia/Shanghai
+STAGING_ROOT=${CPAP_STAGING_ROOT:-$SCRIPT_DIRECTORY}
+if [ -n "${CPAP_DEPLOY_ROOT:-}" ]; then
+  DEFAULT_DEPLOY_ROOT=$CPAP_DEPLOY_ROOT
+else
+  DEFAULT_DEPLOY_ROOT=$(resolve_existing_root "$STAGING_ROOT/runtime" /opt/codex-cpa-cluster) || exit 1
+fi
+DEFAULT_BACKUP_ROOT=${CPAP_BACKUP_DIR:-$STAGING_ROOT/backups}
+DEFAULT_CONFIG_FILE=${CPAP_CONFIG_FILE:-$STAGING_ROOT/config.env}
+LEGACY_CONFIG_FILE=${CPAP_LEGACY_CONFIG_FILE:-/etc/cpac/config.env}
+ACME_ROOT=${CPAP_ACME_ROOT:-/var/www/letsencrypt}
+NGINX_AVAILABLE_DIRECTORY=${CPAP_NGINX_AVAILABLE_DIRECTORY:-/etc/nginx/sites-available}
+NGINX_ENABLED_DIRECTORY=${CPAP_NGINX_ENABLED_DIRECTORY:-/etc/nginx/sites-enabled}
+CERTIFICATE_ROOT=${CPAP_CERTIFICATE_ROOT:-/etc/letsencrypt/live}
+
+OPERATOR_PUBLIC_PORT=18317
 
 UI_STEP_NUMBER=0
 UI_IS_TERMINAL=false
@@ -127,10 +181,10 @@ ui_initialize() {
 ui_banner() {
   if [ "$UI_IS_TERMINAL" = true ]; then
     printf '\n%s%s╭──────────────────────────────────────────────╮%s\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
-    printf '%s%s│  CPAC  ·  安装 / 升级 / HTTPS / 健康检查      │%s\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
+    printf '%s%s│  CPAP  ·  安装 / 升级 / HTTPS / 健康检查      │%s\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
     printf '%s%s╰──────────────────────────────────────────────╯%s\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
   else
-    printf '\n== CPAC 安装与升级 ==\n'
+    printf '\n== CPAP 安装与升级 ==\n'
   fi
 }
 
@@ -172,7 +226,7 @@ ui_run() {
   ui_title=$1
   shift
   ui_step "$ui_title"
-  ui_log=$(mktemp "${TMPDIR:-/var/tmp}/cpac-command.XXXXXX") || {
+  ui_log=$(mktemp "${TMPDIR:-/var/tmp}/cpap-command.XXXXXX") || {
     ui_error "无法创建阶段日志"
     return 1
   }
@@ -277,7 +331,7 @@ die() {
 ui_initialize
 
 require_root() {
-  if [ "$(id -u)" -ne 0 ] && [ "${CPAC_ALLOW_NON_ROOT:-false}" != true ]; then
+  if [ "$(id -u)" -ne 0 ] && [ "${CPAP_ALLOW_NON_ROOT:-false}" != true ]; then
     die "请使用 sudo 运行：sudo $SCRIPT_PATH $*"
   fi
 }
@@ -328,20 +382,27 @@ config_ingress_mode() {
   [ -e "$config_file" ] || return 1
   [ -f "$config_file" ] && [ ! -L "$config_file" ] \
     || die "入口配置必须是普通非符号链接文件：$config_file"
-  values=$(awk -F= '$1 == "CPAC_INGRESS_MODE" { print substr($0, index($0, "=") + 1) }' "$config_file")
+  # Compatibility boundary: old persisted ingress is input-only.
+  values=$(awk -F= '$1 == "CPAP_INGRESS_MODE" || $1 == "CPAC_INGRESS_MODE" {
+    if (seen[$1]++) exit 1
+    value=substr($0, index($0, "=") + 1)
+    if (found++ && value != previous) exit 1
+    previous=value
+  } END { if (found) print previous }' "$config_file") \
+    || die "入口配置的新旧前缀冲突或字段重复：$config_file"
   count=$(printf '%s\n' "$values" | awk 'NF { count++ } END { print count + 0 }')
   case "$count" in
     0) printf '%s\n' managed ;;
     1) validate_ingress_mode "$values" || die "入口模式无效：$config_file" ;;
-    *) die "入口配置必须且只能包含一个 CPAC_INGRESS_MODE：$config_file" ;;
+    *) die "入口配置必须且只能包含一个 CPAP_INGRESS_MODE：$config_file" ;;
   esac
 }
 
 config_has_explicit_ingress_mode() {
   config_file=$1
   config_ingress_mode "$config_file" >/dev/null
-  count=$(awk -F= '$1 == "CPAC_INGRESS_MODE" { count++ } END { print count + 0 }' "$config_file")
-  [ "$count" -eq 1 ]
+  count=$(awk -F= '$1 == "CPAP_INGRESS_MODE" || $1 == "CPAC_INGRESS_MODE" { count++ } END { print count + 0 }' "$config_file")
+  [ "$count" -ge 1 ]
 }
 
 write_config() {
@@ -359,7 +420,7 @@ write_config() {
   config_tmp=$(mktemp "$config_directory/.config.XXXXXX")
   if ! {
     printf 'CPA_DOMAIN=%s\n' "$domain"
-    [ -z "$ingress_mode" ] || printf 'CPAC_INGRESS_MODE=%s\n' "$ingress_mode"
+    [ -z "$ingress_mode" ] || printf 'CPAP_INGRESS_MODE=%s\n' "$ingress_mode"
   } >"$config_tmp" \
     || ! chmod 0600 "$config_tmp" \
     || ! mv -f -- "$config_tmp" "$config_file"; then
@@ -477,7 +538,7 @@ resolve_deploy_domain() {
 
 nginx_domain_server_count() {
   domain=$1
-  nginx_output=$(mktemp "${TMPDIR:-/var/tmp}/cpac-nginx-config.XXXXXX") \
+  nginx_output=$(mktemp "${TMPDIR:-/var/tmp}/cpap-nginx-config.XXXXXX") \
     || die "无法创建 Nginx 配置检查文件"
   if ! nginx -T >"$nginx_output" 2>&1; then
     rm -f -- "$nginx_output"
@@ -536,7 +597,7 @@ choose_ingress_mode() {
   cat >&2 <<EOF
 
   1) 使用现有反向代理（不安装、不启动、不修改 Nginx 或 Certbot）
-  2) 由 CPAC 管理 Nginx 与 Let's Encrypt 证书
+  2) 由 CPAP 管理 Nginx 与 Let's Encrypt 证书
   3) 取消
 请选择 [1-3]:
 EOF
@@ -751,7 +812,7 @@ query_github_release_tags() {
   output_file=$2
   printf '%s' "$repository" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
     || die "GitHub 仓库标识无效：$repository"
-  query_directory=$(mktemp -d "${TMPDIR:-/var/tmp}/cpac-releases.XXXXXX") \
+  query_directory=$(mktemp -d "${TMPDIR:-/var/tmp}/cpap-releases.XXXXXX") \
     || die "创建 Release 查询目录失败"
   : >"$output_file"
   page=1
@@ -793,7 +854,7 @@ choose_upgrade_release() {
   repository=$2
   current_version=$(deployment_marker_version "$deploy_root/.deploy-initialized" 2>/dev/null) \
     || die "未检测到有效的当前部署版本；请使用 --tag TAG 指定 Release，或不带 --tag 使用 Latest Release"
-  release_directory=$(mktemp -d "${TMPDIR:-/var/tmp}/cpac-release-choice.XXXXXX") \
+  release_directory=$(mktemp -d "${TMPDIR:-/var/tmp}/cpap-release-choice.XXXXXX") \
     || die "创建 Release 选择目录失败"
   all_tags="$release_directory/all-tags.txt"
   candidate_tags="$release_directory/candidates.txt"
@@ -856,11 +917,30 @@ choose_upgrade_release() {
 release_value() {
   release_file=$1
   release_key=$2
-  value=$(awk -F= -v key="$release_key" \
-    '$1 == key { print substr($0, index($0, "=") + 1); found++ } END { if (found != 1) exit 1 }' \
-    "$release_file") || die "发布环境缺少唯一字段：$release_key"
+  # Compatibility boundary: former release env fields remain readable.
+  legacy_release_key="CPAC_${release_key#CPAP_}"
+  value=$(awk -F= -v key="$release_key" -v legacy="$legacy_release_key" '
+    $1 == key || $1 == legacy {
+      if (seen[$1]++) invalid=1
+      value=substr($0, index($0, "=") + 1)
+      if (found++ && previous != value) invalid=1
+      previous=value
+    }
+    END { if (!found || invalid) exit 1; print previous }
+  ' "$release_file") || die "发布环境缺少唯一字段或新旧前缀冲突：$release_key"
   [ -n "$value" ] || die "发布环境字段为空：$release_key"
   printf '%s\n' "$value"
+}
+
+release_archive_name() {
+  archive_name=$(release_value "$1" CPAP_RELEASE_ARCHIVE)
+  case "$archive_name" in
+    "codex-cpa-pool-$2.tar.gz") ;;
+    # Compatibility boundary: published archives keep their immutable names.
+    "codex-cpa-cluster-$2.tar.gz") ;;
+    *) die "发布环境归档名不匹配" ;;
+  esac
+  printf '%s\n' "$archive_name"
 }
 
 validate_release_image() {
@@ -888,7 +968,7 @@ install_prerequisites() {
       || die "安装系统依赖失败：$*"
   fi
   for command in awk cmp cp curl docker flock getent grep install mktemp \
-    readlink sed sha256sum sqlite3 systemctl tar timedatectl wc; do
+    readlink sed sha256sum sqlite3 systemctl tar wc; do
     require_command "$command"
   done
   if [ "$ingress_mode" = managed ]; then
@@ -909,19 +989,6 @@ install_prerequisites() {
   docker info >/dev/null 2>&1 || die "Docker 服务不可用"
 }
 
-configure_server_timezone() {
-  current_timezone=$(timedatectl show --property=Timezone --value 2>/dev/null) \
-    || die "读取服务器时区失败"
-  if [ "$current_timezone" != "$SERVER_TIMEZONE" ]; then
-    timedatectl set-timezone "$SERVER_TIMEZONE" \
-      || die "设置服务器时区失败：$SERVER_TIMEZONE"
-  fi
-  current_timezone=$(timedatectl show --property=Timezone --value 2>/dev/null) \
-    || die "校验服务器时区失败"
-  [ "$current_timezone" = "$SERVER_TIMEZONE" ] \
-    || die "服务器时区未生效：期望 $SERVER_TIMEZONE，实际 ${current_timezone:-未知}"
-}
-
 download_release() {
   repository=$1
   requested_tag=$2
@@ -938,7 +1005,6 @@ download_release() {
   mkdir -p -- "$output_directory" || die "创建发布下载目录失败"
   base_url="https://github.com/$repository/releases/download/$selected_version"
   for asset in \
-    "codex-cpa-cluster-$selected_version.tar.gz" \
     "release-$selected_version.env" \
     run.sh \
     SHA256SUMS
@@ -947,6 +1013,10 @@ download_release() {
       "$base_url/$asset" -o "$output_directory/$asset" \
       || die "下载发布文件失败：$asset"
   done
+  archive_name=$(release_archive_name "$output_directory/release-$selected_version.env" "$selected_version")
+  curl -fsSL --retry 3 --connect-timeout 15 --max-time 300 \
+    "$base_url/$archive_name" -o "$output_directory/$archive_name" \
+    || die "下载发布文件失败：$archive_name"
   printf '%s\n' "$selected_version" >"$output_directory/VERSION" \
     || die "记录发布版本失败"
 }
@@ -955,13 +1025,24 @@ verify_release() {
   directory=$1
   version=$2
   sums="$directory/SHA256SUMS"
-  for asset in "codex-cpa-cluster-$version.tar.gz" "release-$version.env" run.sh; do
-    grep -Eq "^[0-9a-f]{64}  $asset$" "$sums" || die "SHA256SUMS 缺少 $asset"
+  archive_name=$(release_archive_name "$directory/release-$version.env" "$version")
+  for asset in "$archive_name" "release-$version.env" run.sh; do
+    expected_sum=$(awk -v name="$asset" '
+      $2 == name {
+        found++
+        hash=substr($0, 1, 64)
+        if (length($0) != 66 + length(name) || substr($0, 65, 2) != "  " ||
+            substr($0, 67) != name || hash !~ /^[0-9a-f]+$/) invalid=1
+        value=hash
+      }
+      END { if (found != 1 || invalid) exit 1; print value }
+    ' "$sums") || die "SHA256SUMS 缺少唯一精确条目：$asset"
+    [ -f "$directory/$asset" ] && [ ! -L "$directory/$asset" ] \
+      || die "发布文件缺失或不是普通文件：$asset"
+    actual_sum=$(sha256sum "$directory/$asset")
+    actual_sum=${actual_sum%% *}
+    [ "$actual_sum" = "$expected_sum" ] || die "发布文件 SHA256 校验失败：$asset"
   done
-  (
-    cd "$directory"
-    sha256sum -c --status --ignore-missing SHA256SUMS
-  ) || die "发布文件 SHA256 校验失败"
   sh -n "$directory/run.sh" || die "发布中的 run.sh 语法无效"
 }
 
@@ -1021,14 +1102,13 @@ write_target_env() {
   expected_version=$2
   output=$3
   deploy_root=$4
-  actual_version=$(release_value "$release_file" CPAC_RELEASE_VERSION)
+  actual_version=$(release_value "$release_file" CPAP_RELEASE_VERSION)
   [ "$actual_version" = "$expected_version" ] || die "发布环境版本不匹配"
-  archive=$(release_value "$release_file" CPAC_RELEASE_ARCHIVE)
-  [ "$archive" = "codex-cpa-cluster-$expected_version.tar.gz" ] || die "发布环境归档名不匹配"
-  control_image=$(release_value "$release_file" CPAC_CONTROL_IMAGE)
-  web_image=$(release_value "$release_file" CPAC_WEB_IMAGE)
-  gateway_image=$(release_value "$release_file" CPAC_GATEWAY_IMAGE)
-  edge_image=$(release_value "$release_file" CPAC_EDGE_IMAGE)
+  release_archive_name "$release_file" "$expected_version" >/dev/null
+  control_image=$(release_value "$release_file" CPAP_CONTROL_IMAGE)
+  web_image=$(release_value "$release_file" CPAP_WEB_IMAGE)
+  gateway_image=$(release_value "$release_file" CPAP_GATEWAY_IMAGE)
+  edge_image=$(release_value "$release_file" CPAP_EDGE_IMAGE)
   for pair in \
     "control|$control_image" "web|$web_image" \
     "gateway|$gateway_image" "edge|$edge_image"
@@ -1039,6 +1119,35 @@ write_target_env() {
   done
   output_directory=$(dirname -- "$output")
   temporary=$(mktemp "$output_directory/.target-env.XXXXXX")
+  if [ -e "$output" ] || [ -L "$output" ]; then
+    [ -f "$output" ] && [ ! -L "$output" ] \
+      || die "既有 target.env 必须是普通非符号链接文件"
+    # Existing deployment identity, network, ports, ownership and explicit
+    # maintenance choices are operator state; a product rename never resets them.
+    if ! awk -v control="$control_image" -v web="$web_image" \
+      -v gateway="$gateway_image" -v edge="$edge_image" '
+      BEGIN {
+        images["CPA_CONTROL_IMAGE"]=control; images["CPA_WEB_IMAGE"]=web
+        images["CPA_GATEWAY_IMAGE"]=gateway; images["CPA_EDGE_IMAGE"]=edge
+      }
+      {
+        key=$0; sub(/=.*/, "", key)
+        if (key in images) {
+          if (seen[key]++) invalid=1
+          print key "=" images[key]
+        } else print
+      }
+      END {
+        for (key in images) if (!seen[key]) invalid=1
+        if (invalid) exit 1
+      }
+    ' "$output" >"$temporary" \
+      || ! chmod 0600 "$temporary" || ! mv -f -- "$temporary" "$output"; then
+      rm -f -- "$temporary"
+      die "更新既有目标镜像失败；target.env 必须包含唯一的四个镜像字段"
+    fi
+    return 0
+  fi
   if ! {
     printf 'CPA_CONTROL_IMAGE=%s\n' "$control_image"
     printf 'CPA_WEB_IMAGE=%s\n' "$web_image"
@@ -1048,7 +1157,6 @@ write_target_env() {
       'CPA_COMPOSE_PROJECT_NAME=codex-cpa' \
       'CPA_INSTANCE_NAME=codex-cpa' \
       'CPA_RUNTIME_OWNER=codex-cpa' \
-      'CPA_TIMEZONE=Asia/Shanghai' \
       'CPA_OWNERSHIP_ACTIVATION_TTL=2m'
     printf 'CPA_DEPLOY_ROOT=%s\nCPA_CONFIRM_DEPLOY_ROOT=%s\n' "$deploy_root" "$deploy_root"
     printf '%s\n' \
@@ -1140,7 +1248,7 @@ ensure_account_runtime_layout() {
 
 backup_target() {
   root=$1
-  backup_directory=${CPAC_BACKUP_DIR:-$DEFAULT_BACKUP_ROOT}
+  backup_directory=${CPAP_BACKUP_DIR:-$DEFAULT_BACKUP_ROOT}
   mkdir -p -- "$backup_directory"
   chmod 0700 "$backup_directory"
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -1222,10 +1330,11 @@ write_nginx_site() {
   if [ -e "$site_file" ] || [ -L "$site_file" ]; then
     [ -f "$site_file" ] && [ ! -L "$site_file" ] \
       || die "Nginx 站点必须是普通非符号链接文件：$site_file"
-    if grep -Fxq '# Managed by CPAC run.sh' "$site_file"; then
+    if grep -Fxq '# Managed by Codex CPA Pool run.sh' "$site_file"; then
       :
-    elif grep -Fxq '# Managed by CPAC deploy.sh' "$site_file"; then
-      ui_note "检测到旧版 CPAC Nginx 标记，本次将迁移为 run.sh"
+    elif grep -Fxq '# Managed by CPAC run.sh' "$site_file" \
+      || grep -Fxq '# Managed by CPAC deploy.sh' "$site_file"; then
+      ui_note "检测到旧版 Nginx 托管标记，本次将迁移为 Codex CPA Pool run.sh"
     else
       die "Nginx 已有未托管的同名站点，拒绝覆盖：${site_file}；请改用 external 或手动处理"
     fi
@@ -1256,7 +1365,7 @@ write_nginx_site() {
   nginx_tmp=$(mktemp "$available_directory/.cpa-site.XXXXXX")
   if [ "$mode" = http ]; then
     cat >"$nginx_tmp" <<EOF
-# Managed by CPAC run.sh
+# Managed by Codex CPA Pool run.sh
 server {
     listen 80;
     server_name $domain;
@@ -1273,7 +1382,7 @@ server {
 EOF
   else
     cat >"$nginx_tmp" <<EOF
-# Managed by CPAC run.sh
+# Managed by Codex CPA Pool run.sh
 server {
     listen 80;
     server_name $domain;
@@ -1299,7 +1408,7 @@ server {
     client_max_body_size 100m;
 
     location / {
-        proxy_pass http://127.0.0.1:18317;
+        proxy_pass http://127.0.0.1:${OPERATOR_PUBLIC_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -1325,7 +1434,7 @@ EOF
     die "写入 Nginx 站点失败"
   fi
   ln -sfn "$site_file" "$enabled_file"
-  nginx_log=$(mktemp "${TMPDIR:-/var/tmp}/cpac-nginx.XXXXXX")
+  nginx_log=$(mktemp "${TMPDIR:-/var/tmp}/cpap-nginx.XXXXXX")
   if ! nginx -t >"$nginx_log" 2>&1 \
     || ! systemctl reload nginx >>"$nginx_log" 2>&1; then
     cat "$nginx_log" >&2
@@ -1345,9 +1454,9 @@ EOF
 }
 
 resolve_certbot_email() {
-  certbot_email=${CPAC_CERTBOT_EMAIL:-}
+  certbot_email=${CPAP_CERTBOT_EMAIL:-}
   if [ -z "$certbot_email" ]; then
-    [ -t 0 ] || die "首次签发证书需要交互输入邮箱，或设置 CPAC_CERTBOT_EMAIL"
+    [ -t 0 ] || die "首次签发证书需要交互输入邮箱，或设置 CPAP_CERTBOT_EMAIL"
     printf "%s" "请输入 Let's Encrypt 通知邮箱: " >&2
     IFS= read -r certbot_email
   fi
@@ -1376,16 +1485,16 @@ show_external_ingress_contract() {
   ui_done "未安装、启动或修改 Nginx / Certbot"
   cat <<EOF
 
-CPAC 本机上游：http://127.0.0.1:18317
+CPAP 本机上游：http://127.0.0.1:${OPERATOR_PUBLIC_PORT}
 现有反向代理必须：
   - 保留 Host、X-Forwarded-For、X-Forwarded-Proto；
   - 透传 WebSocket 的 Upgrade / Connection；SSE 必须关闭响应缓冲；
   - 为流式响应设置至少 3600 秒的读取和发送超时；
   - 将 ${domain}/__health 转发到该上游，公网预期返回 HTTP 200。
 
-Nginx 示例（按你的站点规范合并，不由 CPAC 写入）：
+Nginx 示例（按你的站点规范合并，不由 CPAP 写入）：
   location / {
-      proxy_pass http://127.0.0.1:18317;
+      proxy_pass http://127.0.0.1:${OPERATOR_PUBLIC_PORT};
       proxy_http_version 1.1;
       proxy_set_header Host \$host;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -1404,6 +1513,13 @@ update_operator_script() {
   verified_script=$1
   [ -f "$SCRIPT_PATH" ] && [ ! -L "$SCRIPT_PATH" ] \
     || die "当前部署入口必须是普通非符号链接文件：$SCRIPT_PATH"
+  # Compatibility boundary: a pinned pre-rename release must not downgrade
+  # the installer and lose the resolved CPAP paths or upgrade safeguards.
+  if ! grep -Fxq '# CPAP_OPERATOR_PROTOCOL=1' "$verified_script" \
+    && grep -q 'CPAC_' "$verified_script"; then
+    ui_note "所选历史发布使用旧安装器；保留当前 Pool 安装器以原址升级"
+    return 1
+  fi
   if cmp -s "$verified_script" "$SCRIPT_PATH"; then
     return 1
   fi
@@ -1463,6 +1579,46 @@ deployment_env_value() {
   awk -F= -v key="$env_key" \
     '$1 == key { print substr($0, index($0, "=") + 1); found++ } END { if (found != 1) exit 1 }' \
     "$env_file"
+}
+
+deployment_instance_name() {
+  instance_env=$1
+  [ -f "$instance_env" ] && [ ! -L "$instance_env" ] \
+    || die "target.env 必须是普通非符号链接文件"
+  instance_value=$(awk -F= '
+    $1 == "CPA_INSTANCE_NAME" { value=substr($0, index($0, "=") + 1); found++ }
+    END {
+      if (found > 1) exit 1
+      if (!found) print "codex-cpa"; else print value
+    }
+  ' "$instance_env") || die "target.env 的 CPA_INSTANCE_NAME 不能重复"
+  printf '%s' "$instance_value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' \
+    || die "CPA_INSTANCE_NAME 无效"
+  printf '%s\n' "$instance_value"
+}
+
+deployment_upstream_network() {
+  network_value=$(deployment_env_value "$1" CPA_UPSTREAM_NETWORK) \
+    || die "target.env 必须包含唯一 CPA_UPSTREAM_NETWORK"
+  printf '%s' "$network_value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' \
+    || die "CPA_UPSTREAM_NETWORK 无效"
+  printf '%s\n' "$network_value"
+}
+
+operator_public_port() {
+  port_root=$1
+  if [ ! -e "$port_root" ] && [ ! -L "$port_root" ]; then
+    printf '%s\n' 18317
+    return 0
+  fi
+  port_value=$(deployment_env_value "$port_root/target.env" CPA_PUBLIC_PORT) \
+    || die "既有 target.env 必须包含唯一 CPA_PUBLIC_PORT"
+  case "$port_value" in
+    ''|*[!0-9]*) die "CPA_PUBLIC_PORT 必须是 1 到 65535 的端口" ;;
+  esac
+  [ "${#port_value}" -le 5 ] && [ "$port_value" -ge 1 ] && [ "$port_value" -le 65535 ] \
+    || die "CPA_PUBLIC_PORT 必须是 1 到 65535 的端口"
+  printf '%s\n' "$port_value"
 }
 
 deployment_marker_version() {
@@ -1542,11 +1698,13 @@ prepare_deployment_summary() {
   summary_release_file=$2
   summary_fresh=$3
   DEPLOY_SUMMARY_PREVIOUS_VERSION=未安装
+  DEPLOY_SUMMARY_INSTANCE=codex-cpa
   previous_control_image=
   previous_web_image=
   previous_gateway_image=
   previous_edge_image=
   if [ "$summary_fresh" = false ]; then
+    DEPLOY_SUMMARY_INSTANCE=$(deployment_instance_name "$summary_root/target.env")
     DEPLOY_SUMMARY_PREVIOUS_VERSION=$(deployment_marker_version \
       "$summary_root/.deploy-initialized" 2>/dev/null || printf '%s\n' 未知)
     previous_control_image=$(deployment_env_value "$summary_root/target.env" CPA_CONTROL_IMAGE 2>/dev/null || true)
@@ -1554,32 +1712,32 @@ prepare_deployment_summary() {
     previous_gateway_image=$(deployment_env_value "$summary_root/target.env" CPA_GATEWAY_IMAGE 2>/dev/null || true)
     previous_edge_image=$(deployment_env_value "$summary_root/target.env" CPA_EDGE_IMAGE 2>/dev/null || true)
   fi
-  selected_control_image=$(release_value "$summary_release_file" CPAC_CONTROL_IMAGE)
-  selected_web_image=$(release_value "$summary_release_file" CPAC_WEB_IMAGE)
-  selected_gateway_image=$(release_value "$summary_release_file" CPAC_GATEWAY_IMAGE)
-  selected_edge_image=$(release_value "$summary_release_file" CPAC_EDGE_IMAGE)
+  selected_control_image=$(release_value "$summary_release_file" CPAP_CONTROL_IMAGE)
+  selected_web_image=$(release_value "$summary_release_file" CPAP_WEB_IMAGE)
+  selected_gateway_image=$(release_value "$summary_release_file" CPAP_GATEWAY_IMAGE)
+  selected_edge_image=$(release_value "$summary_release_file" CPAP_EDGE_IMAGE)
   DEPLOY_SUMMARY_CONTROL_IMAGE=$(deployment_image_change "$previous_control_image" "$selected_control_image")
   DEPLOY_SUMMARY_WEB_IMAGE=$(deployment_image_change "$previous_web_image" "$selected_web_image")
   DEPLOY_SUMMARY_GATEWAY_IMAGE=$(deployment_image_change "$previous_gateway_image" "$selected_gateway_image")
   DEPLOY_SUMMARY_EDGE_IMAGE=$(deployment_image_change "$previous_edge_image" "$selected_edge_image")
 
   DEPLOY_SUMMARY_BEFORE_SLOT=$(deployment_active_slot "$summary_root/state/edge/active-gateway.conf")
-  DEPLOY_SUMMARY_BEFORE_GATEWAY_BLUE=$(deployment_container_id codex-cpa-gateway-blue)
-  DEPLOY_SUMMARY_BEFORE_GATEWAY_GREEN=$(deployment_container_id codex-cpa-gateway-green)
-  DEPLOY_SUMMARY_BEFORE_ADMIN=$(deployment_container_id codex-cpa-admin)
-  DEPLOY_SUMMARY_BEFORE_WEB=$(deployment_container_id codex-cpa-web)
-  DEPLOY_SUMMARY_BEFORE_EDGE=$(deployment_container_id codex-cpa-edge)
-  DEPLOY_SUMMARY_BEFORE_QUOTA=$(deployment_container_id codex-cpa-quota)
-  DEPLOY_SUMMARY_BEFORE_COLLECTOR=$(deployment_container_id codex-cpa-usage-collector)
-  DEPLOY_SUMMARY_BEFORE_FAILOVER=$(deployment_container_id codex-cpa-account-failover)
-  DEPLOY_SUMMARY_BEFORE_LOGS=$(deployment_container_id codex-cpa-log-maintenance)
+  DEPLOY_SUMMARY_BEFORE_GATEWAY_BLUE=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-gateway-blue")
+  DEPLOY_SUMMARY_BEFORE_GATEWAY_GREEN=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-gateway-green")
+  DEPLOY_SUMMARY_BEFORE_ADMIN=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-admin")
+  DEPLOY_SUMMARY_BEFORE_WEB=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-web")
+  DEPLOY_SUMMARY_BEFORE_EDGE=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-edge")
+  DEPLOY_SUMMARY_BEFORE_QUOTA=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-quota")
+  DEPLOY_SUMMARY_BEFORE_COLLECTOR=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-usage-collector")
+  DEPLOY_SUMMARY_BEFORE_FAILOVER=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-account-failover")
+  DEPLOY_SUMMARY_BEFORE_LOGS=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-log-maintenance")
 }
 
 collect_core_deployment_summary() {
   summary_root=$1
   current_slot=$(deployment_active_slot "$summary_root/state/edge/active-gateway.conf")
-  current_gateway_blue=$(deployment_container_id codex-cpa-gateway-blue)
-  current_gateway_green=$(deployment_container_id codex-cpa-gateway-green)
+  current_gateway_blue=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-gateway-blue")
+  current_gateway_green=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-gateway-green")
   blue_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_GATEWAY_BLUE" "$current_gateway_blue")
   green_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_GATEWAY_GREEN" "$current_gateway_green")
   if [ "$DEPLOY_SUMMARY_BEFORE_SLOT" = 未知 ]; then
@@ -1592,23 +1750,23 @@ collect_core_deployment_summary() {
     DEPLOY_SUMMARY_GATEWAY_ACTION="保持 ${current_slot}；blue ${blue_action}；green $green_action"
   fi
   admin_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_ADMIN" \
-    "$(deployment_container_id codex-cpa-admin)")
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-admin")")
   web_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_WEB" \
-    "$(deployment_container_id codex-cpa-web)")
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-web")")
   edge_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_EDGE" \
-    "$(deployment_container_id codex-cpa-edge)")
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-edge")")
   DEPLOY_SUMMARY_CORE_ACTIONS="Admin ${admin_action}；Web ${web_action}；Edge $edge_action"
 }
 
 collect_writer_deployment_summary() {
   quota_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_QUOTA" \
-    "$(deployment_container_id codex-cpa-quota)")
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-quota")")
   collector_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_COLLECTOR" \
-    "$(deployment_container_id codex-cpa-usage-collector)")
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-usage-collector")")
   failover_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_FAILOVER" \
-    "$(deployment_container_id codex-cpa-account-failover)")
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-account-failover")")
   logs_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_LOGS" \
-    "$(deployment_container_id codex-cpa-log-maintenance)")
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-log-maintenance")")
   DEPLOY_SUMMARY_WRITER_ACTIONS="quota ${quota_action}；collector ${collector_action}；failover ${failover_action}；logs $logs_action"
 }
 
@@ -1675,8 +1833,8 @@ run_install_or_upgrade() {
   config_file=$DEFAULT_CONFIG_FILE
   deploy_root=$DEFAULT_DEPLOY_ROOT
   repository=$DEFAULT_REPOSITORY
-  explicit_domain=${CPAC_DOMAIN:-}
-  explicit_ingress_mode=${CPAC_INGRESS_MODE:-}
+  explicit_domain=${CPAP_DOMAIN:-}
+  explicit_ingress_mode=${CPAP_INGRESS_MODE:-}
   version=
   tag_menu_requested=false
   while [ "$#" -gt 0 ]; do
@@ -1716,8 +1874,8 @@ run_install_or_upgrade() {
     esac
   done
   require_root run
-  case "$deploy_root" in /*) ;; *) die "CPAC_DEPLOY_ROOT 必须是绝对路径" ;; esac
-  [ "$deploy_root" != / ] || die "CPAC_DEPLOY_ROOT 不能是文件系统根目录"
+  case "$deploy_root" in /*) ;; *) die "CPAP_DEPLOY_ROOT 必须是绝对路径" ;; esac
+  [ "$deploy_root" != / ] || die "CPAP_DEPLOY_ROOT 不能是文件系统根目录"
   ui_banner
   if [ -n "$version" ]; then
     validate_version "$version" || die "无效 Release Tag：$version"
@@ -1731,6 +1889,7 @@ run_install_or_upgrade() {
       return 0
     fi
   fi
+  OPERATOR_PUBLIC_PORT=$(operator_public_port "$deploy_root")
   migrate_legacy_operator_state "$config_file"
   domain=$(resolve_deploy_domain "$config_file" "$explicit_domain")
   ingress_mode=$(resolve_deploy_ingress_mode \
@@ -1747,7 +1906,7 @@ run_install_or_upgrade() {
   ui_note "目录  $deploy_root"
   ui_run "检查系统环境" install_prerequisites "$ingress_mode"
 
-  lock_file=${CPAC_LOCK_FILE:-/var/lock/cpa-deploy.lock}
+  lock_file=${CPAP_LOCK_FILE:-/var/lock/cpa-deploy.lock}
   mkdir -p -- "$(dirname -- "$lock_file")"
   exec 9>"$lock_file"
   flock -n 9 || die "另一个 run.sh 正在运行"
@@ -1804,10 +1963,8 @@ run_install_or_upgrade() {
   fi
   ui_done "部署脚本已是当前版本"
 
-  ui_run "统一服务器时区为 $SERVER_TIMEZONE" configure_server_timezone
-
-  archive="$download_directory/codex-cpa-cluster-$selected_version.tar.gz"
   release_file="$download_directory/release-$selected_version.env"
+  archive="$download_directory/$(release_archive_name "$release_file" "$selected_version")"
   ui_run "解压发布元数据" extract_release "$archive" "$extract_directory"
   [ -f "$extract_directory/docker-compose.yml" ] \
     && [ -f "$extract_directory/release-manifest.json" ] \
@@ -1824,7 +1981,7 @@ run_install_or_upgrade() {
     ui_step "配置 Nginx 与 HTTPS"
     configure_nginx_tls "$domain"
     ui_done "Nginx 与 HTTPS 已就绪"
-    DEPLOY_SUMMARY_INGRESS="CPAC 托管；Nginx / HTTPS 已校验"
+    DEPLOY_SUMMARY_INGRESS="CPAP 托管；Nginx / HTTPS 已校验"
   else
     show_external_ingress_contract "$domain"
     DEPLOY_SUMMARY_INGRESS="外部托管；Nginx / Certbot 未修改"
@@ -1861,7 +2018,7 @@ run_install_or_upgrade() {
     chmod 0700 "$install_root"
     install_release_metadata "$extract_directory" "$install_root"
     write_target_env "$release_file" "$selected_version" "$install_root/target.env" "$deploy_root"
-    control_image=$(release_value "$release_file" CPAC_CONTROL_IMAGE)
+    control_image=$(release_value "$release_file" CPAP_CONTROL_IMAGE)
     ui_note "首次拉取镜像可能需要几分钟"
     docker pull --quiet "$control_image" >/dev/null
     config_directory=$(dirname -- "$config_file")
@@ -1889,8 +2046,10 @@ run_install_or_upgrade() {
     DEPLOY_SUMMARY_BACKUP="首次安装，不创建升级备份"
   fi
 
-  if ! docker network inspect cliproxy-backend >/dev/null 2>&1; then
-    docker network create cliproxy-backend >/dev/null
+  # Read only the required value; unrelated target.env lines are not executed.
+  upstream_network=$(deployment_upstream_network "$deploy_root/target.env")
+  if ! docker network inspect "$upstream_network" >/dev/null 2>&1; then
+    docker network create "$upstream_network" >/dev/null
   fi
   deployment_failed=false
   for action in config pull verify-images activate up-core up-writers smoke; do
@@ -2007,7 +2166,7 @@ run_ingress_set() {
   write_config "$config_file" "$domain" "$requested"
   printf '已记录入口模式：%s\n' "$requested"
   if [ "$requested" = external ]; then
-    printf '%s\n' 'CPAC 不会删除或修改既有 Nginx 站点；请先由你的反向代理接管该域名，再执行 run。'
+    printf '%s\n' 'CPAP 不会删除或修改既有 Nginx 站点；请先由你的反向代理接管该域名，再执行 run。'
   fi
 }
 
@@ -2111,16 +2270,11 @@ set +a
 : "${CPA_ACCOUNT_COMPOSE_PROJECT:?CPA_ACCOUNT_COMPOSE_PROJECT is required}"
 : "${CPA_ACCOUNT_INSTANCE_NAME:?CPA_ACCOUNT_INSTANCE_NAME is required}"
 : "${CPA_RUNTIME_OWNER:=codex-cpa}"
-: "${CPA_TIMEZONE:=Asia/Shanghai}"
 : "${CPA_OWNERSHIP_ACTIVATION_TTL:=2m}"
 : "${CPA_ALLOW_EDGE_RECREATE:=false}"
 : "${CPA_GATEWAY_DRAIN_TIMEOUT_SECONDS:=3600}"
 : "${CPA_CONFIRM_DEPLOY_ROOT:?CPA_CONFIRM_DEPLOY_ROOT must exactly repeat CPA_DEPLOY_ROOT}"
 
-[ "$CPA_TIMEZONE" = "$SERVER_TIMEZONE" ] || {
-  echo "CPA_TIMEZONE must be $SERVER_TIMEZONE" >&2
-  exit 1
-}
 
 case "$CPA_DEPLOY_ROOT" in
   /*) ;;

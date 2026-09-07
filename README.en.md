@@ -1,10 +1,10 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/codex-cpa-cluster-mark-dark.svg">
-    <img alt="Codex CPA Cluster logo" src="./docs/assets/codex-cpa-cluster-mark.svg" width="96">
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/codex-cpa-pool-mark-dark.svg">
+    <img alt="Codex CPA Pool logo" src="./docs/assets/codex-cpa-pool-mark.svg" width="96">
   </picture>
 
-  <h1>Codex CPA Cluster</h1>
+  <h1>Codex CPA Pool</h1>
 
   <p>
     Self-hosted multi-account CLIProxyAPI control plane, gateway and usage center.
@@ -21,10 +21,10 @@
     <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-cluster"></a>
   </p>
 
-  <img alt="CPAC overview" src="./docs/assets/screenshot-overview.png" width="1440">
+  <img alt="Codex CPA Pool overview" src="./docs/assets/screenshot-overview.png" width="1440">
 </div>
 
-**CPAC** consolidates multiple [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account containers behind a single stable endpoint. Typical usage:
+**Codex CPA Pool** consolidates multiple [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account containers behind a single stable endpoint. Typical usage:
 
 - Pool several Codex accounts into one shared account pool;
 - Issue each member an individual API key with its own weekly quota;
@@ -32,6 +32,8 @@
 - The admin sees all members' usage and consumption trends in a single dashboard.
 
 > PS: Works just as well for individuals pooling personal accounts.
+
+The product is **Codex CPA Pool**. GitHub hosting and release downloads continue to use `Alfonsxh/codex-cpa-cluster`, preserving the existing releases, badges, and security-reporting endpoint.
 
 ## Quick Start
 
@@ -42,7 +44,7 @@ curl -fsSLO https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/downlo
 sudo sh run.sh
 ```
 
-Or do it in a single line (the script never touches disk):
+Or start directly with one command; the installer saves `run.sh` in the operator directory before continuing:
 
 ```sh
 curl -fsSL https://github.com/Alfonsxh/codex-cpa-cluster/releases/latest/download/run.sh | sudo sh
@@ -112,7 +114,7 @@ Full documentation is currently available in Chinese:
 ```sh
 npm ci --prefix frontend
 npm ci --prefix tools/openapi
-make verify
+make -f scripts/build.mk verify
 ```
 
 ## License

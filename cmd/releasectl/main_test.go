@@ -94,7 +94,7 @@ func TestWriteDeployEnvironmentProducesStrictMachineReadableContract(t *testing.
 		SchemaVersion:  1,
 		ReleaseVersion: "v2.0.0",
 		Revision:       strings.Repeat("a", 40),
-		ArchiveName:    "codex-cpa-cluster-v2.0.0.tar.gz",
+		ArchiveName:    "codex-cpa-pool-v2.0.0.tar.gz",
 		Components: map[string]descriptorRecord{
 			"control": {Image: "ghcr.io/example/codex-cpa-control:sha256-" + strings.Repeat("a", 64)},
 			"web":     {Image: "ghcr.io/example/codex-cpa-web:sha256-" + strings.Repeat("b", 64)},
@@ -111,10 +111,10 @@ func TestWriteDeployEnvironmentProducesStrictMachineReadableContract(t *testing.
 	}
 	content := string(raw)
 	for _, expected := range []string{
-		"CPAC_RELEASE_VERSION=v2.0.0\n",
-		"CPAC_RELEASE_ARCHIVE=codex-cpa-cluster-v2.0.0.tar.gz\n",
-		"CPAC_CONTROL_IMAGE=ghcr.io/example/codex-cpa-control:sha256-",
-		"CPAC_EDGE_IMAGE=ghcr.io/example/codex-cpa-edge:sha256-",
+		"CPAP_RELEASE_VERSION=v2.0.0\n",
+		"CPAP_RELEASE_ARCHIVE=codex-cpa-pool-v2.0.0.tar.gz\n",
+		"CPAP_CONTROL_IMAGE=ghcr.io/example/codex-cpa-control:sha256-",
+		"CPAP_EDGE_IMAGE=ghcr.io/example/codex-cpa-edge:sha256-",
 	} {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("deploy environment missing %q:\n%s", expected, content)

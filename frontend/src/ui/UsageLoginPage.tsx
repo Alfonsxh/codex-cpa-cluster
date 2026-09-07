@@ -101,8 +101,8 @@ export function UsageLoginPage({ overlay = false }: { overlay?: boolean }) {
           <a href={applicationHref("portal")} aria-label="返回 Codex CPA 首页">
             <img
               className="auth-brand-logo"
-              src={`/portal/assets/codex-cpa-cluster-logo${theme === "dark" ? "-dark" : ""}.svg`}
-              alt="Codex CPA Cluster"
+              src={`/portal/assets/codex-cpa-pool-logo${theme === "dark" ? "-dark" : ""}.svg`}
+              alt="Codex CPA Pool"
             />
           </a>
           <ThemeToggle />

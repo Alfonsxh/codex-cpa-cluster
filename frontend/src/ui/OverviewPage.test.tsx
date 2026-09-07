@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { formatOverviewUsageBoundary, formatOverviewUsageRange, OverviewPage } from "./OverviewPage";
+import { AdminToolbarContext } from "./AdminToolbarContext";
+import { defaultSiteTimezone, setSiteTimezone } from "./site-time";
 
 describe("OverviewPage legacy dashboard contract", () => {
   it("formats an exact custom range without dropping the exclusive end minute", () => {
@@ -115,15 +117,30 @@ describe("OverviewPage legacy dashboard contract", () => {
     vi.stubGlobal("fetch", fetchMock);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const user = userEvent.setup();
+    const setRefreshLabel = vi.fn();
     render(
       <MemoryRouter initialEntries={["/overview"]}>
         <QueryClientProvider client={queryClient}>
-          <OverviewPage />
+          <AdminToolbarContext.Provider value={{ setRefreshLabel, setRefreshing: vi.fn(), setRefreshAction: vi.fn(), setPageDetail: vi.fn() }}>
+            <OverviewPage />
+          </AdminToolbarContext.Provider>
         </QueryClientProvider>
       </MemoryRouter>
     );
 
     expect(await screen.findByText("1 个用户的统一 Key 账号矩阵不完整")).toBeInTheDocument();
+    // Changing only the site timezone must repaint the persisted toolbar label,
+    // even when query structural sharing keeps every API result unchanged.
+    const toolbarTime = (timeZone: string) => new Intl.DateTimeFormat("zh-CN", {
+      timeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+    }).format(new Date(summary.generated_at * 1000));
+    await waitFor(() => expect(setRefreshLabel).toHaveBeenLastCalledWith(`总览更新于 ${toolbarTime(defaultSiteTimezone)}`));
+    try {
+      act(() => setSiteTimezone("UTC"));
+      await waitFor(() => expect(setRefreshLabel).toHaveBeenLastCalledWith(`总览更新于 ${toolbarTime("UTC")}`));
+    } finally {
+      act(() => setSiteTimezone(defaultSiteTimezone));
+    }
     const metrics = screen.getByLabelText("关键指标");
     expect(within(metrics).getAllByRole("article")).toHaveLength(6);
     expect(within(metrics).getByText("CPA 账号")).toBeInTheDocument();
@@ -164,8 +181,8 @@ describe("OverviewPage legacy dashboard contract", () => {
     expect(screen.getByRole("heading", { name: "Token 使用" }).closest(".overview-token-heading-row"))
       .toContainElement(collectorMeta);
     expect(document.querySelector(".usage-monitor-filters")).not.toContainElement(collectorMeta);
-    const refreshCluster = document.querySelector(".overview-legacy-refresh-cluster") as HTMLElement;
-    expect(screen.getByRole("group", { name: "Token 口径" }).closest(".overview-token-scope-filters")).toContainElement(refreshCluster);
+    const refreshControls = document.querySelector(".overview-legacy-refresh-controls") as HTMLElement;
+    expect(screen.getByRole("group", { name: "Token 口径" }).closest(".overview-token-scope-filters")).toContainElement(refreshControls);
     const aggregateSummary = await screen.findByRole("region", { name: "全部账号统计摘要" });
     expect(aggregateSummary).toHaveTextContent("当前值");
     expect(aggregateSummary).toHaveTextContent("范围内总量");

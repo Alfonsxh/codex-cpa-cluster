@@ -55,7 +55,7 @@ Go Admin 只打开既有目标。正式部署必须先存在两份 SQLite 和匹
 go test ./internal/admin ./internal/branding ./internal/controlplane ./internal/notifications
 npm --prefix frontend test
 npm --prefix frontend run test:e2e -- --grep "configuration"
-make verify
+make -f scripts/build.mk verify
 ```
 
 修改设置契约时必须同时更新 `api/openapi.yaml`、生成的 Go/TypeScript 类型、`internal/admin`、`frontend/src/api`、页面测试和 Go Preview fixture。

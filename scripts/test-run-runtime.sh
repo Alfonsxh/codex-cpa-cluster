@@ -152,7 +152,7 @@ if [ "${1:-}" = inspect ]; then
       printf '%s\n' '{"codex-cpa_control":{},"codex-cpa_ingress":{},"cliproxy-backend":{}}'
       ;;
     *"8317/tcp"*)
-      printf '%s\n' '127.0.0.1 18317'
+      printf '127.0.0.1 %s\n' "${CPA_PUBLIC_PORT:-18317}"
       ;;
     *"8319/tcp"*)
       printf '%s\n' '127.0.0.1 18316'
@@ -459,16 +459,16 @@ LEGACY_OPERATOR
 chmod 0755 "$OPERATOR_ROOT/deploy.sh"
 cp "$ROOT_DIR/docker-compose.yml" "$RELEASE_CONTENT/docker-compose.yml"
 printf '%s\n' '{}' >"$RELEASE_CONTENT/release-manifest.json"
-tar -czf "$RELEASE_SERVER/codex-cpa-cluster-$RELEASE_VERSION.tar.gz" \
+tar -czf "$RELEASE_SERVER/codex-cpa-pool-$RELEASE_VERSION.tar.gz" \
   -C "$RELEASE_CONTENT" docker-compose.yml release-manifest.json
 cat >"$RELEASE_SERVER/release-$RELEASE_VERSION.env" <<EOF
-CPAC_RELEASE_VERSION=$RELEASE_VERSION
-CPAC_RELEASE_REVISION=9999999999999999999999999999999999999999
-CPAC_RELEASE_ARCHIVE=codex-cpa-cluster-$RELEASE_VERSION.tar.gz
-CPAC_CONTROL_IMAGE=registry.example.test/codex-cpa-control:sha256-$DIGEST
-CPAC_WEB_IMAGE=registry.example.test/codex-cpa-web:sha256-$DIGEST
-CPAC_GATEWAY_IMAGE=registry.example.test/codex-cpa-gateway:sha256-$DIGEST
-CPAC_EDGE_IMAGE=registry.example.test/codex-cpa-edge:sha256-$DIGEST
+CPAP_RELEASE_VERSION=$RELEASE_VERSION
+CPAP_RELEASE_REVISION=9999999999999999999999999999999999999999
+CPAP_RELEASE_ARCHIVE=codex-cpa-pool-$RELEASE_VERSION.tar.gz
+CPAP_CONTROL_IMAGE=registry.example.test/codex-cpa-control:sha256-$DIGEST
+CPAP_WEB_IMAGE=registry.example.test/codex-cpa-web:sha256-$DIGEST
+CPAP_GATEWAY_IMAGE=registry.example.test/codex-cpa-gateway:sha256-$DIGEST
+CPAP_EDGE_IMAGE=registry.example.test/codex-cpa-edge:sha256-$DIGEST
 EOF
 cp "$ROOT_DIR/scripts/run.sh" "$RELEASE_SERVER/run.sh"
 printf '%s\n' '# verified self-update fixture' >>"$RELEASE_SERVER/run.sh"
@@ -476,7 +476,7 @@ chmod 0755 "$RELEASE_SERVER/run.sh"
 (
   cd "$RELEASE_SERVER"
   sha256sum \
-    "codex-cpa-cluster-$RELEASE_VERSION.tar.gz" \
+    "codex-cpa-pool-$RELEASE_VERSION.tar.gz" \
     "release-$RELEASE_VERSION.env" \
     run.sh >SHA256SUMS
 )
@@ -539,10 +539,10 @@ case "$url" in
   */__internal/edge/slot)
     printf '%s\n' blue
     ;;
-  http://127.0.0.1:18317/v1/models)
+  http://127.0.0.1:18317/v1/models|http://127.0.0.1:28317/v1/models)
     printf '%s' 401
     ;;
-  http://127.0.0.1:18317/__internal/snapshots)
+  http://127.0.0.1:18317/__internal/snapshots|http://127.0.0.1:28317/__internal/snapshots)
     printf '%s' 404
     ;;
   *)
@@ -570,7 +570,7 @@ set -eu
 if [ -n "${FAKE_SYSTEM_LOG:-}" ]; then
   printf '%s %s\n' "$(basename -- "$0")" "$*" >>"$FAKE_SYSTEM_LOG"
 fi
-timezone_file=${FAKE_TIMEZONE_FILE:-${FAKE_SYSTEM_LOG:-/tmp/cpac-system}.timezone}
+timezone_file=${FAKE_TIMEZONE_FILE:-${FAKE_SYSTEM_LOG:-/tmp/cpap-system}.timezone}
 case "${1:-}" in
   show)
     if [ -f "$timezone_file" ]; then
@@ -611,16 +611,16 @@ run_operator_deploy() {
     FAKE_DOCKER_SCENARIO=ordinary \
     FAKE_RELEASE_DIR="$RELEASE_SERVER" \
     FAKE_RELEASE_VERSION="$RELEASE_VERSION" \
-    CPAC_ALLOW_NON_ROOT=true \
-    CPAC_STAGING_ROOT="$OPERATOR_ROOT" \
-    CPAC_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
-    CPAC_BACKUP_DIR="$OPERATOR_ROOT/backups" \
-    CPAC_LEGACY_CONFIG_FILE="$TEST_ROOT/etc/cpac/config.env" \
-    CPAC_LOCK_FILE="$TEST_ROOT/cpa-deploy.lock" \
-    CPAC_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
-    CPAC_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
-    CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
-    CPAC_ACME_ROOT="$TEST_ROOT/acme" \
+    CPAP_ALLOW_NON_ROOT=true \
+    CPAP_STAGING_ROOT="$OPERATOR_ROOT" \
+    CPAP_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
+    CPAP_BACKUP_DIR="$OPERATOR_ROOT/backups" \
+    CPAP_LEGACY_CONFIG_FILE="$TEST_ROOT/etc/cpap/config.env" \
+    CPAP_LOCK_FILE="$TEST_ROOT/cpa-deploy.lock" \
+    CPAP_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
+    CPAP_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
+    CPAP_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
+    CPAP_ACME_ROOT="$TEST_ROOT/acme" \
     sh "$OPERATOR_ROOT/run.sh" run \
       --domain qdata.example.com --ingress managed --tag "$RELEASE_VERSION"
 }
@@ -629,10 +629,10 @@ run_release_choice() {
   PATH="$FAKE_BIN:$PATH" \
     FAKE_RELEASE_DIR="$RELEASE_SERVER" \
     FAKE_RELEASES_FILE="${FAKE_RELEASES_FILE:-$RELEASE_SERVER/releases.json}" \
-    CPAC_ALLOW_NON_ROOT=true \
-    CPAC_STAGING_ROOT="$OPERATOR_ROOT" \
-    CPAC_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
-    CPAC_CONFIG_FILE="$OPERATOR_CONFIG" \
+    CPAP_ALLOW_NON_ROOT=true \
+    CPAP_STAGING_ROOT="$OPERATOR_ROOT" \
+    CPAP_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
+    CPAP_CONFIG_FILE="$OPERATOR_CONFIG" \
     sh "$OPERATOR_ROOT/run.sh" --tag
 }
 
@@ -650,9 +650,8 @@ grep -Fq -- "--tag 与 --version 不能指定不同版本" \
 INSTALL_OUTPUT="$OPERATOR_ROOT/install-output.log"
 run_operator_deploy >"$INSTALL_OUTPUT"
 for expected_output in \
-  "== CPAC 安装与升级 ==" \
+  "== CPAP 安装与升级 ==" \
   "检查系统环境" \
-  "统一服务器时区为 Asia/Shanghai" \
   "拉取 Control / Web / Gateway / Edge 镜像" \
   "镜像 Control" \
   "管理员登录  https://qdata.example.com/admin/" \
@@ -664,12 +663,12 @@ do
     exit 1
   }
 done
-[ "$(cat "$SYSTEM_LOG.timezone")" = Asia/Shanghai ] \
-  || { echo "operator deploy did not set the server timezone" >&2; exit 1; }
-grep -Fq 'timedatectl set-timezone Asia/Shanghai' "$SYSTEM_LOG" \
-  || { echo "operator deploy did not issue the server timezone change" >&2; exit 1; }
-grep -Fxq 'CPA_TIMEZONE=Asia/Shanghai' "$OPERATOR_ROOT/runtime/target.env" \
-  || { echo "operator deploy did not persist the service timezone" >&2; exit 1; }
+[ ! -e "$SYSTEM_LOG.timezone" ] \
+  || { echo "operator deploy changed the host timezone" >&2; exit 1; }
+if grep -q '^CPA_TIMEZONE=' "$OPERATOR_ROOT/runtime/target.env"; then
+  echo "operator deploy persisted a competing timezone setting" >&2
+  exit 1
+fi
 completion_rows=$(grep -c '^│' "$INSTALL_OUTPUT")
 bordered_completion_rows=$(grep -c '^│.*│$' "$INSTALL_OUTPUT")
 [ "$completion_rows" -gt 0 ] && [ "$completion_rows" -eq "$bordered_completion_rows" ] || {
@@ -714,11 +713,11 @@ cmp -s "$OPERATOR_ROOT/run.sh" "$RELEASE_SERVER/run.sh" \
   || { echo "fresh deploy did not create the account management static directory" >&2; exit 1; }
 [ -f "$OPERATOR_ROOT/bootstrap-admin.key" ] \
   || { echo "fresh deploy did not preserve the pending admin key" >&2; exit 1; }
-[ ! -e "$TEST_ROOT/etc/cpac" ] \
+[ ! -e "$TEST_ROOT/etc/cpap" ] \
   || { echo "fresh deploy created the removed external operator config directory" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
   || { echo "fresh deploy published a second target-side script directory" >&2; exit 1; }
-[ "$(cat "$OPERATOR_CONFIG")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAC_INGRESS_MODE=managed')" ] \
+[ "$(cat "$OPERATOR_CONFIG")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAP_INGRESS_MODE=managed')" ] \
   || { echo "fresh deploy did not persist its domain" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/deploy.sh" ] \
   || { echo "run.sh did not remove the recognized legacy operator script" >&2; exit 1; }
@@ -779,7 +778,7 @@ grep -Fq 'GitHub Releases 返回了无效响应' "$OPERATOR_ROOT/malformed-relea
 printf '%s\n' "version=$RELEASE_VERSION" >"$OPERATOR_ROOT/runtime/.deploy-initialized"
 chmod 0600 "$OPERATOR_ROOT/runtime/.deploy-initialized"
 
-EXTERNAL_OPERATOR_ROOT="$TEST_ROOT/home/external-cpac"
+EXTERNAL_OPERATOR_ROOT="$TEST_ROOT/home/external-cpap"
 EXTERNAL_CONFIG="$EXTERNAL_OPERATOR_ROOT/config.env"
 mkdir -p "$EXTERNAL_OPERATOR_ROOT"
 cp "$ROOT_DIR/scripts/run.sh" "$EXTERNAL_OPERATOR_ROOT/run.sh"
@@ -791,20 +790,20 @@ PATH="$FAKE_BIN:$PATH" \
   FAKE_DOCKER_SCENARIO=ordinary \
   FAKE_RELEASE_DIR="$RELEASE_SERVER" \
   FAKE_RELEASE_VERSION="$RELEASE_VERSION" \
-  CPAC_ALLOW_NON_ROOT=true \
-  CPAC_STAGING_ROOT="$EXTERNAL_OPERATOR_ROOT" \
-  CPAC_DEPLOY_ROOT="$EXTERNAL_OPERATOR_ROOT/runtime" \
-  CPAC_BACKUP_DIR="$EXTERNAL_OPERATOR_ROOT/backups" \
-  CPAC_LEGACY_CONFIG_FILE="$TEST_ROOT/external-etc/cpac/config.env" \
-  CPAC_LOCK_FILE="$TEST_ROOT/external-cpa-deploy.lock" \
-  CPAC_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
-  CPAC_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
-  CPAC_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
-  CPAC_ACME_ROOT="$TEST_ROOT/acme" \
+  CPAP_ALLOW_NON_ROOT=true \
+  CPAP_STAGING_ROOT="$EXTERNAL_OPERATOR_ROOT" \
+  CPAP_DEPLOY_ROOT="$EXTERNAL_OPERATOR_ROOT/runtime" \
+  CPAP_BACKUP_DIR="$EXTERNAL_OPERATOR_ROOT/backups" \
+  CPAP_LEGACY_CONFIG_FILE="$TEST_ROOT/external-etc/cpap/config.env" \
+  CPAP_LOCK_FILE="$TEST_ROOT/external-cpa-deploy.lock" \
+  CPAP_NGINX_AVAILABLE_DIRECTORY="$TEST_ROOT/nginx/available" \
+  CPAP_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
+  CPAP_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
+  CPAP_ACME_ROOT="$TEST_ROOT/acme" \
   sh "$EXTERNAL_OPERATOR_ROOT/run.sh" run \
     --domain existing.example.com --ingress external --version "$RELEASE_VERSION" \
     >"$EXTERNAL_OPERATOR_ROOT/install-output.log"
-[ "$(cat "$EXTERNAL_CONFIG")" = "$(printf 'CPA_DOMAIN=existing.example.com\nCPAC_INGRESS_MODE=external')" ] \
+[ "$(cat "$EXTERNAL_CONFIG")" = "$(printf 'CPA_DOMAIN=existing.example.com\nCPAP_INGRESS_MODE=external')" ] \
   || { echo "external ingress mode was not persisted" >&2; exit 1; }
 grep -Fq '复用现有反向代理' "$EXTERNAL_OPERATOR_ROOT/install-output.log" \
   || { echo "external ingress did not describe the existing proxy contract" >&2; exit 1; }
@@ -921,15 +920,53 @@ done
 
 site_file="$TEST_ROOT/nginx/available/qdata.example.com.conf"
 legacy_site="$TEST_ROOT/nginx/legacy-site.conf"
-sed 's/^# Managed by CPAC run\.sh$/# Managed by CPAC deploy.sh/' \
+sed 's/^# Managed by Codex CPA Pool run\.sh$/# Managed by CPAC deploy.sh/' \
   "$site_file" >"$legacy_site"
 mv "$legacy_site" "$site_file"
 run_operator_deploy >"$OPERATOR_ROOT/legacy-nginx-marker.log"
-grep -Fxq '# Managed by CPAC run.sh' "$site_file" \
+grep -Fxq '# Managed by Codex CPA Pool run.sh' "$site_file" \
   || { echo "run.sh did not migrate the legacy Nginx ownership marker" >&2; exit 1; }
 
+# Compatibility rehearsal: a pinned pre-rename release supplies its immutable
+# archive/env and an old installer. The current installer must remain in place.
+sed 's/^CPA_PUBLIC_PORT=18317$/CPA_PUBLIC_PORT=28317/' \
+  "$OPERATOR_ROOT/runtime/target.env" >"$TEST_ROOT/custom-port.env"
+cp "$TEST_ROOT/custom-port.env" "$OPERATOR_ROOT/runtime/target.env"
+cp "$OPERATOR_ROOT/run.sh" "$TEST_ROOT/operator-before-legacy-release.sh"
+cp "$OPERATOR_ROOT/runtime/target.env" "$TEST_ROOT/target-before-legacy-release.env"
+cp "$OPERATOR_ROOT/runtime/secrets/control-plane.key" "$TEST_ROOT/key-before-legacy-release"
+mv "$RELEASE_SERVER/codex-cpa-pool-$RELEASE_VERSION.tar.gz" \
+  "$RELEASE_SERVER/codex-cpa-cluster-$RELEASE_VERSION.tar.gz"
+sed -e 's/^CPAP_/CPAC_/' -e 's/codex-cpa-pool-/codex-cpa-cluster-/' \
+  "$RELEASE_SERVER/release-$RELEASE_VERSION.env" >"$TEST_ROOT/legacy-release.env"
+mv "$TEST_ROOT/legacy-release.env" "$RELEASE_SERVER/release-$RELEASE_VERSION.env"
+cat >"$RELEASE_SERVER/run.sh" <<'PINNED_LEGACY_INSTALLER'
+#!/usr/bin/env sh
+CPAC_STAGING_ROOT=${CPAC_STAGING_ROOT:-/home/cpac}
+echo 'unexpected execution of the pinned legacy installer' >&2
+exit 91
+PINNED_LEGACY_INSTALLER
+(
+  cd "$RELEASE_SERVER"
+  sha256sum "codex-cpa-cluster-$RELEASE_VERSION.tar.gz" \
+    "release-$RELEASE_VERSION.env" run.sh >SHA256SUMS
+)
+: >"$COMMAND_LOG"
+run_operator_deploy >"$OPERATOR_ROOT/pinned-legacy-release.log"
+grep -Fq 'proxy_pass http://127.0.0.1:28317;' "$site_file" \
+  || { echo "pinned legacy release reset the Nginx upstream port" >&2; exit 1; }
+cmp -s "$OPERATOR_ROOT/run.sh" "$TEST_ROOT/operator-before-legacy-release.sh" \
+  || { echo "pinned legacy release downgraded the installer" >&2; exit 1; }
+cmp -s "$OPERATOR_ROOT/runtime/target.env" "$TEST_ROOT/target-before-legacy-release.env" \
+  && cmp -s "$OPERATOR_ROOT/runtime/secrets/control-plane.key" "$TEST_ROOT/key-before-legacy-release" \
+  || { echo "pinned legacy release changed target settings or key bytes" >&2; exit 1; }
+if grep -q cpa-bootstrap "$COMMAND_LOG"; then
+  echo "pinned legacy release initialized parallel runtime state" >&2
+  exit 1
+fi
+
 site_without_marker="$TEST_ROOT/nginx/unmanaged-site.conf"
-sed '/^# Managed by CPAC run\.sh$/d' "$site_file" >"$site_without_marker"
+sed '/^# Managed by Codex CPA Pool run\.sh$/d' "$site_file" >"$site_without_marker"
 mv "$site_without_marker" "$site_file"
 if run_operator_deploy >"$OPERATOR_ROOT/unmanaged-site.log" 2>&1; then
   echo "managed ingress overwrote an unmanaged same-domain site" >&2

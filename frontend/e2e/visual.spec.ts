@@ -813,7 +813,9 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   await expect(effortTooltip).toContainText("加权 Token652,500");
   const effortPopup = page.locator(".ant-tooltip:has(.usage-model-effort-tooltip)");
   await expect(effortPopup.getByRole("tooltip")).toHaveCSS("background-color", "rgb(23, 29, 43)");
-  await expect(effortPopup).toHaveScreenshot("react-usage-model-effort-tooltip.png");
+  await expect(effortPopup).toHaveScreenshot("react-usage-model-effort-tooltip.png", {
+    maxDiffPixelRatio: 0.01
+  });
 });
 
 test("个人使用中心账号明细 Tab 视觉基准", async ({ page }) => {

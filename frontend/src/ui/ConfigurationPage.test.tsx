@@ -18,8 +18,8 @@ describe("ConfigurationPage", () => {
     }));
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration?section=access");
 
-    const access = within(await screen.findByRole("navigation", { name: "系统管理" }))
-      .getByRole("button", { name: /访问凭据/ });
+    const access = within(await screen.findByRole("navigation", { name: "配置分类" }))
+      .getByRole("button", { name: "系统设置" });
     await waitFor(() => expect(access).toHaveAttribute("aria-current", "page"));
     expect(screen.getByRole("button", { name: "设置用户初始密码" })).toBeInTheDocument();
   });
@@ -150,10 +150,51 @@ describe("ConfigurationPage", () => {
     expect(screen.getByText("上游失败重试次数。")).toBeInTheDocument();
     expect(screen.queryByText("branding.product_name", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("默认 Codex CPA Pool", { exact: true })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /企业微信通知/ }));
+    await user.click(screen.getByRole("button", { name: "通知设置" }));
     const enabled = screen.getByLabelText("启用企业微信通知");
     const webhook = screen.getByText("企业微信群 Webhook");
     expect(enabled.compareDocumentPosition(webhook) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("clears the Webhook independently without restoring its enabled switch or losing other drafts", async () => {
+    let configured = true;
+    let current = withUpdatedValues(configurationFixture(), { "notification.enabled": true });
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/admin/api/settings/notification-webhook/clear") {
+        configured = false;
+        current = withUpdatedValues(current, { "notification.enabled": false });
+        return jsonResponse({ message: "企业微信 Webhook 已清除，通知已关闭" });
+      }
+      if (path === "/admin/api/settings/notifications") {
+        const payload = await supportingSettingsResponse(path)!.json();
+        payload.notifications.webhook_configured = configured;
+        return jsonResponse(payload);
+      }
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        current = withUpdatedValues(current, body.values);
+        return jsonResponse({ message: "已保存品牌", changed: Object.keys(body.values), applied: ["live"], pending_deployment: false });
+      }
+      return jsonResponse(current);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration");
+    await user.type(await screen.findByLabelText("产品名称"), " Updated");
+    await user.click(screen.getByRole("button", { name: "通知设置" }));
+    expect(screen.getByLabelText("启用企业微信通知")).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "清除 Webhook" }));
+    await user.click(screen.getByRole("button", { name: "确认清除" }));
+    expect(await screen.findByText("企业微信 Webhook 已清除，通知已关闭")).toBeInTheDocument();
+    expect(screen.getByLabelText("启用企业微信通知")).not.toBeChecked();
+    expect(screen.getByText("1 项未保存")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+    expect(await screen.findByText("已保存品牌")).toBeInTheDocument();
+    const saved = fetchMock.mock.calls.find(([path, init]) => String(path) === "/admin/api/settings/configuration" && init?.method === "POST");
+    expect(JSON.parse(String(saved?.[1]?.body)).values).toEqual({ "branding.product_name": "Codex CPA Pool Updated" });
   });
 
   it("loads the destructive all-user impact only when User Quota is opened and refreshes it after reset", async () => {
@@ -184,7 +225,9 @@ describe("ConfigurationPage", () => {
 
     await screen.findByPlaceholderText("已配置；留空保持不变");
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/users/quota-actions")).toBe(false);
-    await user.click(screen.getByRole("button", { name: /用户额度/ }));
+    await user.click(screen.getByRole("button", { name: "用量与额度" }));
+    expect(quotaReads).toBe(0);
+    await user.click(screen.getByRole("button", { name: /用量维护/ }));
     expect(await screen.findByText("2 位有用量")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "清零全部用户本周已用量" }));
     const reason = screen.getByLabelText("操作原因");
@@ -216,17 +259,18 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" onManagementKeyRotated={rotated} />);
 
-    const storageButton = await screen.findByRole("button", { name: /本地数据/ });
+    await user.click(await screen.findByRole("button", { name: "数据与审计" }));
+    const storageButton = screen.getByRole("button", { name: /本地数据/ });
     await user.click(storageButton);
-    expect(storageButton).toHaveAttribute("aria-current", "page");
+    expect(storageButton).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "持久化数据" })).toBeInTheDocument();
     expect(screen.getByText("state/control-plane.sqlite3")).toBeInTheDocument();
     const auditButton = screen.getByRole("button", { name: /审计记录/ });
     await user.click(auditButton);
-    expect(auditButton).toHaveAttribute("aria-current", "page");
+    expect(auditButton).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "最近管理操作" })).toBeInTheDocument();
     expect(screen.getByText("configuration.update")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /访问凭据/ }));
+    await user.click(screen.getByRole("button", { name: "系统设置" }));
     await user.click(screen.getByRole("button", { name: "更换管理密钥" }));
     const newKey = screen.getByLabelText("新管理密钥");
     const confirmation = screen.getByLabelText("再次输入管理密钥");
@@ -264,7 +308,8 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
 
-    await user.click(await screen.findByRole("button", { name: /审计记录/ }));
+    await user.click(await screen.findByRole("button", { name: "数据与审计" }));
+    await user.click(screen.getByRole("button", { name: /审计记录/ }));
     expect(screen.getByRole("heading", { name: "最近管理操作" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "暂无管理操作" })).toBeInTheDocument();
     expect(screen.getByText("配置与维护操作将在此记录。")).toBeInTheDocument();
@@ -296,8 +341,9 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
 
-    await user.click(await screen.findByRole("button", { name: /推理强度策略/ }));
-    expect(screen.getByText("模型倍率 × 推理强度倍率")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "用量与额度" }));
+    await user.click(screen.getByRole("button", { name: /模型与推理倍率/ }));
+    expect(screen.getAllByText("模型倍率 × 推理强度倍率")[0]).toBeInTheDocument();
     expect(screen.getByLabelText("gpt-6-astra用户额度倍率")).toHaveValue(4);
     expect(screen.getByLabelText("gpt-5.6-sol用户额度倍率")).toHaveValue(1);
     expect(screen.getByLabelText("其他未匹配模型用户额度倍率")).toHaveValue(1);
@@ -317,6 +363,85 @@ describe("ConfigurationPage", () => {
     });
   });
 
+  it("preserves cross-category drafts, opens hidden search results and discards everything from data and audit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      return supportingSettingsResponse(path) ?? jsonResponse(configurationFixture());
+    }));
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration");
+    const navigation = within(await screen.findByRole("navigation", { name: "配置分类" }));
+    expect(navigation.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "品牌与身份", "系统设置", "请求与账号", "用量与额度", "通知设置", "数据与审计"
+    ]);
+    const product = await screen.findByLabelText("产品名称");
+    await user.clear(product);
+    await user.type(product, "New Brand");
+    await user.type(screen.getByLabelText("搜索配置"), "Max 推理强度颜色{Enter}");
+    expect(navigation.getByRole("button", { name: "系统设置" })).toHaveAttribute("aria-current", "page");
+    const color = screen.getByRole("textbox", { name: "Max 推理强度颜色" });
+    expect(color).toBeVisible();
+    await user.clear(color);
+    await user.type(color, "#123456");
+    expect(screen.getByText("2 项未保存")).toBeInTheDocument();
+    expect(screen.getByText("涉及 2 个分类")).toBeInTheDocument();
+    await user.click(navigation.getByRole("button", { name: /品牌与身份/ }));
+    expect(screen.getByLabelText("产品名称")).toHaveValue("New Brand");
+    await user.click(navigation.getByRole("button", { name: "数据与审计" }));
+    await user.click(screen.getByRole("button", { name: "撤销未保存修改" }));
+    expect(screen.getByRole("button", { name: "保存配置" })).toBeDisabled();
+    await user.click(navigation.getByRole("button", { name: "品牌与身份" }));
+    expect(screen.getByLabelText("产品名称")).toHaveValue("Codex CPA Pool");
+  });
+
+  it("saves only edited fields across categories and rejects an empty required number even when zero is valid", async () => {
+    let current = configurationFixture();
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        current = withUpdatedValues(current, body.values);
+        return jsonResponse({ message: "已保存 2 项配置", changed: Object.keys(body.values), applied: ["live", "accounts"], pending_deployment: false });
+      }
+      return jsonResponse(current);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
+    await user.clear(await screen.findByLabelText("请求重试次数"));
+    await user.click(screen.getByRole("button", { name: "品牌与身份" }));
+    const product = screen.getByLabelText("产品名称");
+    await user.clear(product);
+    await user.type(product, "Changed Brand");
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+    expect(screen.getByLabelText("请求重试次数")).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    await user.type(screen.getByLabelText("请求重试次数"), "0");
+    await user.click(screen.getByRole("button", { name: "数据与审计" }));
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+    await user.click(screen.getByRole("button", { name: "保存并应用" }));
+    expect(await screen.findByText("已保存 2 项配置")).toBeInTheDocument();
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ confirm: "save", values: { "branding.product_name": "Changed Brand", "cpa.request_retry": 0 } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存配置" })).toBeDisabled());
+  });
+
+  it.each([
+    ["推理强度策略", "admin.account_usage.reasoning_effort_color.max", "系统设置"],
+    ["推理强度策略", "user_quota.reasoning_multiplier.max", "用量与额度"]
+  ])("resolves legacy %s links using the field's new category", async (group, key, category) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => supportingSettingsResponse(String(input)) ?? jsonResponse(configurationFixture())));
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, `/configuration?group=${group}&key=${key}`);
+    const navigation = within(await screen.findByRole("navigation", { name: "配置分类" }));
+    await waitFor(() => expect(navigation.getByRole("button", { name: category })).toHaveAttribute("aria-current", "page"));
+    const target = document.querySelector(`[data-configuration-field="${key}"]`)!;
+    expect(target).toBeVisible();
+    expect(target.contains(document.activeElement)).toBe(true);
+  });
+
   it("shows a recoverable empty state when the configuration catalog has no groups", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const path = String(input);
@@ -331,6 +456,7 @@ describe("ConfigurationPage", () => {
     const user = userEvent.setup();
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
 
+    await user.click(await screen.findByRole("button", { name: "品牌与身份" }));
     expect(await screen.findByText("当前没有可配置项")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "进入访问凭据" }));
     expect(screen.getByText("管理密钥已配置")).toBeInTheDocument();
@@ -498,7 +624,7 @@ function withUpdatedValues(catalog: ConfigurationCatalog, values: Record<string,
   };
 }
 
-function renderConfiguration(element: React.ReactNode, entry = "/configuration") {
+function renderConfiguration(element: React.ReactNode, entry = "/configuration?group=CPA 请求") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });

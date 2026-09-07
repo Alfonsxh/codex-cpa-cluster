@@ -1,1 +1,1013 @@
-{"version":1,"generated_at":1787500800,"field_count":12,"groups":[{"name":"系统设置","description":"站点统一的时间与日期边界。","fields":[{"key":"system.timezone","label":"系统时区","description":"统一用于页面时间、用量统计、自然周额度与通知调度。","type":"timezone","value":"Asia/Shanghai","default":"Asia/Shanghai","apply_mode":"collector","editable":true}]},{"name":"CPA 请求","description":"统一作用于所有业务 CPA，保存后只重建受影响的账号容器。","fields":[{"key":"cpa.proxy_url","label":"默认上游代理 URL","description":"加密保存且不会回显；留空继续使用当前值。","type":"proxy_url_secret","value":"","default":"","apply_mode":"accounts","editable":true,"configured":true},{"key":"cpa.request_retry","label":"请求重试次数","description":"单次上游请求失败后的最大重试次数。","type":"integer","value":2,"default":2,"apply_mode":"accounts","editable":true,"min":0,"max":10}]},{"name":"品牌与身份","description":"管理公开页面显示名称与客户端导出参数。","fields":[{"key":"branding.product_name","label":"产品名称","description":"所有页面显示的完整产品名称。","type":"text","value":"Codex CPA Pool","default":"Codex CPA Pool","apply_mode":"live","editable":true,"min_length":2,"max_length":64},{"key":"branding.environment_label","label":"环境标签","description":"显示在登录页与侧栏的环境说明。","type":"text","value":"本地模拟预览","default":"Production","apply_mode":"live","editable":true,"min_length":2,"max_length":64}]},{"name":"账号自动切换","description":"额度不可用时的账号路由策略。","fields":[{"key":"account_failover.mode","label":"自动切换模式","description":"只保留关闭或自动执行；不再提供观察模式。","type":"choice","value":"active","default":"active","apply_mode":"live","editable":true,"choices":[{"value":"off","label":"关闭"},{"value":"active","label":"自动执行"}]},{"key":"user_quota.default_weekly_tokens","label":"默认用户周额度","description":"用户未配置个人策略时使用的自然周 Token 上限。","type":"nullable_integer","value":20000000,"default":20000000,"apply_mode":"quota","editable":true,"unit":"Token","min":0}]},{"name":"企业微信通知","description":"配置定时额度报告、发送时区和阈值预警。","fields":[{"key":"notification.enabled","label":"启用企业微信通知","description":"启用后按设定时间发送账号额度表格，并执行周额度阈值检查。","type":"boolean","value":true,"default":false,"apply_mode":"live","editable":true},{"key":"notification.daily_times","label":"每日发送时间","description":"多个 HH:MM 使用逗号分隔，保存时自动去重排序。","type":"time_list","value":"09:00,14:00,18:00","default":"09:00,14:00,18:00","apply_mode":"live","editable":true},{"key":"notification.schedule_grace_minutes","label":"定时补发窗口","description":"服务在发送时刻后恢复时，允许补发报告的分钟数。","type":"integer","value":15,"default":15,"apply_mode":"live","editable":true,"unit":"分钟","min":0,"max":120},{"key":"notification.quota_alert_enabled","label":"启用周额度预警","description":"每个账号额度窗口首次达到阈值时发送一次；恢复到阈值以下后重新布防。","type":"boolean","value":true,"default":true,"apply_mode":"live","editable":true},{"key":"notification.weekly_threshold_percent","label":"周额度预警阈值","description":"各账号、各周额度窗口独立判断的已使用百分比。","type":"number","value":90,"default":90,"apply_mode":"live","editable":true,"unit":"%","min":1,"max":100}]}]}
+{
+  "version": 2,
+  "generated_at": 1787500800,
+  "field_count": 78,
+  "groups": [
+    {
+      "name": "品牌与身份",
+      "description": "品牌、域名和客户端配置。",
+      "fields": [
+        {
+          "key": "branding.product_name",
+          "label": "产品名称",
+          "description": "页面产品名称。",
+          "type": "text",
+          "value": "Codex CPA Pool",
+          "default": "Codex CPA Pool",
+          "apply_mode": "live",
+          "editable": true,
+          "min_length": 2,
+          "max_length": 64
+        },
+        {
+          "key": "branding.short_name",
+          "label": "产品简称",
+          "description": "客户端显示的简称。",
+          "type": "text",
+          "value": "Codex CPA",
+          "default": "Codex CPA",
+          "apply_mode": "live",
+          "editable": true,
+          "min_length": 2,
+          "max_length": 32
+        },
+        {
+          "key": "branding.environment_label",
+          "label": "环境说明",
+          "description": "入口页环境说明，可留空。",
+          "type": "optional_text",
+          "value": "本地模拟预览",
+          "default": "Self-hosted service",
+          "apply_mode": "live",
+          "editable": true,
+          "max_length": 64
+        },
+        {
+          "key": "branding.public_base_url",
+          "label": "公开访问地址",
+          "description": "通知与导出地址；留空用当前站点。",
+          "type": "base_url",
+          "value": "",
+          "default": "",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "identity.allowed_email_domains",
+          "label": "允许的邮箱域名",
+          "description": "逗号分隔；创建用户前至少填一个。",
+          "type": "domain_list",
+          "value": [
+            "example.com"
+          ],
+          "default": [],
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "identity.key_prefix",
+          "label": "新 Key 前缀",
+          "description": "新 Key 前缀，以下划线结尾。",
+          "type": "key_prefix",
+          "value": "cpa_",
+          "default": "cpa_",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "portal.provider_name",
+          "label": "客户端 Provider 名称",
+          "description": "客户端 Provider 名称。",
+          "type": "text",
+          "value": "Codex CPA",
+          "default": "Codex CPA",
+          "apply_mode": "live",
+          "editable": true,
+          "min_length": 2,
+          "max_length": 48
+        },
+        {
+          "key": "portal.api_key_env",
+          "label": "客户端 Key 环境变量",
+          "description": "Shell Key 变量名。",
+          "type": "env_name",
+          "value": "CPA_API_KEY",
+          "default": "CPA_API_KEY",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "portal.default_model",
+          "label": "客户端默认模型",
+          "description": "客户端默认模型。",
+          "type": "text",
+          "value": "gpt-5.6-sol",
+          "default": "gpt-5.6-sol",
+          "apply_mode": "live",
+          "editable": true,
+          "min_length": 1,
+          "max_length": 128
+        }
+      ]
+    },
+    {
+      "name": "系统设置",
+      "description": "站点统一的时间与日期边界。",
+      "fields": [
+        {
+          "key": "system.timezone",
+          "label": "系统时区",
+          "description": "统一用于页面时间、今日用量、自然周额度与通知调度。修改后将重新归集本周用量。",
+          "type": "timezone",
+          "value": "Asia/Shanghai",
+          "default": "Asia/Shanghai",
+          "apply_mode": "collector",
+          "editable": true
+        }
+      ]
+    },
+    {
+      "name": "CPA 请求",
+      "description": "CPA 请求与代理配置。",
+      "fields": [
+        {
+          "key": "cpa.proxy_enabled",
+          "label": "启用默认上游代理",
+          "description": "仅用于继承默认代理的 CPA。",
+          "type": "boolean",
+          "value": false,
+          "default": false,
+          "apply_mode": "accounts",
+          "editable": true
+        },
+        {
+          "key": "cpa.proxy_url",
+          "label": "默认上游代理 URL",
+          "description": "默认代理地址（HTTP/HTTPS/SOCKS5）。",
+          "type": "proxy_url_secret",
+          "value": "",
+          "default": "",
+          "apply_mode": "accounts",
+          "editable": true,
+          "configured": false
+        },
+        {
+          "key": "cpa.request_retry",
+          "label": "请求重试次数",
+          "description": "上游失败重试次数。",
+          "type": "integer",
+          "value": 2,
+          "default": 2,
+          "apply_mode": "accounts",
+          "editable": true,
+          "min": 0,
+          "max": 10
+        },
+        {
+          "key": "cpa.disable_image_generation",
+          "label": "图片工具策略",
+          "description": "图片工具启用策略。",
+          "type": "choice",
+          "value": "chat",
+          "default": "chat",
+          "apply_mode": "accounts",
+          "editable": true,
+          "choices": [
+            {
+              "value": "chat",
+              "label": "仅普通对话禁用（推荐）"
+            },
+            {
+              "value": "true",
+              "label": "全部禁用"
+            },
+            {
+              "value": "false",
+              "label": "全部启用"
+            }
+          ]
+        },
+        {
+          "key": "cpa.max_retry_credentials",
+          "label": "最大重试凭据数",
+          "description": "单次切换凭据上限。",
+          "type": "integer",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "accounts",
+          "editable": true,
+          "min": 1,
+          "max": 10
+        },
+        {
+          "key": "cpa.max_retry_interval",
+          "label": "最大重试等待",
+          "description": "冷却凭据最长等待时间。",
+          "type": "integer",
+          "value": 12,
+          "default": 12,
+          "apply_mode": "accounts",
+          "editable": true,
+          "unit": "秒",
+          "min": 1,
+          "max": 300
+        },
+        {
+          "key": "cpa.transient_error_cooldown_seconds",
+          "label": "临时错误冷却",
+          "description": "临时错误冷却时间。",
+          "type": "integer",
+          "value": 10,
+          "default": 10,
+          "apply_mode": "accounts",
+          "editable": true,
+          "unit": "秒",
+          "min": 1,
+          "max": 300
+        },
+        {
+          "key": "cpa.session_affinity",
+          "label": "会话亲和",
+          "description": "是否复用会话凭据。",
+          "type": "boolean",
+          "value": true,
+          "default": true,
+          "apply_mode": "accounts",
+          "editable": true
+        },
+        {
+          "key": "cpa.session_affinity_ttl",
+          "label": "会话亲和有效期",
+          "description": "凭据复用时长，如 30s。",
+          "type": "duration",
+          "value": "1h",
+          "default": "1h",
+          "apply_mode": "accounts",
+          "editable": true
+        },
+        {
+          "key": "cpa.debug",
+          "label": "调试日志",
+          "description": "排障时开启，会增加日志量。",
+          "type": "boolean",
+          "value": false,
+          "default": false,
+          "apply_mode": "accounts",
+          "editable": true
+        },
+        {
+          "key": "cpa.logging_to_file",
+          "label": "写入 CPA 日志文件",
+          "description": "是否保存 CPA 日志。",
+          "type": "boolean",
+          "value": true,
+          "default": true,
+          "apply_mode": "accounts",
+          "editable": true
+        },
+        {
+          "key": "cpa.logs_max_total_size_mb",
+          "label": "单 CPA 日志容量上限",
+          "description": "单个 CPA 上限，超出删除最旧日志。",
+          "type": "integer",
+          "value": 64,
+          "default": 64,
+          "apply_mode": "accounts",
+          "editable": true,
+          "unit": "MiB",
+          "min": 16,
+          "max": 1024
+        },
+        {
+          "key": "cpa.error_logs_max_files",
+          "label": "单 CPA 错误文件上限",
+          "description": "单个 CPA 错误日志文件上限。",
+          "type": "integer",
+          "value": 10,
+          "default": 10,
+          "apply_mode": "accounts",
+          "editable": true,
+          "unit": "个",
+          "min": 1,
+          "max": 100
+        }
+      ]
+    },
+    {
+      "name": "用量与额度",
+      "description": "额度与用量采集。",
+      "fields": [
+        {
+          "key": "cpa.usage_statistics_enabled",
+          "label": "官方用量事件",
+          "description": "关闭后停止采集新增 Token 用量。",
+          "type": "boolean",
+          "value": true,
+          "default": true,
+          "apply_mode": "accounts",
+          "editable": true
+        },
+        {
+          "key": "cpa.usage_queue_retention_seconds",
+          "label": "用量队列保留时间",
+          "description": "中断时事件保留时间。",
+          "type": "integer",
+          "value": 3600,
+          "default": 3600,
+          "apply_mode": "accounts",
+          "editable": true,
+          "unit": "秒",
+          "min": 60,
+          "max": 604800
+        },
+        {
+          "key": "usage.quota_cache_seconds",
+          "label": "官方额度缓存",
+          "description": "官方额度缓存时间。",
+          "type": "integer",
+          "value": 60,
+          "default": 60,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "秒",
+          "min": 30,
+          "max": 3600
+        },
+        {
+          "key": "usage.upstream_timeout_seconds",
+          "label": "官方接口超时",
+          "description": "官方接口超时时间。",
+          "type": "integer",
+          "value": 20,
+          "default": 20,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "秒",
+          "min": 5,
+          "max": 120
+        }
+      ]
+    },
+    {
+      "name": "账号自动切换",
+      "description": "额度不足时自动迁移。",
+      "fields": [
+        {
+          "key": "account_failover.mode",
+          "label": "自动切换模式",
+          "description": "官方周额度耗尽后自动迁移用户。",
+          "type": "choice",
+          "value": "active",
+          "default": "active",
+          "apply_mode": "live",
+          "editable": true,
+          "choices": [
+            {
+              "value": "off",
+              "label": "关闭"
+            },
+            {
+              "value": "active",
+              "label": "自动执行"
+            }
+          ]
+        },
+        {
+          "key": "account_failover.poll_seconds",
+          "label": "额度检查间隔",
+          "description": "官方额度检查周期。",
+          "type": "integer",
+          "value": 60,
+          "default": 60,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "秒",
+          "min": 30,
+          "max": 3600
+        },
+        {
+          "key": "account_failover.reserve_percent",
+          "label": "目标账号安全余量",
+          "description": "剩余额度不高于此值时不接收迁入。",
+          "type": "number",
+          "value": 5,
+          "default": 5,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "%",
+          "min": 0,
+          "max": 50
+        },
+        {
+          "key": "account_failover.stale_after_seconds",
+          "label": "额度数据失效时间",
+          "description": "额度过期后停止迁移。",
+          "type": "integer",
+          "value": 120,
+          "default": 120,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "秒",
+          "min": 60,
+          "max": 7200
+        }
+      ]
+    },
+    {
+      "name": "用户额度",
+      "description": "用户额度和故障策略。",
+      "fields": [
+        {
+          "key": "user_quota.default_weekly_tokens",
+          "label": "用户周额度系统默认值",
+          "description": "每人自然周加权上限；留空不限额，个人策略优先。",
+          "type": "nullable_integer",
+          "value": null,
+          "default": null,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "Token",
+          "min": 1,
+          "max": 1000000000000
+        },
+        {
+          "key": "user_quota.reset_personal_weekly_on_new_week",
+          "label": "新周恢复默认个人额度",
+          "description": "新周恢复系统默认额度。",
+          "type": "boolean",
+          "value": true,
+          "default": true,
+          "apply_mode": "quota",
+          "editable": true
+        },
+        {
+          "key": "user_quota.fail_open_after_seconds",
+          "label": "额度故障放行等待",
+          "description": "采集异常超时后放行并告警。",
+          "type": "integer",
+          "value": 300,
+          "default": 300,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "秒",
+          "min": 30,
+          "max": 3600
+        }
+      ]
+    },
+    {
+      "name": "推理强度策略",
+      "description": "模型与推理强度共同决定用户额度 Token 倍率；颜色只影响展示。",
+      "fields": [
+        {
+          "key": "user_quota.model_multiplier.codex-auto-review",
+          "label": "codex-auto-review 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-5.3-codex-spark",
+          "label": "gpt-5.3-codex-spark 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-5.4",
+          "label": "gpt-5.4 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-5.4-mini",
+          "label": "gpt-5.4-mini 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-5.5",
+          "label": "gpt-5.5 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-5.6-luna",
+          "label": "gpt-5.6-luna 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-5.6-sol",
+          "label": "gpt-5.6-sol 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-5.6-terra",
+          "label": "gpt-5.6-terra 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-6-astra",
+          "label": "gpt-6-astra 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 4,
+          "default": 4,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-image-1.5",
+          "label": "gpt-image-1.5 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.gpt-image-2",
+          "label": "gpt-image-2 模型倍率",
+          "description": "新采集事件的模型 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.model_multiplier.unknown",
+          "label": "其他 / 未匹配模型 模型倍率",
+          "description": "模型未匹配时用于新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.none",
+          "label": "None 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.minimal",
+          "label": "Minimal 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.low",
+          "label": "Low 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.medium",
+          "label": "Medium 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.high",
+          "label": "High 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.xhigh",
+          "label": "Xhigh 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.max",
+          "label": "Max 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 2,
+          "default": 2,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.ultra",
+          "label": "Ultra 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 3,
+          "default": 3,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.auto",
+          "label": "Auto 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "user_quota.reasoning_multiplier.unknown",
+          "label": "Unknown 推理强度倍率",
+          "description": "新采集事件的 Token 倍率。",
+          "type": "number",
+          "value": 1,
+          "default": 1,
+          "apply_mode": "quota",
+          "editable": true,
+          "unit": "倍",
+          "min": 0.1,
+          "max": 10
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.none",
+          "label": "None 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#7d8490",
+          "default": "#7d8490",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.minimal",
+          "label": "Minimal 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#84929a",
+          "default": "#84929a",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.low",
+          "label": "Low 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#4b8ccf",
+          "default": "#4b8ccf",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.medium",
+          "label": "Medium 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#7653a6",
+          "default": "#7653a6",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.high",
+          "label": "High 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#2f73d9",
+          "default": "#2f73d9",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.xhigh",
+          "label": "Xhigh 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#5965c7",
+          "default": "#5965c7",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.max",
+          "label": "Max 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#b2731e",
+          "default": "#b2731e",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.ultra",
+          "label": "Ultra 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#9b5f9d",
+          "default": "#9b5f9d",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.auto",
+          "label": "Auto 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#5e708a",
+          "default": "#5e708a",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "admin.account_usage.reasoning_effort_color.unknown",
+          "label": "Unknown 推理强度颜色",
+          "description": "账号明细显示颜色。",
+          "type": "color",
+          "value": "#687287",
+          "default": "#687287",
+          "apply_mode": "live",
+          "editable": true
+        }
+      ]
+    },
+    {
+      "name": "企业微信通知",
+      "description": "额度报告和预警。",
+      "fields": [
+        {
+          "key": "notification.enabled",
+          "label": "启用企业微信通知",
+          "description": "是否发送企业微信通知。",
+          "type": "boolean",
+          "value": false,
+          "default": false,
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "notification.daily_times",
+          "label": "每日发送时间",
+          "description": "HH:MM 格式，多个时间用逗号分隔。",
+          "type": "time_list",
+          "value": "09:00,14:00,18:00",
+          "default": "09:00,14:00,18:00",
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "notification.schedule_grace_minutes",
+          "label": "定时补发窗口",
+          "description": "计划发送时间后允许补发的时长。",
+          "type": "integer",
+          "value": 15,
+          "default": 15,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "分钟",
+          "min": 0,
+          "max": 120
+        },
+        {
+          "key": "notification.quota_alert_enabled",
+          "label": "启用周额度预警",
+          "description": "是否发送周额度预警。",
+          "type": "boolean",
+          "value": true,
+          "default": true,
+          "apply_mode": "live",
+          "editable": true
+        },
+        {
+          "key": "notification.weekly_threshold_percent",
+          "label": "周额度预警阈值",
+          "description": "账号周额度已用比例达到此值时预警。",
+          "type": "number",
+          "value": 90,
+          "default": 90,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "%",
+          "min": 1,
+          "max": 100
+        }
+      ]
+    },
+    {
+      "name": "会话与采集",
+      "description": "会话和采集设置。",
+      "fields": [
+        {
+          "key": "portal.session_ttl_seconds",
+          "label": "使用中心登录有效期",
+          "description": "仅影响保存后的新登录会话。",
+          "type": "integer",
+          "value": 43200,
+          "default": 43200,
+          "apply_mode": "live",
+          "editable": true,
+          "unit": "秒",
+          "min": 3600,
+          "max": 43200
+        },
+        {
+          "key": "collector.interval_seconds",
+          "label": "采集轮询间隔",
+          "description": "采集轮询间隔。",
+          "type": "number",
+          "value": 2,
+          "default": 2,
+          "apply_mode": "collector",
+          "editable": true,
+          "unit": "秒",
+          "min": 0.5,
+          "max": 60
+        },
+        {
+          "key": "collector.batch_size",
+          "label": "单批采集数量",
+          "description": "单个 CPA 每批采集事件上限。",
+          "type": "integer",
+          "value": 100,
+          "default": 100,
+          "apply_mode": "collector",
+          "editable": true,
+          "min": 1,
+          "max": 500
+        }
+      ]
+    },
+    {
+      "name": "账号供应",
+      "description": "新 CPA 端口范围。",
+      "fields": [
+        {
+          "key": "accounts.port_start",
+          "label": "新账号端口起点",
+          "description": "新 CPA 端口起点。",
+          "type": "integer",
+          "value": 18319,
+          "default": 18319,
+          "apply_mode": "future",
+          "editable": true,
+          "min": 1024,
+          "max": 65535
+        },
+        {
+          "key": "accounts.port_end",
+          "label": "新账号端口终点",
+          "description": "新 CPA 端口终点，不小于起点。",
+          "type": "integer",
+          "value": 18999,
+          "default": 18999,
+          "apply_mode": "future",
+          "editable": true,
+          "min": 1024,
+          "max": 65535
+        }
+      ]
+    },
+    {
+      "name": "账号与发布",
+      "description": "CPA 监听与更新镜像。",
+      "fields": [
+        {
+          "key": "accounts.listen_address",
+          "label": "业务 CPA 监听地址",
+          "description": "仅允许宿主机回环地址。",
+          "type": "ip",
+          "value": "127.0.0.1",
+          "default": "127.0.0.1",
+          "apply_mode": "deployment",
+          "editable": true
+        },
+        {
+          "key": "runtime.cliproxy_image",
+          "label": "CLIProxyAPI 镜像",
+          "description": "在账号管理中拉取并验证更新。",
+          "type": "image",
+          "value": "docker.m.daocloud.io/eceasy/cli-proxy-api:latest",
+          "default": "docker.m.daocloud.io/eceasy/cli-proxy-api:latest",
+          "apply_mode": "deployment",
+          "editable": true
+        }
+      ]
+    }
+  ]
+}

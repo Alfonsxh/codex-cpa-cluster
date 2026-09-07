@@ -165,9 +165,9 @@ for (const viewport of viewports) {
           await expect(page.getByRole("navigation", { name: "初始化配置" })).toBeVisible();
         }
         if (route.slug === "configuration") {
-          const configurationPanel = page.getByRole("region", { name: "系统设置", exact: true });
-          await expect(configurationPanel.locator(".configuration-field")).toHaveCount(1);
-          await expect(configurationPanel.getByRole("combobox", { name: "系统时区" })).toBeVisible();
+          const configurationPanel = page.getByRole("region", { name: "站点品牌", exact: true });
+          await expect(configurationPanel.getByLabel("产品名称", { exact: true })).toBeVisible();
+          await expect(page.getByRole("heading", { level: 1 })).toHaveText("配置中心/品牌与身份");
           expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
         }
         await expect(page).toHaveScreenshot(
@@ -178,9 +178,9 @@ for (const viewport of viewports) {
             // slightly wider color delta filters that antialiasing noise while
             // the bounded pixel ratio and the separate navigation, geometry
             // and overflow assertions continue to catch structural regressions.
-            threshold: viewport.width <= 560 ? 0.3 : 0.2,
+            threshold: route.slug === "configuration" ? 0.15 : viewport.width <= 560 ? 0.3 : 0.2,
             maxDiffPixelRatio:
-              viewport.width <= 560
+              route.slug === "configuration" ? 0.005 : viewport.width <= 560
                 ? 0.02
                 : viewport.width <= 1024
                   ? 0.015
@@ -374,6 +374,57 @@ test("首次管理登录进入独立配置页，状态接口失败时不阻塞�
   await expect(page.getByText("更新通道", { exact: false }).first()).toBeVisible();
 });
 
+for (const viewport of [viewports[0], viewports[1], viewports[2]]) {
+  test(`配置中心六类导航保留全部字段、草稿与固定保存栏 ${viewport.name}`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await setTheme(page, "dark");
+    await login(page, "/admin/configuration", "保存配置");
+    const response = await page.request.get("/admin/api/settings/configuration");
+    const catalog = await response.json();
+    const expectedKeys = catalog.groups.flatMap((group: { fields: Array<{ key: string }> }) => group.fields.map((field) => field.key));
+    const seen: string[] = [];
+    const categories = ["品牌与身份", "系统设置", "请求与账号", "用量与额度", "通知设置", "数据与审计"];
+    const selectCategory = async (category: string) => {
+      if (viewport.width > 1120) await page.getByRole("navigation", { name: "配置分类" }).getByRole("button", { name: category, exact: true }).click();
+      else {
+        await page.getByRole("button", { name: "选择配置分类" }).click();
+        await page.getByRole("option", { name: category, exact: true }).click();
+      }
+    };
+    for (const category of categories) {
+      await selectCategory(category);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(`配置中心/${category}`);
+      while (await page.locator(".configuration-section-heading button[aria-expanded=false]").count()) await page.locator(".configuration-section-heading button[aria-expanded=false]").first().click();
+      const keys = await page.locator("[data-configuration-field]").evaluateAll((elements) => elements.map((element) => (element as HTMLElement).dataset.configurationField!));
+      seen.push(...keys.filter((key) => expectedKeys.includes(key)));
+      for (const key of keys.filter((key) => expectedKeys.includes(key))) {
+        await expect(page.locator(`[data-configuration-field="${key}"]`).locator("input, button, select").first()).toBeVisible();
+      }
+      expect(await page.evaluate(() => document.body.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+      const geometry = await page.locator(".configuration-save-region").boundingBox();
+      expect(geometry!.y + geometry!.height).toBeLessThanOrEqual(viewport.height);
+      await page.screenshot({ path: testInfo.outputPath(`configuration-${categories.indexOf(category)}-${viewport.name}.png`), animations: "disabled" });
+    }
+    expect(seen.sort()).toEqual(expectedKeys.sort());
+    await selectCategory("品牌与身份");
+    await page.getByLabel("产品名称", { exact: true }).fill("Draft Brand");
+    await page.getByLabel("搜索配置", { exact: true }).fill("portal.session_ttl_seconds");
+    await page.getByLabel("搜索配置", { exact: true }).press("Enter");
+    const ttl = page.locator('[data-configuration-field="portal.session_ttl_seconds"] input');
+    await expect(ttl).toBeFocused();
+    await ttl.fill("3600");
+    await expect(page.getByText("涉及 2 个分类", { exact: true })).toBeVisible();
+    // The mobile selector labels remain plain even when categories have drafts.
+    if (viewport.width > 1120) await page.getByRole("navigation", { name: "配置分类" }).getByRole("button", { name: /品牌与身份/ }).click();
+    else await selectCategory("品牌与身份");
+    await expect(page.getByLabel("产品名称", { exact: true })).toHaveValue("Draft Brand");
+    await page.getByRole("button", { name: "撤销未保存修改", exact: true }).click();
+    await expect(page.getByRole("button", { name: "保存配置", exact: true })).toBeDisabled();
+    await page.getByLabel("搜索配置", { exact: true }).fill("no-such-configuration");
+    await expect(page.getByText("没有匹配项", { exact: true })).toBeVisible();
+  });
+}
+
 test("配置中心本地数据与审计记录沿用统一信息卡片", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-08-28T05:42:00.000Z"));
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -392,11 +443,13 @@ test("配置中心本地数据与审计记录沿用统一信息卡片", async ({
   });
   await login(page, "/admin/configuration", "保存配置");
 
-  const systemNavigation = page.getByRole("navigation", { name: "系统管理" });
-  const storageButton = systemNavigation.getByRole("button", { name: /本地数据/ });
+  const systemNavigation = page.getByRole("navigation", { name: "配置分类" });
+  await systemNavigation.getByRole("button", { name: "数据与审计" }).click();
+  await page.getByRole("button", { name: /安全归档/ }).click();
+  const storageButton = page.getByRole("button", { name: /本地数据/ });
   await storageButton.click();
-  await expect(storageButton).toHaveAttribute("aria-current", "page");
-  await expect(page.locator(".configuration-navigation .active")).toHaveCount(0);
+  await expect(storageButton).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".configuration-navigation .active")).toHaveCount(1);
   await expect(systemNavigation.locator(".active")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "持久化数据" })).toBeVisible();
   await expect(page.getByText("用户用量数据库", { exact: true })).toBeVisible();
@@ -431,9 +484,10 @@ test("配置中心本地数据与审计记录沿用统一信息卡片", async ({
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(systemNavigation).toBeVisible();
 
-  const auditButton = systemNavigation.getByRole("button", { name: /审计记录/ });
+  await storageButton.click();
+  const auditButton = page.locator(".configuration-section-heading").getByRole("button", { name: /审计记录/ });
   await auditButton.click();
-  await expect(auditButton).toHaveAttribute("aria-current", "page");
+  await expect(auditButton).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("heading", { name: "暂无管理操作" })).toBeVisible();
   await expect(page.getByRole("button", { name: "刷新审计记录" })).toBeVisible();
   await expect(page).toHaveScreenshot("react-configuration-audit-empty-desktop-dark.png", { fullPage: false });

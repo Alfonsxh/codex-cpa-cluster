@@ -33,7 +33,7 @@ if ! printf '%s' "$GH_REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
   exit 1
 fi
 
-for command in git docker gh go make; do
+for command in git docker gh go make npm; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "缺少发布依赖：$command" >&2
     exit 1
@@ -100,17 +100,39 @@ if [ "$ACTION" = check ]; then
   exit 0
 fi
 
-make -C "$ROOT_DIR" -f scripts/build.mk verify
+# Verification, image publication and release packaging must read one immutable
+# checkout. The operator's working tree can otherwise change between those
+# phases and produce a Release whose image references do not match its archive.
+SNAPSHOT_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/cpap-local-release.XXXXXX")
+SNAPSHOT_ROOT="$SNAPSHOT_PARENT/source"
+cleanup_snapshot() {
+  if [ -d "$SNAPSHOT_ROOT" ]; then
+    git -C "$ROOT_DIR" worktree remove --force "$SNAPSHOT_ROOT" >/dev/null 2>&1 || true
+  fi
+  rm -rf -- "$SNAPSHOT_PARENT"
+}
+trap cleanup_snapshot EXIT HUP INT TERM
+git -C "$ROOT_DIR" worktree add --detach "$SNAPSHOT_ROOT" "$REVISION" >/dev/null
+if [ -d "$ROOT_DIR/frontend/node_modules" ]; then
+  ln -s "$ROOT_DIR/frontend/node_modules" "$SNAPSHOT_ROOT/frontend/node_modules"
+else
+  npm --prefix "$SNAPSHOT_ROOT/frontend" ci
+fi
+
+make -C "$SNAPSHOT_ROOT" -f scripts/build.mk verify
 
 if [ -z "$LOCAL_TAG_REVISION" ]; then
   # Tag 先保留在本地；镜像和发布包全部完成后才推送到 GitHub。
-  git -C "$ROOT_DIR" tag -a "$VERSION" -m "Release $VERSION"
+  git -C "$ROOT_DIR" tag -a "$VERSION" "$REVISION" -m "Release $VERSION"
 fi
 
-VERSION="$VERSION" \
-PLATFORM="$PLATFORM" \
-IMAGE_PREFIXES="$IMAGE_PREFIX" \
-  sh "$ROOT_DIR/scripts/release-images.sh" publish
+(
+  cd "$SNAPSHOT_ROOT"
+  VERSION="$VERSION" \
+  PLATFORM="$PLATFORM" \
+  IMAGE_PREFIXES="$IMAGE_PREFIX" \
+    sh scripts/release-images.sh publish
+)
 
 mkdir -p "$DIST_DIR"
 ARCHIVE="$DIST_DIR/codex-cpa-pool-$VERSION.tar.gz"
@@ -118,27 +140,27 @@ RELEASE_DESCRIPTOR="$DIST_DIR/release-$VERSION.json"
 RELEASE_ENV="$DIST_DIR/release-$VERSION.env"
 RUN_ASSET="$DIST_DIR/run.sh"
 CHECKSUMS="$DIST_DIR/SHA256SUMS"
-sh "$ROOT_DIR/scripts/package-release.sh" "$ARCHIVE"
-go run "$ROOT_DIR/cmd/releasectl" manifest descriptor \
-  --root "$ROOT_DIR" \
+(cd "$SNAPSHOT_ROOT" && sh scripts/package-release.sh "$ARCHIVE")
+(cd "$SNAPSHOT_ROOT" && go run ./cmd/releasectl manifest descriptor \
+  --root "$SNAPSHOT_ROOT" \
   --output "$RELEASE_DESCRIPTOR" \
   --release-version "$VERSION" \
   --revision "$REVISION" \
   --image-prefix "$IMAGE_PREFIX" \
-  --archive-name "$(basename -- "$ARCHIVE")"
-go run "$ROOT_DIR/cmd/releasectl" manifest deploy-env \
-  --root "$ROOT_DIR" \
+  --archive-name "$(basename -- "$ARCHIVE")")
+(cd "$SNAPSHOT_ROOT" && go run ./cmd/releasectl manifest deploy-env \
+  --root "$SNAPSHOT_ROOT" \
   --output "$RELEASE_ENV" \
   --release-version "$VERSION" \
   --revision "$REVISION" \
   --image-prefix "$IMAGE_PREFIX" \
-  --archive-name "$(basename -- "$ARCHIVE")"
-cp "$ROOT_DIR/scripts/run.sh" "$RUN_ASSET"
+  --archive-name "$(basename -- "$ARCHIVE")")
+cp "$SNAPSHOT_ROOT/scripts/run.sh" "$RUN_ASSET"
 chmod 0755 "$RUN_ASSET"
 
-go run "$ROOT_DIR/cmd/releasectl" checksum \
+(cd "$SNAPSHOT_ROOT" && go run ./cmd/releasectl checksum \
   --output "$CHECKSUMS" \
-  "$ARCHIVE" "$RELEASE_DESCRIPTOR" "$RELEASE_ENV" "$RUN_ASSET"
+  "$ARCHIVE" "$RELEASE_DESCRIPTOR" "$RELEASE_ENV" "$RUN_ASSET")
 
 if [ -z "$REMOTE_TAG_REVISION" ]; then
   git -C "$ROOT_DIR" push "$GIT_REMOTE" "refs/tags/$VERSION"

@@ -5,12 +5,20 @@ import { useEffect } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { defaultPublicSiteConfiguration } from "../api/public-site";
 import { AdminShell } from "./App";
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
 import { ThemeProvider } from "./ThemeProvider";
 
-beforeEach(() => vi.stubEnv("DEV", false));
+beforeEach(() => {
+  vi.stubEnv("DEV", false);
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+    const payload = String(input) === "/site-config.json" ? defaultPublicSiteConfiguration
+      : { configured: false, current_version: "v2.0.0", status: "disabled", available: false };
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+  }));
+});
 afterEach(() => vi.unstubAllEnvs());
 
 function renderShell(pathname: string, children: React.ReactNode = <div>页面内容</div>) {
@@ -68,7 +76,7 @@ describe("AdminShell legacy visual contract", () => {
     expect(within(switcher).getByRole("link", { name: /使用中心/ })).toHaveAttribute("href", "/usage/");
     expect(screen.getByRole("heading", { name: "配置中心" })).toBeInTheDocument();
     expect(screen.getByText("CONTROL PLANE SETTINGS")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Codex CPA 管理中心" }).querySelector("img"))
+    expect(screen.getByRole("link", { name: "Codex CPA Pool 管理中心" }).querySelector("img"))
       .toHaveAttribute("src", "/portal/assets/codex-cpa-pool-mark.svg");
   });
 
@@ -95,7 +103,7 @@ describe("AdminShell legacy visual contract", () => {
     expect(screen.getByText("等待刷新")).toBeInTheDocument();
     const refresh = screen.getByRole("button", { name: "刷新" });
     await user.click(refresh);
-    expect(refresh).toBeEnabled();
+    await waitFor(() => expect(refresh).toBeEnabled());
   });
 
   it("uses a dedicated distraction-free shell for first setup", () => {

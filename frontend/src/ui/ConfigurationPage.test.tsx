@@ -58,7 +58,7 @@ describe("ConfigurationPage", () => {
     productName.focus();
     await user.keyboard("{Enter}");
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-    await user.click(screen.getByRole("button", { name: "保存配置", exact: true }));
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
 
     expect(await screen.findByText("已保存 1 项配置")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
@@ -229,7 +229,7 @@ describe("ConfigurationPage", () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path) === "/admin/api/users/quota-actions")).toBe(false);
     expect(screen.getByRole("button", { name: "用量与额度" })).toHaveAttribute("aria-expanded", "true");
     expect(quotaReads).toBe(0);
-    await user.click(screen.getByRole("button", { name: "额度", exact: true }));
+    await user.click(screen.getByRole("button", { name: "额度" }));
     expect(await screen.findByText("2 位有用量")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "清零全部用户本周已用量" }));
     const reason = screen.getByLabelText("操作原因");
@@ -344,7 +344,7 @@ describe("ConfigurationPage", () => {
     renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />);
 
     expect(await screen.findByRole("button", { name: "用量与额度" })).toHaveAttribute("aria-expanded", "true");
-    await user.click(screen.getByRole("button", { name: "模型倍率", exact: true }));
+    await user.click(screen.getByRole("button", { name: "模型倍率" }));
     expect(screen.getByLabelText("gpt-6-astra用户额度倍率")).toHaveValue(4);
     expect(screen.getByLabelText("gpt-5.6-sol用户额度倍率")).toHaveValue(1);
     expect(screen.getByLabelText("其他未匹配模型用户额度倍率")).toHaveValue(1);
@@ -376,11 +376,11 @@ describe("ConfigurationPage", () => {
       "品牌与身份", "系统设置", "请求与账号", "用量与额度", "通知设置", "数据与审计"
     ]);
     const product = await screen.findByLabelText("产品名称");
-    expect(navigation.getByRole("button", { name: "站点品牌", exact: true })).toHaveAttribute("aria-current", "page");
-    await user.click(navigation.getByRole("button", { name: "系统设置", exact: true }));
+    expect(navigation.getByRole("button", { name: "站点品牌" })).toHaveAttribute("aria-current", "page");
+    await user.click(navigation.getByRole("button", { name: "系统设置" }));
     expect(product).toBeVisible();
-    expect(navigation.getByRole("button", { name: "系统设置", exact: true })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("heading", { name: "站点品牌", exact: true })).not.toBeInTheDocument();
+    expect(navigation.getByRole("button", { name: "系统设置" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("heading", { name: "站点品牌" })).not.toBeInTheDocument();
     await user.clear(product);
     await user.type(product, "New Brand");
     await user.type(screen.getByLabelText("搜索配置"), "Max 推理强度颜色{Enter}");
@@ -632,9 +632,9 @@ function withUpdatedValues(catalog: ConfigurationCatalog, values: Record<string,
 
 async function selectConfigurationItem(user: ReturnType<typeof userEvent.setup>, category: string, section: string) {
   const navigation = within(screen.getByRole("navigation", { name: "配置分类" }));
-  const categoryButton = navigation.getByRole("button", { name: category, exact: true });
+  const categoryButton = navigation.getByRole("button", { name: category });
   if (categoryButton.getAttribute("aria-expanded") !== "true") await user.click(categoryButton);
-  await user.click(navigation.getByRole("button", { name: section, exact: true }));
+  await user.click(navigation.getByRole("button", { name: section }));
 }
 
 function renderConfiguration(element: React.ReactNode, entry = "/configuration?group=CPA 请求") {

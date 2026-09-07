@@ -1,11 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title desc">
-  <title id="title">Codex CPA Pool mark</title>
-  <desc id="desc">The letter C connected to three pooled accounts.</desc>
-  <g transform="translate(18 18)" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M101 37a49 49 0 1 0 0 70" stroke="#EDF1FB" stroke-width="14"/>
-    <path d="M102 37l23-23M112 72h32M102 107l23 23" stroke="#7F8BA3" stroke-width="6"/>
-    <circle cx="130" cy="10" r="9" fill="#8D9BF1" stroke="none"/>
-    <circle cx="150" cy="72" r="9" fill="#8D9BF1" stroke="none"/>
-    <circle cx="130" cy="134" r="9" fill="#8D9BF1" stroke="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-labelledby="title desc">
+  <title id="title">Codex CPA Pool</title>
+  <desc id="desc">Layered rounded resource panels forming the letter P for Pool.</desc>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 70V38a16 16 0 0 1 16-16h32" stroke="#7f8ba3" stroke-width="7"/>
+    <path d="M35 83V51a16 16 0 0 1 16-16h32" stroke="#edf1fb" stroke-width="7"/>
+    <path d="M49 106V65a16 16 0 0 1 16-16h24a17 17 0 0 1 17 17v6a17 17 0 0 1-17 17H69" stroke="#8d9bf1" stroke-width="9"/>
   </g>
 </svg>

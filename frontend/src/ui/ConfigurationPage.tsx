@@ -50,6 +50,7 @@ import { LegacyPasswordInput } from "./components/LegacyPasswordInput";
 
 import { TimezoneSelect } from "./components/TimezoneSelect";
 import { publicSiteQueryKey } from "../api/public-site";
+import { useTheme } from "./ThemeProvider";
 
 type DraftValue = string | number | boolean | null;
 type Draft = Record<string, DraftValue>;
@@ -532,7 +533,8 @@ function SystemNavigationButton({ active, label, detail, onClick }: { active: bo
 }
 
 function BrandingLogoEditor({ custom, sha256, pending, error, onFile, onReset }: { custom: boolean; sha256?: string; pending: boolean; error: string; onFile: (file: File) => void; onReset: () => void }) {
-  const source = custom ? `/branding/logo${sha256 ? `?v=${encodeURIComponent(sha256.slice(0, 16))}` : ""}` : "/portal/assets/codex-cpa-pool-logo.svg";
+  const { theme } = useTheme();
+  const source = custom ? `/branding/logo${sha256 ? `?v=${encodeURIComponent(sha256.slice(0, 16))}` : ""}` : `/portal/assets/codex-cpa-pool-logo${theme === "dark" ? "-dark" : ""}.svg`;
   return <article className="branding-logo-editor"><div className="branding-logo-preview"><img src={source} alt="当前 Logo" /></div><div className="branding-logo-copy"><strong>品牌 Logo</strong><span className={`status-chip ${custom ? "success" : "neutral"}`}>{custom ? "自定义 Logo" : "默认 Logo"}</span></div><div className="branding-logo-actions"><label className="button button-secondary" aria-disabled={pending}>{pending ? "正在上传…" : "选择并上传"}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" disabled={pending} hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} /></label><button className="button danger-outline" type="button" disabled={!custom || pending} onClick={onReset}>恢复默认</button><small className="form-error" role="alert">{error}</small></div></article>;
 }
 

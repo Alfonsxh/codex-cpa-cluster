@@ -1,9 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title id="title">Codex CPA Pool</title>
-  <rect x="2" y="2" width="60" height="60" rx="15" fill="#151B28" stroke="#344157" stroke-width="2"/>
-  <path d="M40 18a18 18 0 1 0 0 28" fill="none" stroke="#EDF1FB" stroke-width="7" stroke-linecap="round"/>
-  <path d="M42 18l8-8M46 32h11M42 46l8 8" fill="none" stroke="#7F8BA3" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="52" cy="8" r="4" fill="#8D9BF1"/>
-  <circle cx="58" cy="32" r="4" fill="#8D9BF1"/>
-  <circle cx="52" cy="56" r="4" fill="#8D9BF1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Codex CPA Pool</title>
+  <rect x="1" y="1" width="62" height="62" rx="16" fill="#151b28" stroke="#344157"/>
+  <g transform="translate(4 4) scale(.4375)">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 70V38a16 16 0 0 1 16-16h32" stroke="#edf1fb" stroke-width="9"/>
+      <path d="M35 83V51a16 16 0 0 1 16-16h32" stroke="#edf1fb" stroke-width="9"/>
+      <path d="M49 106V65a16 16 0 0 1 16-16h24a17 17 0 0 1 17 17v6a17 17 0 0 1-17 17H69" stroke="#8d9bf1" stroke-width="10"/>
+    </g>
+  </g>
 </svg>

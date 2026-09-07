@@ -20,6 +20,7 @@ import { PageState } from "./components/PageState";
 import { PageToolbar } from "./components/PageToolbar";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
 import { InitialPasswordModal } from "./InitialPasswordModal";
+import { useTheme, type ThemeMode } from "./ThemeProvider";
 
 const { Paragraph, Text } = Typography;
 
@@ -56,6 +57,7 @@ export function GeneralSettingsPage({
   csrfToken: string;
   onManagementKeyRotated?: (message: string) => void;
 }) {
+  const { theme } = useTheme();
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState("");
   const [initialPasswordOpen, setInitialPasswordOpen] = useState(false);
@@ -190,7 +192,7 @@ export function GeneralSettingsPage({
                 className="settings-logo-preview"
                 shape="square"
                 size={44}
-                src={logoPreviewURL(settings.data)}
+                src={logoPreviewURL(settings.data, theme)}
               >
                 C
               </Avatar>
@@ -413,8 +415,8 @@ function validateLogoFile(file: File) {
   return "";
 }
 
-function logoPreviewURL(settings: GeneralSettings) {
-  if (!settings.branding.custom_logo) return "/portal/assets/codex-cpa-pool-mark.svg";
+function logoPreviewURL(settings: GeneralSettings, theme: ThemeMode) {
+  if (!settings.branding.custom_logo) return `/portal/assets/codex-cpa-pool-mark${theme === "dark" ? "-dark" : ""}.svg`;
   const digest = settings.branding.logo_sha256 ?? "";
   return digest ? `/branding/logo?v=${encodeURIComponent(digest.slice(0, 16))}` : "/branding/logo";
 }

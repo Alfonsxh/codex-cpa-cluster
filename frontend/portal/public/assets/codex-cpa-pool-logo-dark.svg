@@ -1,15 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 830 180" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 128" role="img" aria-labelledby="title">
   <title id="title">Codex CPA Pool</title>
-  <desc id="desc">The letter C connected to pooled accounts beside the Codex CPA Pool wordmark.</desc>
-  <g transform="translate(20 18)" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M101 37a49 49 0 1 0 0 70" stroke="#EDF1FB" stroke-width="14"/>
-    <path d="M102 37l23-23M112 72h32M102 107l23 23" stroke="#7F8BA3" stroke-width="6"/>
-    <circle cx="130" cy="10" r="9" fill="#8D9BF1" stroke="none"/>
-    <circle cx="150" cy="72" r="9" fill="#8D9BF1" stroke="none"/>
-    <circle cx="130" cy="134" r="9" fill="#8D9BF1" stroke="none"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 70V38a16 16 0 0 1 16-16h32" stroke="#7f8ba3" stroke-width="7"/>
+    <path d="M35 83V51a16 16 0 0 1 16-16h32" stroke="#edf1fb" stroke-width="7"/>
+    <path d="M49 106V65a16 16 0 0 1 16-16h24a17 17 0 0 1 17 17v6a17 17 0 0 1-17 17H69" stroke="#8d9bf1" stroke-width="9"/>
   </g>
-  <g font-family="Inter, SF Pro Display, Segoe UI, Arial, sans-serif">
-    <text x="215" y="112" fill="#EDF1FB" font-size="62" font-weight="800" letter-spacing="-2">CODEX</text>
-    <text x="495" y="110" fill="#8D9BF1" font-size="36" font-weight="720" letter-spacing="2.5">CPA POOL</text>
-  </g>
+  <text x="156" y="82" fill="#edf1fb" font-family="Geist, Plus Jakarta Sans, Avenir Next, Segoe UI, Arial, sans-serif" font-size="48" font-weight="650" letter-spacing="-1.4">Codex CPA Pool</text>
 </svg>

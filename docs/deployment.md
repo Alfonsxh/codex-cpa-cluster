@@ -71,6 +71,9 @@ Manifest/Config 判断 `reuse`、`promote` 或 `build`：已存在且标签一�
 目标先用镜像标签完成非执行式身份校验，只有 Control 镜像与不可变标签一致后，才允许运行其中的
 `cpa-releasectl` 读取 Manifest。
 
+正式 GitHub Release 可在本地发布成功后自动发送 Telegram 公告。配置、内容格式和回执重试见
+[Telegram 正式版发布通知](telegram-release.md)。
+
 ## Test 应用顺序
 
 目标环境文件从 `.env.example` 生成并保存在仓库外。四个镜像必须使用发布描述中的 `:sha256-<源码摘要>` 标签。`CPA_CONFIRM_DEPLOY_ROOT`、首次接管确认和 Edge 维护确认在示例中故意留空，必须由操作者针对本次目标显式填写。正式控制面的端口、镜像、Compose 身份和所有权参数只来自该 `target.env`；配置中心生成的 `state/compose.env` 只服务业务 CPA 账号容器。

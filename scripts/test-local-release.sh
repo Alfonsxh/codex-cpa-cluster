@@ -5,6 +5,7 @@ TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/cpap-local-publish-test.XXXXXX")
 trap 'rm -rf -- "$TEST_ROOT"' EXIT HUP INT TERM
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/source/scripts" "$TEST_ROOT/source/frontend" "$TEST_ROOT/source/tools/openapi"
 cp "$ROOT_DIR/scripts/local-release.sh" "$TEST_ROOT/source/scripts/local-release.sh"
+cp "$ROOT_DIR/scripts/telegram-release.mjs" "$TEST_ROOT/source/scripts/telegram-release.mjs"
 printf '%s\n' '{}' >"$TEST_ROOT/source/frontend/package.json"
 printf '%s\n' '{}' >"$TEST_ROOT/source/tools/openapi/package.json"
 printf '%s\n' '# validation fixture' >"$TEST_ROOT/source/scripts/release-validation.mjs"
@@ -41,6 +42,13 @@ EOF
 cat >"$TEST_ROOT/bin/node" <<'EOF'
 #!/usr/bin/env sh
 set -eu
+case "$1" in
+  */telegram-release.mjs)
+    printf 'notify %s\n' "$*" >>"$FIXTURE_LOG"
+    if [ "$2" = send ] && [ -f "$FIXTURE_NOTIFY_FAIL" ]; then exit 1; fi
+    exit 0
+    ;;
+esac
 printf 'validate %s\n' "$*" >>"$FIXTURE_LOG"
 test -f "$2/frontend/package.json"
 EOF
@@ -65,6 +73,7 @@ git -C "$TEST_ROOT/source" commit -qm 'release fixture'
 git -C "$TEST_ROOT/source" remote add origin "$TEST_ROOT/remote.git"
 git -C "$TEST_ROOT/source" push -q -u origin main
 export FIXTURE_LOG="$TEST_ROOT/commands.log" FIXTURE_FAIL_ONCE="$TEST_ROOT/fail-once"
+export FIXTURE_NOTIFY_FAIL="$TEST_ROOT/notify-fail"
 export PATH="$TEST_ROOT/bin:$PATH"
 export IMAGE_PREFIX=ghcr.io/fixture-a GH_REPO=fixture-a/pool DIST_DIR="$TEST_ROOT/dist"
 
@@ -82,6 +91,7 @@ touch "$FIXTURE_FAIL_ONCE"
 if sh "$TEST_ROOT/source/scripts/local-release.sh" publish >"$TEST_ROOT/failed.log" 2>&1; then
   echo 'public failure was ignored' >&2; exit 1
 fi
+! grep -Eq '^notify .* send ' "$FIXTURE_LOG" || { echo 'failed publication triggered notification' >&2; exit 1; }
 sh "$TEST_ROOT/source/scripts/local-release.sh" publish >/dev/null
 grep -Fq 'release edit v9.9.9-rc.1 --repo fixture-a/pool --draft=false --prerelease --latest=false' "$FIXTURE_LOG"
 ! grep -Fq 'release create ' "$FIXTURE_LOG" || { echo 'existing Draft was replaced' >&2; exit 1; }
@@ -90,4 +100,11 @@ test "$(git -C "$TEST_ROOT/source" rev-parse 'v9.9.9-rc.1^{commit}')" = "$(git -
 # Only canonical stable versions may move Latest.
 VERSION=v9.9.9 sh "$TEST_ROOT/source/scripts/local-release.sh" publish >/dev/null
 grep -Fq 'release edit v9.9.9 --repo fixture-a/pool --draft=false --prerelease=false --latest' "$FIXTURE_LOG"
+awk '/release edit v9.9.9 .*--latest$/ { published=1 } /^notify .* send .*--version v9.9.9 / { if (!published) exit 1; sent=1 } END { if (!sent) exit 1 }' "$FIXTURE_LOG"
+# Notification failure is separate from an already completed GitHub publication.
+touch "$FIXTURE_NOTIFY_FAIL"
+if VERSION=v9.9.10 sh "$TEST_ROOT/source/scripts/local-release.sh" publish >"$TEST_ROOT/notify-error.log" 2>&1; then
+  echo 'notification failure was hidden' >&2; exit 1
+fi
+grep -Fq 'GitHub Release 已发布，但 Telegram 通知未完成' "$TEST_ROOT/notify-error.log"
 printf '%s\n' 'local release orchestration contract tests passed'

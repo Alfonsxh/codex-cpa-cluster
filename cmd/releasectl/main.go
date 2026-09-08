@@ -834,7 +834,7 @@ func containsAnyPart(parts, expected []string) bool {
 func allowedDomain(host string) bool {
 	normalized := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 	// Public community links use Telegram's exact short-link host.
-	if normalized == "t.me" {
+	if normalized == "t.me" || normalized == "api.telegram.org" {
 		return true
 	}
 	for _, suffix := range allowedDomainSuffixes {

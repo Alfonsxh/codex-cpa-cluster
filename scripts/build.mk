@@ -17,6 +17,7 @@ GIT_REMOTE ?= origin
 RELEASE_BRANCH ?= main
 TARGET_ENV ?= target.env
 TEST_PROJECT ?= codex-cpa-test
+NOTIFY_ACTION ?= send
 
 .PHONY: help verify run-test generate-api check-generated-api \
 	test-config test-build test-up test-smoke test-down test-faults \
@@ -24,7 +25,7 @@ TEST_PROJECT ?= codex-cpa-test
 	target-activate target-up-core target-up-writers target-up-notifications \
 	target-smoke target-ps target-down lease-rehearsal worker-lease-rehearsal \
 	privacy-check package images publish publish-harbor publish-dockerhub \
-	publish-ghcr publish-all release-check release-verify release run
+	publish-ghcr publish-all release-check release-verify release release-notify run
 
 help:
 	@printf '%s\n' \
@@ -50,7 +51,8 @@ help:
 	  'make -f scripts/build.mk publish VERSION=v1.0.0 IMAGE_PREFIXES="registry.example.com/team docker.io/user"' \
 	  'make -f scripts/build.mk release-verify' \
 	  'make -f scripts/build.mk release-check VERSION=v1.1.0 IMAGE_PREFIX=ghcr.io/owner' \
-	  'make -f scripts/build.mk release VERSION=v1.1.0 IMAGE_PREFIX=ghcr.io/owner'
+	  'make -f scripts/build.mk release VERSION=v1.1.0 IMAGE_PREFIX=ghcr.io/owner' \
+	  'make -f scripts/build.mk release-notify VERSION=v1.1.0 [NOTIFY_ACTION=preview|status|send|edit]'
 
 verify:
 	cd "$(ROOT_DIR)" && sh scripts/verify.sh
@@ -162,6 +164,9 @@ release-check:
 
 release:
 	cd "$(ROOT_DIR)" && VERSION="$(VERSION)" IMAGE_PREFIX="$(IMAGE_PREFIX)" PLATFORM="$(PLATFORM)" GH_REPO="$(GH_REPO)" GIT_REMOTE="$(GIT_REMOTE)" RELEASE_BRANCH="$(RELEASE_BRANCH)" sh scripts/local-release.sh publish
+
+release-notify:
+	cd "$(ROOT_DIR)" && node scripts/telegram-release.mjs "$(NOTIFY_ACTION)" --repo "$(GH_REPO)" --version "$(VERSION)"
 
 run:
 	$(MAKE) -f "$(ROOT_DIR)/scripts/build.mk" target-config TARGET_ENV="$(TARGET_ENV)"

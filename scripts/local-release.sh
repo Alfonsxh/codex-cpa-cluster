@@ -116,6 +116,9 @@ if [ "$ACTION" != verify ]; then
 
   printf 'version=%s\nrevision=%s\nimage_prefix=%s\ngithub_repo=%s\nrelease_state=%s\n' \
     "$VERSION" "$REVISION" "$IMAGE_PREFIX" "$GH_REPO" "$RELEASE_STATE"
+  # With local notifications enabled, reject missing notes or destination rights
+  # before publishing artifacts. This only reads Telegram/GitHub state.
+  node "$ROOT_DIR/scripts/telegram-release.mjs" check --repo "$GH_REPO" --version "$VERSION"
   if [ "$ACTION" = check ]; then
     printf '%s\n' '发布预检通过；未创建 Tag、镜像或 GitHub Release'
     exit 0
@@ -227,3 +230,8 @@ else
   run_stage "公开预发布" gh release edit "$VERSION" --repo "$GH_REPO" --draft=false --prerelease --latest=false
 fi
 printf '发布完成：https://github.com/%s/releases/tag/%s\n' "$GH_REPO" "$VERSION"
+if ! node "$SNAPSHOT_ROOT/scripts/telegram-release.mjs" send \
+  --repo "$GH_REPO" --version "$VERSION" --revision "$REVISION" --image-prefix "$IMAGE_PREFIX"; then
+  printf '%s\n' 'GitHub Release 已发布，但 Telegram 通知未完成。请先查看回执，再通过 release-notify 重试；不要重新发布或删除未知结果的回执。' >&2
+  exit 2
+fi

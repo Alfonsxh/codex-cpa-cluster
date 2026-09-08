@@ -250,6 +250,9 @@ func TestPublicCommunityDomainDoesNotAllowLookalikes(t *testing.T) {
 	}{
 		{host: "t.me", want: true},
 		{host: "T.ME", want: true},
+		{host: "api.telegram.org", want: true},
+		{host: "api.telegram.org.attacker.net", want: false},
+		{host: "private.api.telegram.org", want: false},
 		{host: "t.me.attacker.net", want: false},
 		{host: "private.t.me", want: false},
 		{host: "not-t.me", want: false},

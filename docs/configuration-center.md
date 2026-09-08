@@ -63,7 +63,7 @@ Logo、访问凭据、Webhook 和用量清零保留独立操作流程，不包�
 | `POST /admin/api/settings/configuration` | 按键保存通用配置 | CSRF；类型、范围和枚举校验 |
 | `GET/PUT /admin/api/settings/general` | 品牌、公开地址、邮箱域、Key 前缀和客户端导出默认值 | PUT 需要 CSRF 与 `confirm=save` |
 | `GET /admin/api/settings/workspace` | 存储文件存在性、权限、账号备份摘要和脱敏审计 | 不读取或返回文件秘密内容 |
-| `GET/PUT /admin/api/settings/notifications` | 通知调度与阈值 | 完整 Webhook 不回显；单独提供脱敏展示地址 |
+| `GET/PUT /admin/api/settings/notifications` | 通知调度、阈值与运行状态 | 完整 Webhook 不回显；独立展示调度心跳，失联时隐藏下次发送时间 |
 | `POST /admin/api/settings/initial-password` | 设置之后新用户的初始密码 | 只返回配置状态，不回显密码 |
 | `POST/DELETE /admin/api/settings/logo` | 上传或恢复品牌 Logo | 文件类型、大小与 SVG 安全校验 |
 | `POST /admin/api/settings/management-key` | 轮换管理密钥 | 成功后当前管理会话立即失效 |

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -8,6 +8,44 @@ import type { ConfigurationCatalog } from "../api/configuration";
 import { ConfigurationPage } from "./ConfigurationPage";
 
 describe("ConfigurationPage", () => {
+  it("refreshes scheduler status without overwriting an unsaved notification switch or Webhook", async () => {
+    let worker = "heartbeat_lost";
+    let unavailable = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === "/admin/api/settings/notifications") {
+        if (unavailable) throw new Error("status temporarily unavailable");
+        const payload = await supportingSettingsResponse(path)!.json();
+        payload.notifications.worker_status = worker;
+        return jsonResponse(payload);
+      }
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      return jsonResponse(configurationFixture());
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration?key=notification.enabled", client);
+    expect(await screen.findByText("心跳中断")).toBeInTheDocument();
+    const enabled = screen.getByLabelText("启用企业微信通知");
+    await user.click(enabled);
+    const webhook = screen.getByLabelText("Webhook 地址");
+    await user.type(webhook, "https://example.test/draft");
+    worker = "running";
+    await act(async () => { await client.refetchQueries({ queryKey: ["notification-settings"] }); });
+    expect(await screen.findByText("待命中")).toBeInTheDocument();
+    expect(screen.getByText("已关闭", { exact: true })).toBeInTheDocument();
+    expect(enabled).toBeChecked();
+    expect(webhook).toHaveValue("https://example.test/draft");
+    expect(webhook).toHaveFocus();
+    expect(screen.getByText("1 项未保存")).toBeInTheDocument();
+    unavailable = true;
+    await act(async () => { await client.refetchQueries({ queryKey: ["notification-settings"] }); });
+    expect(await screen.findByText("状态未知")).toBeInTheDocument();
+    expect(screen.getByText("暂时无法刷新调度状态，请稍后重试。")).toBeInTheDocument();
+    expect(enabled).toBeChecked();
+    expect(webhook).toHaveValue("https://example.test/draft");
+  });
   it("opens the deep-linked access section used by first-run guidance", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const path = String(input);
@@ -679,8 +717,8 @@ async function selectConfigurationItem(user: ReturnType<typeof userEvent.setup>,
   await user.click(navigation.getByRole("button", { name: section }));
 }
 
-function renderConfiguration(element: React.ReactNode, entry = "/configuration?group=CPA 请求") {
-  const queryClient = new QueryClient({
+function renderConfiguration(element: React.ReactNode, entry = "/configuration?group=CPA 请求", client?: QueryClient) {
+  const queryClient = client ?? new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
   });
   return render(

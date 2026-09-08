@@ -235,7 +235,7 @@ services:
 
   notifications:
     <<: *control-service
-    profiles: ["external-effects"]
+    profiles: ["writers"]
     container_name: ${CPA_INSTANCE_NAME:-codex-cpa}-notifications
     command:
       - /usr/local/bin/cpa-notifications

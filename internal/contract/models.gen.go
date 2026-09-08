@@ -625,6 +625,27 @@ func (e NotificationSettingsUpdateRequestConfirm) Valid() bool {
 	}
 }
 
+// Defines values for NotificationStatusWorkerStatus.
+const (
+	NotificationStatusWorkerStatusHeartbeatLost NotificationStatusWorkerStatus = "heartbeat_lost"
+	NotificationStatusWorkerStatusNotStarted    NotificationStatusWorkerStatus = "not_started"
+	NotificationStatusWorkerStatusRunning       NotificationStatusWorkerStatus = "running"
+)
+
+// Valid indicates whether the value is a known member of the NotificationStatusWorkerStatus enum.
+func (e NotificationStatusWorkerStatus) Valid() bool {
+	switch e {
+	case NotificationStatusWorkerStatusHeartbeatLost:
+		return true
+	case NotificationStatusWorkerStatusNotStarted:
+		return true
+	case NotificationStatusWorkerStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotificationWebhookRequestConfirm.
 const (
 	NotificationWebhookRequestConfirmSave NotificationWebhookRequestConfirm = "save"
@@ -2566,7 +2587,13 @@ type NotificationStatus struct {
 
 	// WebhookUrl Always empty on reads so the Webhook credential never enters a browser cache.
 	WebhookUrl string `json:"webhook_url"`
+
+	// WorkerStatus Scheduler heartbeat status, independent of delivery results. Running requires a heartbeat within three minutes; missing on older backends.
+	WorkerStatus *NotificationStatusWorkerStatus `json:"worker_status,omitempty"`
 }
+
+// NotificationStatusWorkerStatus Scheduler heartbeat status, independent of delivery results. Running requires a heartbeat within three minutes; missing on older backends.
+type NotificationStatusWorkerStatus string
 
 // NotificationValues defines model for NotificationValues.
 type NotificationValues struct {

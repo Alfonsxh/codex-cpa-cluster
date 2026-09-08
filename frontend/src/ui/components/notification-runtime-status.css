@@ -1,0 +1,10 @@
+.notification-runtime-status { margin-bottom: 18px; }
+.notification-runtime-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 10px; }
+.notification-runtime-grid > div { display: grid; align-content: start; gap: 5px; padding: 11px 12px; color: var(--faint); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; font-size: 11px; }
+.notification-runtime-grid strong { color: var(--ink); font: 600 11px/1.5 var(--mono); overflow-wrap: anywhere; }
+.notification-runtime-grid .status-chip { justify-self: start; }
+.notification-runtime-grid .status-chip.success { color: var(--accent); background: var(--accent-soft); }
+.notification-runtime-grid .status-chip.warning { color: var(--warning); background: var(--warning-soft); }
+.notification-runtime-warning, .notification-runtime-error { margin: 10px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.notification-runtime-warning { color: var(--warning); }
+.notification-runtime-error { color: var(--danger); }

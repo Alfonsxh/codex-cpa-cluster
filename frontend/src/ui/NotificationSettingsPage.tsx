@@ -1,4 +1,4 @@
-import { useSiteTimezone, formatSiteTimestamp, getSiteTimezone } from "./site-time";
+import { useSiteTimezone, getSiteTimezone } from "./site-time";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   BellOutlined,
@@ -12,7 +12,6 @@ import {
   Button,
   Card,
   Col,
-  Descriptions,
   Form,
   Input,
   InputNumber,
@@ -40,6 +39,7 @@ import {
   type NotificationValues
 } from "../api/notifications";
 import { PageState } from "./components/PageState";
+import { NotificationRuntimeStatus } from "./components/NotificationRuntimeStatus";
 import { PageToolbar } from "./components/PageToolbar";
 import { ConfigurationSectionNav } from "./ConfigurationSectionNav";
 
@@ -137,7 +137,7 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
   if (settings.isPending) {
     return <NotificationPageSkeleton />;
   }
-  if (settings.isError) {
+  if (!settings.data) {
     return (
       <section className="page-content">
         <PageState
@@ -239,14 +239,7 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
           </Card>
 
           <Card className="notification-status-card" title="运行状态">
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="Worker 心跳">{formatSiteTimestamp(status.heartbeat_at)}</Descriptions.Item>
-              <Descriptions.Item label="最近成功">{formatSiteTimestamp(status.last_success_at)}</Descriptions.Item>
-              <Descriptions.Item label="下次发送">{formatSiteTimestamp(status.next_schedule_at)}</Descriptions.Item>
-              <Descriptions.Item label="最近错误">
-                {status.last_error ? <Text type="danger">{status.last_error}</Text> : "—"}
-              </Descriptions.Item>
-            </Descriptions>
+            <NotificationRuntimeStatus status={status} enabled={settings.data.values.enabled} unavailable={settings.isError} />
           </Card>
         </Col>
 

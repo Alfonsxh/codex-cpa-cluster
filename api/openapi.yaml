@@ -3364,6 +3364,11 @@ components:
           type: string
           readOnly: true
           description: Display-only saved Webhook address with its key masked except for the last four characters; omitted when unconfigured.
+        worker_status:
+          type: string
+          readOnly: true
+          enum: [running, heartbeat_lost, not_started]
+          description: Scheduler heartbeat status, independent of delivery results. Running requires a heartbeat within three minutes; missing on older backends.
         heartbeat_at: { type: [integer, "null"], format: int64 }
         last_success_at: { type: [integer, "null"], format: int64 }
         last_error: { type: string }

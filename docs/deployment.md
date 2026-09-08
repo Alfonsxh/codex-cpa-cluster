@@ -49,7 +49,7 @@ logs/gateway/
 
 `docker-compose.yml` 与 `release-manifest.json` 必须来自本次选择的同一个发布包。主密钥必须与控制库匹配，`active-gateway.conf` 必须只选择 `blue` 或 `green`，`logs/gateway/` 必须允许镜像内 UID `10001` 写入。`run.sh` 的内部目标动作不会初始化新目标、导入退役 JSON、替换 OAuth，或沿符号链接读写运行数据；首次初始化只由同一脚本在未发布的临时根目录调用镜像内 `cpa-bootstrap` 完成。
 
-成功部署会在各阶段后报告可验证结果，并在带完整左右边框的完成卡片中汇总版本变化、Control/Web/Gateway/Edge 镜像更新或复用、Gateway 槽位切换和旧槽排空、Admin/Web/Edge 与四个 Writer 容器动作、升级备份及入口模式。`external` 入口会明确标记 Nginx/Certbot 未修改，同时仍给出按所记录域名生成的站点和管理员登录链接。
+成功部署会在各阶段后报告可验证结果，并在带完整左右边框的完成卡片中汇总版本变化、Control/Web/Gateway/Edge 镜像更新或复用、Gateway 槽位切换和旧槽排空、Admin/Web/Edge 与五个后台任务容器动作、升级备份及入口模式。`external` 入口会明确标记 Nginx/Certbot 未修改，同时仍给出按所记录域名生成的站点和管理员登录链接。
 
 ## 镜像发布
 
@@ -85,7 +85,9 @@ make -f scripts/build.mk target-up-writers TARGET_ENV=/absolute/path/to/test.env
 make -f scripts/build.mk target-smoke TARGET_ENV=/absolute/path/to/test.env
 ```
 
-通知带外部副作用，单独执行 `up-notifications`。
+通知进程随 `up-writers` 常驻启动，普通安装、升级与回滚都会检查其容器、网络、镜像及调度心跳。配置中心的通知开关只控制自动发送；关闭通知或未配置 Webhook 时，进程保持待命。原 `up-notifications` 入口保留兼容。
+
+配置中心分别展示通知开关、后台调度心跳、最近发送成功和下次发送时间。心跳超过 3 分钟未更新时显示中断提示并隐藏下次发送时间；手动发送成功不会改变调度状态。通知容器健康检查只判断调度心跳，历史发送错误在页面展示，不阻塞应用升级。发送计划按系统时区计算；超过补发窗口的漏发不会自动补发。
 
 `up-core` 先确认非活动 Gateway 已无遗留请求，再更新该槽；需要更新活动槽时，Edge 先把新请求切到已验证的新槽，旧槽的 `/__stats` 归零后才重建。排空超时会保留旧容器和已有 SSE 并使部署失败，重试仍会先等待它排空。Edge 自身镜像或 Compose 配置变化时，必须设置 `CPA_ALLOW_EDGE_RECREATE=true`，并用 `CPA_CONFIRM_EDGE_MAINTENANCE` 精确重复目标目录；该操作有明确的单端口维护窗口。
 

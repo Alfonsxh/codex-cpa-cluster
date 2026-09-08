@@ -66,20 +66,21 @@ func decodeRecordMap[T any](raw json.RawMessage, destination *map[string]T) {
 	*destination = result
 }
 
-func HealthyRuntimeState(
+const DefaultMaxHeartbeatAge = 3 * time.Minute
+
+// WorkerStatus describes the scheduler heartbeat, independently of manual sends
+// and delivery failures. It does not inspect the Docker process itself.
+func WorkerStatus(
 	state RuntimeState,
-	found bool,
-	enabled bool,
 	now time.Time,
 	maxAge time.Duration,
-) bool {
-	if !found || state.Version != RuntimeStateVersion || state.HeartbeatAt == nil ||
-		*state.HeartbeatAt <= 0 || maxAge <= 0 {
-		return false
+) string {
+	if state.Version != RuntimeStateVersion || state.HeartbeatAt == nil || *state.HeartbeatAt <= 0 {
+		return "not_started"
 	}
 	age := now.Unix() - *state.HeartbeatAt
-	if age < 0 || age > int64(maxAge/time.Second) {
-		return false
+	if maxAge <= 0 || age < 0 || age > int64(maxAge/time.Second) {
+		return "heartbeat_lost"
 	}
-	return !enabled || state.LastError == ""
+	return "running"
 }

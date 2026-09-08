@@ -14,10 +14,16 @@ make -f scripts/build.mk target-smoke TARGET_ENV=/absolute/path/to/target.env
 ```sh
 docker compose --env-file /absolute/path/to/target.env -f docker-compose.yml \
   --profile writers --profile external-effects \
-  logs --tail=200 admin web edge gateway-blue gateway-green usage-collector quota account-failover
+  logs --tail=200 admin web edge gateway-blue gateway-green usage-collector quota account-failover notifications
 ```
 
 输出前删除管理密钥、用户 Key、OAuth、Webhook、邮箱、私有域名和目标地址。
+
+## 通知已启用但定时消息未发送
+
+先查看配置中心的“后台调度”和“最近心跳”。“最近发送成功”同时包含手动发送，不能证明调度正在运行。心跳超过 3 分钟未更新或尚无心跳时，检查 `notifications` 容器是否存在、运行，以及其日志中的所有权或数据库错误。新版本的普通部署会自动启动该进程，关闭通知仅停止自动发送。
+
+心跳正常时，再检查 Webhook、最近发送错误、每日发送时间与系统时区。超过“定时补发窗口”的漏发不会自动补发；只有用户明确需要补发时，才点击“发送账号报告”。
 
 ## Edge 健康但访问 502
 

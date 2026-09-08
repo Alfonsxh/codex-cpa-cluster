@@ -1,11 +1,44 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/notifications"
 )
+
+func TestHealthProbeChecksHeartbeatIndependentlyOfDelivery(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := controlplane.Open(ctx, root, controlplane.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.WriteSettings(ctx, map[string]any{"notification.enabled": true}); err != nil {
+		t.Fatal(err)
+	}
+	state := notifications.DefaultRuntimeState()
+	now := time.Now().Unix()
+	state.HeartbeatAt, state.LastSuccessAt = &now, &now
+	state.LastError = "historical send failure"
+	config := appConfig{Root: root, Health: true, MaxHealthAge: notifications.DefaultMaxHeartbeatAge}
+	for _, offset := range []time.Duration{0, -4 * time.Minute, time.Minute} {
+		heartbeat := now + int64(offset/time.Second)
+		state.HeartbeatAt = &heartbeat
+		if err := store.WriteRuntimeState(ctx, notifications.RuntimeStateName, state); err != nil {
+			t.Fatal(err)
+		}
+		err := runHealth(config)
+		if (err == nil) != (offset == 0) {
+			t.Fatalf("heartbeat offset %s: %v", offset, err)
+		}
+	}
+}
 
 func TestAppConfigValidation(t *testing.T) {
 	valid := appConfig{

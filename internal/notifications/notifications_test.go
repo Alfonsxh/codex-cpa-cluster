@@ -316,6 +316,12 @@ func TestWorkerScheduledReportAbsorbsTransitionsAndDisabledPreservesError(t *tes
 	if err != nil || result.Enabled || store.notificationState(t).LastError != "previous failure" {
 		t.Fatalf("disabled run = (%#v, %v), state=%#v", result, err, store.notificationState(t))
 	}
+	state = store.notificationState(t)
+	if len(sender.contents) != 1 || state.NextScheduleAt != nil ||
+		state.HeartbeatAt == nil || *state.HeartbeatAt != worker.Now().Unix() ||
+		WorkerStatus(state, worker.Now(), DefaultMaxHeartbeatAge) != "running" {
+		t.Fatalf("disabled worker did not remain idle with a fresh heartbeat: %#v", state)
+	}
 }
 
 func testAccountSnapshot(account string, used float64, label string) AccountSnapshot {

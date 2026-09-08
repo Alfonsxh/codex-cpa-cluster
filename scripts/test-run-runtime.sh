@@ -403,13 +403,13 @@ new_fixture writer-no-dependencies
 write_env "$DEPLOY_ROOT"
 : >"$COMMAND_LOG"
 run_action ordinary up-writers >/dev/null
-for service in quota usage-collector account-failover log-maintenance; do
-  grep -E "compose .*--profile writers up .*--no-deps $service$" \
+for service in quota usage-collector account-failover log-maintenance notifications; do
+  grep -E "compose .*--profile writers .*up .*--no-deps $service$" \
     "$COMMAND_LOG" >/dev/null || {
       echo "writer rollout did not start $service independently with --no-deps" >&2
       exit 1
     }
-  grep -E "compose .*--profile writers config --hash $service$" \
+  grep -E "compose .*--profile writers .*config --hash $service$" \
     "$COMMAND_LOG" >/dev/null || {
       echo "writer rollout did not calculate the $service hash with its profile enabled" >&2
       exit 1
@@ -425,12 +425,12 @@ new_fixture notification-profile
 write_env "$DEPLOY_ROOT"
 : >"$COMMAND_LOG"
 run_action ordinary up-notifications >/dev/null
-grep -E 'compose .*--profile external-effects up .*--no-deps notifications$' \
+grep -E 'compose .*--profile writers --profile external-effects up .*--no-deps notifications$' \
   "$COMMAND_LOG" >/dev/null || {
     echo "notification rollout did not start independently with its profile enabled" >&2
     exit 1
   }
-grep -E 'compose .*--profile external-effects config --hash notifications$' \
+grep -E 'compose .*--profile writers --profile external-effects config --hash notifications$' \
   "$COMMAND_LOG" >/dev/null || {
     echo "notification rollout did not calculate its hash with its profile enabled" >&2
     exit 1

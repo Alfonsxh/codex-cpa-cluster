@@ -83,7 +83,7 @@ func newCommand() *cobra.Command {
 	flags.String("log-level", "info", "Zap log level")
 	flags.Duration("interval", 30*time.Second, "robfig/cron @every notification evaluation interval")
 	flags.Duration("round-timeout", 25*time.Second, "maximum duration of one notification round")
-	flags.Duration("max-health-age", 3*time.Minute, "maximum healthy heartbeat age")
+	flags.Duration("max-health-age", notifications.DefaultMaxHeartbeatAge, "maximum healthy heartbeat age")
 	flags.Bool("once", false, "evaluate one notification round and exit")
 	flags.Bool("health", false, "read notification health without mutating the target")
 	flags.String("runtime-owner", "codex-cpa", "explicitly activated runtime ownership label")
@@ -183,35 +183,17 @@ func runHealth(config appConfig) error {
 		return err
 	}
 	defer reader.Close()
-	settings, err := reader.ReadSettings(ctx)
-	if err != nil {
-		return err
-	}
-	notificationConfig, err := notifications.ParseConfig(settings)
-	if err != nil {
-		return err
-	}
-	secretStatuses, err := reader.SecretStatuses(ctx)
-	if err != nil {
-		return err
-	}
-	if notificationConfig.Enabled {
-		webhook, configured := secretStatuses["wecom_webhook"]
-		if !configured || strings.TrimSpace(webhook.SHA256) == "" {
-			return errors.New("notification worker is enabled but the WeCom Webhook is not configured")
-		}
-	}
-	state, found, err := notifications.ReadRuntimeState(ctx, reader)
+	state, _, err := notifications.ReadRuntimeState(ctx, reader)
 	if err != nil {
 		return err
 	}
 	if err := printJSON(state); err != nil {
 		return err
 	}
-	if !notifications.HealthyRuntimeState(
-		state, found, notificationConfig.Enabled, time.Now(), config.MaxHealthAge,
-	) {
-		return errors.New("notification worker is not healthy")
+	// Delivery errors and an unconfigured Webhook remain visible in Admin but
+	// must not block deployment of an otherwise live, possibly idle scheduler.
+	if notifications.WorkerStatus(state, time.Now(), config.MaxHealthAge) != "running" {
+		return errors.New("notification worker heartbeat is missing or stale")
 	}
 	return nil
 }

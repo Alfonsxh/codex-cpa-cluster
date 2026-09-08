@@ -843,6 +843,10 @@ export type NotificationStatus = {
      * Display-only saved Webhook address with its key masked except for the last four characters; omitted when unconfigured.
      */
     readonly webhook_display_url?: string;
+    /**
+     * Scheduler heartbeat status, independent of delivery results. Running requires a heartbeat within three minutes; missing on older backends.
+     */
+    readonly worker_status?: 'running' | 'heartbeat_lost' | 'not_started';
     heartbeat_at: number | null;
     last_success_at: number | null;
     last_error: string;

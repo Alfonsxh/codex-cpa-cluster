@@ -45,6 +45,7 @@ import {
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { PageState } from "./components/PageState";
+import { NotificationRuntimeStatus } from "./components/NotificationRuntimeStatus";
 import { formatTokenAmount, tokenInputPresentation, tokenReadableParts, tokenReadableText } from "./formatters";
 import { InitialPasswordModal } from "./InitialPasswordModal";
 import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
@@ -135,7 +136,8 @@ export function ConfigurationPage({
     queryFn: ({ signal }) => readNotificationSettings(signal),
     staleTime: 0,
     gcTime: 0,
-    refetchOnWindowFocus: false
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000
   });
   const workspace = useQuery({
     queryKey: settingsWorkspaceQueryKey,
@@ -232,6 +234,7 @@ export function ConfigurationPage({
     setRefreshLabel("配置已刷新");
   }, [catalog.data, general.data, notification.data, setRefreshLabel, workspace.data]);
 
+  const notificationLoaded = Boolean(notification.data);
   useEffect(() => {
     if (!focusKey) return;
     const target = [...document.querySelectorAll<HTMLElement>("[data-configuration-field]")]
@@ -242,7 +245,7 @@ export function ConfigurationPage({
     target.querySelector<HTMLElement>('input:not([type="hidden"]):not([type="file"]):not(:disabled), select:not(.enhanced-select-native):not(:disabled), textarea:not(:disabled), button:not(:disabled)')?.focus({ preventScroll: true });
     const timer = window.setTimeout(() => target.classList.remove("configuration-field-highlight"), 1_600);
     return () => { window.clearTimeout(timer); target.classList.remove("configuration-field-highlight"); };
-  }, [focusKey, category, selectedSectionId, catalog.data, general.data, notification.data, workspace.data]);
+  }, [focusKey, category, selectedSectionId, catalog.data, general.data, notificationLoaded, workspace.data]);
 
   const saveMutation = useMutation({
     onMutate: () => setSaveError(""),
@@ -369,7 +372,7 @@ export function ConfigurationPage({
   });
 
   const pending = catalog.isPending || general.isPending || notification.isPending || workspace.isPending;
-  const loadError = catalog.error ?? general.error ?? notification.error ?? workspace.error;
+  const loadError = catalog.error ?? general.error ?? (!notification.data ? notification.error : null) ?? workspace.error;
   if (pending) return <ConfigurationSkeleton />;
   if (loadError || !catalog.data || !general.data || !notification.data || !workspace.data) {
     return (
@@ -508,7 +511,7 @@ export function ConfigurationPage({
                     </div> : null}
                     {section.id === "model-multipliers" ? <ModelMultiplierEditor fields={sectionFields.filter(specialized)} draft={draft} onChange={updateField} /> : null}
                     {section.id === "reasoning-multipliers" || section.id === "appearance" ? <ReasoningStrategyEditor fields={sectionFields.filter(specialized)} draft={draft} onChange={updateField} /> : null}
-                    {section.id === "notifications" ? <><p className="configuration-independent-note">Webhook 单独保存，立即生效。</p><NotificationIntegration status={notification.data.notifications} value={webhookDraft} error={webhookError} saving={webhookMutation.isPending} clearing={webhookClearMutation.isPending} sending={notificationSendMutation.isPending} testing={notificationTestMutation.isPending} editing={webhookEditing} onEdit={() => { setWebhookError(""); setWebhookEditing(true); }} onCancel={() => { setWebhookDraft(""); setWebhookError(""); setWebhookEditing(false); }} onTest={() => notificationTestMutation.mutate()} onChange={(value) => { setWebhookDraft(value); setWebhookError(""); }} onSave={() => webhookMutation.mutate()} onClear={() => setWebhookClearOpen(true)} onSend={() => notificationSendMutation.mutate()} /></> : null}
+                    {section.id === "notifications" ? <><p className="configuration-independent-note">Webhook 单独保存，立即生效。</p><NotificationIntegration status={notification.data.notifications} enabled={notification.data.values.enabled} unavailable={notification.isError} value={webhookDraft} error={webhookError} saving={webhookMutation.isPending} clearing={webhookClearMutation.isPending} sending={notificationSendMutation.isPending} testing={notificationTestMutation.isPending} editing={webhookEditing} onEdit={() => { setWebhookError(""); setWebhookEditing(true); }} onCancel={() => { setWebhookDraft(""); setWebhookError(""); setWebhookEditing(false); }} onTest={() => notificationTestMutation.mutate()} onChange={(value) => { setWebhookDraft(value); setWebhookError(""); }} onSave={() => webhookMutation.mutate()} onClear={() => setWebhookClearOpen(true)} onSend={() => notificationSendMutation.mutate()} /></> : null}
                     {section.id === "access" ? <AccessPanel managementKeyConfigured={general.data.security.management_key_configured} initialPasswordConfigured={general.data.security.initial_password_configured} onInitialPassword={() => setInitialPasswordOpen(true)} onManagementKey={() => setManagementKeyOpen(true)} /> : null}
                     {section.id === "backups" ? <BackupsPanel count={workspace.data.backups.count} latest={workspace.data.backups.latest} /> : null}
                     {section.id === "storage" ? <StoragePanel rows={workspace.data.storage} onRefresh={() => refreshWorkspace(true)} /> : null}
@@ -592,8 +595,10 @@ function BrandingLogoEditor({ custom, sha256, pending, error, onFile, onReset }:
   return <article className="branding-logo-editor"><div className="branding-logo-preview"><img src={source} alt="当前 Logo" /></div><div className="branding-logo-copy"><strong>品牌 Logo</strong><small>上传或恢复后立即生效</small><span className={`status-chip ${custom ? "success" : "neutral"}`}>{custom ? "自定义 Logo" : "默认 Logo"}</span></div><div className="branding-logo-actions"><button className="button button-secondary" type="button" disabled={pending} onClick={() => fileInputRef.current?.click()}>{pending ? "正在上传…" : "选择并上传"}</button><input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" disabled={pending} hidden onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onFile(file); }} /><button className="button danger-outline" type="button" disabled={!custom || pending} onClick={onReset}>恢复默认</button><small className="form-error" role="alert">{error}</small></div></article>;
 }
 
-function NotificationIntegration({ status, value, error, saving, clearing, sending, testing, editing, onEdit, onCancel, onChange, onSave, onClear, onSend, onTest }: {
+function NotificationIntegration({ status, enabled, unavailable, value, error, saving, clearing, sending, testing, editing, onEdit, onCancel, onChange, onSave, onClear, onSend, onTest }: {
   status: NotificationStatus;
+  enabled: boolean;
+  unavailable: boolean;
   value: string;
   error: string;
   saving: boolean;
@@ -650,11 +655,7 @@ function NotificationIntegration({ status, value, error, saving, clearing, sendi
       </div>
       {error ? <p className="form-error" id="notification-webhook-error" role="alert">{error}</p> : null}
     </div>
-    <div className="notification-status-list">
-      <span>最近成功<strong>{formatSiteTimestamp(status.last_success_at)}</strong></span>
-      <span>下次发送<strong>{formatSiteTimestamp(status.next_schedule_at)}</strong></span>
-      {status.last_error ? <span>最近错误<strong>{status.last_error}</strong></span> : null}
-    </div>
+    <NotificationRuntimeStatus status={status} enabled={enabled} unavailable={unavailable} />
   </article>;
 }
 

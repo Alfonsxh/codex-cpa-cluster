@@ -66,7 +66,7 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 	if worker.Activity == nil || worker.Sender == nil {
 		return result, worker.recordError(ctx, state, errors.New("notification worker dependencies are incomplete"))
 	}
-	state.NextScheduleAt = nextScheduleAt(nowTime.In(config.Timezone), config.DailyTimes)
+	state.NextScheduleAt = NextScheduleAt(nowTime.In(config.Timezone), config.DailyTimes)
 	dueKeys := dueScheduleKeys(nowTime, config, state.Scheduled)
 	lastQuotaCheck := int64Value(state.QuotaCheckedAt)
 	quotaCheckDue := config.QuotaAlertEnabled &&
@@ -357,7 +357,8 @@ func dueScheduleKeys(now time.Time, config Config, scheduled map[string]Schedule
 	return result
 }
 
-func nextScheduleAt(local time.Time, clocks []ClockTime) *int64 {
+// NextScheduleAt returns the next configured daily time in the supplied timezone.
+func NextScheduleAt(local time.Time, clocks []ClockTime) *int64 {
 	var next time.Time
 	for dayOffset := 0; dayOffset <= 1; dayOffset++ {
 		date := local.AddDate(0, 0, dayOffset)

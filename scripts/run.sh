@@ -1860,6 +1860,7 @@ prepare_deployment_summary() {
   DEPLOY_SUMMARY_BEFORE_COLLECTOR=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-usage-collector")
   DEPLOY_SUMMARY_BEFORE_FAILOVER=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-account-failover")
   DEPLOY_SUMMARY_BEFORE_LOGS=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-log-maintenance")
+  DEPLOY_SUMMARY_BEFORE_NOTIFICATIONS=$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-notifications")
 }
 
 collect_core_deployment_summary() {
@@ -1896,7 +1897,9 @@ collect_writer_deployment_summary() {
     "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-account-failover")")
   logs_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_LOGS" \
     "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-log-maintenance")")
-  DEPLOY_SUMMARY_WRITER_ACTIONS="quota ${quota_action}；collector ${collector_action}；failover ${failover_action}；logs $logs_action"
+  notifications_action=$(deployment_container_change "$DEPLOY_SUMMARY_BEFORE_NOTIFICATIONS" \
+    "$(deployment_container_id "$DEPLOY_SUMMARY_INSTANCE-notifications")")
+  DEPLOY_SUMMARY_WRITER_ACTIONS="quota ${quota_action}；collector ${collector_action}；failover ${failover_action}；logs ${logs_action}；notifications $notifications_action"
 }
 
 show_target_action_details() {
@@ -2792,7 +2795,7 @@ service_config_hash() {
       output=$(compose --profile writers config --hash "$service")
       ;;
     notifications)
-      output=$(compose --profile external-effects config --hash "$service")
+      output=$(compose --profile writers --profile external-effects config --hash "$service")
       ;;
     *)
       output=$(compose config --hash "$service")
@@ -3213,12 +3216,18 @@ case "$ACTION" in
       "quota|true" \
       "usage-collector|true" \
       "account-failover|true" \
-      "log-maintenance|false"
+      "log-maintenance|false" \
+      "notifications|true"
     do
       service=${pair%%|*}
       needs_upstream=${pair#*|}
       container="$instance-$service"
-      compose --profile writers up -d --no-deps "$service"
+      if [ "$service" = notifications ]; then
+        # Older release archives kept notifications in external-effects.
+        compose --profile writers --profile external-effects up -d --no-deps "$service"
+      else
+        compose --profile writers up -d --no-deps "$service"
+      fi
       ensure_target_network "$container" "$project" "$service" "$control_network"
       if [ "$needs_upstream" = true ]; then
         ensure_target_network "$container" "$project" "$service" "$CPA_UPSTREAM_NETWORK"
@@ -3233,7 +3242,7 @@ case "$ACTION" in
     project=${CPA_COMPOSE_PROJECT_NAME:-codex-cpa}
     control_network="${project}_control"
     container="$instance-notifications"
-    compose --profile external-effects up -d --no-deps notifications
+    compose --profile writers --profile external-effects up -d --no-deps notifications
     ensure_target_network "$container" "$project" notifications "$control_network"
     ensure_target_network "$container" "$project" notifications "$CPA_UPSTREAM_NETWORK"
     wait_target_container "$container"

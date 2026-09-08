@@ -95,7 +95,7 @@ make -f scripts/build.mk target-up-writers TARGET_ENV=/absolute/path/to/test.env
 make -f scripts/build.mk target-smoke TARGET_ENV=/absolute/path/to/test.env
 ```
 
-通知会产生外部消息，必须单独获批后执行 `up-notifications`。目标烟测只证明 Go 拓扑与静态路径；上线前仍要使用真实 API Key 验证非流式 Responses 和 SSE，并完成浏览器验收。
+通知进程随部署常驻，配置中心启用通知且保存 Webhook 后，才按发送计划和预警规则自动发送；关闭通知时进程保持待命。页面会单独显示调度心跳，手动发送成功不代表定时调度正常。目标烟测只证明 Go 拓扑与静态路径；上线前仍要使用真实 API Key 验证非流式 Responses 和 SSE，并完成浏览器验收。
 
 更多信息见 [架构](architecture.md)、[部署](deployment.md)、[备份恢复](backup-and-restore.md) 和 [故障排查](troubleshooting.md)。
 

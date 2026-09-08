@@ -17,6 +17,7 @@ type notificationStatus struct {
 	WebhookConfigured bool   `json:"webhook_configured"`
 	WebhookURL        string `json:"webhook_url"`
 	WebhookDisplayURL string `json:"webhook_display_url,omitempty"`
+	WorkerStatus      string `json:"worker_status"`
 	HeartbeatAt       *int64 `json:"heartbeat_at"`
 	LastSuccessAt     *int64 `json:"last_success_at"`
 	LastError         string `json:"last_error"`
@@ -55,7 +56,7 @@ func (server *Server) notificationSettings(ctx context.Context) (notificationSet
 	if err != nil {
 		return notificationSettingsResponse{}, err
 	}
-	status, err := server.notificationStatus(ctx)
+	status, err := server.notificationStatusWithConfig(ctx, config)
 	if err != nil {
 		return notificationSettingsResponse{}, err
 	}
@@ -76,13 +77,27 @@ func (server *Server) notificationSettings(ctx context.Context) (notificationSet
 }
 
 func (server *Server) notificationStatus(ctx context.Context) (notificationStatus, error) {
+	settings, err := server.store.ReadSettings(ctx)
+	if err != nil {
+		return notificationStatus{}, err
+	}
+	config, err := notifications.ParseConfig(settings)
+	if err != nil {
+		return notificationStatus{}, err
+	}
+	return server.notificationStatusWithConfig(ctx, config)
+}
+
+func (server *Server) notificationStatusWithConfig(ctx context.Context, config notifications.Config) (notificationStatus, error) {
 	state, _, err := notifications.ReadRuntimeState(ctx, server.store)
 	if err != nil {
 		return notificationStatus{}, err
 	}
+	now := server.now()
 	status := notificationStatus{
 		HeartbeatAt: state.HeartbeatAt, LastSuccessAt: state.LastSuccessAt,
-		LastError: notifications.RedactWebhook(state.LastError), NextScheduleAt: state.NextScheduleAt,
+		LastError:    notifications.RedactWebhook(state.LastError),
+		WorkerStatus: notifications.WorkerStatus(state, now, notifications.DefaultMaxHeartbeatAge),
 	}
 	webhook, found, err := server.store.ReadSecret(ctx, "wecom_webhook")
 	if err != nil {
@@ -91,6 +106,9 @@ func (server *Server) notificationStatus(ctx context.Context) (notificationStatu
 	if found {
 		status.WebhookDisplayURL = notifications.MaskedWebhookURL(webhook)
 		status.WebhookConfigured = status.WebhookDisplayURL != ""
+	}
+	if status.WorkerStatus == "running" && config.Enabled && status.WebhookConfigured {
+		status.NextScheduleAt = notifications.NextScheduleAt(now.In(config.Timezone), config.DailyTimes)
 	}
 	return status, nil
 }

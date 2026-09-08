@@ -266,6 +266,27 @@ export type Account = {
     proxy_configured: boolean;
 };
 
+export type AccountModels = {
+    account: string;
+    models: Array<string>;
+};
+
+export type AccountModelTestRequest = {
+    account: string;
+    model: string;
+};
+
+export type AccountModelTestResult = {
+    account: string;
+    model: string;
+    success: boolean;
+    elapsed_ms: number;
+    checked_at: number;
+    upstream_status: number;
+    code: string;
+    message: string;
+};
+
 export type AccountCatalog = {
     accounts: Array<Account>;
     generated_at: number;
@@ -1991,6 +2012,61 @@ export type UpdateAdminOnboardingPreferencesResponses = {
 };
 
 export type UpdateAdminOnboardingPreferencesResponse = UpdateAdminOnboardingPreferencesResponses[keyof UpdateAdminOnboardingPreferencesResponses];
+
+export type ListAccountModelsData = {
+    body?: never;
+    path?: never;
+    query: {
+        account: string;
+    };
+    url: '/admin/api/accounts/models';
+};
+
+export type ListAccountModelsErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type ListAccountModelsError = ListAccountModelsErrors[keyof ListAccountModelsErrors];
+
+export type ListAccountModelsResponses = {
+    /**
+     * Models advertised by the selected account; no inference performed
+     */
+    200: AccountModels;
+};
+
+export type ListAccountModelsResponse = ListAccountModelsResponses[keyof ListAccountModelsResponses];
+
+export type TestAccountModelData = {
+    body: AccountModelTestRequest;
+    headers: {
+        'X-CSRF-Token': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/admin/api/accounts/model-test';
+};
+
+export type TestAccountModelErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type TestAccountModelError = TestAccountModelErrors[keyof TestAccountModelErrors];
+
+export type TestAccountModelResponses = {
+    /**
+     * Fixed short generation test, bounded to 25 seconds; upstream failures are returned as unsuccessful results without invalidating the Admin session
+     */
+    200: AccountModelTestResult;
+};
+
+export type TestAccountModelResponse = TestAccountModelResponses[keyof TestAccountModelResponses];
 
 export type ListAdminAccountsData = {
     body?: never;

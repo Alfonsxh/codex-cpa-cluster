@@ -86,12 +86,13 @@ import { AdminTable } from "./components/AdminTable";
 import { ImageUpdateTaskReport, parseImageUpdateOutput } from "./components/ImageUpdateTaskReport";
 import {
   CustomUsageRangeModal,
-  formatCustomUsageRange,
   type CustomUsageRange
 } from "./components/CustomUsageRangeModal";
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
+import { ManagementUsageTimeFilter } from "./components/ManagementUsageTimeFilter";
+import { AccountModelTestModal } from "./components/AccountModelTestModal";
 import { WideSelect } from "./components/WideSelect";
 import { formatTokenAmount } from "./formatters";
 
@@ -177,6 +178,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   const [destructiveAction, setDestructiveAction] = useState<DestructiveAction | null>(null);
   const [runtimeOperation, setRuntimeOperation] = useState<PendingAccountRuntimeOperation | null>(null);
   const [imageUpdateTarget, setImageUpdateTarget] = useState<PendingImageUpdate | null>(null);
+  const [modelTestAccount, setModelTestAccount] = useState<Account | null>(null);
   const [logTarget, setLogTarget] = useState<string | null>(null);
   const [rebalanceTarget, setRebalanceTarget] = useState<Account | null>(null);
   const [oauthAccount, setOAuthAccount] = useState<Account | null>(null);
@@ -189,11 +191,6 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
     startAt: usageWindow === "custom" ? customUsageRange?.startAt : undefined,
     endAt: usageWindow === "custom" ? customUsageRange?.endAt : undefined
   }), [customUsageRange?.endAt, customUsageRange?.startAt, usageWindow]);
-  const displayedUsageWindowOptions = useMemo(() => usageWindowOptions.map((option) => (
-    option.value === "custom"
-      ? { ...option, label: customUsageRange ? formatCustomUsageRange(customUsageRange) : option.label }
-      : option
-  )), [customUsageRange, siteTimezone]);
   const accounts = useQuery({
     queryKey: accountListQueryKey(usageRange),
     queryFn: ({ signal }) => listAccounts(usageRange, signal),
@@ -540,58 +537,52 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
       ? `${localImage.version || "镜像未提供可识别版本"} · ${localImage.short_id || "摘要未知"} · ${visibleImageStatus?.current_count ?? 0}/${visibleImageStatus?.running_count ?? 0} 个运行中的已启用 CPA`
       : `${runningEnabledAccounts} 个已启用 CPA 运行中`;
 
+  const rangeBoundary = (timestamp: number | null | undefined, empty = "—") => {
+    if (accounts.isFetching) return "…";
+    if (!accounts.data || accounts.isError) return "—";
+    return timestamp != null && timestamp > 0 ? formatSiteTimestamp(timestamp) : empty;
+  };
+
   return (
     <section className="page-content account-page">
       <div className="account-management-panel">
-        <div className="account-management-toolbar">
-          <Input
-            className="account-search-input"
-            aria-label="搜索 CPA 账号"
-            prefix={<span className="account-search-legacy-icon" aria-hidden="true" />}
-            placeholder="搜索账号、名称或邮箱"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+        <div className="account-management-toolbar management-toolbar user-management-toolbar user-time-filter-toolbar">
+          <ManagementUsageTimeFilter
+            value={usageWindow} options={usageWindowOptions} label="账号用量"
+            onChange={setUsageWindow} onCustomSelect={() => setCustomUsageRangeOpen(true)}
+            start={rangeBoundary(usageWindow === "since_reset" ? null : accounts.data?.window_start_at, usageWindow === "since_reset" ? "各账号重置时间" : usageWindow === "all" ? "不限" : "—")}
+            end={rangeBoundary(accounts.data?.window_end_at)} updating={accounts.isFetching}
           />
-          <div className="account-filter-actions">
-            <AccountFilter label="运行状态">
-              <WideSelect<AccountRuntimeFilter>
-                aria-label="运行状态"
-                value={runtimeFilter}
-                options={runtimeFilterOptions}
-                onChange={setRuntimeFilter}
-              />
-            </AccountFilter>
-            <AccountFilter label="OAuth">
-              <WideSelect<AccountAuthFilter>
-                aria-label="OAuth"
-                value={authFilter}
-                options={authFilterOptions}
-                onChange={setAuthFilter}
-              />
-            </AccountFilter>
-            <AccountFilter label="用量范围" className="account-usage-window-filter">
-              <WideSelect<AccountUsageWindow>
-                aria-label="用量范围"
-                value={usageWindow}
-                options={displayedUsageWindowOptions}
-                labelRender={(option) => usageWindow === "custom" && customUsageRange ? (
-                  <span className="account-custom-usage-range" title={formatCustomUsageRange(customUsageRange)}>
-                    <span>{formatSiteTimestamp(customUsageRange.startAt)}</span>
-                    <span>{formatSiteTimestamp(customUsageRange.endAt)}</span>
-                  </span>
-                ) : option.label}
-                onChange={(nextWindow) => {
-                  if (nextWindow === "custom") {
-                    setCustomUsageRangeOpen(true);
-                    return;
-                  }
-                  setUsageWindow(nextWindow);
-                }}
-              />
-            </AccountFilter>
-            <Button type="primary" onClick={() => openEditor("create")}>
-              添加 CPA
-            </Button>
+          <div className="account-time-filter-actions">
+            <Input
+              className="account-search-input"
+              aria-label="搜索 CPA 账号"
+              prefix={<span className="account-search-legacy-icon" aria-hidden="true" />}
+              placeholder="搜索账号、名称或邮箱"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <div className="account-filter-actions">
+              <AccountFilter label="运行状态">
+                <WideSelect<AccountRuntimeFilter>
+                  aria-label="运行状态"
+                  value={runtimeFilter}
+                  options={runtimeFilterOptions}
+                  onChange={setRuntimeFilter}
+                />
+              </AccountFilter>
+              <AccountFilter label="OAuth">
+                <WideSelect<AccountAuthFilter>
+                  aria-label="OAuth"
+                  value={authFilter}
+                  options={authFilterOptions}
+                  onChange={setAuthFilter}
+                />
+              </AccountFilter>
+              <Button type="primary" onClick={() => openEditor("create")}>
+                添加 CPA
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -684,6 +675,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
                 <AccountExpandedRow
                   account={account}
                   usageRange={usageRange}
+                  onModelTest={setModelTestAccount}
                   imageStatus={imageStatus}
                   onEdit={openEditor}
                   onOAuth={openOAuth}
@@ -713,6 +705,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
         </div>
       </div>
 
+      {modelTestAccount ? <AccountModelTestModal account={modelTestAccount} csrfToken={csrfToken} onClose={() => setModelTestAccount(null)} /> : null}
       <CustomUsageRangeModal
         open={customUsageRangeOpen}
         title="账号信息自定义统计范围"
@@ -1110,6 +1103,7 @@ function AccountExpandedRow({
   onPolicy,
   onRuntimeOperation,
   onOpenLogs,
+  onModelTest,
   onRebalance,
   onUpdateImage
 }: {
@@ -1121,6 +1115,7 @@ function AccountExpandedRow({
   onPolicy: (account: Account) => void;
   onRuntimeOperation: (operation: PendingAccountRuntimeOperation) => void;
   onOpenLogs: (account: string) => void;
+  onModelTest: (account: Account) => void;
   onRebalance: (account: Account) => void;
   onUpdateImage: (account: Account) => void;
 }) {
@@ -1190,6 +1185,7 @@ function AccountExpandedRow({
 
       <div className="account-detail-actions">
         <div className="account-detail-action-group" role="group" aria-label="常用操作">
+          <button className="button ghost" type="button" disabled={!running} title={!running ? "请先启动账号容器" : undefined} onClick={() => onModelTest(account)}>模型通信测试</button>
           <button className="button ghost" type="button" onClick={() => onOpenLogs(account.id)}>查看日志</button>
           <button className="button ghost" type="button" aria-label={`编辑 ${account.id}`} onClick={() => onEdit(account)}>编辑账号</button>
           <button className="button ghost" type="button" onClick={() => onOAuth(account)}>
@@ -1634,8 +1630,7 @@ const usageWindowOptions = [
   { value: "604800", label: "7 天" },
   { value: "2592000", label: "30 天" },
   { value: "since_reset", label: "额度周期" },
-  { value: "all", label: "全部" },
-  { value: "custom", label: "自定义…" }
+  { value: "all", label: "全部" }
 ] satisfies Array<{ value: AccountUsageWindow; label: string }>;
 
 const runtimeStateLabel: Record<Account["runtime_state"], string> = {

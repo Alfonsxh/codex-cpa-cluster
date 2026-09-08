@@ -69,6 +69,7 @@ type Config struct {
 	Accounts             AccountCatalog
 	AccountStates        failover.AccountStateProvider
 	AccountRuntime       AccountRuntimeReader
+	ModelProbe           AccountModelProbe
 	Activity             failover.ActivityProvider
 	OAuth                AccountOAuthReader
 	Logger               *zap.Logger
@@ -163,6 +164,7 @@ type Server struct {
 	accounts                AccountCatalog
 	accountStates           failover.AccountStateProvider
 	accountRuntime          AccountRuntimeReader
+	modelProbe              AccountModelProbe
 	activity                failover.ActivityProvider
 	oauth                   AccountOAuthReader
 	usage                   UsageReader
@@ -261,6 +263,7 @@ func New(config Config) (*Server, error) {
 		accounts:             config.Accounts,
 		accountStates:        config.AccountStates,
 		accountRuntime:       config.AccountRuntime,
+		modelProbe:           config.ModelProbe,
 		activity:             config.Activity,
 		oauth:                config.OAuth,
 		usage:                config.Usage,
@@ -337,6 +340,8 @@ func (server *Server) registerRoutes() {
 	authenticated.POST("/notifications/send", server.limitBody(defaultBodyLimit), server.sendNotification)
 	authenticated.POST("/notifications/test", server.limitBody(defaultBodyLimit), server.testNotification)
 	authenticated.GET("/accounts", server.listAccounts)
+	authenticated.GET("/accounts/models", server.readAccountModels)
+	authenticated.POST("/accounts/model-test", server.limitBody(4096), server.testAccountModel)
 	authenticated.POST("/accounts", server.limitBody(defaultBodyLimit), server.createAccount)
 	authenticated.POST("/accounts/update", server.limitBody(defaultBodyLimit), server.updateAccount)
 	authenticated.POST("/accounts/policy", server.limitBody(defaultBodyLimit), server.updateAccount)

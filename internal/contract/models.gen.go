@@ -2015,6 +2015,30 @@ type AccountLifecycleRecord struct {
 // AccountLifecycleRecordProxyMode defines model for AccountLifecycleRecord.ProxyMode.
 type AccountLifecycleRecordProxyMode string
 
+// AccountModelTestRequest defines model for AccountModelTestRequest.
+type AccountModelTestRequest struct {
+	Account string `json:"account"`
+	Model   string `json:"model"`
+}
+
+// AccountModelTestResult defines model for AccountModelTestResult.
+type AccountModelTestResult struct {
+	Account        string `json:"account"`
+	CheckedAt      int64  `json:"checked_at"`
+	Code           string `json:"code"`
+	ElapsedMs      int64  `json:"elapsed_ms"`
+	Message        string `json:"message"`
+	Model          string `json:"model"`
+	Success        bool   `json:"success"`
+	UpstreamStatus int    `json:"upstream_status"`
+}
+
+// AccountModels defines model for AccountModels.
+type AccountModels struct {
+	Account string   `json:"account"`
+	Models  []string `json:"models"`
+}
+
 // AccountOperationalStatus defines model for AccountOperationalStatus.
 type AccountOperationalStatus struct {
 	Code       string                       `json:"code"`
@@ -4077,6 +4101,16 @@ type DeleteAdminAccountParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// TestAccountModelParams defines parameters for TestAccountModel.
+type TestAccountModelParams struct {
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// ListAccountModelsParams defines parameters for ListAccountModels.
+type ListAccountModelsParams struct {
+	Account string `form:"account" json:"account"`
+}
+
 // UpdateAdminAccountPolicyParams defines parameters for UpdateAdminAccountPolicy.
 type UpdateAdminAccountPolicyParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
@@ -4445,6 +4479,9 @@ type ClearAdminAccountAuthJSONRequestBody = AccountClearAuthRequest
 
 // DeleteAdminAccountJSONRequestBody defines body for DeleteAdminAccount for application/json ContentType.
 type DeleteAdminAccountJSONRequestBody = AccountDeleteRequest
+
+// TestAccountModelJSONRequestBody defines body for TestAccountModel for application/json ContentType.
+type TestAccountModelJSONRequestBody = AccountModelTestRequest
 
 // UpdateAdminAccountPolicyJSONRequestBody defines body for UpdateAdminAccountPolicy for application/json ContentType.
 type UpdateAdminAccountPolicyJSONRequestBody = AccountUpdateRequest

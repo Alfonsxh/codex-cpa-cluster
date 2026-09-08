@@ -176,6 +176,49 @@ paths:
                 $ref: "#/components/schemas/OnboardingStatus"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/models:
+    get:
+      operationId: listAccountModels
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - name: account
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Models advertised by the selected account; no inference performed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountModels"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /admin/api/accounts/model-test:
+    post:
+      operationId: testAccountModel
+      tags: [admin-accounts]
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountModelTestRequest"
+      responses:
+        "200":
+          description: Fixed short generation test, bounded to 25 seconds; upstream failures are returned as unsuccessful results without invalidating the Admin session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountModelTestResult"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /admin/api/accounts:
     get:
       operationId: listAdminAccounts
@@ -2430,6 +2473,32 @@ components:
         operational_status: { $ref: "#/components/schemas/AccountOperationalStatus" }
         state_available: { type: boolean }
         proxy_configured: { type: boolean }
+    AccountModels:
+      type: object
+      required: [account, models]
+      properties:
+        account: { type: string }
+        models:
+          type: array
+          items: { type: string }
+    AccountModelTestRequest:
+      type: object
+      required: [account, model]
+      properties:
+        account: { type: string }
+        model: { type: string, minLength: 1, maxLength: 128 }
+    AccountModelTestResult:
+      type: object
+      required: [account, model, success, elapsed_ms, checked_at, upstream_status, code, message]
+      properties:
+        account: { type: string }
+        model: { type: string }
+        success: { type: boolean }
+        elapsed_ms: { type: integer, format: int64 }
+        checked_at: { type: integer, format: int64 }
+        upstream_status: { type: integer }
+        code: { type: string }
+        message: { type: string }
     AccountCatalog:
       type: object
       additionalProperties: false

@@ -200,10 +200,10 @@ describe("AccountsPage", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/admin/api/images/cliproxy")).toBe(true);
     const actionTexts = [...document.querySelectorAll(".account-detail-actions button")].map((button) => button.textContent?.trim());
     expect(actionTexts).toEqual([
-      "查看日志", "编辑账号", "重新 OAuth", "镜像已同步",
+      "模型通信测试", "查看日志", "编辑账号", "重新 OAuth", "镜像已同步",
       "重启容器", "迁移全部用户", "停止容器", "停用账号"
     ]);
-    expect(expanded.getByRole("group", { name: "常用操作" }).querySelectorAll("button")).toHaveLength(3);
+    expect(expanded.getByRole("group", { name: "常用操作" }).querySelectorAll("button")).toHaveLength(4);
     expect(expanded.getByRole("group", { name: "容器维护" }).querySelectorAll("button")).toHaveLength(2);
     expect(expanded.getByRole("group", { name: "风险操作" }).querySelectorAll("button")).toHaveLength(3);
     expect(actionTexts).not.toContain("更多");
@@ -950,7 +950,6 @@ describe("AccountsPage", () => {
 
     expect(await screen.findByText("alpha", { selector: ".account-name-cell .table-primary" })).toBeInTheDocument();
     expect(requestsTo(fetchMock, "/admin/api/accounts?window=today")).toHaveLength(1);
-    await user.click(screen.getByRole("combobox", { name: "用量范围" }));
     await user.click(await screen.findByText("30 天"));
     await waitFor(() => expect(requestsTo(fetchMock, "/admin/api/accounts?window=2592000")).toHaveLength(1));
   });
@@ -962,7 +961,6 @@ describe("AccountsPage", () => {
     renderPage();
 
     expect(await screen.findByText("alpha", { selector: ".account-name-cell .table-primary" })).toBeInTheDocument();
-    await user.click(screen.getByRole("combobox", { name: "用量范围" }));
     await user.click(await screen.findByText("额度周期"));
     await waitFor(() => expect(requestsTo(fetchMock, "/admin/api/accounts?window=since_reset")).toHaveLength(1));
 
@@ -974,19 +972,16 @@ describe("AccountsPage", () => {
         && url.searchParams.get("window") === "since_reset";
     })).toBe(true));
 
-    await user.click(screen.getByRole("combobox", { name: "用量范围" }));
-    await clickVisibleOption(user, "自定义…");
+    await user.click(screen.getByRole("button", { name: "时间选择" }));
     expect(await screen.findByText("账号信息自定义统计范围")).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.queryByText("CUSTOM USAGE RANGE")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /取\s*消/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(requestsMatching(fetchMock, "/admin/api/accounts", "custom")).toHaveLength(0);
-    expect(screen.getByRole("combobox", { name: "用量范围" }).closest(".ant-select")?.querySelector(".ant-select-content"))
-      .toHaveAttribute("title", "额度周期");
+    expect(screen.getByRole("button", { name: "额度周期" })).toHaveAttribute("aria-pressed", "true");
 
-    await user.click(screen.getByRole("combobox", { name: "用量范围" }));
-    await clickVisibleOption(user, "自定义…");
+    await user.click(screen.getByRole("button", { name: "时间选择" }));
     await user.click(await screen.findByRole("button", { name: "应用范围" }));
 
     await waitFor(() => expect(requestsMatching(fetchMock, "/admin/api/accounts", "custom")).toHaveLength(1));

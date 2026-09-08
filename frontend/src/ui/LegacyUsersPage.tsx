@@ -70,6 +70,7 @@ import {
   type UsageRange,
   type UsageWindow
 } from "../api/usage";
+import { ManagementUsageTimeFilter } from "./components/ManagementUsageTimeFilter";
 import { AdminTable } from "./components/AdminTable";
 import { NativeTableViewport } from "./components/NativeTableViewport";
 import { SecretRevealModal, type SecretReveal } from "./components/SecretRevealModal";
@@ -442,41 +443,13 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
     <section className="page-content legacy-user-page">
       <div className="legacy-user-management-panel">
         <div className="management-toolbar user-management-toolbar user-time-filter-toolbar">
-          <div className="overview-token-window-row user-time-filter">
-            <fieldset className="overview-legacy-window-control usage-time-control">
-              <legend>时间范围</legend>
-              <div className="overview-legacy-window-segments usage-time-segments" role="group" aria-label="用户用量时间范围">
-                {usageWindowOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-pressed={usageWindow === option.value}
-                    onClick={() => {
-                      setUsageWindow(option.value);
-                      setPage(1);
-                      setExpandedUsers([]);
-                    }}
-                  >{option.label}</button>
-                ))}
-                <button
-                  type="button"
-                  aria-pressed={usageWindow === "custom"}
-                  title="选择时间范围"
-                  onClick={() => setCustomRangeOpen(true)}
-                >时间选择</button>
-              </div>
-            </fieldset>
-            <div className="overview-token-window-boundaries" aria-label="用户用量时间边界" aria-live="polite" aria-busy={rangeUpdating}>
-              <div className="overview-token-window-value">
-                <small>起始时间</small>
-                <strong>{rangeBoundary(catalog?.window_start_at, usageWindow === "all")}</strong>
-              </div>
-              <div className="overview-token-window-value">
-                <small>结束时间</small>
-                <strong>{rangeBoundary(catalog?.window_end_at)}</strong>
-              </div>
-            </div>
-          </div>
+          <ManagementUsageTimeFilter
+            value={usageWindow} options={usageWindowOptions} label="用户用量"
+            onChange={(value) => { setUsageWindow(value); setPage(1); setExpandedUsers([]); }}
+            onCustomSelect={() => setCustomRangeOpen(true)}
+            start={rangeBoundary(catalog?.window_start_at, usageWindow === "all")}
+            end={rangeBoundary(catalog?.window_end_at)} updating={rangeUpdating}
+          />
           <div className="user-toolbar-actions management-toolbar-controls">
             <div className="management-filter-grid user-filter-grid">
               <div className="user-filter-field user-search-filter-field">

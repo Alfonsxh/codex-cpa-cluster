@@ -209,7 +209,7 @@ form.configuration-panel .settings-workspace-content { flex: 1; height: auto; mi
 .reasoning-strategy-defaults { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 14px 18px; background: var(--surface-2); }
 .reasoning-strategy-defaults .button { min-height: 32px; }
 
-.configuration-field-control.boolean-control { display: flex; align-items: center; min-height: 36px; }
+.configuration-field-control.boolean-control { display: flex; align-items: center; min-height: 36px; padding-inline-start: var(--configuration-control-inset); }
 .configuration-field-control.boolean-control label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; cursor: pointer; }
 .configuration-field-control.boolean-control input { width: 16px; min-height: 16px; margin-inline-start: 0; accent-color: var(--accent); }
 .configuration-nullable-control { display: grid; gap: 5px; }

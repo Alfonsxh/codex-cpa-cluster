@@ -426,12 +426,17 @@ func runOwnedAdmin(
 	if controlRuntimeManager != nil && !config.RuntimeReadOnly {
 		configurationApplier.ControlRuntime = configurationRuntimeAdapter{manager: controlRuntimeManager}
 	}
+	var modelProbe adminapi.AccountModelProbe
+	if runtimeManager != nil {
+		modelProbe = runtimeops.NewModelProbe(store, runtimeManager, nil)
+	}
 	adminServer, err := adminapi.New(adminapi.Config{
 		Root:                 config.Root,
 		Store:                store,
 		Accounts:             store,
 		AccountStates:        stateProvider,
 		AccountRuntime:       runtimeObserver,
+		ModelProbe:           modelProbe,
 		Activity:             usageReader,
 		OAuth:                oauthLoader,
 		Usage:                usageReader,

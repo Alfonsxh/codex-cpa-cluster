@@ -1,5 +1,7 @@
 import { apiRequest } from "./client";
 import type {
+  AccountModels,
+  AccountModelTestResult,
   Account,
   AccountCatalog,
   AccountClearAuthRequest,
@@ -18,6 +20,8 @@ import type {
 } from "./generated";
 
 export type {
+  AccountModels,
+  AccountModelTestResult,
   Account,
   AccountCatalog,
   AccountClearAuthRequest,
@@ -37,6 +41,18 @@ export type {
 } from "./generated";
 
 export const accountsQueryKey = ["accounts"] as const;
+
+export function readAccountModels(account: string, signal?: AbortSignal): Promise<AccountModels> {
+  return apiRequest(`/admin/api/accounts/models?${new URLSearchParams({ account })}`, { signal, cache: "no-store" });
+}
+
+export function testAccountModel(account: string, model: string, csrfToken: string, signal?: AbortSignal): Promise<AccountModelTestResult> {
+  return apiRequest("/admin/api/accounts/model-test", {
+    method: "POST", signal,
+    headers: { "X-CSRF-Token": csrfToken },
+    body: JSON.stringify({ account, model })
+  });
+}
 export type AccountUsageWindow = Extract<UsageWindow, "3600" | "today" | "86400" | "604800" | "2592000" | "since_reset" | "all" | "custom">;
 export type AccountUsageRange = {
   window: AccountUsageWindow;

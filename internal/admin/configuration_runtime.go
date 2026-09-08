@@ -14,9 +14,8 @@ import (
 	"github.com/google/renameio/v2"
 )
 
-// ConfigurationAccountProjector atomically refreshes the generated account
-// configuration and routing projections after the authoritative settings have
-// changed.
+// ConfigurationAccountProjector refreshes account configs while retaining file
+// watches, and atomically replaces routing projections after settings change.
 type ConfigurationAccountProjector interface {
 	RefreshAccounts(context.Context) error
 }

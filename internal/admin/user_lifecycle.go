@@ -55,6 +55,7 @@ type UserCredentialStore interface {
 // Gateway snapshot.
 type UserLifecycleProjection interface {
 	RefreshAccounts(context.Context) error
+	VerifyUserKey(context.Context, string) error
 }
 
 type UserLifecycleService interface {
@@ -193,6 +194,12 @@ func (manager *UserManager) CreateUser(
 		return UserCreateResult{}, manager.rollbackCreation(
 			ctx, creation, user, previousCredential, credentialFound, previousInternalKey,
 			fmt.Errorf("refresh user creation account projection: %w", err),
+		)
+	}
+	if err := manager.projection.VerifyUserKey(ctx, user); err != nil {
+		return UserCreateResult{}, manager.rollbackCreation(
+			ctx, creation, user, previousCredential, credentialFound, previousInternalKey,
+			fmt.Errorf("activate user creation account credential: %w", err),
 		)
 	}
 	snapshot, err := manager.snapshots.PublishAuthSnapshot(ctx, true)

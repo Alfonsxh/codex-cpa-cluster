@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Alfonsxh/codex-cpa-pool/internal/accountconfig"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
@@ -50,6 +51,7 @@ type Store interface {
 type Renderer struct {
 	Root  string
 	Store Store
+	mu    sync.Mutex
 }
 
 type Result struct {
@@ -59,19 +61,21 @@ type Result struct {
 }
 
 type renderedFile struct {
-	relative string
-	payload  []byte
-	mode     os.FileMode
+	relative      string
+	payload       []byte
+	mode          os.FileMode
+	accountConfig bool
 }
 
-// Render builds every output in memory and validates it before replacing any
-// live file. Each replacement is atomic; lifecycle orchestration is
-// responsible for restoring a captured projection set if a later Docker or
-// snapshot step fails.
+// Render validates all outputs first. Existing CPA configs retain their inode
+// because the upstream watches the file itself; other projections are replaced
+// atomically. Lifecycle orchestration compensates later activation failures.
 func (renderer *Renderer) Render(ctx context.Context) (Result, error) {
 	if renderer == nil || renderer.Store == nil {
 		return Result{}, errors.New("account projection renderer requires a control-plane store")
 	}
+	renderer.mu.Lock()
+	defer renderer.mu.Unlock()
 	root, err := renderer.root()
 	if err != nil {
 		return Result{}, err
@@ -126,7 +130,11 @@ func (renderer *Renderer) Render(ctx context.Context) (Result, error) {
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		path := filepath.Join(root, filepath.FromSlash(file.relative))
-		if err := writeAtomic(path, file.payload, file.mode); err != nil {
+		write := writeAtomic
+		if file.accountConfig {
+			write = writeAccountConfig
+		}
+		if err := write(path, file.payload, file.mode); err != nil {
 			return Result{}, fmt.Errorf("write account projection %s: %w", file.relative, err)
 		}
 		paths = append(paths, file.relative)
@@ -159,9 +167,10 @@ func (renderer *Renderer) buildFiles(
 			return nil, fmt.Errorf("render CPA config for %s: %w", account.ID, err)
 		}
 		files = append(files, renderedFile{
-			relative: filepath.ToSlash(filepath.Join("configs", account.ID, accountconfig.FileName)),
-			payload:  payload,
-			mode:     0o600,
+			relative:      filepath.ToSlash(filepath.Join("configs", account.ID, accountconfig.FileName)),
+			payload:       payload,
+			mode:          0o600,
+			accountConfig: true,
 		})
 	}
 	keyMap, err := renderGatewayKeyMap(accounts, routes, records)

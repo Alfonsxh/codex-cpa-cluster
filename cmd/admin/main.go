@@ -601,6 +601,17 @@ type configurationProjectionAdapter struct {
 	renderer *accountprojection.Renderer
 }
 
+func (adapter configurationProjectionAdapter) VerifyUserKey(ctx context.Context, user string) error {
+	if adapter.renderer == nil {
+		return errors.New("account projection renderer is unavailable")
+	}
+	store, ok := adapter.renderer.Store.(accountprojection.UserKeyReadinessStore)
+	if !ok {
+		return errors.New("account projection cannot verify user credentials")
+	}
+	return (accountprojection.UserKeyReadiness{Store: store}).VerifyUserKey(ctx, user)
+}
+
 func (adapter configurationProjectionAdapter) RefreshAccounts(ctx context.Context) error {
 	if adapter.renderer == nil {
 		return errors.New("account projection renderer is unavailable")

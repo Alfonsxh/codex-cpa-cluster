@@ -565,6 +565,43 @@ func newUserLifecycleStore(t *testing.T) *controlplane.Store {
 	return newUserLifecycleStoreAt(t, t.TempDir())
 }
 
+func TestUserManagerRollsBackWhenNewInternalKeyIsNotAccepted(t *testing.T) {
+	store := newUserLifecycleStore(t)
+	credentials := &lifecycleCredentialFake{values: make(map[string]usage.PortalCredential)}
+	publisher := &lifecyclePublisherFake{}
+	renderer := &accountprojection.Renderer{Root: store.Root(), Store: store}
+	projection := &lifecycleProjectionFake{
+		refresh: func(ctx context.Context) error { _, err := renderer.Render(ctx); return err },
+		verify: func(ctx context.Context, user string) error {
+			key, found, err := store.ReadInternalKey(ctx, user)
+			if err != nil || !found || key.Status != "active" {
+				t.Fatal("readiness ran before rendering the new internal Key")
+			}
+			if publisher.calls != 0 {
+				t.Fatal("new Key was published before upstream authentication succeeded")
+			}
+			return errors.New("upstream still rejects the new credential")
+		},
+	}
+	manager, err := NewUserManager(UserLifecycleConfig{Store: store, Credentials: credentials, Projection: projection, Snapshots: publisher})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.CreateUser(context.Background(), "alice@example.com", nil)
+	if err == nil || result.APIKey != "" {
+		t.Fatal("creation reported success for a rejected Key")
+	}
+	if exists, _ := store.UserExists(context.Background(), "alice@example.com"); exists {
+		t.Fatal("failed creation left a user")
+	}
+	if _, found, _ := store.ReadInternalKey(context.Background(), "alice@example.com"); found {
+		t.Fatal("failed creation left an internal Key")
+	}
+	if len(credentials.values) != 0 || projection.calls != 2 || publisher.calls != 1 {
+		t.Fatal("failed activation did not compensate credential, projection and snapshot")
+	}
+}
+
 func newUserLifecycleStoreAt(t *testing.T, root string) *controlplane.Store {
 	t.Helper()
 	store, err := controlplane.Open(context.Background(), root, controlplane.Options{})
@@ -748,6 +785,14 @@ type lifecycleProjectionFake struct {
 	calls     int
 	failCalls map[int]error
 	refresh   func(context.Context) error
+	verify    func(context.Context, string) error
+}
+
+func (projection *lifecycleProjectionFake) VerifyUserKey(ctx context.Context, user string) error {
+	if projection.verify != nil {
+		return projection.verify(ctx, user)
+	}
+	return nil
 }
 
 func (projection *lifecycleProjectionFake) RefreshAccounts(ctx context.Context) error {

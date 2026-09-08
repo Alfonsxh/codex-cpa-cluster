@@ -48,11 +48,13 @@ flowchart LR
 | `state/control-plane.sqlite3` | Go Control | 账号、路由、外部 Key、团队、配置、加密秘密元数据和运行状态 |
 | `state/usage.sqlite3` | Go Collector/Portal/Quota | 高频用量事件、用户会话、额度策略和调整账本 |
 | `secrets/control-plane.key` | Go Control | 解密控制面秘密的 32 字节主密钥，必须与控制库成对恢复 |
-| `auth/<account>/`、`configs/<account>/config.yaml` | Go 账号生命周期管理器 / 上游账号进程 | OAuth 与上游运行配置；账号容器只读挂载自己的配置目录，使原子替换后的新文件立即可见，不进入镜像或发布包 |
+| `auth/<account>/`、`configs/<account>/config.yaml` | Go 账号生命周期管理器 / 上游账号进程 | OAuth 与上游运行配置；账号容器只读挂载自己的配置目录，更新配置时保留 inode 以维持文件监听，不进入镜像或发布包 |
 | `state/gateway/` | Go Collector/Failover | Gateway 只读鉴权、额度和心跳快照 |
 | `state/edge/active-gateway.conf` | 发布切换流程 | Edge 当前槽位；非法内容保持最后一个有效槽 |
 
 Admin 负责账号容器生命周期，因此正式 Compose 在已初始化目标上直接挂载 Docker Socket。该权限只用于本仓库拥有的 CPA 管理操作；部署前必须校验目标目录、Compose Project 和上游网络，不能将 Socket 暴露给 Web、Gateway 或 Edge。
+
+账号配置先完整校验，再原位写入；写入报错会尝试恢复原内容，但进程崩溃时不具备原子替换保障。新增用户须使用该用户的内部 Key，通过所分配账号的认证后才发布网关快照；失败则回滚创建。此前已丢失配置监听的账号进程，需要排空请求后重启一次。
 
 ## 请求与切换流程
 

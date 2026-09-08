@@ -546,7 +546,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   return (
     <section className="page-content account-page">
       <div className="account-management-panel">
-        <div className="account-management-toolbar management-toolbar user-management-toolbar user-time-filter-toolbar">
+        <div className="account-management-toolbar management-toolbar">
           <ManagementUsageTimeFilter
             value={usageWindow} options={usageWindowOptions} label="账号用量"
             onChange={setUsageWindow} onCustomSelect={() => setCustomUsageRangeOpen(true)}
@@ -554,14 +554,16 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
             end={rangeBoundary(accounts.data?.window_end_at)} updating={accounts.isFetching}
           />
           <div className="account-time-filter-actions">
-            <Input
-              className="account-search-input"
-              aria-label="搜索 CPA 账号"
-              prefix={<span className="account-search-legacy-icon" aria-hidden="true" />}
-              placeholder="搜索账号、名称或邮箱"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
+            <AccountFilter label="搜索账号">
+              <Input
+                className="account-search-input"
+                aria-label="搜索 CPA 账号"
+                prefix={<span className="account-search-legacy-icon" aria-hidden="true" />}
+                placeholder="账号、名称或邮箱"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </AccountFilter>
             <div className="account-filter-actions">
               <AccountFilter label="运行状态">
                 <WideSelect<AccountRuntimeFilter>

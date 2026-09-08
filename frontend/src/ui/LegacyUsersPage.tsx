@@ -947,12 +947,12 @@ function UserCoverage({ user }: { user: UserSummary }) {
     ? Math.round(slots * user.active_accounts / user.account_count)
     : 0;
   return (
-    <>
+    <span className="user-coverage">
       <span className="coverage" aria-hidden="true">
         {Array.from({ length: slots }, (_, index) => <i key={index} className={index < activeSlots ? "active" : ""} />)}
       </span>
-      {user.active_accounts}/{user.account_count}
-    </>
+      <span className="user-coverage-count">{user.active_accounts}/{user.account_count}</span>
+    </span>
   );
 }
 

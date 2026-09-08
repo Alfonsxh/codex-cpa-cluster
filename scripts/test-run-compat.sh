@@ -303,6 +303,12 @@ if update_operator_script "$RELEASE/run.sh" >"$TEST_ROOT/pre-config-update.log";
 fi
 cmp -s "$ROOT_DIR/scripts/run.sh" "$SCRIPT_PATH" || fail 'pre-config installer replaced the current entrypoint'
 
+printf '%s\n' '# CPAP_RUNTIME_ROOT_CONFIG=1' >>"$RELEASE/run.sh"
+if update_operator_script "$RELEASE/run.sh" >"$TEST_ROOT/pre-backup-update.log"; then
+  fail 'older release removed the pinned snapshot backup fix'
+fi
+cmp -s "$ROOT_DIR/scripts/run.sh" "$SCRIPT_PATH" || fail 'pre-backup installer replaced the current entrypoint'
+
 printf '%s\n' immutable-archive >"$RELEASE/codex-cpa-cluster-v9.8.7.tar.gz"
 (
   cd "$RELEASE"

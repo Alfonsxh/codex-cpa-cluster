@@ -879,6 +879,11 @@ mv "$old_target_env" "$OPERATOR_ROOT/runtime/target.env"
 printf '%s\n' 'version=v9.9.8' >"$OPERATOR_ROOT/runtime/.deploy-initialized"
 chmod 0600 "$OPERATOR_ROOT/runtime/.deploy-initialized"
 UPGRADE_OUTPUT="$OPERATOR_ROOT/upgrade-output.log"
+printf '%s\n' runtime-log >"$OPERATOR_ROOT/runtime/logs/backup-exclusion.log"
+printf '%s\n' generated-snapshot >"$OPERATOR_ROOT/runtime/state/gateway/backup-exclusion.json"
+printf '%s\n' stale-database >"$OPERATOR_ROOT/runtime/state/usage.sqlite3.old"
+mkdir -p "$OPERATOR_ROOT/runtime/backups"
+printf '%s\n' old-backup >"$OPERATOR_ROOT/runtime/backups/backup-exclusion.txt"
 run_operator_deploy >"$UPGRADE_OUTPUT"
 for expected_change in \
   "版本        v9.9.8 -> $RELEASE_VERSION" \
@@ -912,6 +917,17 @@ if tar -tzf "$backup_file" | grep -Eq '^state/(control-plane|usage)\.sqlite3-(wa
   echo "upgrade backup contains live SQLite WAL/SHM files" >&2
   exit 1
 fi
+if tar -tzf "$backup_file" | grep -Eq '^(logs/|backups/|state/gateway/|state/usage\.sqlite3\.old$)'; then
+  echo "upgrade backup contains logs, historical backups or generated runtime files" >&2
+  exit 1
+fi
+for recovery_file in secrets/control-plane.key target.env docker-compose.yml \
+  release-manifest.json .deploy-initialized state/edge/active-gateway.conf; do
+  tar -tzf "$backup_file" | grep -Fxq "$recovery_file" || {
+    echo "upgrade backup is missing recovery input: $recovery_file" >&2
+    exit 1
+  }
+done
 backup_extract="$OPERATOR_ROOT/backup-extract"
 mkdir "$backup_extract"
 tar -xzf "$backup_file" -C "$backup_extract" \

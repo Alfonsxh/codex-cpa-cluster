@@ -17,6 +17,7 @@ sh -n \
   "$ROOT_DIR/scripts/test-release-images.sh" \
   "$ROOT_DIR/scripts/test-local-release.sh" \
   "$ROOT_DIR/scripts/test-run-runtime.sh" \
+  "$ROOT_DIR/scripts/test-run-backup.sh" \
   "$ROOT_DIR/scripts/test-run.sh" \
   "$ROOT_DIR/scripts/test-run-compat.sh" \
   "$ROOT_DIR/scripts/test-faults.sh" \
@@ -26,6 +27,7 @@ sh "$ROOT_DIR/scripts/check-product-name.sh"
 sh "$ROOT_DIR/scripts/test-product-name.sh"
 (cd "$ROOT_DIR" && sh scripts/check-generated-api.sh)
 sh "$ROOT_DIR/scripts/test-run-runtime.sh"
+sh "$ROOT_DIR/scripts/test-run-backup.sh"
 sh "$ROOT_DIR/scripts/test-run.sh"
 sh "$ROOT_DIR/scripts/test-run-compat.sh"
 sh "$ROOT_DIR/scripts/test-release-images.sh"

@@ -4,6 +4,7 @@ set -eu
 # CPAP_OPERATOR_PROTOCOL=1
 # CPAP_RUNTIME_ROOT_ALIAS=1
 # CPAP_RUNTIME_ROOT_CONFIG=1
+# CPAP_SNAPSHOT_BACKUP=1
 # Compatibility boundary: accept the former operator prefix only as input.
 # Values are never evaluated as shell code; the suffix list is fixed here.
 for operator_suffix in GITHUB_REPOSITORY RUN_ASSET_URL STAGING_ROOT DEPLOY_ROOT \
@@ -1374,8 +1375,12 @@ backup_target() {
   chmod 0700 "$backup_directory"
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
   backup="$backup_directory/codex-cpa-$timestamp.tar.gz"
+  # Keep recovery inputs only; logs, generated snapshots, live database files
+  # and historical backups must never be copied into the staging directory.
   set --
-  for relative in state secrets auth configs management logs target.env docker-compose.yml release-manifest.json; do
+  for relative in secrets auth configs management target.env docker-compose.yml \
+    compose.accounts.yml release-manifest.json .deploy-initialized \
+    state/compose.env state/edge/active-gateway.conf; do
     [ -e "$root/$relative" ] && set -- "$@" "$relative"
   done
   [ "$#" -gt 0 ] || die "没有可备份的 CPA 目标内容：$root"
@@ -1387,6 +1392,7 @@ backup_target() {
     rm -f -- "$backup_temporary"
     die "准备升级备份目录失败：$backup_directory"
   fi
+  mkdir -p -- "$backup_staging/state/edge"
   for relative in "$@"; do
     if ! cp -a -- "$root/$relative" "$backup_staging/$relative"; then
       rm -rf -- "$backup_staging"
@@ -1399,7 +1405,19 @@ backup_target() {
     snapshot_database="$backup_staging/state/$database"
     rm -f -- "$snapshot_database" "$snapshot_database-wal" "$snapshot_database-shm"
     escaped_snapshot=$(printf '%s' "$snapshot_database" | sed "s/'/''/g")
-    if ! sqlite3 "$source_database" ".backup '$escaped_snapshot'"; then
+    # Pin a WAL read snapshot before the Backup API starts. Without this read
+    # transaction, concurrent collector commits repeatedly restart the copy.
+    printf '  →  备份数据库 %s\n' "$database" >&2
+    if ! sqlite3 -readonly -bail "$source_database" <<EOF
+.timeout 5000
+BEGIN;
+.output /dev/null
+SELECT count(*) FROM sqlite_schema;
+.output stdout
+.backup '$escaped_snapshot'
+ROLLBACK;
+EOF
+    then
       rm -rf -- "$backup_staging"
       rm -f -- "$backup_temporary"
       die "创建 SQLite 一致性副本失败：$source_database"
@@ -1415,6 +1433,7 @@ backup_target() {
       die "SQLite 备份完整性失败：$database"
     }
     chmod 0600 "$snapshot_database"
+    set -- "$@" "state/$database"
   done
   if ! tar -C "$backup_staging" -czf "$backup_temporary" "$@" \
     || ! chmod 0600 "$backup_temporary" \
@@ -1647,6 +1666,10 @@ update_operator_script() {
   fi
   if ! grep -Fxq '# CPAP_RUNTIME_ROOT_CONFIG=1' "$verified_script"; then
     ui_note "所选发布的安装器不支持已记录的运行目录；保留当前安装器"
+    return 1
+  fi
+  if ! grep -Fxq '# CPAP_SNAPSHOT_BACKUP=1' "$verified_script"; then
+    ui_note "所选发布的安装器缺少在线快照备份修复；保留当前安装器"
     return 1
   fi
   if cmp -s "$verified_script" "$SCRIPT_PATH"; then

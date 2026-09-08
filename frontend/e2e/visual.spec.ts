@@ -1785,11 +1785,11 @@ test("管理中心 Token 卡片分层展示实际范围、趋势和可滚动明�
   await expect(card.getByRole("tabpanel", { name: "用户 Token 统计" }).getByLabel("用户用量明细表格")).toBeVisible();
 });
 
-test("管理中心左下角显示版本及正式更新链接，不再弹出版本详情", async ({ page }) => {
+test("管理中心左下角保留当前版本和更新心跳，悬停显示版本对比且点击不跳转", async ({ page }) => {
   let releasePayload = {
     configured: true,
-    current_version: "v1.0.0",
-    latest_version: "v1.1.0",
+    current_version: "v2.0.0-rc.50",
+    latest_version: "v2.0.0",
     available: true,
     checked_at: 1_787_500_800,
     status: "ok"
@@ -1804,7 +1804,9 @@ test("管理中心左下角显示版本及正式更新链接，不再弹出版�
   await expect(page.locator(".release-notice")).toHaveCount(0);
   const desktopEntry = page.locator(".side-nav-footer .release-version-indicator");
   await expect(desktopEntry).toBeVisible();
-  await expect(desktopEntry).toHaveText("有版本更新");
+  await expect(desktopEntry).toHaveText("v2.0.0-rc.50");
+  const versionOverflow = await desktopEntry.locator(".release-version-number").evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(versionOverflow).toBeLessThanOrEqual(1);
   await expect(desktopEntry.locator(".release-version-heartbeat")).toBeVisible();
   await expect(desktopEntry).toHaveAttribute("data-update", "true");
   const footerOrder = await page.locator(".side-nav-footer").evaluate((footer) => {
@@ -1821,10 +1823,28 @@ test("管理中心左下角显示版本及正式更新链接，不再弹出版�
   });
   expect(footerOrder.releaseLeft).toBeGreaterThan(footerOrder.authRight);
   expect(Math.abs(footerOrder.releaseCenter - footerOrder.authCenter)).toBeLessThan(1);
-  await expect(desktopEntry).toHaveAttribute("href", "https://github.com/Alfonsxh/codex-cpa-pool/releases/tag/v1.1.0");
+  await expect(desktopEntry).not.toHaveAttribute("href");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await desktopEntry.hover();
+  const versionTooltip = page.getByRole("tooltip");
+  await expect(versionTooltip).toBeVisible();
+  await expect(versionTooltip.locator(".release-version-comparison > span")).toHaveText(["当前版本", "最新版本"]);
+  await expect(versionTooltip.locator(".release-version-comparison > strong")).toHaveText(["v2.0.0-rc.50", "v2.0.0"]);
+  await test.info().attach("版本更新悬浮框", {
+    body: await page.screenshot({ clip: { x: 0, y: 720, width: 300, height: 180 }, animations: "disabled" }),
+    contentType: "image/png"
+  });
+  const originalURL = page.url();
+  const originalPages = page.context().pages().length;
+  await desktopEntry.click();
+  await expect(page).toHaveURL(originalURL);
+  expect(page.context().pages()).toHaveLength(originalPages);
   await expect(page.getByRole("region", { name: "应用版本详情" })).toHaveCount(0);
+  await page.mouse.move(300, 100);
+  await desktopEntry.evaluate((element) => (element as HTMLElement).blur());
+  await expect(versionTooltip).not.toBeVisible();
 
-  releasePayload = { ...releasePayload, latest_version: "v1.0.0", available: false };
+  releasePayload = { ...releasePayload, current_version: "v1.0.0", latest_version: "v1.0.0", available: false };
   await page.reload();
   await expect(desktopEntry).toHaveText("v1.0.0");
 

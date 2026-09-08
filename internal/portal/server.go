@@ -1015,7 +1015,7 @@ func (server *Server) parseUsageWindow(ctx context.Context, raw string) (usageWi
 	if value == "" {
 		value = "today"
 	}
-	if value == "today" {
+	if value == "today" || value == "current_week" {
 		timezone, err := server.usageTimezone(ctx)
 		if err != nil {
 			return usageWindow{}, err
@@ -1025,8 +1025,12 @@ func (server *Server) parseUsageWindow(ctx context.Context, raw string) (usageWi
 			return usageWindow{}, errors.New("用量时区配置无效")
 		}
 		local := now.In(location)
-		start := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location).Unix()
-		return usageWindow{Name: "today", StartAt: start, EndAt: now.Unix(), Timezone: timezone}, nil
+		start := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+		if value == "current_week" {
+			daysSinceMonday := (int(local.Weekday()) + 6) % 7
+			start = start.AddDate(0, 0, -daysSinceMonday)
+		}
+		return usageWindow{Name: value, StartAt: start.Unix(), EndAt: now.Unix(), Timezone: timezone}, nil
 	}
 	seconds, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {

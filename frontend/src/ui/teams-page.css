@@ -1,0 +1,41 @@
+.legacy-team-page .organization-catalog-panel { container: team-catalog / inline-size; }
+.legacy-team-page .organization-table-toolbar { --overview-control-height: 40px; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: end; gap: clamp(24px, 3cqw, 48px); overflow-x: auto; scrollbar-width: thin; background: var(--surface-2); padding: 16px; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 72%, transparent); }
+.legacy-team-page .organization-table-toolbar > .team-time-filter { display: flex; min-width: max-content; flex: 0 0 auto; flex-wrap: nowrap; align-items: end; justify-content: flex-start; gap: 14px; }
+.legacy-team-page .organization-table-toolbar > .team-catalog-controls { display: flex; flex: 0 0 auto; flex-wrap: nowrap; align-items: end; justify-content: flex-start; gap: 16px; margin-inline-start: auto; padding-inline-start: clamp(24px, 3cqw, 48px); }
+.legacy-team-page .organization-table-filters { width: auto; flex: none; grid-template-columns: 180px 140px; align-items: start; gap: 16px !important; }
+.legacy-team-page .team-search-filter,
+.legacy-team-page .organization-status-filter { display: grid; min-width: 0; gap: 8px; }
+.legacy-team-page .team-search-filter > label,
+.legacy-team-page .team-filter-label { color: var(--faint); font: 700 8px/12px var(--sans); letter-spacing: .05em; }
+.legacy-team-page .organization-table-filters .search-field { height: 40px; border-color: var(--line); border-radius: 8px; }
+.legacy-team-page .organization-table-filters input { min-height: 0; height: 38px; font: 9px/1.2 var(--mono); }
+.legacy-team-page .organization-status-filter .enhanced-select-trigger { min-height: 40px; height: 40px; padding: 8px 10px; border-color: var(--line); border-radius: 8px; font: 9px/1.25 var(--mono); }
+.legacy-team-page .team-usage-time-control { flex: 0 0 auto; }
+.legacy-team-page .team-usage-time-control .usage-time-segments { align-items: center; flex-wrap: nowrap; }
+.legacy-team-page .team-usage-time-control button { flex: 0 0 auto; }
+.legacy-team-page .team-usage-time-control button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.legacy-team-page .team-time-filter .overview-token-window-boundaries { flex: 0 0 auto; grid-template-columns: repeat(2, minmax(180px, max-content)); gap: 10px; }
+.legacy-team-page .team-time-filter .overview-token-window-value strong { height: 40px; padding-inline: 10px; }
+.legacy-team-page .team-catalog-actions { display: flex; min-height: 40px; flex-wrap: nowrap; align-items: center; gap: 12px; white-space: nowrap; }
+.legacy-team-page .organization-catalog-table-wrap { overflow-x: auto; }
+.legacy-team-page .organization-catalog-table { min-width: 900px; }
+.legacy-team-page .organization-catalog-table th:nth-child(1) { width: 5%; }
+.legacy-team-page .organization-catalog-table th:nth-child(2) { width: 23%; }
+.legacy-team-page .organization-catalog-table th:nth-child(3),
+.legacy-team-page .organization-catalog-table th:nth-child(4) { width: 10%; }
+.legacy-team-page .organization-catalog-table th:nth-child(5) { width: 26%; }
+.legacy-team-page .organization-catalog-table th:nth-child(6) { width: 15%; }
+.legacy-team-page .organization-catalog-table th:nth-child(7) { width: 11%; }
+.legacy-team-page .organization-catalog-table .team-token-cell,
+.legacy-team-page .organization-catalog-table .team-token-column { text-align: right; }
+.legacy-team-page .team-token-column .legacy-sort-button { justify-content: flex-end; text-align: right; }
+.legacy-team-page .team-token-column .legacy-sort-button::after { order: -1; }
+.legacy-team-page .legacy-sort-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
+.legacy-team-page .team-usage-placeholder { color: var(--muted); }
+
+@container team-catalog (max-width: 1250px) {
+  .legacy-team-page .organization-table-toolbar { gap: 16px; }
+  .legacy-team-page .organization-table-toolbar > .team-time-filter { gap: 10px; }
+  .legacy-team-page .organization-table-toolbar > .team-catalog-controls { gap: 12px; padding-inline-start: 16px; }
+  .legacy-team-page .organization-table-filters { grid-template-columns: 120px 110px; gap: 12px !important; }
+}

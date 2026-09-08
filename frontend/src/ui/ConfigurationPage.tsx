@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp } from "./site-time";
 import { Alert, Button, Form, Input, Modal } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
@@ -651,8 +651,8 @@ function NotificationIntegration({ status, value, error, saving, clearing, sendi
       {error ? <p className="form-error" id="notification-webhook-error" role="alert">{error}</p> : null}
     </div>
     <div className="notification-status-list">
-      <span>最近成功<strong>{formatFullTime(status.last_success_at)}</strong></span>
-      <span>下次发送<strong>{formatFullTime(status.next_schedule_at)}</strong></span>
+      <span>最近成功<strong>{formatSiteTimestamp(status.last_success_at)}</strong></span>
+      <span>下次发送<strong>{formatSiteTimestamp(status.next_schedule_at)}</strong></span>
       {status.last_error ? <span>最近错误<strong>{status.last_error}</strong></span> : null}
     </div>
   </article>;
@@ -991,7 +991,7 @@ function QuotaSystemDanger({ summary, pending, failed, onReset }: { summary?: { 
         <div className="quota-system-danger-reset-time">
           <span>下次自动换周</span>
           {available && summary?.week_end_at
-            ? <time dateTime={new Date(summary.week_end_at * 1_000).toISOString()}>{formatFullTime(summary.week_end_at)}</time>
+            ? <time dateTime={new Date(summary.week_end_at * 1_000).toISOString()}>{formatSiteTimestamp(summary.week_end_at)}</time>
             : <span>—</span>}
         </div>
         <button className="button danger-outline" type="button" disabled={!canReset || pending} onClick={onReset}>
@@ -1076,7 +1076,7 @@ function AuditPanel({ rows, onRefresh }: { rows: Array<{ timestamp: number; acti
               <tbody>{rows.map((item, index) => (
                 <tr key={`${item.timestamp}-${index}`}>
                   <td className="table-index-cell">{index + 1}</td>
-                  <td className="settings-time-cell">{formatTime(item.timestamp)}</td>
+                  <td className="settings-time-cell">{formatSiteTimestamp(item.timestamp)}</td>
                   <td><span className="settings-path">{item.action}</span></td>
                   <td>{item.target}</td>
                   <td><span className={`status-chip ${item.outcome === "accepted" ? "success" : "neutral"}`}>{item.outcome || "unknown"}</span></td>
@@ -1124,5 +1124,3 @@ function configurationEffects(fields: EditorField[]): string[] { const modes = n
 function validateLogoFile(file: File): string { if (!supportedLogoTypes.has(file.type)) return "仅支持 PNG、JPEG、GIF、WebP 或 SVG 文件"; if (file.size < 1) return "Logo 文件不能为空"; if (file.size > maxLogoBytes) return "Logo 文件不能超过 2 MiB"; if ([...file.name].length > 128) return "Logo 文件名不能超过 128 个字符"; return ""; }
 function reasoningEffortLabel(effort: string): string { return ({ none: "无", minimal: "最小", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最大", ultra: "超高", auto: "自动", unknown: "未知" } as Record<string, string>)[effort] ?? effort; }
 function reasoningColorPresentation(value: string, fallback = "#687287") { const color = /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : fallback; const channels = [1, 3, 5].map((index) => Number.parseInt(color.slice(index, index + 2), 16) / 255).map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4); const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]; return { color, text: luminance > 0.179 ? "#171d2b" : "#ffffff" }; }
-function formatTime(timestamp: number): string { if (!timestamp) return "—"; return siteDateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1_000)); }
-function formatFullTime(timestamp: number | null): string { if (!timestamp) return "—"; return siteDateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(timestamp * 1_000)); }

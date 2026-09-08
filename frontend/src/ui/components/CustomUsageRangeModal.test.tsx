@@ -29,7 +29,7 @@ describe("CustomUsageRangeModal visual contract", () => {
     expect(inputs).toHaveLength(2);
     expect(inputs[0]).toHaveAttribute("date-range", "start");
     expect(inputs[1]).toHaveAttribute("date-range", "end");
-    expect(within(dialog).getByText("2026/08/20 00:00 → 2026/08/21 00:00")).toBeInTheDocument();
+    expect(within(dialog).getByText("2026/08/20 00:00:00 → 2026/08/21 00:00:00")).toBeInTheDocument();
     expect(within(dialog).queryByText(/本地时间|包含开始时刻|不包含结束时刻/)).not.toBeInTheDocument();
 
     await user.click(inputs[0]);

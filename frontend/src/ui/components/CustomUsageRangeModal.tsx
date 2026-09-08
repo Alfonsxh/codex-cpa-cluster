@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "../site-time";
+import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone, formatSiteTimestamp } from "../site-time";
 import { DatePicker, Modal } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import timezonePlugin from "dayjs/plugin/timezone";
@@ -87,8 +87,8 @@ export function CustomUsageRangeModal({
           className="custom-usage-range-picker"
           aria-label="时间范围"
           value={draft}
-          format="YYYY/MM/DD HH:mm"
-          showTime={{ format: "HH:mm" }}
+          format="YYYY/MM/DD HH:mm:ss"
+          showTime={{ format: "HH:mm:ss" }}
           allowClear={false}
           inputReadOnly
           disabledDate={(current) => current.tz(zone, true).startOf("day").isAfter(nowInZone.endOf("day"))}
@@ -143,16 +143,10 @@ function normalizeTimezone(value?: string) {
 
 export function formatCustomUsageRange(range: CustomUsageRange | null, timezone?: string) {
   if (!range?.startAt || !range?.endAt) return "选择时间范围";
-  const zone = normalizeTimezone(timezone);
-  const start = dayjs.unix(range.startAt).tz(zone);
-  const end = dayjs.unix(range.endAt).tz(zone);
-  const sameYear = start.year() === end.year();
-  const sameDay = sameYear && start.month() === end.month() && start.date() === end.date();
-  if (sameDay) return `${start.format("MM/DD HH:mm")}–${end.format("HH:mm")}`;
-  return `${start.format(sameYear ? "MM/DD HH:mm" : "YYYY/MM/DD HH:mm")} → ${end.format(sameYear ? "MM/DD HH:mm" : "YYYY/MM/DD HH:mm")}`;
+  return formatFullCustomUsageRange(range, timezone);
 }
 
 export function formatFullCustomUsageRange(range: CustomUsageRange, timezone?: string) {
   const zone = normalizeTimezone(timezone);
-  return `${dayjs.unix(range.startAt).tz(zone).format("YYYY/MM/DD HH:mm")} → ${dayjs.unix(range.endAt).tz(zone).format("YYYY/MM/DD HH:mm")}`;
+  return `${formatSiteTimestamp(range.startAt, zone)} → ${formatSiteTimestamp(range.endAt, zone)}`;
 }

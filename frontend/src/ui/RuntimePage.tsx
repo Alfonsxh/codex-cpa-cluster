@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp } from "./site-time";
 import { Button, Modal, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -105,7 +105,7 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
       ]);
       queryClient.setQueryData(runtimeServicesQueryKey, serviceCatalog);
       queryClient.setQueryData(runtimeJobsQueryKey, jobCatalog);
-      setRefreshLabel(`运行状态更新于 ${formatCompactTimestamp(Date.now() / 1_000)}`);
+      setRefreshLabel(`运行状态更新于 ${formatSiteTimestamp(Date.now() / 1_000)}`);
       if (feedback) showToast("数据已刷新");
     } catch (error) {
       setRefreshLabel("刷新失败");
@@ -126,7 +126,7 @@ export function RuntimePage({ csrfToken }: { csrfToken: string }) {
   useEffect(() => {
     if (!services.data) return;
     reportedServiceError.current = null;
-    setRefreshLabel(`运行状态更新于 ${formatCompactTimestamp(services.dataUpdatedAt / 1_000)}`);
+    setRefreshLabel(`运行状态更新于 ${formatSiteTimestamp(services.dataUpdatedAt / 1_000)}`);
   }, [services.data, services.dataUpdatedAt, setRefreshLabel, siteTimezone]);
   useEffect(() => {
     if (!services.isError || reportedServiceError.current === services.error) return;
@@ -440,7 +440,7 @@ function RuntimeJobList({ jobs, onOpen }: { jobs: LegacyRuntimeJobView[]; onOpen
         <div className="job-row" key={job.id}>
           <div><div className="job-name">{job.name}</div><div className="job-target">{job.id}</div></div>
           <div className="job-target">{job.target}</div>
-          <div className="job-time">{formatCompactTimestamp(job.created_at)}</div>
+          <div className="job-time">{formatSiteTimestamp(job.created_at)}</div>
           <button className="button ghost" type="button" onClick={() => onOpen(job.id)}>
             <span className={`status-chip ${statusTone(job.status)}`}>{statusLabel(job.status)}</span>
           </button>
@@ -553,7 +553,7 @@ function RuntimeOutputModal({
       ]}
     >
       <div className="job-meta">
-        {job ? <><span>{job.target}</span><span>{statusLabel(job.status)}</span><span>{formatCompactTimestamp(job.started_at || job.created_at)}</span></> : <><span>最近 200 行</span><span>{logTarget}</span></>}
+        {job ? <><span>{job.target}</span><span>{statusLabel(job.status)}</span><span>{formatSiteTimestamp(job.started_at || job.created_at)}</span></> : <><span>最近 200 行</span><span>{logTarget}</span></>}
       </div>
       {pollError ? <div className="runtime-output-notice error">{errorMessage(pollError, "任务状态刷新失败，正在重试")}</div> : null}
       {logs.data?.truncated && !isJob ? <div className="runtime-output-notice">输出已按 2 MiB 上限截断</div> : null}
@@ -619,17 +619,6 @@ function serviceDescription(service: string) {
 
 function serviceTarget(service: string) {
   return service.startsWith("cliproxy-") ? service.slice("cliproxy-".length) : service;
-}
-
-function formatCompactTimestamp(timestamp?: number | null) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(new Date(timestamp * 1_000));
 }
 
 function errorMessage(error: unknown, fallback = "操作失败，请稍后重试") {

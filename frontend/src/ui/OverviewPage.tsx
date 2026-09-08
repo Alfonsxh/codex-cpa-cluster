@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp, getSiteTimezone } from "./site-time";
 import { Alert, Button, Empty, Result, Skeleton, Spin, Typography } from "antd";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,6 +36,7 @@ import { LegacyUsageMultiSelect } from "./components/LegacyUsageMultiSelect";
 import { NativeTableViewport } from "./components/NativeTableViewport";
 import { OverviewTokenValue } from "./components/OverviewTokenValue";
 import { formatTokens } from "./formatters";
+import { recentUsageWindows, UsageTimeRangeControl } from "./components/UsageTimeRangeControl";
 import { OnboardingCard } from "./OnboardingCard";
 
 const { Text } = Typography;
@@ -50,15 +51,9 @@ type SortState = {
 type TokenMode = "unweighted" | "weighted";
 type UsageSeriesView = "aggregate" | "account" | "user";
 
-
 const standardWindows: Array<{ value: Exclude<OverviewUsageWindow, "custom">; label: string }> = [
-  { value: "3600", label: "1 小时" },
-  { value: "21600", label: "6 小时" },
-  { value: "today", label: "今日" },
-  { value: "86400", label: "24 小时" },
-  { value: "604800", label: "7 天" },
-  { value: "2592000", label: "30 天" },
-  { value: "since_reset", label: "本周期" }
+  ...recentUsageWindows,
+  { value: "since_reset", label: "额度周期" }
 ];
 
 const chartColors = [
@@ -199,7 +194,7 @@ export function OverviewPage() {
   useEffect(() => setRefreshing(refreshing), [refreshing, setRefreshing]);
   useEffect(() => {
     const generatedAt = Math.max(overview.data?.generated_at ?? 0, status.data?.generated_at ?? 0, usage.data?.generated_at ?? 0);
-    if (generatedAt > 0) setRefreshLabel(`总览更新于 ${formatToolbarTime(generatedAt)}`);
+    if (generatedAt > 0) setRefreshLabel(`总览更新于 ${formatSiteTimestamp(generatedAt)}`);
   }, [overview.data?.generated_at, setRefreshLabel, siteTimezone, status.data?.generated_at, usage.data?.generated_at]);
   useEffect(() => () => {
     setRefreshing(false);
@@ -278,36 +273,20 @@ export function OverviewPage() {
               </span>
               <time aria-label="最近采集时间">
                 {usage.data?.collector.heartbeat_at
-                  ? formatOverviewCollectorTime(usage.data.collector.heartbeat_at, getSiteTimezone())
+                  ? formatSiteTimestamp(usage.data.collector.heartbeat_at, getSiteTimezone())
                   : "—"}
               </time>
             </div>
           </div>
           <div className="overview-legacy-filters usage-monitor-filters" aria-label="Token Dashboard 变量">
             <div className="overview-token-window-row">
-              <fieldset className="overview-legacy-window-control usage-time-control">
-                <legend>时间范围</legend>
-                <div className="overview-legacy-window-segments usage-time-segments" role="group" aria-label="Token 使用时间范围">
-                  {standardWindows.map((window) => (
-                    <button
-                      key={window.value}
-                      type="button"
-                      aria-pressed={usageWindow === window.value}
-                      onClick={() => setUsageWindow(window.value)}
-                    >
-                      {window.label}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    aria-pressed={usageWindow === "custom"}
-                    title="选择时间范围"
-                    onClick={() => setCustomOpen(true)}
-                  >
-                    时间选择
-                  </button>
-                </div>
-              </fieldset>
+              <UsageTimeRangeControl
+                label="Token 使用时间范围"
+                value={usageWindow}
+                options={standardWindows}
+                onChange={setUsageWindow}
+                onCustomSelect={() => setCustomOpen(true)}
+              />
               <div className="overview-token-window-boundaries" aria-label="Token 使用时间边界" aria-live="polite" aria-busy={usageBoundaryUpdating}>
                 <UsageTimeBoundary
                   label="起始时间"
@@ -414,8 +393,8 @@ export function OverviewPage() {
           <Alert
             type="warning"
             showIcon
-            title={`${usage.data.unavailable_accounts.length} 个账号缺少当前额度周期起点`}
-            description="本周期趋势仅聚合拥有有效周期起点的账号。"
+            title={`${usage.data.unavailable_accounts.length} 个账号缺少额度周期起点`}
+            description="额度周期趋势仅聚合拥有有效周期起点的账号。"
           />
         ) : null}
 
@@ -424,7 +403,6 @@ export function OverviewPage() {
         ) : usage.data ? (
           <UsageDashboard
             payload={usage.data}
-            includeDateLabels={usageWindow === "since_reset" || usageWindow === "custom" || Number(usageWindow) > 86_400}
             accountStatuses={new Map(catalog.data?.accounts.map((account) => [account.id, {
               label: account.operational_status.label,
               tone: account.operational_status.tone
@@ -487,7 +465,6 @@ function Metric({ label, value, detail }: { label: string; value: string | numbe
 
 function UsageDashboard({
   payload,
-  includeDateLabels,
   accountStatuses,
   userStatuses,
   tokenMode,
@@ -497,7 +474,6 @@ function UsageDashboard({
   onLoadMoreUsers
 }: {
   payload: Awaited<ReturnType<typeof readOverviewUsage>>;
-  includeDateLabels: boolean;
   accountStatuses: Map<string, SeriesStatus>;
   userStatuses: Map<string, SeriesStatus>;
   tokenMode: TokenMode;
@@ -551,7 +527,6 @@ function UsageDashboard({
             buckets={payload.buckets}
             series={chartSeries}
             summary={view === "aggregate"}
-            includeDateLabels={includeDateLabels}
             valueLabel={modeLabel}
             timezone={payload.window_timezone}
             ariaLabel={`${viewLabel}${modeLabel} Token 使用趋势：${chartAriaDetails}`}
@@ -578,11 +553,10 @@ function UsageDashboard({
   );
 }
 
-function UsageChartLoader({ buckets, series, summary = false, includeDateLabels, valueLabel, timezone, ariaLabel, footer }: {
+function UsageChartLoader({ buckets, series, summary = false, valueLabel, timezone, ariaLabel, footer }: {
   buckets: number[];
   series: TokenSeries[];
   summary?: boolean;
-  includeDateLabels: boolean;
   valueLabel: string;
   timezone: string;
   ariaLabel: string;
@@ -601,7 +575,6 @@ function UsageChartLoader({ buckets, series, summary = false, includeDateLabels,
         buckets={buckets}
         series={series}
         summary={summary}
-        includeDateLabels={includeDateLabels}
         valueLabel={valueLabel}
         timezone={timezone}
         ariaLabel={ariaLabel}
@@ -755,7 +728,7 @@ function RecentJobs({ jobs, pending, error }: { jobs: RuntimeJob[]; pending: boo
             <div className="overview-legacy-job-row" key={job.id}>
               <strong>{job.name || actionLabel(job.action)}</strong>
               <span>{job.target}</span>
-              <time>{formatTimestamp(job.created_at)}</time>
+              <time>{formatSiteTimestamp(job.created_at)}</time>
               <span className={`overview-status-chip ${status.tone}`}>{status.label}</span>
             </div>
           );
@@ -874,19 +847,7 @@ export function formatOverviewUsageRange(startAt: number, endAt: number, timezon
 }
 
 export function formatOverviewUsageBoundary(timestamp: number, timezone = getSiteTimezone()) {
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
-    ...(timezone ? { timeZone: timezone } : {})
-  }).format(new Date(timestamp * 1000));
-}
-
-function formatOverviewCollectorTime(timestamp: number, timezone = getSiteTimezone()) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-    ...(timezone ? { timeZone: timezone } : {})
-  }).format(new Date(timestamp * 1000));
+  return formatSiteTimestamp(timestamp, timezone);
 }
 
 function formatBucketInterval(seconds: number) {
@@ -894,18 +855,4 @@ function formatBucketInterval(seconds: number) {
   if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`;
   if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时`;
   return `${Math.round(seconds / 86400)} 天`;
-}
-
-function formatTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
-  }).format(new Date(timestamp * 1000));
-}
-
-function formatToolbarTime(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
-  }).format(new Date(timestamp * 1000));
 }

@@ -28,3 +28,22 @@ export function useSiteTimezone() {
 export function siteDateTimeFormat(locales?: Intl.LocalesArgument, options: Intl.DateTimeFormatOptions = {}) {
   return new Intl.DateTimeFormat(locales, { ...options, timeZone: options.timeZone || timezone });
 }
+
+/** Display Unix seconds consistently in the configured business timezone. */
+export function formatSiteTimestamp(timestamp: number | null | undefined, timeZone = getSiteTimezone()) {
+  if (timestamp == null || !Number.isFinite(timestamp) || timestamp <= 0) return "—";
+  const date = new Date(timestamp * 1000);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const parts = siteDateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}/${value("month")}/${value("day")} ${value("hour")}:${value("minute")}:${value("second")}`;
+}

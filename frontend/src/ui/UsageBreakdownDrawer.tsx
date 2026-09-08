@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp } from "./site-time";
 import {
   Alert,
   Button,
@@ -127,7 +127,7 @@ function UsageBreakdownContent({
       </Row>
       <Card
         title="模型与推理强度"
-        extra={<Text type="secondary">数据时间：{formatTimestamp(data.generated_at)}</Text>}
+        extra={<Text type="secondary">数据时间：{formatSiteTimestamp(data.generated_at)}</Text>}
       >
         <AdminTable<UsageCombination>
           rowKey={(item) => `${item.account ?? "all"}:${item.model}:${item.reasoning_effort}`}
@@ -164,7 +164,7 @@ function combinationColumns(kind: "account" | "user"): TableColumnsType<UsageCom
       width: 125,
       render: (_, item) => <TokenValue value={kind === "user" ? item.weighted_tokens ?? 0 : item.total_tokens} />
     },
-    { title: "最后使用", dataIndex: "last_used_at", width: 165, render: formatTimestamp }
+    { title: "最后使用", dataIndex: "last_used_at", width: 165, render: (timestamp: number) => formatSiteTimestamp(timestamp) }
   ];
 }
 
@@ -187,15 +187,3 @@ const effortLabels: Record<string, string> = {
   auto: "自动",
   unknown: "未知"
 };
-
-function formatTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  }).format(new Date(timestamp * 1000));
-}

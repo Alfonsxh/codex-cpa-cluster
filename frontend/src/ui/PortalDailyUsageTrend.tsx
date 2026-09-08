@@ -212,7 +212,7 @@ function PortalTrendChart({
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
-  const labels = useMemo(() => trend.days.map((day) => day.date.slice(5).replace("-", "/")), [trend.days]);
+  const labels = useMemo(() => trend.days.map((day) => formatTrendDate(day.date)), [trend.days]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -286,10 +286,10 @@ function PortalTrendChart({
         sampling: "lttb",
         smooth: false,
         emphasis: { focus: "series" },
-        lineStyle: { width: 2, color: usageChartColors[index % usageChartColors.length] },
+        lineStyle: { width: 2, color: trendSeriesColor(index, dimension) },
         itemStyle: {
           color: dark ? "#151b28" : "#ffffff",
-          borderColor: usageChartColors[index % usageChartColors.length],
+          borderColor: trendSeriesColor(index, dimension),
           borderWidth: 2
         }
       }))
@@ -313,22 +313,14 @@ function PortalTrendChart({
 
   return (
     <div className={`usage-trend-chart${dimension === "model_reasoning" ? " model-reasoning" : ""}`}>
-      <div className="usage-trend-chart-toolbar">
-        {dimension === "total" ? <div className="usage-trend-chart-legend" role="group" aria-label="趋势图例">
-          {series.map((item, index) => (
-            <span title={item.name} key={item.name}>
-              <i style={{ background: usageChartColors[index % usageChartColors.length] }} aria-hidden="true" />
-              <b>{item.name}</b>
-            </span>
-          ))}
-        </div> : null}
-        {dimension === "model_reasoning" ? (
+      {dimension === "model_reasoning" ? (
+        <div className="usage-trend-chart-toolbar">
           <div className="usage-trend-metric-switch" role="group" aria-label="模型趋势统计口径">
             <button type="button" data-metric="weighted" aria-pressed={modelMetric === "weighted"} onClick={() => onModelMetricChange("weighted")}><i aria-hidden="true" /><span>加权</span></button>
             <button type="button" data-metric="total" aria-pressed={modelMetric === "total"} onClick={() => onModelMetricChange("total")}><i aria-hidden="true" /><span>未加权</span></button>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <div
         className="usage-trend-chart-plot"
         role="img"
@@ -489,7 +481,7 @@ export function renderPortalTrendTooltip(
       // the panel background as their fill and the series color as a border,
       // so item.color would render every Tooltip marker almost black. Keep the
       // marker tied to the same deterministic palette as the line instead.
-      color: trendSeriesColor(item.seriesIndex)
+      color: trendSeriesColor(item.seriesIndex, dimension)
     }))
     .filter((item) => item.value !== null)
     .sort((left, right) => dimension === "total" ? 0 : (right.value ?? 0) - (left.value ?? 0) || left.name.localeCompare(right.name))
@@ -499,12 +491,13 @@ export function renderPortalTrendTooltip(
   const requestRow = dimension === "total"
     ? `<span class="usage-trend-tooltip-request"><b>请求</b><em>${day.request_count.toLocaleString("en-US")}</em></span>`
     : `<span class="usage-trend-tooltip-total"><b>当日${modelMetric === "total" ? "未加权" : "加权"}</b><em>${escapeHTML(`${formatTokenAmount(modelMetric === "total" ? day.total_tokens : day.weighted_tokens)} Token`)}</em></span>`;
-  return `<div class="overview-chart-tooltip usage-trend-tooltip" role="tooltip" data-active="true" data-layout="single-column"><strong>${escapeHTML(formatTrendDate(day.date))}</strong>${rows}${requestRow}</div>`;
+  return `<div class="overview-chart-tooltip usage-trend-tooltip" role="tooltip" data-active="true" data-layout="single-column" data-dimension="${escapeAttribute(dimension)}"><strong>${escapeHTML(formatTrendDate(day.date))}</strong>${rows}${requestRow}</div>`;
 }
 
-function trendSeriesColor(seriesIndex: CallbackDataParams["seriesIndex"]) {
+function trendSeriesColor(seriesIndex: CallbackDataParams["seriesIndex"], dimension: PortalUsageTrendDimension) {
   const index = Number(seriesIndex);
-  return usageChartColors[Number.isInteger(index) && index >= 0 ? index % usageChartColors.length : 0];
+  const palette = dimension === "total" ? ["#6374d8", "#d18b41"] : usageChartColors;
+  return palette[Number.isInteger(index) && index >= 0 ? index % palette.length : 0];
 }
 
 function renderTooltipRow(
@@ -515,7 +508,10 @@ function renderTooltipRow(
   if (dimension === "total") {
     return `<span class="usage-trend-tooltip-row"><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(item.name)}</b><em>${escapeHTML(value)}</em></span>`;
   }
-  return `<span class="usage-trend-tooltip-row usage-trend-tooltip-combination"><i style="background:${escapeAttribute(item.color)}"></i><b title="${escapeAttribute(item.name)}">${escapeHTML(item.name)}</b><em>${escapeHTML(value)}</em></span>`;
+  const separator = item.name.lastIndexOf(" · ");
+  const model = separator >= 0 ? item.name.slice(0, separator) : item.name;
+  const effort = separator >= 0 ? item.name.slice(separator + 3) : "";
+  return `<span class="usage-trend-tooltip-row usage-trend-tooltip-combination" title="${escapeAttribute(item.name)}"><i style="background:${escapeAttribute(item.color)}"></i><b class="usage-trend-tooltip-model">${escapeHTML(model)}</b> <b class="usage-trend-tooltip-effort">${escapeHTML(effort)}</b> <em>${escapeHTML(value)}</em></span>`;
 }
 
 function chartValue(value: CallbackDataParams["value"]): number | null {
@@ -531,8 +527,7 @@ function combinationKey(model: string, effort: string) {
 }
 
 function formatTrendDate(date: string) {
-  const [, month = "", day = ""] = date.split("-");
-  return `${Number(month)}月${Number(day)}日`;
+  return date.replace(/-/g, "/");
 }
 
 function errorMessage(error: unknown) {

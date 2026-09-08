@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat } from "../site-time";
+import { useSiteTimezone, formatSiteTimestamp } from "../site-time";
 import * as echarts from "echarts/core";
 import { LineChart, type LineSeriesOption } from "echarts/charts";
 import {
@@ -36,14 +36,13 @@ export type UsageChartProps = {
   buckets: number[];
   series: TokenSeries[];
   summary?: boolean;
-  includeDateLabels?: boolean;
   valueLabel: string;
   timezone?: string;
   ariaLabel: string;
   footer?: ReactNode;
 };
 
-export function UsageChart({ buckets, series, summary = false, includeDateLabels = false, valueLabel, timezone, ariaLabel, footer }: UsageChartProps) {
+export function UsageChart({ buckets, series, summary = false, valueLabel, timezone, ariaLabel, footer }: UsageChartProps) {
   const siteTimezone = useSiteTimezone();
   timezone = timezone || siteTimezone;
   const { theme } = useTheme();
@@ -62,8 +61,8 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
     ["maximum", "最大值", summaryMetrics.maximum]
   ] as const : [];
   const labels = useMemo(
-    () => buckets.map((timestamp) => formatChartTime(timestamp, includeDateLabels, timezone)),
-    [buckets, includeDateLabels, timezone]
+    () => buckets.map((timestamp) => formatSiteTimestamp(timestamp, timezone)),
+    [buckets, timezone]
   );
 
   useEffect(() => {
@@ -76,12 +75,19 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
     const axisColor = dark ? "#7f8ba3" : "#8b95a7";
     const gridColor = dark ? "#273247" : "#e3e8f1";
     const chartWidth = Math.round(container.getBoundingClientRect().width) || 1_000;
-    const recordedMaximum = Math.max(1, ...series.flatMap((item) => item.values.map((value) => Number(value) || 0)));
-    const maximum = recordedMaximum * 1.35;
+    const recordedMaximum = Math.max(1, ...series.flatMap((item) => item.values
+      .slice(0, buckets.length).map((value) => Number.isFinite(value) ? value : 0)));
+    const maximum = recordedMaximum * 1.1;
+    const yAxisSplitNumber = 10;
+    const roughInterval = maximum / yAxisSplitNumber;
+    const intervalMagnitude = 10 ** Math.floor(Math.log10(roughInterval));
+    const yAxisInterval = Math.max(1, intervalMagnitude * (
+      [1, 2, 5, 10].find((step) => step * intervalMagnitude >= roughInterval) ?? 10
+    ));
     const peak = summary ? usageChartPeak(series[0]?.values ?? []) : null;
     const peakColor = valueLabel === "加权" ? "#d18b41" : "#6374d8";
-    const xLabelIndexes = new Set([0, 0.25, 0.5, 0.75, 1].map((ratio) => (
-      Math.round(Math.max(0, labels.length - 1) * ratio)
+    const xLabelIndexes = new Set(Array.from({ length: 11 }, (_, index) => (
+      Math.round(Math.max(0, labels.length - 1) * index / 10)
     )));
     const option: UsageChartOption = {
       animation: false,
@@ -93,7 +99,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
         left: summary ? chartWidth <= 520 ? 66 : 72 : chartWidth * 82 / 1_000,
         right: summary ? 16 : chartWidth * 20 / 1_000,
         top: 24,
-        bottom: 48,
+        bottom: 62,
         containLabel: false
       },
       tooltip: {
@@ -125,7 +131,9 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
           color: axisColor,
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
           fontSize: 11,
+          lineHeight: 15,
           margin: 22,
+          formatter: (label: string) => label.replace(" ", "\n"),
           interval: (index: number) => xLabelIndexes.has(index),
           hideOverlap: true
         }
@@ -134,8 +142,9 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
         type: "value",
         min: 0,
         max: maximum,
-        interval: maximum / 4,
-        splitNumber: 4,
+        interval: yAxisInterval,
+        minInterval: 1,
+        splitNumber: yAxisSplitNumber,
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
@@ -143,7 +152,8 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
           fontFamily: "SFMono-Regular, Consolas, Liberation Mono, monospace",
           fontSize: 11,
           margin: 12,
-          formatter: (value: number) => formatTokens(value)
+          showMaxLabel: Number.isInteger(maximum / yAxisInterval),
+          formatter: formatAxisTokens
         },
         splitLine: { lineStyle: { color: gridColor, width: 1 } }
       },
@@ -285,7 +295,7 @@ export function UsageChart({ buckets, series, summary = false, includeDateLabels
               <tr>
                 <td className="overview-chart-summary-time">
                   <time dateTime={buckets[pointIndex] ? new Date(buckets[pointIndex] * 1000).toISOString() : undefined}>
-                    {formatTimestamp(buckets[pointIndex] ?? 0, timezone, true)}
+                    {formatSiteTimestamp(buckets[pointIndex] ?? 0, timezone)}
                   </time>
                 </td>
                 <td className="overview-chart-summary-mode">
@@ -352,7 +362,7 @@ export function renderUsageTooltip(
 ) {
   const values = Array.isArray(parameters) ? parameters : [parameters];
   const dataIndex = Number(values[0]?.dataIndex ?? 0);
-  const timestamp = formatTimestamp(buckets[dataIndex] ?? 0, timezone);
+  const timestamp = formatSiteTimestamp(buckets[dataIndex] ?? 0, timezone);
   const rows = tooltipRows(values).map((item) => (
     `<span><i style="background:${escapeAttribute(item.color)}"></i>`
     + `<b title="${escapeAttribute(item.name)}">${escapeHtml(item.name)}</b>`
@@ -376,28 +386,14 @@ function chartValue(value: CallbackDataParams["value"]) {
   return Number(value ?? 0);
 }
 
-function formatChartTime(timestamp: number, includeDate: boolean, timezone?: string) {
-  if (!timestamp) return "—";
-  const options: Intl.DateTimeFormatOptions = includeDate
-    ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }
-    : { hour: "2-digit", minute: "2-digit", hour12: false };
-  if (timezone) options.timeZone = timezone;
-  return siteDateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
-}
-
-function formatTimestamp(timestamp: number, timezone?: string, includeYear = false) {
-  if (!timestamp) return "—";
-  const options: Intl.DateTimeFormatOptions = {
-    year: includeYear ? "numeric" : undefined,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  };
-  if (timezone) options.timeZone = timezone;
-  return siteDateTimeFormat("zh-CN", options).format(new Date(timestamp * 1000));
+function formatAxisTokens(value: number) {
+  const tokens = Math.max(0, Math.round(Number.isFinite(value) ? value : 0));
+  for (const [divisor, unit] of [[1_000_000_000, "B"], [1_000_000, "M"], [1_000, "K"]] as const) {
+    if (tokens >= divisor && tokens % divisor === 0) {
+      return `${(tokens / divisor).toLocaleString("en-US")} ${unit}`;
+    }
+  }
+  return `${tokens.toLocaleString("en-US")} Token`;
 }
 
 function escapeHtml(value: string) {

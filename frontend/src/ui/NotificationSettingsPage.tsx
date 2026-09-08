@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp, getSiteTimezone } from "./site-time";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   BellOutlined,
@@ -240,9 +240,9 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
 
           <Card className="notification-status-card" title="运行状态">
             <Descriptions column={1} size="small">
-              <Descriptions.Item label="Worker 心跳">{formatTimestamp(status.heartbeat_at)}</Descriptions.Item>
-              <Descriptions.Item label="最近成功">{formatTimestamp(status.last_success_at)}</Descriptions.Item>
-              <Descriptions.Item label="下次发送">{formatTimestamp(status.next_schedule_at)}</Descriptions.Item>
+              <Descriptions.Item label="Worker 心跳">{formatSiteTimestamp(status.heartbeat_at)}</Descriptions.Item>
+              <Descriptions.Item label="最近成功">{formatSiteTimestamp(status.last_success_at)}</Descriptions.Item>
+              <Descriptions.Item label="下次发送">{formatSiteTimestamp(status.next_schedule_at)}</Descriptions.Item>
               <Descriptions.Item label="最近错误">
                 {status.last_error ? <Text type="danger">{status.last_error}</Text> : "—"}
               </Descriptions.Item>
@@ -357,13 +357,6 @@ export function NotificationSettingsPage({ csrfToken }: { csrfToken: string }) {
 
 function WebhookTag({ configured }: { configured: boolean }) {
   return <Tag color={configured ? "success" : "default"}>{configured ? "已配置" : "未配置"}</Tag>;
-}
-
-function formatTimestamp(timestamp: number | null) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit"
-  }).format(new Date(timestamp * 1000));
 }
 
 function NotificationPageSkeleton() {

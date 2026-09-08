@@ -24,6 +24,7 @@ const (
 
 var allowedUsageWindows = map[int64]struct{}{
 	int64(time.Hour / time.Second):           {},
+	int64(6 * time.Hour / time.Second):       {},
 	int64(24 * time.Hour / time.Second):      {},
 	int64(7 * 24 * time.Hour / time.Second):  {},
 	int64(30 * 24 * time.Hour / time.Second): {},

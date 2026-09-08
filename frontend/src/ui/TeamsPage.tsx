@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp } from "./site-time";
 import { Button, Empty, Modal, Spin, Tooltip } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,6 +10,9 @@ import {
   type ReactNode
 } from "react";
 
+import "./teams-page.css";
+import { recentUsageWindows, UsageTimeRangeControl } from "./components/UsageTimeRangeControl";
+
 import { ApiError } from "../api/client";
 import {
   createTeam,
@@ -20,6 +23,7 @@ import {
   teamsQueryKey,
   updateTeam,
   type Team,
+  type TeamUsageRange,
   type TeamUsageRow
 } from "../api/teams";
 import {
@@ -36,7 +40,17 @@ import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { formatTokenAmount } from "./formatters";
 import { teamTagClassName } from "./teamTagStyles";
 
+const teamUsageWindows = [
+  ...recentUsageWindows.filter((option) => option.value !== "21600"),
+  { value: "current_week", label: "本周", title: "系统时区本周一 00:00 起的团队用量" },
+  { value: "all", label: "全部" }
+] as const;
+type TeamWindow = (typeof teamUsageWindows)[number]["value"];
+
 type TeamStatus = "all" | "active" | "empty";
+type TeamSortField = "name" | "members" | "active_users" | "weighted_tokens" | "updated_at";
+type TeamSort = { field: TeamSortField; direction: "asc" | "desc" };
+const teamNameCollator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
 type MemberScope = "current" | "unassigned" | "all";
 type UsageState = "all" | "used" | "unused";
 type MemberWindow = "today" | "604800" | "2592000" | "all";
@@ -70,12 +84,14 @@ function initialMemberCriteria(team: Team | null): MemberCriteria {
 }
 
 export function TeamsPage({ csrfToken }: { csrfToken: string }) {
-  useSiteTimezone();
+  const siteTimezone = useSiteTimezone();
   const queryClient = useQueryClient();
   const { setRefreshing, setRefreshAction, setRefreshLabel } = useAdminToolbar();
   const { toasts, showToast } = useLegacyToasts();
   const [search, setSearch] = useState("");
+  const [usageWindow, setUsageWindow] = useState<TeamWindow>("all");
   const [status, setStatus] = useState<TeamStatus>("all");
+  const [sort, setSort] = useState<TeamSort | null>(null);
   const [editor, setEditor] = useState<TeamEditorState>(null);
   const [deleting, setDeleting] = useState<Team | null>(null);
   const [memberTeam, setMemberTeam] = useState<Team | null>(null);
@@ -88,10 +104,10 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
     retry: false,
     refetchOnWindowFocus: false
   });
-  const allUsageRange = useMemo(() => ({ window: "all" as const }), []);
-  const allUsage = useQuery({
-    queryKey: teamUsageQueryKey(allUsageRange),
-    queryFn: ({ signal }) => readTeamUsage(allUsageRange, signal),
+  const selectedUsageRange = useMemo<TeamUsageRange>(() => ({ window: usageWindow }), [usageWindow]);
+  const teamUsage = useQuery({
+    queryKey: [...teamUsageQueryKey(selectedUsageRange), siteTimezone],
+    queryFn: ({ signal }) => readTeamUsage(selectedUsageRange, signal),
     enabled: teams.isSuccess,
     retry: false,
     refetchOnWindowFocus: false
@@ -100,7 +116,7 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
   const refreshWorkspace = useCallback(async (fresh = true) => {
     setRefreshing(true);
     try {
-      const usageRange = { window: "all" as const, fresh };
+      const usageRange = { ...selectedUsageRange, fresh };
       const teamResult = await queryClient.fetchQuery({
         queryKey: teamsQueryKey,
         queryFn: ({ signal }) => listTeams(signal),
@@ -108,11 +124,11 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
       });
       queryClient.setQueryData(teamsQueryKey, teamResult);
       const usageResult = await queryClient.fetchQuery({
-        queryKey: teamUsageQueryKey(usageRange),
+        queryKey: [...teamUsageQueryKey(usageRange), siteTimezone],
         queryFn: ({ signal }) => readTeamUsage(usageRange, signal),
         staleTime: 0
       });
-      queryClient.setQueryData(teamUsageQueryKey(allUsageRange), usageResult);
+      queryClient.setQueryData([...teamUsageQueryKey(selectedUsageRange), siteTimezone], usageResult);
       setRefreshLabel("团队数据已刷新");
       showToast("数据已刷新");
     } catch (error) {
@@ -121,20 +137,20 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
     } finally {
       setRefreshing(false);
     }
-  }, [allUsageRange, queryClient, setRefreshLabel, setRefreshing, showToast]);
+  }, [selectedUsageRange, siteTimezone, queryClient, setRefreshLabel, setRefreshing, showToast]);
 
   useEffect(() => {
     setRefreshAction(() => refreshWorkspace(true));
     return () => setRefreshAction(null);
   }, [refreshWorkspace, setRefreshAction]);
   useEffect(() => {
-    setRefreshing(teams.isFetching || allUsage.isFetching);
-  }, [allUsage.isFetching, setRefreshing, teams.isFetching]);
+    setRefreshing(teams.isFetching || teamUsage.isFetching);
+  }, [teamUsage.isFetching, setRefreshing, teams.isFetching]);
   useEffect(() => {
-    if (!teams.isSuccess || allUsage.isFetching) return;
+    if (!teams.isSuccess || teamUsage.isFetching) return;
     reportedCatalogError.current = null;
-    setRefreshLabel("团队数据已刷新");
-  }, [allUsage.isFetching, allUsage.status, setRefreshLabel, teams.isSuccess]);
+    setRefreshLabel(teamUsage.isError ? "团队用量加载失败" : "团队数据已刷新");
+  }, [teamUsage.isError, teamUsage.isFetching, teamUsage.status, setRefreshLabel, teams.isSuccess]);
   useEffect(() => {
     if (!teams.isError || reportedCatalogError.current === teams.error) return;
     reportedCatalogError.current = teams.error;
@@ -147,17 +163,55 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
   }, [setRefreshLabel, setRefreshing]);
 
   const usageByTeam = useMemo(
-    () => new Map((allUsage.data?.teams ?? []).map((team) => [team.id, team])),
-    [allUsage.data?.teams]
+    () => new Map((teamUsage.isError ? [] : teamUsage.data?.teams ?? []).map((team) => [team.id, team])),
+    [teamUsage.data?.teams, teamUsage.isError]
   );
   const visibleTeams = useMemo(() => {
     const normalized = search.trim().toLowerCase();
-    return (teams.data?.teams ?? []).filter((team) => {
+    const filtered = (teams.data?.teams ?? []).filter((team) => {
       const matchesSearch = !normalized || `${team.name} ${team.description || ""}`.toLowerCase().includes(normalized);
       const matchesStatus = status === "all" || (status === "active" ? team.user_count > 0 : team.user_count === 0);
       return matchesSearch && matchesStatus;
     });
-  }, [search, status, teams.data?.teams]);
+    if (!sort) return filtered;
+    const valueForTeam = (team: Team) => {
+      switch (sort.field) {
+        case "name": return team.name;
+        case "members": return team.user_count;
+        case "updated_at": return team.updated_at;
+        default: return usageByTeam.get(team.id)?.usage[sort.field];
+      }
+    };
+    return filtered.sort((left, right) => {
+      const leftValue = valueForTeam(left);
+      const rightValue = valueForTeam(right);
+      const tieBreak = teamNameCollator.compare(left.name, right.name) || left.id.localeCompare(right.id);
+      // Missing usage stays at the bottom in either direction.
+      if (leftValue == null) return rightValue == null ? tieBreak : 1;
+      if (rightValue == null) return -1;
+      const comparison = typeof leftValue === "string" && typeof rightValue === "string"
+        ? teamNameCollator.compare(leftValue, rightValue)
+        : Number(leftValue) - Number(rightValue);
+      return comparison * (sort.direction === "asc" ? 1 : -1) || tieBreak;
+    });
+  }, [search, status, teams.data?.teams, usageByTeam, sort]);
+
+  const changeSort = (field: TeamSortField) => {
+    setSort((current) => ({
+      field,
+      direction: current?.field === field
+        ? current.direction === "asc" ? "desc" : "asc"
+        : field === "name" ? "asc" : "desc"
+    }));
+  };
+
+  const rangeLabel = usageWindow === "all" ? "全部历史" : teamUsageWindows.find((option) => option.value === usageWindow)?.label;
+  const rangeBoundary = (timestamp: number | null | undefined, unbounded = false) => {
+    if (teamUsage.isPending) return "…";
+    if (teamUsage.isError || !teamUsage.data) return "—";
+    if (timestamp == null) return unbounded ? "不限" : "—";
+    return formatSiteTimestamp(timestamp);
+  };
 
   const refreshAfterCatalogMutation = async () => {
     const teamResult = await queryClient.fetchQuery({
@@ -167,11 +221,11 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
     });
     queryClient.setQueryData(teamsQueryKey, teamResult);
     const usageResult = await queryClient.fetchQuery({
-      queryKey: teamUsageQueryKey(allUsageRange),
-      queryFn: ({ signal }) => readTeamUsage(allUsageRange, signal),
+      queryKey: [...teamUsageQueryKey(selectedUsageRange), siteTimezone],
+      queryFn: ({ signal }) => readTeamUsage(selectedUsageRange, signal),
       staleTime: 0
     });
-    queryClient.setQueryData(teamUsageQueryKey(allUsageRange), usageResult);
+    queryClient.setQueryData([...teamUsageQueryKey(selectedUsageRange), siteTimezone], usageResult);
     await queryClient.invalidateQueries({ queryKey: usersQueryRoot, refetchType: "none" });
   };
 
@@ -193,46 +247,65 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
     <section className="page-content legacy-team-page" aria-label="团队管理">
       <div className="panel table-panel organization-catalog-panel" id="organization-teams-panel">
         <div className="organization-table-toolbar">
-          <div className="organization-table-filters">
-            <label className="search-field">
-              <span aria-hidden="true">⌕</span>
-              <input
-                type="search"
-                aria-label="搜索团队名称或说明"
-                placeholder="搜索团队名称或说明"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </label>
-            <div className="organization-status-filter">
-              <span className="visually-hidden">团队状态</span>
-              <LegacyEnhancedSelect
-                label="团队状态"
-                value={status}
-                options={[
-                  { value: "all", label: "全部团队" },
-                  { value: "active", label: "有成员" },
-                  { value: "empty", label: "空团队" }
-                ]}
-                onChange={setStatus}
-              />
+          <div className="team-time-filter">
+            <UsageTimeRangeControl
+              className="team-usage-time-control"
+              label="团队用量时间范围"
+              value={usageWindow}
+              options={teamUsageWindows}
+              onChange={setUsageWindow}
+            />
+            <div className="overview-token-window-boundaries" aria-label="团队用量时间边界" aria-live="polite" aria-busy={teamUsage.isPending}>
+              <div className="overview-token-window-value"><small>起始时间</small><strong>{rangeBoundary(teamUsage.data?.window_start_at, usageWindow === "all")}</strong></div>
+              <div className="overview-token-window-value"><small>结束时间</small><strong>{rangeBoundary(teamUsage.data?.window_end_at)}</strong></div>
             </div>
           </div>
-          <div>
-            <span>{formatNumber(visibleTeams.length)} 个团队</span>
-            <button className="button primary" type="button" onClick={() => setEditor({ mode: "create" })}>创建团队</button>
+          <div className="team-catalog-controls">
+            <div className="organization-table-filters">
+              <div className="team-search-filter">
+                <label htmlFor="team-search">团队</label>
+                <div className="search-field">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    id="team-search"
+                    type="search"
+                    aria-label="搜索团队名称或说明"
+                    placeholder="搜索团队名称或说明"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="organization-status-filter">
+                <span className="team-filter-label">团队状态</span>
+                <LegacyEnhancedSelect
+                  label="团队状态"
+                  value={status}
+                  options={[
+                    { value: "all", label: "全部团队" },
+                    { value: "active", label: "有成员" },
+                    { value: "empty", label: "空团队" }
+                  ]}
+                  onChange={setStatus}
+                />
+              </div>
+            </div>
+            <div className="team-catalog-actions">
+              <button className="button primary" type="button" onClick={() => setEditor({ mode: "create" })}>创建团队</button>
+            </div>
           </div>
         </div>
+        {teamUsage.isError ? <p className="organization-error form-error" role="alert">团队用量加载失败，请刷新重试</p> : null}
         <NativeTableViewport className="table-wrap organization-catalog-table-wrap" aria-label="团队目录表格">
           <table className="organization-catalog-table">
             <thead>
               <tr>
                 <th className="table-index-column">序号</th>
-                <th>团队</th>
-                <th>当前成员</th>
-                <th>活跃成员</th>
-                <th>全部历史 Token</th>
-                <th>更新时间</th>
+                <TeamSortHeader field="name" label="团队" sort={sort} onSort={changeSort} />
+                <TeamSortHeader field="members" label="当前成员" sort={sort} onSort={changeSort} />
+                <TeamSortHeader field="active_users" label="活跃成员" sort={sort} onSort={changeSort} />
+                <TeamSortHeader field="weighted_tokens" label="Token 用量" sort={sort} onSort={changeSort} />
+                <TeamSortHeader field="updated_at" label="更新时间" sort={sort} onSort={changeSort} />
                 <th className="organization-action-column">操作</th>
               </tr>
             </thead>
@@ -243,6 +316,8 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
                   index={index + 1}
                   team={team}
                   usage={usageByTeam.get(team.id)}
+                  usagePending={teamUsage.isPending}
+                  rangeLabel={rangeLabel}
                   onMembers={() => setMemberTeam(team)}
                   onEdit={() => setEditor({ mode: "edit", team })}
                   onDelete={() => {
@@ -300,10 +375,32 @@ export function TeamsPage({ csrfToken }: { csrfToken: string }) {
   );
 }
 
-function TeamRow({ index, team, usage, onMembers, onEdit, onDelete }: {
+function TeamSortHeader({ field, label, sort, onSort }: {
+  field: TeamSortField;
+  label: string;
+  sort: TeamSort | null;
+  onSort: (field: TeamSortField) => void;
+}) {
+  const active = sort?.field === field;
+  const tokenColumn = field === "weighted_tokens";
+  const description = active
+    ? `${label}，当前${sort.direction === "asc" ? "升序" : "降序"}，点击切换排序方向`
+    : `${label}，点击排序`;
+  return (
+    <th scope="col" aria-sort={active ? sort.direction === "asc" ? "ascending" : "descending" : "none"} className={tokenColumn ? "team-token-column" : undefined}>
+      <button type="button" className={`legacy-sort-button${active ? " active" : ""}`} title={description} aria-label={description} onClick={() => onSort(field)}>
+        <span>{label}</span>
+      </button>
+    </th>
+  );
+}
+
+function TeamRow({ index, team, usage, usagePending, rangeLabel, onMembers, onEdit, onDelete }: {
   index: number;
   team: Team;
   usage?: TeamUsageRow;
+  usagePending: boolean;
+  rangeLabel?: string;
   onMembers: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -311,11 +408,22 @@ function TeamRow({ index, team, usage, onMembers, onEdit, onDelete }: {
   return (
     <tr>
       <td className="table-index-cell">{index}</td>
-      <td><span className="organization-catalog-name"><strong title={team.name}><span className={teamTagClassName(team.tag_style)}>{team.name}</span></strong><small title={team.description || "无说明"}>{team.description || "无说明"}</small></span></td>
+      <td><span className="organization-catalog-name"><strong title={team.name}><span className={teamTagClassName(team.tag_style)}>{team.name}</span></strong>{team.description?.trim() ? <small title={team.description}>{team.description}</small> : null}</span></td>
       <td className="number-cell">{formatNumber(team.user_count)}</td>
-      <td className="number-cell">{formatNumber(usage?.usage.active_users ?? 0)}</td>
-      <td className="number-cell token-total"><LegacyTokenValue value={usage?.usage.weighted_tokens ?? 0} /></td>
-      <td>{formatTimestamp(team.updated_at)}</td>
+      <td className="number-cell">{usage ? formatNumber(usage.usage.active_users) : <span className="team-usage-placeholder">{usagePending ? "…" : "—"}</span>}</td>
+      <td className="number-cell token-total team-token-cell">
+        <div className="user-token-summary">
+          <div className="user-token-stat user-token-weighted">
+            <span>{rangeLabel}加权</span>
+            {usage ? <LegacyTokenValue value={usage.usage.weighted_tokens} /> : <span className="team-usage-placeholder">{usagePending ? "…" : "—"}</span>}
+          </div>
+          <div className="user-token-stat user-token-current">
+            <span>{rangeLabel}未加权</span>
+            {usage ? <LegacyTokenValue value={usage.usage.total_tokens} /> : <span className="team-usage-placeholder">{usagePending ? "…" : "—"}</span>}
+          </div>
+        </div>
+      </td>
+      <td>{formatSiteTimestamp(team.updated_at)}</td>
       <td>
         <div className="organization-row-actions">
           <button className="inline-action" type="button" onClick={onMembers}>成员</button>
@@ -639,11 +747,6 @@ function errorMessage(error: unknown) {
 
 function sameCriteria(left: MemberCriteria, right: MemberCriteria) {
   return left.query === right.query && left.scope === right.scope && left.usageState === right.usageState && left.window === right.window;
-}
-
-function formatTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(timestamp * 1000));
 }
 
 function formatNumber(value: number) {

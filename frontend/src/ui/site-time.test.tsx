@@ -14,9 +14,9 @@ describe("site timezone", () => {
       return <time>{formatServerTimestamp(timestamp)}</time>;
     }
     render(<Clock />);
-    expect(screen.getByText("2026/09/07 08:30")).toBeInTheDocument();
+    expect(screen.getByText("2026/09/07 08:30:00")).toBeInTheDocument();
     act(() => setSiteTimezone("America/Los_Angeles"));
-    expect(screen.getByText("2026/09/06 17:30")).toBeInTheDocument();
+    expect(screen.getByText("2026/09/06 17:30:00")).toBeInTheDocument();
     expect(getSiteTimezone()).toBe("America/Los_Angeles");
   });
 

@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp } from "./site-time";
 import { Alert, App as AntApp, Button, Form, Input, Modal, Skeleton, Space, Tabs, Tooltip } from "antd";
 import { CopyOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -479,7 +479,7 @@ function UsageUpdateBadge({ scope, updatedAt, refreshing, failed }: PortalTrendU
     <span className="usage-update-dot" aria-hidden="true" />
     <span className="usage-update-label">{refreshing ? "更新中" : failed ? "更新失败" : "数据更新"}</span>
     <time key={updatedAt} className="usage-update-time" dateTime={hasTimestamp ? new Date(updatedAt * 1000).toISOString() : undefined}>
-      {hasTimestamp ? formatServerTimestamp(updatedAt, { withSeconds: true }) : refreshing ? "正在读取…" : "暂无数据"}
+      {hasTimestamp ? formatServerTimestamp(updatedAt) : refreshing ? "正在读取…" : "暂无数据"}
     </time>
   </div>;
 }
@@ -521,7 +521,7 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
   const remaining = weekly?.unlimited ? null : Math.max(0, 100 - percent);
   const quotaTooltip = weekly ? (
     <div className="usage-quota-tooltip">
-      <strong>个人周额度</strong>
+      <strong>个人本周额度</strong>
       <span><b>加权已用</b><em>{formatNumber(weekly.weighted_used_tokens)}</em></span>
       <span><b>未加权已用</b><em>{formatNumber(weekly.raw_used_tokens)}</em></span>
       <span><b>总额度</b><em>{weekly.unlimited ? "不限额" : formatNumber(weekly.limit_tokens ?? 0)}</em></span>
@@ -530,19 +530,19 @@ function PersonalQuotaSummary({ quota, loading, error, onRetry }: { quota?: Port
   ) : null;
   return (
     <div className="usage-personal-overview" aria-labelledby="personal-usage-label">
-      <div className="usage-personal-overview-head"><span id="personal-usage-label">个人周用量</span><small className="usage-summary-tag">{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
+      <div className="usage-personal-overview-head"><span id="personal-usage-label">个人本周用量</span><small className="usage-summary-tag">{weekly ? quotaSourceLabel(weekly.source) : "组织默认"}</small></div>
       {error ? (
         <div className="usage-current-quota degraded">
-          <div><span>个人周额度读取失败</span><button className="usage-inline-retry" type="button" onClick={onRetry}>重试</button></div>
-          <progress className="usage-quota-track" max="100" value="0" aria-label="个人周额度暂不可用" />
+          <div><span>个人本周额度读取失败</span><button className="usage-inline-retry" type="button" onClick={onRetry}>重试</button></div>
+          <progress className="usage-quota-track" max="100" value="0" aria-label="个人本周额度暂不可用" />
         </div>
       ) : (
         <div className={`usage-current-quota ${weekly?.limit_reached ? "exhausted" : percent >= 90 ? "warning" : ""}`.trim()}>
-          <div><span>{loading ? "周额度正在读取…" : weekly?.unlimited ? "周额度不限额" : `周额度 ${formatPercent(percent)}`}</span><strong>{loading ? "—" : weekly?.unlimited ? "剩余不限额" : `剩余 ${formatPercent(remaining ?? 0)}`}</strong></div>
-          <progress className="usage-quota-track" max="100" value={percent} aria-label={weekly?.unlimited ? "个人周额度不限额" : `个人周额度已使用 ${formatPercent(percent)}`} />
+          <div><span>{loading ? "本周额度正在读取…" : weekly?.unlimited ? "本周额度不限额" : `本周额度 ${formatPercent(percent)}`}</span><strong>{loading ? "—" : weekly?.unlimited ? "剩余不限额" : `剩余 ${formatPercent(remaining ?? 0)}`}</strong></div>
+          <progress className="usage-quota-track" max="100" value={percent} aria-label={weekly?.unlimited ? "个人本周额度不限额" : `个人本周额度已使用 ${formatPercent(percent)}`} />
           <div className="usage-personal-quota-detail">
             <span>{weekly ? weekly.unlimited ? `加权已用 ${formatTokens(weekly.weighted_used_tokens)}` : `加权已用 ${formatTokens(weekly.weighted_used_tokens)} / ${formatTokens(weekly.limit_tokens ?? 0)}` : "用量正在读取…"}{weekly ? <UsageHelp
-              label="查看个人周额度 Token 说明"
+              label="查看个人本周额度 Token 说明"
               title={quotaTooltip}
             /> : null}</span>
             <time>{weekly ? `重置：${formatServerTimestamp(weekly.week_end_at)}` : "—"}</time>
@@ -858,26 +858,14 @@ function formatCompact(value: number) {
   return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value) || 0);
 }
 
-export function formatServerTimestamp(timestamp: number, { withSeconds = false }: { withSeconds?: boolean } = {}) {
-  if (!timestamp) return "—";
-  const parts = siteDateTimeFormat("en-US", {
-    timeZone: getSiteTimezone(),
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(withSeconds ? { second: "2-digit" as const } : {}),
-    hourCycle: "h23"
-  }).formatToParts(new Date(timestamp * 1000));
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
-  const base = `${value("year")}/${value("month")}/${value("day")} ${value("hour")}:${value("minute")}`;
-  return withSeconds ? `${base}:${value("second")}` : base;
+export function formatServerTimestamp(timestamp: number) {
+  return formatSiteTimestamp(timestamp);
 }
 
 const portalWindowOptions: Array<{ value: PortalUsageWindow; label: string }> = [
   { value: "3600", label: "1 小时" },
   { value: "today", label: "今日" },
   { value: "86400", label: "24 小时" },
-  { value: "604800", label: "7 天" }
+  { value: "604800", label: "7 天" },
+  { value: "current_week", label: "本周" }
 ];

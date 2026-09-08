@@ -1,4 +1,5 @@
-import { Button, Result } from "antd";
+import { DownOutlined, LockOutlined, LogoutOutlined } from "@ant-design/icons";
+import { Button, Dropdown, Result } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
@@ -92,7 +93,7 @@ export function UsageApp() {
             <div>
               <span className="eyebrow">SECURITY CHECK</span>
               <h1>先设置你的个人密码</h1>
-              <p>初始密码仅用于首次登录。完成修改后再加载 API Key 与个人周用量。</p>
+              <p>初始密码仅用于首次登录。完成修改后再加载 API Key 与个人本周用量。</p>
             </div>
             <PortalPasswordModal
               open
@@ -140,7 +141,7 @@ function UsageAuthenticationBoundary() {
           </div>
           <div className="usage-preview-stat-grid">
             <PreviewStat title="当前账号" value="尚未选择" detail="选择可用账号后显示" />
-            <PreviewStat title="个人周用量" value="—" detail="周额度正在读取…" />
+            <PreviewStat title="个人本周用量" value="—" detail="本周额度正在读取…" />
             <PreviewStat title="今日 Token" value="—" />
           </div>
         </section>
@@ -148,7 +149,7 @@ function UsageAuthenticationBoundary() {
           <div className="usage-preview-toolbar">
             <h2>账号明细</h2>
             <div>
-              {['1 小时', '今日', '24 小时', '7 天', '刷新'].map((label) => (
+              {['1 小时', '今日', '24 小时', '7 天', '本周', '刷新'].map((label) => (
                 <button type="button" disabled key={label}>{label}</button>
               ))}
             </div>
@@ -219,6 +220,8 @@ function UsageShell({
   onChangePassword: () => void;
   children: React.ReactNode;
 }) {
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
   return (
     <main className="usage-shell usage-center-shell">
       <header className="usage-center-head">
@@ -230,17 +233,43 @@ function UsageShell({
           </div>
         </div>
         <div className="usage-user-actions">
-          <span className="usage-user-badge" title={user}>{user}</span>
-          <button className="usage-link-button usage-password-action" type="button" aria-label="修改密码" onClick={onChangePassword}>
-            <span className="usage-password-action-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6zM12 14v2" /></svg>
-            </span>
-            <span className="usage-password-action-label">修改密码</span>
-          </button>
           <ThemeToggle className="usage-theme-toggle" />
-          <button className="usage-link-button" type="button" onClick={onLogout} disabled={loggingOut}>
-            {loggingOut ? "退出中…" : "退出"}
-          </button>
+          <Dropdown
+            trigger={["click"]}
+            placement="bottomRight"
+            open={userMenuOpen && !loggingOut}
+            onOpenChange={setUserMenuOpen}
+            disabled={loggingOut}
+            autoFocus
+            destroyOnHidden
+            classNames={{ root: "usage-user-menu" }}
+            menu={{
+              "aria-label": "用户操作",
+              items: [
+                { key: "password", label: "修改密码", icon: <LockOutlined aria-hidden="true" />, disabled: loggingOut },
+                { key: "logout", label: "退出", icon: <LogoutOutlined aria-hidden="true" />, disabled: loggingOut }
+              ],
+              onClick: ({ key }) => {
+                setUserMenuOpen(false);
+                if (loggingOut) return;
+                if (key === "password") onChangePassword();
+                if (key === "logout") onLogout();
+              }
+            }}
+          >
+            <button
+              className="usage-user-badge"
+              type="button"
+              title={user}
+              aria-label={`用户菜单：${user}`}
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen && !loggingOut}
+              disabled={loggingOut}
+            >
+              <span className="usage-user-name">{loggingOut ? "退出中…" : user}</span>
+              <DownOutlined className="usage-user-menu-arrow" aria-hidden="true" />
+            </button>
+          </Dropdown>
         </div>
       </header>
       <div className="usage-center-content">{children}</div>

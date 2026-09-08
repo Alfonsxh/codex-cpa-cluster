@@ -263,8 +263,7 @@ describe("UsageApp", () => {
 
 describe("UsageDashboard", () => {
   it("formats reset timestamps with the full server date regardless of the browser timezone", () => {
-    expect(formatServerTimestamp(20_000)).toBe("1970/01/01 13:33");
-    expect(formatServerTimestamp(20_000, { withSeconds: true })).toBe("1970/01/01 13:33:20");
+    expect(formatServerTimestamp(20_000)).toBe("1970/01/01 13:33:20");
   });
 
   it("queries detail only while opened and replaces the in-memory key after confirmed rotation", async () => {
@@ -290,9 +289,9 @@ describe("UsageDashboard", () => {
     renderPortal(<UsageDashboard user="alice@example.com" onSessionExpired={() => undefined} />);
 
     expect((await screen.findAllByText("zeta.cpa@example.com")).length).toBeGreaterThan(0);
-    expect(screen.getByText("个人周用量")).toBeInTheDocument();
+    expect(screen.getByText("个人本周用量")).toBeInTheDocument();
     expect(screen.getByText("加权已用 3 M / 20 M")).toBeInTheDocument();
-    expect(screen.getByText("重置：1970/01/01 13:33")).toBeInTheDocument();
+    expect(screen.getByText("重置：1970/01/01 13:33:20")).toBeInTheDocument();
     const quotaUpdated = screen.getByRole("status", { name: "账号明细数据更新时间" });
     expect(quotaUpdated).toHaveTextContent("数据更新1970/01/01 10:46:40");
     expect(quotaUpdated).toHaveClass("usage-updated");
@@ -304,7 +303,7 @@ describe("UsageDashboard", () => {
     expect(document.querySelectorAll(".usage-token-cell .usage-user-token-pair").length).toBeGreaterThan(0);
     expect(screen.queryByText(/未加权累计/)).not.toBeInTheDocument();
     expect(screen.queryByText(/今日请求/)).not.toBeInTheDocument();
-    const quotaHelp = screen.getByRole("button", { name: "查看个人周额度 Token 说明" });
+    const quotaHelp = screen.getByRole("button", { name: "查看个人本周额度 Token 说明" });
     await user.hover(quotaHelp);
     const quotaTooltip = await screen.findByRole("tooltip");
     expect(within(quotaTooltip).getByText("加权已用")).toBeInTheDocument();
@@ -434,7 +433,7 @@ describe("UsageDashboard", () => {
     expect(trendSummary.getByText("30天用量")).toBeInTheDocument();
     expect(trendSummary.getAllByText("未加权")).toHaveLength(3);
     expect(trendSummary.getAllByText("加权")).toHaveLength(3);
-    expect(screen.getByLabelText("趋势图例")).toBeInTheDocument();
+    expect(screen.queryByLabelText("趋势图例")).not.toBeInTheDocument();
     expect(requestPaths(fetchMock, "/usage/me/accounts?")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "7天" }));

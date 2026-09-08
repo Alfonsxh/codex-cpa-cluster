@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp } from "./site-time";
 import {
   Alert,
   Button,
@@ -123,7 +123,7 @@ function PortalBreakdownContent({ data }: { data: Awaited<ReturnType<typeof read
       </Row>
       <Card
         title="模型用量"
-        extra={<Typography.Text type="secondary">数据时间：{formatTimestamp(data.generated_at)}</Typography.Text>}
+        extra={<Typography.Text type="secondary">数据时间：{formatSiteTimestamp(data.generated_at)}</Typography.Text>}
       >
         <AdminTable<ModelRow>
           rowKey="model"
@@ -160,7 +160,7 @@ const modelColumns: TableColumnsType<ModelRow> = [
     width: 140,
     render: (_, item) => formatTokens(item.weighted_tokens ?? 0)
   },
-  { title: "最后使用", dataIndex: "last_used_at", width: 170, render: formatTimestamp }
+  { title: "最后使用", dataIndex: "last_used_at", width: 170, render: (timestamp: number) => formatSiteTimestamp(timestamp) }
 ];
 
 const portalWindowOptions: Array<{ value: PortalUsageWindow; label: string }> = [
@@ -183,15 +183,3 @@ const effortLabels: Record<string, string> = {
   auto: "自动",
   unknown: "未知"
 };
-
-function formatTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  }).format(new Date(timestamp * 1000));
-}

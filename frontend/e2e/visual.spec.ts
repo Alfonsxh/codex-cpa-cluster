@@ -586,7 +586,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   const detailFrameRect = await page.locator(".usage-detail-sections").evaluate((element) => element.getBoundingClientRect().toJSON());
   expect(Math.abs(topCardRect.left - detailFrameRect.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(topCardRect.right - detailFrameRect.right)).toBeLessThanOrEqual(1);
-  const quotaHelp = page.getByRole("button", { name: "查看个人周额度 Token 说明" });
+  const quotaHelp = page.getByRole("button", { name: "查看个人本周额度 Token 说明" });
   await quotaHelp.hover();
   const quotaTooltip = page.locator(".usage-quota-tooltip");
   await expect(quotaTooltip).toBeVisible();
@@ -681,8 +681,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   await expect(summaryTooltip).toBeVisible();
   await expect(summaryTooltip).toHaveText(/^\d{1,3}(?:,\d{3})+$/);
   await expect(summaryTooltip).not.toContainText("Token");
-  await expect(page.getByLabel("趋势图例")).toContainText("未加权 Token");
-  await expect(page.getByLabel("趋势图例")).toContainText("加权 Token");
+  await expect(page.getByLabel("趋势图例")).toHaveCount(0);
   await page.getByRole("button", { name: "7天", exact: true }).click();
   await page.getByRole("button", { name: "模型 + 推理强度", exact: true }).click();
   await expect.poll(() => trendRequests).toContain(
@@ -764,7 +763,8 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
     scrollable: element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth
   }))).toEqual({ overflowX: "hidden", overflowY: "hidden", scrollable: false });
   const combinationRows = tooltip.locator(".usage-trend-tooltip-combination");
-  await expect(combinationRows.first()).toContainText("gpt-5.6-sol · xhigh");
+  await expect(combinationRows.first().locator(".usage-trend-tooltip-model")).toHaveText("gpt-5.6-sol");
+  await expect(combinationRows.first().locator(".usage-trend-tooltip-effort")).toHaveText("xhigh");
   await expect(combinationRows.first()).toContainText("Token");
   await expect(combinationRows.locator("small")).toHaveCount(0);
   const markerStyles = await combinationRows.locator("i").evaluateAll((markers) => markers.map((marker) => ({
@@ -1546,7 +1546,7 @@ for (const viewport of [
           for (const token of await aggregateSummary.locator(".overview-chart-summary-token").all()) {
             await expect(token).toHaveCSS("text-align", "right");
             await expect(token.locator("strong")).toHaveText(/[\d,.]+ (Token|K|M|B)/);
-            await expect(token.locator("small")).toHaveText(/^[\d,]+$/);
+            await expect(token.locator("small")).toHaveText(/^[\d,]+ Token$/);
           }
           expect(await aggregateSummary.evaluate((element) => {
             const chart = element.previousElementSibling!.getBoundingClientRect();
@@ -1637,7 +1637,7 @@ test("全部账号图下摘要跟随口径、时段及时间范围", async ({ pa
   await chart.focus();
   await chart.press("Home");
   await expect(point.locator("strong")).toHaveText("200 Token");
-  await expect(point.locator("small")).toHaveText("200");
+  await expect(point.locator("small")).toHaveText("200 Token");
   await card.getByRole("button", { name: "6 小时", exact: true }).click();
   await expect(metric("范围内总量")).toHaveText("400 Token");
   await expect(time).toHaveText("2026/09/05 06:15:00");
@@ -2048,7 +2048,8 @@ test("修改个人密码弹框统一边框、标签和输入框几何", async ({
   await installUsageVisualBackend(page);
   await page.goto("http://127.0.0.1:5194/usage/");
 
-  await page.getByRole("button", { name: "修改密码", exact: true }).click();
+  await page.getByRole("button", { name: /^用户菜单：/ }).click();
+  await page.getByRole("menuitem", { name: "修改密码", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "修改个人密码" });
   await expect(dialog).toBeVisible();
   const fields = dialog.locator(".portal-password-form .ant-input-affix-wrapper");

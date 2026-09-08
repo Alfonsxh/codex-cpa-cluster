@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp, getSiteTimezone } from "./site-time";
 import { DownOutlined } from "@ant-design/icons";
 import {
   Button,
@@ -124,6 +124,7 @@ const usageWindowOptions: Array<{ value: Exclude<UsageWindow, "custom">; label: 
   { value: "86400", label: "24 小时" },
   { value: "604800", label: "7 天" },
   { value: "2592000", label: "30 天" },
+  { value: "current_week", label: "本周" },
   { value: "all", label: "全部" }
 ];
 
@@ -429,7 +430,7 @@ export function LegacyUsersPage({ csrfToken }: { csrfToken: string }) {
     if (rangeUpdating) return "…";
     if (!catalog || users.isPlaceholderData) return "—";
     if (timestamp == null || timestamp <= 0) return unbounded ? "不限" : "—";
-    return formatLastUsed(timestamp, true);
+    return formatLastUsed(timestamp);
   };
   const total = catalog?.pagination.total ?? 0;
   const selectedTeamUsage = teamUsage.data?.teams.find((team) => team.id === teamID) ?? null;
@@ -925,7 +926,7 @@ function userColumns({
       render: (_, user) => <UserTokenCell user={user} window={usageWindow} />
     },
     {
-      ...sortable("quota", "周额度状态"),
+      ...sortable("quota", "本周额度状态"),
       key: "quota",
       className: "user-quota-column",
       width: "23%",
@@ -1291,7 +1292,7 @@ function UserUsageAnalysis({
       <div><span>强度覆盖率</span><strong>{formatUsageRatio(query.totals.known_effort_count ?? 0, successCount)}</strong></div>
       <div className="usage-analysis-token-stat"><span>未加权 Token</span><strong><LegacyTokenValue value={query.totals.total_tokens} /></strong></div>
       <div className="usage-analysis-token-stat"><span>加权 Token</span><strong><LegacyTokenValue value={totalWeighted} /></strong></div>
-      <div className="usage-analysis-time-stat"><span>统计开始</span><strong>{formatFullTimestamp(query.collection_started_at)}</strong></div>
+      <div className="usage-analysis-time-stat"><span>统计开始</span><strong>{formatSiteTimestamp(query.collection_started_at)}</strong></div>
     </div>
   );
   if (!successCount) {
@@ -1429,7 +1430,7 @@ function UserModelAccountDrawer({
       <div className="user-model-account-toolbar">
         <div className="user-model-account-context">
           <strong>{query.user}</strong>
-          <span>{formatLastUsed(query.window_start_at, true)} — {formatLastUsed(query.window_end_at, true)}</span>
+          <span>{formatLastUsed(query.window_start_at)} — {formatLastUsed(query.window_end_at)}</span>
         </div>
       </div>
       {error ? <div className="usage-analysis-stale" role="alert">刷新失败，当前展示上一次成功数据：{errorMessage(error)} <button type="button" className="inline-action" onClick={onRetry}>重试</button></div> : null}
@@ -2095,7 +2096,7 @@ function UserQuotaDrawer({
               />
               <QuotaFact label="基础额度" value={quota.base_limit_tokens == null ? "不限额" : tokenReadableText(quota.base_limit_tokens)} />
               <QuotaFact label="加权剩余额度" value={quota.unlimited ? "不限额" : tokenReadableText(quota.remaining_tokens)} />
-              <QuotaFact label="下次重置" value={formatTimestamp(quota.week_end_at)} />
+              <QuotaFact label="下次重置" value={formatSiteTimestamp(quota.week_end_at)} />
             </dl>
             <div className="inline-notice">额度按该用户在全部 CPA 的 Token 总量汇总。达到额度后只拒绝新请求，已经开始的请求（含流式输出）可以完成。</div>
             <fieldset className="quota-policy-options">
@@ -2170,7 +2171,7 @@ function UserQuotaDrawer({
                 {adjustments.slice(0, 4).map((adjustment, index) => (
                   <div className="quota-adjustment-history-row" key={adjustment.created_at + ":" + index}>
                     <strong>{adjustment.action === "bonus" ? "追加本周额度" : "清零本周已用量"} · {tokenText(adjustment.token_amount)}</strong>
-                    <time>{formatTimestamp(adjustment.created_at)}</time>
+                    <time>{formatSiteTimestamp(adjustment.created_at)}</time>
                     <p title={adjustment.reason}>{adjustment.reason}</p>
                   </div>
                 ))}
@@ -2593,9 +2594,9 @@ function TeamUsageTrend({ series }: { series: TeamUsageSeries }) {
         <circle cx={lastPoint.x} cy={lastPoint.y} r="4" />
       </svg>
       <div className="team-trend-axis">
-        <span>{formatFullTimestamp(series.start_at)}</span>
+        <span>{formatSiteTimestamp(series.start_at)}</span>
         <strong>峰值 <LegacyTokenValue value={maximum} /></strong>
-        <span>{formatFullTimestamp(series.end_at)}</span>
+        <span>{formatSiteTimestamp(series.end_at)}</span>
       </div>
     </section>
   );
@@ -2744,7 +2745,7 @@ function usageWindowLabel(window: UsageWindow) {
     "604800": "7 天",
     "2592000": "30 天",
     current_week: "本周",
-    since_reset: "本周期",
+    since_reset: "额度周期",
     all: "累计",
     custom: "自定义范围"
   }[window] || "当前范围";
@@ -2754,31 +2755,9 @@ function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
 }
 
-function formatTimestamp(timestamp: number | null | undefined) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(timestamp * 1000));
-}
-
-function formatFullTimestamp(timestamp: number | null | undefined) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(timestamp * 1000));
-}
-
 function UserLastUsed({ timestamp }: { timestamp: number | null | undefined }) {
   if (!timestamp || !Number.isFinite(timestamp) || timestamp <= 0) return <span className="user-last-used">从未使用</span>;
-  const label = formatLastUsed(timestamp, true);
+  const label = formatLastUsed(timestamp);
   return (
     <time className="user-last-used" dateTime={new Date(timestamp * 1000).toISOString()} title={label}>
       {label.replace(" ", "\n")}
@@ -2786,18 +2765,8 @@ function UserLastUsed({ timestamp }: { timestamp: number | null | undefined }) {
   );
 }
 
-function formatLastUsed(timestamp: number | null | undefined, full = false) {
-  if (!timestamp) return "从未使用";
-  return siteDateTimeFormat("zh-CN", {
-    timeZone: full ? getSiteTimezone() : undefined,
-    year: full ? "numeric" : undefined,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: full ? "2-digit" : undefined,
-    hour12: false
-  }).format(new Date(timestamp * 1000));
+function formatLastUsed(timestamp: number | null | undefined) {
+  return timestamp && Number.isFinite(timestamp) && timestamp > 0 ? formatSiteTimestamp(timestamp) : "从未使用";
 }
 
 function effortLabel(value: string) {
@@ -2834,7 +2803,7 @@ function paginationItems(current: number, total: number): Array<number | "…"> 
 }
 
 function userRefreshLabel(timestamp: number, cached: boolean) {
-  return "用户数据更新于 " + formatLastUsed(timestamp) + (cached ? "（缓存）" : "");
+  return "用户数据更新于 " + formatSiteTimestamp(timestamp) + (cached ? "（缓存）" : "");
 }
 
 function errorMessage(error: unknown) {

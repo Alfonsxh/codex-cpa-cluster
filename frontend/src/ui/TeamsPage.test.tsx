@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TeamsPage } from "./TeamsPage";
+import { AdminToolbarContext, type AdminToolbarContextValue } from "./AdminToolbarContext";
 
 const teams = [
   { id: "platform", name: "平台研发", description: "核心平台与基础设施", tag_style: "indigo", user_count: 2, created_at: 10, updated_at: 100 },
@@ -62,11 +63,11 @@ describe("TeamsPage frozen legacy contract", () => {
 
     expect(await screen.findByText("平台研发")).toBeInTheDocument();
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
-      "序号", "团队", "当前成员", "活跃成员", "全部历史 Token", "更新时间", "操作"
+      "序号", "团队", "当前成员", "活跃成员", "Token 用量", "更新时间", "操作"
     ]);
-    expect(screen.getByText("1970/01/01 08:01")).toBeInTheDocument();
-    expect(screen.getByText("1970/01/01 08:03")).toBeInTheDocument();
-    expect(screen.getByText("1970/01/01 08:05")).toBeInTheDocument();
+    expect(screen.getByText("1970/01/01 08:01:40")).toBeInTheDocument();
+    expect(screen.getByText("1970/01/01 08:03:20")).toBeInTheDocument();
+    expect(screen.getByText("1970/01/01 08:05:00")).toBeInTheDocument();
     expect(await screen.findByText("12.4")).toBeInTheDocument();
     expect(screen.getByText("平台研发")).toHaveClass("team-tag-style-indigo");
     expect(screen.getByText("数据智能")).toHaveClass("team-tag-style-cyan");
@@ -75,17 +76,73 @@ describe("TeamsPage frozen legacy contract", () => {
     expect(screen.getAllByRole("button", { name: "删除" })[2]).toBeEnabled();
 
     await userDriver.type(screen.getByRole("searchbox", { name: "搜索团队名称或说明" }), "数据");
-    expect(screen.getByText("1 个团队")).toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(2);
     expect(screen.queryByText("平台研发")).not.toBeInTheDocument();
     await userDriver.clear(screen.getByRole("searchbox", { name: "搜索团队名称或说明" }));
     await userDriver.click(screen.getByRole("button", { name: "团队状态：全部团队" }));
     await userDriver.click(screen.getByRole("option", { name: "空团队" }));
-    expect(screen.getByText("1 个团队")).toBeInTheDocument();
-    expect(screen.getByText("无说明")).toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(screen.queryByText("无说明")).not.toBeInTheDocument();
 
     const requested = fetchMock.mock.calls.map(([input]) => String(input));
     expect(requested.some((url) => url.endsWith("/admin/api/teams"))).toBe(true);
     expect(requested.some((url) => url.includes("/admin/api/teams/usage?window=all"))).toBe(true);
+  });
+
+  it("switches preset ranges, separates weighted and raw totals, and refreshes the selected range", async () => {
+    const fetchMock = installFetch(({ url }) => {
+      if (!url.includes("/admin/api/teams/usage?window=604800")) return null;
+      return json({ generated_at: 2000, window: "604800", window_start_at: 1000, window_end_at: 2000, teams: [
+        { ...teams[0], current_user_count: 2, usage: usage(2_000_000, 1) }
+      ] });
+    });
+    const setRefreshAction = vi.fn();
+    renderTeams({ setRefreshAction, setRefreshing: vi.fn(), setRefreshLabel: vi.fn(), setPageDetail: vi.fn() });
+    const driver = userEvent.setup();
+    await screen.findByText("12.4");
+    const ranges = screen.getByRole("group", { name: "团队用量时间范围" });
+    expect(within(ranges).getAllByRole("button").map((button) => button.textContent)).toEqual(["1 小时", "今日", "24 小时", "7 天", "30 天", "本周", "全部"]);
+    expect(screen.queryByRole("button", { name: "时间选择" })).not.toBeInTheDocument();
+    expect(within(ranges).getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true");
+    await driver.type(screen.getByRole("searchbox"), "平台");
+    await driver.click(within(ranges).getByRole("button", { name: "7 天" }));
+    await waitFor(() => expect(screen.getByRole("row", { name: /平台研发/ })).toHaveTextContent("2,000,000 Token"));
+    const cells = within(screen.getByRole("row", { name: /平台研发/ })).getAllByRole("cell");
+    expect(cells[2]).toHaveTextContent("2");
+    expect(cells[3]).toHaveTextContent("1");
+    expect(cells[4]).toHaveTextContent("2,000,000 Token");
+    expect(cells[4]).toHaveTextContent("1,000,000 Token");
+    expect(cells[4]).toHaveTextContent("7 天加权");
+    expect(cells[4]).toHaveTextContent("7 天未加权");
+    expect(screen.getByRole("columnheader", { name: /^Token 用量，点击排序$/ })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox")).toHaveValue("平台");
+    expect(screen.getByLabelText("团队用量时间边界")).toHaveTextContent("1970/01/01 08:16:40");
+    const refresh = setRefreshAction.mock.calls.at(-1)?.[0];
+    await refresh();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain("/admin/api/teams/usage?window=604800&fresh=1");
+    await driver.click(within(ranges).getByRole("button", { name: "本周" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("window=current_week"))).toBe(true));
+  });
+
+  it("does not display previous-range totals or zero values while a new range is loading or fails", async () => {
+    let failRange = () => {};
+    const pending = new Promise<Response>((resolve) => { failRange = () => resolve(json({ error: "范围加载失败" }, 500)); });
+    installFetch(({ url }) => url.includes("/admin/api/teams/usage?window=86400") ? pending : null);
+    const driver = userEvent.setup();
+    renderTeams();
+    await screen.findByText("12.4");
+    await driver.click(screen.getByRole("button", { name: "24 小时" }));
+    const row = screen.getByRole("row", { name: /平台研发/ });
+    expect(within(row).getAllByText("…")).toHaveLength(3);
+    expect(within(row).queryByText("12.4")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("团队用量时间边界")).toHaveAttribute("aria-busy", "true");
+    failRange();
+    expect(await screen.findByRole("alert")).toHaveTextContent("团队用量加载失败，请刷新重试");
+    expect(within(row).getAllByText("—")).toHaveLength(3);
+    expect(screen.getByLabelText("团队用量时间边界")).toHaveAttribute("aria-busy", "false");
+    await driver.click(screen.getByRole("button", { name: "全部" }));
+    expect(await screen.findByText("12.4")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("uses the frozen create/edit form lifecycle and keeps failed input in the open modal", async () => {
@@ -348,16 +405,17 @@ describe("TeamsPage frozen legacy contract", () => {
   });
 });
 
-function renderTeams() {
+function renderTeams(toolbar?: AdminToolbarContextValue) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><TeamsPage csrfToken="csrf-test" /></QueryClientProvider>);
+  const page = <TeamsPage csrfToken="csrf-test" />;
+  return render(<QueryClientProvider client={queryClient}>{toolbar ? <AdminToolbarContext.Provider value={toolbar}>{page}</AdminToolbarContext.Provider> : page}</QueryClientProvider>);
 }
 
-function installFetch(override?: (request: { url: string; method: string; body: unknown }) => Response | null) {
+function installFetch(override?: (request: { url: string; method: string; body: unknown }) => Response | null | Promise<Response | null>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    const custom = override?.({ url, method, body: init?.body });
+    const custom = await override?.({ url, method, body: init?.body });
     if (custom) return custom;
     if (url.includes("/admin/api/teams/usage")) return json({ generated_at: 1000, window: "all", window_start_at: null, window_end_at: 1000, window_seconds: null, teams: [
       { ...teams[0], current_user_count: 2, usage: usage(12_400_000, 2) },
@@ -400,7 +458,7 @@ function user(email: string, teamID: string | null, teamName: string, tokens: nu
 }
 
 function usage(tokens: number, activeUsers: number) {
-  return { request_count: activeUsers, failed_count: 0, input_tokens: Math.round(tokens * .2), cached_tokens: 0, output_tokens: Math.round(tokens * .8), reasoning_tokens: 0, total_tokens: tokens, weighted_tokens: tokens, last_used_at: 100, active_users: activeUsers };
+  return { request_count: activeUsers, failed_count: 0, input_tokens: Math.round(tokens * .2), cached_tokens: 0, output_tokens: Math.round(tokens * .8), reasoning_tokens: 0, total_tokens: Math.round(tokens / 2), weighted_tokens: tokens, last_used_at: 100, active_users: activeUsers };
 }
 
 function json(payload: unknown, status = 200) {

@@ -1,4 +1,4 @@
-import { useSiteTimezone, siteDateTimeFormat, getSiteTimezone } from "./site-time";
+import { useSiteTimezone, formatSiteTimestamp, getSiteTimezone } from "./site-time";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CheckOutlined,
@@ -193,12 +193,13 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
     option.value === "custom"
       ? { ...option, label: customUsageRange ? formatCustomUsageRange(customUsageRange) : option.label }
       : option
-  )), [customUsageRange]);
+  )), [customUsageRange, siteTimezone]);
   const accounts = useQuery({
     queryKey: accountListQueryKey(usageRange),
     queryFn: ({ signal }) => listAccounts(usageRange, signal),
     enabled: usageWindow !== "custom" || customUsageRange !== null,
     retry: false,
+    refetchInterval: (query) => query.state.data?.quota_refreshing ? 3_000 : false,
     refetchOnWindowFocus: false
   });
   const imageStatus = useQuery({
@@ -232,10 +233,17 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   const accountPageRefreshing = accounts.isFetching || imageStatus.isFetching;
   useEffect(() => setRefreshing(accountPageRefreshing), [accountPageRefreshing, setRefreshing]);
   useEffect(() => {
-    if (!accounts.data) return;
+    if (!accounts.data || accounts.isError) return;
     reportedCatalogError.current = null;
-    setRefreshLabel(accountRefreshLabel(accounts.data));
-  }, [accounts.data, setRefreshLabel, siteTimezone]);
+    const catalog = accounts.data;
+    const updateLabel = () => {
+      const elapsedSeconds = Math.max(0, (Date.now() - accounts.dataUpdatedAt) / 1_000);
+      setRefreshLabel(accountRefreshLabel(catalog, catalog.generated_at + elapsedSeconds));
+    };
+    updateLabel();
+    const timer = window.setInterval(updateLabel, 30_000);
+    return () => window.clearInterval(timer);
+  }, [accounts.data, accounts.dataUpdatedAt, accounts.isError, setRefreshLabel, siteTimezone]);
   useEffect(() => {
     if (!accounts.isError || reportedCatalogError.current === accounts.error) return;
     reportedCatalogError.current = accounts.error;
@@ -566,6 +574,12 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
                 aria-label="用量范围"
                 value={usageWindow}
                 options={displayedUsageWindowOptions}
+                labelRender={(option) => usageWindow === "custom" && customUsageRange ? (
+                  <span className="account-custom-usage-range" title={formatCustomUsageRange(customUsageRange)}>
+                    <span>{formatSiteTimestamp(customUsageRange.startAt)}</span>
+                    <span>{formatSiteTimestamp(customUsageRange.endAt)}</span>
+                  </span>
+                ) : option.label}
                 onChange={(nextWindow) => {
                   if (nextWindow === "custom") {
                     setCustomUsageRangeOpen(true);
@@ -990,7 +1004,7 @@ function accountColumns({
                 <div className="account-quota-cell quota-cell">
                   <div><strong>{formatPercent(bounded)}</strong></div>
                   <progress className={quotaTone} max="100" value={bounded} aria-label={`已使用 ${formatPercent(bounded)}`} />
-                  <small>{account.account_state.reset_at ? `下次重置 ${formatFullTimestamp(account.account_state.reset_at)}` : "重置时间未知"}</small>
+                  <small>{account.account_state.reset_at ? `下次重置 ${formatSiteTimestamp(account.account_state.reset_at)}` : "重置时间未知"}</small>
                 </div>
               </div>
               <div className="account-quota-reset-cell quota-reset-cell">
@@ -1540,33 +1554,6 @@ function formatPercent(value: number) {
   return `${Number(value.toFixed(value >= 10 ? 0 : 1))}%`;
 }
 
-function formatCompactTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(new Date(timestamp * 1000)).replace(/\//g, "/");
-}
-
-function formatTaskTimestamp(timestamp?: number | null) {
-  if (!timestamp) return "—";
-  const parts = siteDateTimeFormat("en-US", {
-    timeZone: getSiteTimezone(),
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(new Date(timestamp * 1000));
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${value("year")}/${value("month")}/${value("day")} ${value("hour")}:${value("minute")}:${value("second")}`;
-}
-
 function formatTaskDuration(startedAt?: number | null, finishedAt?: number | null, active = false) {
   if (active) return "执行中";
   if (!startedAt || !finishedAt) return "—";
@@ -1579,34 +1566,26 @@ function formatTaskDuration(startedAt?: number | null, finishedAt?: number | nul
 }
 
 function formatAccountLastUsed(timestamp: number) {
-  return timestamp ? formatTaskTimestamp(timestamp) : "从未使用";
+  return timestamp ? formatSiteTimestamp(timestamp) : "从未使用";
 }
 
-function formatToolbarTime(timestamp: number) {
-  return formatCompactTimestamp(timestamp);
-}
-
-function accountRefreshLabel(catalog: AccountCatalog) {
+function accountRefreshLabel(catalog: AccountCatalog, nowSeconds = catalog.generated_at) {
   const observedAt = Math.max(0, ...catalog.accounts.map((account) => account.account_state.observed_at || 0));
-  const generatedAt = catalog.quota_generated_at || observedAt || catalog.generated_at;
+  const generatedAt = catalog.quota_generated_at || observedAt;
+  if (!Number.isFinite(generatedAt) || generatedAt <= 0) {
+    return catalog.quota_refreshing ? "额度正在后台更新" : "额度数据暂不可用";
+  }
+  const cacheSeconds = Number.isFinite(catalog.quota_cache_ttl_seconds) && catalog.quota_cache_ttl_seconds > 0
+    ? catalog.quota_cache_ttl_seconds
+    : 60;
+  // Allow one extra cache period for the scheduled collection round to finish.
+  const stale = nowSeconds - generatedAt > cacheSeconds * 2;
   const state = catalog.quota_refreshing
     ? "（后台更新中）"
-    : catalog.quota_cached
-      ? "（缓存）"
+    : stale
+      ? "（数据较旧，请刷新）"
       : "";
-  return `额度更新于 ${formatToolbarTime(generatedAt)}${state}`;
-}
-
-function formatFullTimestamp(timestamp: number) {
-  if (!timestamp) return "—";
-  return siteDateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(new Date(timestamp * 1000));
+  return `额度更新于 ${formatSiteTimestamp(generatedAt)}${state}`;
 }
 
 function formatNumber(value: number) {
@@ -1654,7 +1633,7 @@ const usageWindowOptions = [
   { value: "86400", label: "24 小时" },
   { value: "604800", label: "7 天" },
   { value: "2592000", label: "30 天" },
-  { value: "since_reset", label: "本周期" },
+  { value: "since_reset", label: "额度周期" },
   { value: "all", label: "全部" },
   { value: "custom", label: "自定义…" }
 ] satisfies Array<{ value: AccountUsageWindow; label: string }>;
@@ -2142,11 +2121,11 @@ function TaskOutputModal({
         </div>
         <div>
           <span>开始时间</span>
-          <time>{formatTaskTimestamp(startedAt)}</time>
+          <time>{formatSiteTimestamp(startedAt)}</time>
         </div>
         <div>
           <span>完成时间</span>
-          <time>{job.finished_at ? formatTaskTimestamp(job.finished_at) : active ? "执行中" : "—"}</time>
+          <time>{job.finished_at ? formatSiteTimestamp(job.finished_at) : active ? "执行中" : "—"}</time>
         </div>
         <div>
           <span>任务耗时</span>
@@ -2308,7 +2287,7 @@ function QuotaResetModal({
                 value={creditID}
                 options={details.credits.map((credit, index) => ({
                   value: credit.id,
-                  label: `${credit.title || "Full reset"}${details.credits.length > 1 ? ` #${index + 1}` : ""} · ${credit.expires_at ? `${formatFullTimestamp(credit.expires_at)} 到期` : "长期有效"}`
+                  label: `${credit.title || "Full reset"}${details.credits.length > 1 ? ` #${index + 1}` : ""} · ${credit.expires_at ? `${formatSiteTimestamp(credit.expires_at)} 到期` : "长期有效"}`
                 }))}
                 autoFocus
                 required
@@ -2583,7 +2562,7 @@ function accountRuntimeDetail(account: Account) {
   }
   if (runtime.affected_users > 0) parts.push(`影响 ${runtime.affected_users} 位用户`);
   if (runtime.last_error_status > 0) {
-    parts.push(`最近 HTTP ${runtime.last_error_status} · ${formatFullTimestamp(runtime.last_error_at)}`);
+    parts.push(`最近 HTTP ${runtime.last_error_status} · ${formatSiteTimestamp(runtime.last_error_at)}`);
   }
   if (runtime.error_log_status === "ok") parts.push(`原生错误文件 ${runtime.error_log_files} 个`);
   return [...new Set(parts)].join(" · ") || "CPA 原生凭据状态正常";

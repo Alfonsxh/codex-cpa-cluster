@@ -27,7 +27,7 @@ import {
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { InitialPasswordModal } from "./InitialPasswordModal";
 import { TimezoneSelect } from "./components/TimezoneSelect";
-import { defaultSiteTimezone, siteDateTimeFormat, useSiteTimezone } from "./site-time";
+import { defaultSiteTimezone, formatSiteTimestamp, useSiteTimezone } from "./site-time";
 
 const requiredLabels: Record<string, string> = {
   email_domains: "访问范围",
@@ -104,7 +104,7 @@ export function OnboardingPage({ csrfToken }: { csrfToken: string }) {
 
   useEffect(() => setRefreshing(onboarding.isFetching || catalog.isFetching), [catalog.isFetching, onboarding.isFetching, setRefreshing]);
   useEffect(() => {
-    if (onboarding.data) setRefreshLabel(`初始化状态更新于 ${formatStatusTime(onboarding.data.generated_at)}`);
+    if (onboarding.data) setRefreshLabel(`初始化状态更新于 ${formatSiteTimestamp(onboarding.data.generated_at)}`);
     return () => setRefreshLabel("");
   }, [onboarding.data, setRefreshLabel, siteTimezone]);
   useEffect(() => {
@@ -549,9 +549,4 @@ function configurationStringValue(catalog: ConfigurationCatalog, key: string): s
 function configurationNumberValue(catalog: ConfigurationCatalog, key: string): number | null {
   const value = configurationField(catalog, key)?.value;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function formatStatusTime(timestamp: number) {
-  return siteDateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
-    .format(new Date(timestamp * 1000));
 }

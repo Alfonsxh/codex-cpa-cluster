@@ -13,9 +13,9 @@ describe("OverviewPage legacy dashboard contract", () => {
     const startAt = Math.floor(Date.parse("2026-09-03T10:00:00+08:00") / 1000);
     const endAt = Math.floor(Date.parse("2026-09-03T11:00:00+08:00") / 1000);
     expect(formatOverviewUsageRange(startAt, endAt)).toMatch(
-      /2026\/09\/03 10:00\s*—\s*2026\/09\/03 11:00/
+      /2026\/09\/03 10:00:00\s*—\s*2026\/09\/03 11:00:00/
     );
-    expect(formatOverviewUsageBoundary(startAt)).toMatch(/2026\/09\/03 10:00/);
+    expect(formatOverviewUsageBoundary(startAt)).toMatch(/2026\/09\/03 10:00:00/);
   });
 
   it("uses fine-grained APIs while restoring the legacy metrics, monitor, tables, and activity layout", async () => {
@@ -132,7 +132,7 @@ describe("OverviewPage legacy dashboard contract", () => {
     // Changing only the site timezone must repaint the persisted toolbar label,
     // even when query structural sharing keeps every API result unchanged.
     const toolbarTime = (timeZone: string) => new Intl.DateTimeFormat("zh-CN", {
-      timeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+      timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
     }).format(new Date(summary.generated_at * 1000));
     await waitFor(() => expect(setRefreshLabel).toHaveBeenLastCalledWith(`总览更新于 ${toolbarTime(defaultSiteTimezone)}`));
     try {

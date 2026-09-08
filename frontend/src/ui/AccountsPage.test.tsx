@@ -963,7 +963,7 @@ describe("AccountsPage", () => {
 
     expect(await screen.findByText("alpha", { selector: ".account-name-cell .table-primary" })).toBeInTheDocument();
     await user.click(screen.getByRole("combobox", { name: "用量范围" }));
-    await user.click(await screen.findByText("本周期"));
+    await user.click(await screen.findByText("额度周期"));
     await waitFor(() => expect(requestsTo(fetchMock, "/admin/api/accounts?window=since_reset")).toHaveLength(1));
 
     await user.click(screen.getByRole("row", { name: "展开 alpha" }));
@@ -983,7 +983,7 @@ describe("AccountsPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(requestsMatching(fetchMock, "/admin/api/accounts", "custom")).toHaveLength(0);
     expect(screen.getByRole("combobox", { name: "用量范围" }).closest(".ant-select")?.querySelector(".ant-select-content"))
-      .toHaveAttribute("title", "本周期");
+      .toHaveAttribute("title", "额度周期");
 
     await user.click(screen.getByRole("combobox", { name: "用量范围" }));
     await clickVisibleOption(user, "自定义…");

@@ -45,7 +45,7 @@ import {
 import { useAdminToolbar } from "./AdminToolbarContext";
 import { LegacyToastRegion, useLegacyToasts } from "./components/LegacyToast";
 import { PageState } from "./components/PageState";
-import { tokenInputPresentation, tokenReadableText } from "./formatters";
+import { formatTokenAmount, tokenInputPresentation, tokenReadableParts, tokenReadableText } from "./formatters";
 import { InitialPasswordModal } from "./InitialPasswordModal";
 import { LegacyEnhancedSelect } from "./components/LegacyEnhancedSelect";
 import { LegacyPasswordInput } from "./components/LegacyPasswordInput";
@@ -971,7 +971,46 @@ function ReasoningStrategyEditor({ fields, draft, onChange }: { fields: Configur
 function QuotaSystemDanger({ summary, pending, failed, onReset }: { summary?: { total_users: number; users_with_usage: number; total_used_tokens: number; total_raw_used_tokens: number; week_end_at: number | null }; pending: boolean; failed: boolean; onReset: () => void }) {
   const available = Boolean(summary) && !failed;
   const canReset = available && Number(summary?.users_with_usage ?? 0) > 0;
-  return <section className="quota-system-danger" aria-label="全员额度危险操作" data-configuration-field="quota-reset"><div className="quota-system-danger-copy"><strong>全员本周用量清零</strong><p>仅用于异常补偿；保留原始事件、额度策略和追加额度。需填写原因并确认。</p><div className="quota-system-danger-metrics">{available && summary ? <><span>{summary.total_users.toLocaleString("zh-CN")} 位用户</span><span>{summary.users_with_usage.toLocaleString("zh-CN")} 位有用量</span><span>当前加权已用 {tokenReadableText(summary.total_used_tokens)}</span><span>未加权累计 {tokenReadableText(summary.total_raw_used_tokens)}</span><span>{formatFullTime(summary.week_end_at)} 自动换周</span></> : <span>{pending ? "正在确认影响范围" : "影响范围暂不可确认，请刷新配置后重试"}</span>}</div></div><button className="button danger-outline" type="button" disabled={!canReset || pending} onClick={onReset}>{pending ? "正在确认影响范围" : !available ? "影响范围暂不可确认" : canReset ? "清零全部用户本周已用量" : "当前无需清零"}</button></section>;
+  return (
+    <section className="quota-system-danger" aria-label="全员额度危险操作" aria-busy={pending} data-configuration-field="quota-reset">
+      <div className="quota-system-danger-copy">
+        <strong>全员本周用量清零</strong>
+        <p>仅用于异常补偿。保留原始事件、额度策略和追加额度；操作需填写原因并确认。</p>
+      </div>
+      {available && summary ? (
+        <dl className="quota-system-danger-metrics" aria-label="本周用量清零影响范围">
+          <div><dt>用户总数</dt><dd><strong>{summary.total_users.toLocaleString("zh-CN")}</strong><span className="quota-system-danger-unit">位</span></dd></div>
+          <div><dt>有用量用户</dt><dd><strong>{summary.users_with_usage.toLocaleString("zh-CN")}</strong><span className="quota-system-danger-unit">位</span></dd></div>
+          <QuotaResetTokenMetric label="本周加权已用" value={summary.total_used_tokens} primary />
+          <QuotaResetTokenMetric label="本周未加权" value={summary.total_raw_used_tokens} />
+        </dl>
+      ) : (
+        <p className="quota-system-danger-status" role="status">{pending ? "正在确认影响范围…" : "影响范围暂不可确认，请刷新配置后重试"}</p>
+      )}
+      <div className="quota-system-danger-footer">
+        <div className="quota-system-danger-reset-time">
+          <span>下次自动换周</span>
+          {available && summary?.week_end_at
+            ? <time dateTime={new Date(summary.week_end_at * 1_000).toISOString()}>{formatFullTime(summary.week_end_at)}</time>
+            : <span>—</span>}
+        </div>
+        <button className="button danger-outline" type="button" disabled={!canReset || pending} onClick={onReset}>
+          {pending ? "正在确认影响范围" : !available ? "影响范围暂不可确认" : canReset ? "清零全部用户本周已用量" : "当前无需清零"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function QuotaResetTokenMetric({ label, value, primary = false }: { label: string; value: number; primary?: boolean }) {
+  const details = tokenReadableParts(value, { allowZero: true });
+  return <div data-primary={primary}>
+    <dt>{label}</dt>
+    <dd title={details.state === "ready" ? details.exact : undefined}>
+      <strong>{formatTokenAmount(value)}</strong><span className="quota-system-danger-unit">Token</span>
+      {details.state === "ready" && details.localized ? <small>{details.localized}</small> : null}
+    </dd>
+  </div>;
 }
 
 function AccessPanel({ managementKeyConfigured, initialPasswordConfigured, onInitialPassword, onManagementKey }: { managementKeyConfigured: boolean; initialPasswordConfigured: boolean; onInitialPassword: () => void; onManagementKey: () => void }) {

@@ -230,7 +230,8 @@ describe("ConfigurationPage", () => {
     expect(screen.getByRole("button", { name: "用量与额度" })).toHaveAttribute("aria-expanded", "true");
     expect(quotaReads).toBe(0);
     await user.click(screen.getByRole("button", { name: "额度" }));
-    expect(await screen.findByText("2 位有用量")).toBeInTheDocument();
+    const impact = await screen.findByLabelText("本周用量清零影响范围");
+    expect(within(impact).getByText("有用量用户").nextElementSibling).toHaveTextContent("2位");
     await user.click(screen.getByRole("button", { name: "清零全部用户本周已用量" }));
     const reason = screen.getByLabelText("操作原因");
     await user.type(reason, "incident{Enter}correction");

@@ -578,7 +578,7 @@ test("个人使用中心账号明细默认展开，按需加载趋势并保留�
   await expect(page.getByRole("tab", { name: "每日用量" })).toHaveAttribute("aria-selected", "false");
   await expect(page.getByRole("columnheader", { name: /CPA 账号/ })).toBeVisible();
   await expect(page.locator(".usage-account-table thead th").first()).toHaveCSS("position", "sticky");
-  await expect(page.locator(".usage-last-used").first()).toHaveText(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/);
+  await expect(page.locator(".usage-last-used").first()).toHaveText(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
   await expect(chart).toHaveCount(0);
   await expect.poll(() => trendRequests).toEqual([]);
 
@@ -1632,7 +1632,7 @@ test("全部账号图下摘要跟随口径、时段及时间范围", async ({ pa
   await expect(metric("最大值")).toHaveText("600 Token");
   await expect(chart.locator("svg text").filter({ hasText: "峰值 600 Token" })).toBeVisible();
   await expect(chart.locator("svg text").filter({ hasText: "峰值 300 Token" })).toHaveCount(0);
-  await expect(summary.locator(".overview-chart-summary-token small")).toHaveText(["600", "600", "800", "400", "600"]);
+  await expect(summary.locator(".overview-chart-summary-token small")).toHaveText(["600 Token", "600 Token", "800 Token", "400 Token", "600 Token"]);
   await expect(summary.locator(".overview-chart-mode-tag.weighted")).toHaveText("加权");
   await chart.focus();
   await chart.press("Home");
@@ -1642,7 +1642,7 @@ test("全部账号图下摘要跟随口径、时段及时间范围", async ({ pa
   await expect(metric("范围内总量")).toHaveText("400 Token");
   await expect(time).toHaveText("2026/09/05 06:15:00");
   await expect(point.locator("strong")).toHaveText("300 Token");
-  await expect(summary.locator(".overview-chart-summary-token small")).toHaveText(["300", "300", "400", "200", "300"]);
+  await expect(summary.locator(".overview-chart-summary-token small")).toHaveText(["300 Token", "300 Token", "400 Token", "200 Token", "300 Token"]);
   await summary.screenshot({ path: test.info().outputPath("token-summary.png") });
 });
 

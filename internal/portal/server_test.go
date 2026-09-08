@@ -180,6 +180,46 @@ func TestPortalUsageReadsAreUserScopedAndBoundedToOneGeneratedWindow(t *testing.
 	}
 }
 
+func TestPortalCurrentWeekUsesLocalMondayAcrossYearAndDSTBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name, timezone, now, start string
+	}{
+		{"local_monday", "Asia/Shanghai", "2026-09-06T16:30:00Z", "2026-09-06T16:00:00Z"},
+		{"previous_year", "Asia/Shanghai", "2026-01-01T04:00:00Z", "2025-12-28T16:00:00Z"},
+		{"spring_dst", "America/New_York", "2026-03-08T16:00:00Z", "2026-03-02T05:00:00Z"},
+		{"fall_dst", "America/New_York", "2026-11-01T17:00:00Z", "2026-10-26T04:00:00Z"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newPortalFixture(t)
+			now, err := time.Parse(time.RFC3339, test.now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			start, err := time.Parse(time.RFC3339, test.start)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.server.now = func() time.Time { return now }
+			fixture.sessions.now = fixture.server.now
+			fixture.identity.settings["system.timezone"] = test.timezone
+			fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: now.Add(time.Hour).Unix()}
+			for _, endpoint := range []string{"accounts", "usage-breakdown"} {
+				response := fixture.request(http.MethodGet, "/usage/me/"+endpoint+"?window=current_week", "", "session")
+				if response.Code != http.StatusOK {
+					t.Fatalf("%s: %d %s", endpoint, response.Code, response.Body.String())
+				}
+				end := fixture.usage.endAt
+				if endpoint == "usage-breakdown" {
+					end = fixture.usage.breakdownEndAt
+				}
+				if fixture.usage.user != "alice@example.com" || fixture.usage.startAt != start.Unix() || end == nil || *end != now.Unix() {
+					t.Fatalf("%s range = %#v, want %d..%d for session user", endpoint, fixture.usage, start.Unix(), now.Unix())
+				}
+			}
+		})
+	}
+}
+
 func TestPortalDailyUsageTrendUsesOnlySessionIdentityAndDedicatedBounds(t *testing.T) {
 	fixture := newPortalFixture(t)
 	fixture.sessions.sessions["session"] = usage.PortalSession{User: "alice@example.com", ExpiresAt: 11_000}

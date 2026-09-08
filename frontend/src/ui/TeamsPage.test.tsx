@@ -114,7 +114,8 @@ describe("TeamsPage frozen legacy contract", () => {
     expect(cells[4]).toHaveTextContent("1,000,000 Token");
     expect(cells[4]).toHaveTextContent("7 天加权");
     expect(cells[4]).toHaveTextContent("7 天未加权");
-    expect(screen.getByRole("columnheader", { name: /^Token 用量，点击排序$/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("columnheader", { name: "Token 用量", exact: true }))
+      .getByRole("button", { name: "Token 用量，点击排序", exact: true })).toBeInTheDocument();
     expect(screen.getByRole("searchbox")).toHaveValue("平台");
     expect(screen.getByLabelText("团队用量时间边界")).toHaveTextContent("1970/01/01 08:16:40");
     const refresh = setRefreshAction.mock.calls.at(-1)?.[0];

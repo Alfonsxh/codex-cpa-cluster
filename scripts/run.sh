@@ -2,6 +2,7 @@
 set -eu
 
 # CPAP_OPERATOR_PROTOCOL=1
+# CPAP_RUNTIME_ROOT_ALIAS=1
 # Compatibility boundary: accept the former operator prefix only as input.
 # Values are never evaluated as shell code; the suffix list is fixed here.
 for operator_suffix in GITHUB_REPOSITORY RUN_ASSET_URL STAGING_ROOT DEPLOY_ROOT \
@@ -35,6 +36,11 @@ resolve_existing_root() {
   if [ "$current_root" != "$former_root" ] \
     && { [ -e "$former_root" ] || [ -L "$former_root" ]; }; then
     if [ -e "$current_root" ] || [ -L "$current_root" ]; then
+      if [ -d "$current_root" ] && [ -d "$former_root" ] \
+        && [ "$(CDPATH= cd -- "$current_root" && pwd -P)" = "$(CDPATH= cd -- "$former_root" && pwd -P)" ]; then
+        printf '%s\n' "$current_root"
+        return 0
+      fi
       printf 'ERROR  新旧目录同时存在，请显式指定已有部署目录：%s / %s\n' \
         "$current_root" "$former_root" >&2
       return 1
@@ -45,16 +51,63 @@ resolve_existing_root() {
   fi
 }
 
+# Only the operator entry may be an alias. All subsequent writes, re-execs and
+# target actions use one physical root; runtime children retain strict checks.
+resolve_deploy_root() (
+  deploy_path=$1
+  case "$deploy_path" in
+    /*) ;;
+    *) printf 'ERROR  CPAP_DEPLOY_ROOT 必须是绝对路径\n' >&2; return 1 ;;
+  esac
+  while [ "$deploy_path" != / ] && [ "${deploy_path%/}" != "$deploy_path" ]; do
+    deploy_path=${deploy_path%/}
+  done
+  deploy_suffix=
+  # A new installation may have missing parents. Resolve its existing ancestor
+  # without creating anything or following a dangling/looping link as a new root.
+  while [ ! -e "$deploy_path" ] && [ ! -L "$deploy_path" ]; do
+    deploy_component=$(basename -- "$deploy_path")
+    case "$deploy_component" in
+      .|..) printf 'ERROR  新部署目录不能包含未解析的 . 或 ..：%s\n' "$1" >&2; return 1 ;;
+    esac
+    deploy_suffix="/$deploy_component$deploy_suffix"
+    deploy_path=$(dirname -- "$deploy_path")
+  done
+  [ -d "$deploy_path" ] || {
+    printf 'ERROR  部署入口必须指向有效目录，不能是断链、循环链接或文件：%s\n' "$1" >&2
+    return 1
+  }
+  deploy_physical=$(CDPATH= cd -- "$deploy_path" && pwd -P) || return 1
+  deploy_resolved="${deploy_physical%/}$deploy_suffix"
+  [ -n "$deploy_resolved" ] || {
+    printf 'ERROR  CPAP_DEPLOY_ROOT 不能是文件系统根目录\n' >&2
+    return 1
+  }
+  printf '%s\n' "$deploy_resolved"
+)
+
+set_operator_deploy_root() {
+  CPAP_DEPLOY_ROOT=$(resolve_deploy_root "$1") || return 1
+  export CPAP_DEPLOY_ROOT
+  # Keep an explicitly supplied legacy input equal across script replacement.
+  if [ "${CPAC_DEPLOY_ROOT+set}" = set ]; then
+    CPAC_DEPLOY_ROOT=$CPAP_DEPLOY_ROOT
+    export CPAC_DEPLOY_ROOT
+  fi
+}
+
 bootstrap_from_stdin() {
   if [ -n "${CPAP_STAGING_ROOT:-}" ]; then
     bootstrap_root=$CPAP_STAGING_ROOT
   else
     bootstrap_root=$(resolve_existing_root /home/ccpa /home/cpac) || exit 1
   fi
-  if [ -z "${CPAP_DEPLOY_ROOT:-}" ]; then
+  if [ -n "${CPAP_DEPLOY_ROOT:-}" ]; then
+    bootstrap_deploy_root=$CPAP_DEPLOY_ROOT
+  else
     bootstrap_deploy_root=$(resolve_existing_root "$bootstrap_root/runtime" /opt/codex-cpa-cluster) || exit 1
-    export CPAP_DEPLOY_ROOT="$bootstrap_deploy_root"
   fi
+  set_operator_deploy_root "$bootstrap_deploy_root" || exit 1
   case "$bootstrap_root" in
     /*) ;;
     *) printf 'ERROR  CPAP_STAGING_ROOT 必须是绝对路径\n' >&2; exit 1 ;;
@@ -1520,6 +1573,10 @@ update_operator_script() {
     ui_note "所选历史发布使用旧安装器；保留当前 Pool 安装器以原址升级"
     return 1
   fi
+  if ! grep -Fxq '# CPAP_RUNTIME_ROOT_ALIAS=1' "$verified_script"; then
+    ui_note "所选发布的安装器不支持运行目录入口解析；保留当前安装器以原址升级"
+    return 1
+  fi
   if cmp -s "$verified_script" "$SCRIPT_PATH"; then
     return 1
   fi
@@ -1874,8 +1931,8 @@ run_install_or_upgrade() {
     esac
   done
   require_root run
-  case "$deploy_root" in /*) ;; *) die "CPAP_DEPLOY_ROOT 必须是绝对路径" ;; esac
-  [ "$deploy_root" != / ] || die "CPAP_DEPLOY_ROOT 不能是文件系统根目录"
+  set_operator_deploy_root "$deploy_root" || return 1
+  deploy_root=$CPAP_DEPLOY_ROOT
   ui_banner
   if [ -n "$version" ]; then
     validate_version "$version" || die "无效 Release Tag：$version"

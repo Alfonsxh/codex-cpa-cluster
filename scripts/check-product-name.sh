@@ -36,6 +36,9 @@ awk '
       gsub(/\/home\/cpac|\/etc\/cpac|CPAC_\*/, "", line)
     }
     if (path == "scripts/run.sh") {
+      if (line == "  if [ \"${CPAC_DEPLOY_ROOT+set}\" = set ]; then" ||
+          line == "    CPAC_DEPLOY_ROOT=$CPAP_DEPLOY_ROOT" ||
+          line == "    export CPAC_DEPLOY_ROOT") next
       if (line ~ /operator_legacy_(set|value)=/ || line ~ /resolve_existing_root / ||
           line ~ /^LEGACY_CONFIG_FILE=/ || line ~ /\$1 == "CPAC_INGRESS_MODE"/ ||
           line ~ /legacy_release_key=/ || line ~ /"codex-cpa-cluster-\$2.tar.gz"/ ||
@@ -46,6 +49,7 @@ awk '
     if (path == "scripts/test-run-runtime.sh" &&
         (line ~ /^DEFAULT_REPOSITORY=/ || line ~ /Managed by CPAC (run|deploy)\.sh/ ||
          line ~ /codex-cpa-cluster-\$RELEASE_VERSION/ || line ~ /s\/\^CPAP_\/CPAC_\// ||
+         line == "CPAC_DEPLOY_ROOT=\"$OPERATOR_ROOT/runtime\" run_operator_deploy >\"$OPERATOR_ROOT/alias-upgrade.log\"" ||
          line ~ /^CPAC_STAGING_ROOT=/)) next
     if (path == "scripts/test-run.sh" && line ~ /^for removed in .*scripts\/cpac/) next
     if (path == ".github/workflows/ci.yml" && line ~ /tar -tzf .*scripts\/\(cpac\|install-cpac/) next

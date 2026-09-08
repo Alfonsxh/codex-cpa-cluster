@@ -919,6 +919,47 @@ for database in state/control-plane.sqlite3 state/usage.sqlite3; do
 done
 
 site_file="$TEST_ROOT/nginx/available/qdata.example.com.conf"
+
+# Rehearse the migrated-host layout: the default runtime is an alias while all
+# target identity, backup and Docker paths stay on the original physical root.
+PHYSICAL_RUNTIME="$TEST_ROOT/preserved-runtime"
+mv "$OPERATOR_ROOT/runtime" "$PHYSICAL_RUNTIME"
+ln -s "$PHYSICAL_RUNTIME" "$OPERATOR_ROOT/runtime"
+sed "s|$OPERATOR_ROOT/runtime|$PHYSICAL_RUNTIME|g" "$PHYSICAL_RUNTIME/target.env" \
+  >"$TEST_ROOT/physical-target.env"
+cp "$TEST_ROOT/physical-target.env" "$PHYSICAL_RUNTIME/target.env"
+cp "$PHYSICAL_RUNTIME/secrets/control-plane.key" "$TEST_ROOT/key-before-alias-upgrade"
+# Force self-update so both operator variable prefixes must survive re-exec.
+cp "$ROOT_DIR/scripts/run.sh" "$OPERATOR_ROOT/run.sh"
+: >"$COMMAND_LOG"
+CPAC_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" run_operator_deploy >"$OPERATOR_ROOT/alias-upgrade.log"
+grep -Fq '部署脚本已更新，继续执行' "$OPERATOR_ROOT/alias-upgrade.log" \
+  || { echo "alias upgrade did not exercise script replacement" >&2; exit 1; }
+[ -L "$OPERATOR_ROOT/runtime" ] \
+  && cmp -s "$PHYSICAL_RUNTIME/target.env" "$TEST_ROOT/physical-target.env" \
+  && cmp -s "$PHYSICAL_RUNTIME/secrets/control-plane.key" "$TEST_ROOT/key-before-alias-upgrade" \
+  || { echo "alias upgrade changed the alias, target identity or key" >&2; exit 1; }
+if grep -Fq "$OPERATOR_ROOT/runtime" "$COMMAND_LOG" || grep -q cpa-bootstrap "$COMMAND_LOG"; then
+  echo "alias upgrade used noncanonical Docker paths or initialized parallel state" >&2
+  exit 1
+fi
+grep -Fq "$PHYSICAL_RUNTIME" "$COMMAND_LOG" \
+  || { echo "alias upgrade did not deploy the physical runtime" >&2; exit 1; }
+FAKE_RELEASES_FILE="$RELEASE_SERVER/releases.json" \
+  run_release_choice </dev/null >"$OPERATOR_ROOT/alias-release-choice.log"
+grep -Fq "当前部署  $RELEASE_VERSION" "$OPERATOR_ROOT/alias-release-choice.log" \
+  || { echo "release choice did not read the aliased version marker" >&2; exit 1; }
+mv "$PHYSICAL_RUNTIME/state" "$PHYSICAL_RUNTIME/state-original"
+ln -s state-original "$PHYSICAL_RUNTIME/state"
+if run_operator_deploy >"$OPERATOR_ROOT/alias-unsafe-state.log" 2>&1; then
+  echo "runtime alias support accepted a symlink inside runtime state" >&2
+  exit 1
+fi
+grep -Fq '升级前置目录缺失或不是普通目录' "$OPERATOR_ROOT/alias-unsafe-state.log" \
+  || { cat "$OPERATOR_ROOT/alias-unsafe-state.log" >&2; exit 1; }
+rm "$PHYSICAL_RUNTIME/state"
+mv "$PHYSICAL_RUNTIME/state-original" "$PHYSICAL_RUNTIME/state"
+
 legacy_site="$TEST_ROOT/nginx/legacy-site.conf"
 sed 's/^# Managed by Codex CPA Pool run\.sh$/# Managed by CPAC deploy.sh/' \
   "$site_file" >"$legacy_site"

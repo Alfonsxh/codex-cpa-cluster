@@ -18,6 +18,19 @@ curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/r
 
 执行 `sudo /home/ccpa/run.sh --tag` 可读取 `.deploy-initialized` 中的当前版本，只查询正式 GitHub Releases，并列出所有更高版本。交互终端选择序号后才会进入升级流程；非交互环境只打印当前版本和候选版本，不改配置、不拉镜像、不升级。没有候选时会明确提示当前已是最新版本；尚未初始化的环境必须直接使用 Latest Release，或通过 `sudo /home/ccpa/run.sh --tag v2.0.0` 明确指定版本。指定 Tag 必须对应包含完整附件的 GitHub Release。兼容入口 `--version` 仍可使用，但新操作统一使用 `--tag`。需要切换入口时必须显式确认 `sudo /home/ccpa/run.sh ingress set managed|external`，再执行日常部署。
 
+## 已有运行目录的软链接入口
+
+默认运行目录是 `/home/ccpa/runtime`。如果数据已部署在其他目录，可以保留真实目录，并让 `runtime` 指向它。例如，确认 `/srv/ccpa-runtime` 是已初始化的部署，且 `/home/ccpa/runtime` 尚不存在后：
+
+```sh
+sudo ln -s /srv/ccpa-runtime /home/ccpa/runtime
+sudo /home/ccpa/run.sh --tag
+```
+
+使用前需安装包含运行目录入口解析功能的 `run.sh`。直接运行和管道入口都会先解析真实目录，版本查询、备份、部署身份校验和 Compose 操作均使用该真实路径；脚本自更新后继续沿用它。选择附带旧安装器的 Release 时，保留当前安装器，避免丢失软链接支持。也可以通过 `CPAP_DEPLOY_ROOT` 显式传入同类入口。
+
+断链、循环链接、指向文件或文件系统根目录的链接会在写入前被拒绝。新旧默认入口指向同一真实目录时视为同一部署，指向不同目录时仍需明确选择。运维目录与 `run.sh`、数据库、密钥及运行目录内部的非软链接要求继续保留；既有 `target.env` 中的路径和身份字段不会因入口变化而改写。
+
 ## 前置条件
 
 升级只面向已经初始化的目标，必须同时存在：

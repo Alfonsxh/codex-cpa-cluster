@@ -40,4 +40,15 @@ if sh "$ROOT_DIR/scripts/check-product-name.sh" "$TEST_ROOT" >/dev/null 2>&1; th
   echo 'name gate accepted a legacy asset filename' >&2
   exit 1
 fi
+rm "$TEST_ROOT/$FORBIDDEN_SLUG.svg"
+mkdir "$TEST_ROOT/scripts"
+# Alias re-exec compatibility must not allow new defaults under the old prefix.
+for script in run.sh test-run-runtime.sh; do
+  printf '%s\n' 'CPA''C_DEPLOY_ROOT=/srv/retired-default' >"$TEST_ROOT/scripts/$script"
+  if sh "$ROOT_DIR/scripts/check-product-name.sh" "$TEST_ROOT" >/dev/null 2>&1; then
+    echo 'name gate accepted a new legacy deploy-root default' >&2
+    exit 1
+  fi
+  rm "$TEST_ROOT/scripts/$script"
+done
 printf '%s\n' 'Pool product-name regression tests passed'

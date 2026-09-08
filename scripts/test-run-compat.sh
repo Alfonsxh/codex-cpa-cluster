@@ -25,6 +25,73 @@ mkdir -p "$TEST_ROOT/legacy"
 mkdir "$TEST_ROOT/current"
 reject resolve_existing_root "$TEST_ROOT/current" "$TEST_ROOT/legacy"
 
+# Existing runtime aliases resolve without touching the target or accepting a
+# second deployment. Missing new-install parents are normalized without mkdir.
+PHYSICAL_ROOT=$(CDPATH= cd -- "$TEST_ROOT/legacy" && pwd -P)
+ln -s legacy "$TEST_ROOT/runtime"
+[ "$(resolve_existing_root "$TEST_ROOT/runtime" "$TEST_ROOT/legacy")" = "$TEST_ROOT/runtime" ] \
+  || fail 'two entrances to the same runtime were treated as different deployments'
+[ "$(resolve_deploy_root "$TEST_ROOT/runtime/")" = "$PHYSICAL_ROOT" ] \
+  || fail 'relative runtime alias was not resolved to the physical root'
+ln -s runtime "$TEST_ROOT/runtime-chain"
+[ "$(resolve_deploy_root "$TEST_ROOT/runtime-chain")" = "$PHYSICAL_ROOT" ] \
+  || fail 'runtime alias chain was not resolved'
+[ "$(resolve_deploy_root "$TEST_ROOT/runtime/new/child")" = "$PHYSICAL_ROOT/new/child" ] \
+  && [ ! -e "$PHYSICAL_ROOT/new" ] || fail 'new-root resolution created or misplaced directories'
+ln -s absent "$TEST_ROOT/dangling-runtime"
+ln -s loop-b "$TEST_ROOT/loop-a"
+ln -s loop-a "$TEST_ROOT/loop-b"
+printf '%s\n' preserved >"$TEST_ROOT/runtime-file"
+ln -s runtime-file "$TEST_ROOT/file-runtime"
+ln -s / "$TEST_ROOT/root-runtime"
+for invalid_root in \
+  "$TEST_ROOT/dangling-runtime" "$TEST_ROOT/dangling-runtime/" \
+  "$TEST_ROOT/dangling-runtime/child" "$TEST_ROOT/loop-a" \
+  "$TEST_ROOT/file-runtime" "$TEST_ROOT/runtime-file/child" "$TEST_ROOT/root-runtime" \
+  relative/runtime "$TEST_ROOT/absent/../runtime"
+do
+  reject resolve_deploy_root "$invalid_root"
+  reject env CPAP_ALLOW_NON_ROOT=true CPAP_DEPLOY_ROOT="$invalid_root" \
+    CPAP_CONFIG_FILE="$TEST_ROOT/invalid-root-config.env" \
+    sh "$ROOT_DIR/scripts/run.sh" run --domain example.test --ingress external --tag v9.8.7
+  [ ! -e "$TEST_ROOT/invalid-root-config.env" ] || fail 'invalid runtime wrote configuration'
+done
+
+# The stdin entry must resolve before replacing run.sh, and pass a physical root
+# even to a downloaded installer that does not itself know about aliases.
+PIPE_OPERATOR="$TEST_ROOT/alias-operator"
+mkdir "$PIPE_OPERATOR"
+ln -s ../legacy "$PIPE_OPERATOR/runtime"
+cat >"$TEST_ROOT/capture-installer.sh" <<'CAPTURE_INSTALLER'
+#!/usr/bin/env sh
+set -eu
+printf '%s\n' "$CPAP_DEPLOY_ROOT" "${CPAC_DEPLOY_ROOT-unset}" >"$ROOT_CAPTURE"
+CAPTURE_INSTALLER
+sed "s|/opt/codex-cpa-cluster|$TEST_ROOT/legacy|g" "$ROOT_DIR/scripts/run.sh" >"$TEST_ROOT/alias-bootstrap.sh"
+(
+  unset CPAP_DEPLOY_ROOT CPAC_DEPLOY_ROOT
+  CPAP_ALLOW_NON_ROOT=true CPAP_STAGING_ROOT="$PIPE_OPERATOR" \
+    CPAP_RUN_ASSET_URL="file://$TEST_ROOT/capture-installer.sh" ROOT_CAPTURE="$TEST_ROOT/root-capture" \
+    sh -s -- help <"$TEST_ROOT/alias-bootstrap.sh" >/dev/null
+)
+[ "$(cat "$TEST_ROOT/root-capture")" = "$(printf '%s\n' "$PHYSICAL_ROOT" unset)" ] \
+  || fail 'stdin bootstrap did not pass the canonical default runtime'
+(
+  unset CPAP_DEPLOY_ROOT
+  CPAC_DEPLOY_ROOT="$PIPE_OPERATOR/runtime" CPAP_ALLOW_NON_ROOT=true CPAP_STAGING_ROOT="$PIPE_OPERATOR" \
+    CPAP_RUN_ASSET_URL="file://$TEST_ROOT/capture-installer.sh" ROOT_CAPTURE="$TEST_ROOT/root-capture" \
+    sh -s -- help <"$TEST_ROOT/alias-bootstrap.sh" >/dev/null
+)
+[ "$(cat "$TEST_ROOT/root-capture")" = "$(printf '%s\n' "$PHYSICAL_ROOT" "$PHYSICAL_ROOT")" ] \
+  || fail 'legacy runtime input conflicted with the resolved root after bootstrap'
+for invalid_root in "$TEST_ROOT/dangling-runtime" "$TEST_ROOT/loop-a" "$TEST_ROOT/file-runtime"; do
+  printf '%s\n' preserved-script >"$PIPE_OPERATOR/run.sh"
+  reject env CPAP_ALLOW_NON_ROOT=true CPAP_DEPLOY_ROOT="$invalid_root" CPAP_STAGING_ROOT="$PIPE_OPERATOR" \
+    CPAP_RUN_ASSET_URL="file://$TEST_ROOT/capture-installer.sh" \
+    sh -s -- help <"$TEST_ROOT/alias-bootstrap.sh"
+  [ "$(cat "$PIPE_OPERATOR/run.sh")" = preserved-script ] || fail 'invalid runtime replaced the installer'
+done
+
 # Exercise stdin selection itself, with isolated equivalents of the default paths.
 sed -e "s|/home/ccpa|$TEST_ROOT/home/ccpa|g" \
   -e "s|/home/cpac|$TEST_ROOT/home/cpac|g" \
@@ -158,6 +225,19 @@ if update_operator_script "$RELEASE/run.sh" >"$TEST_ROOT/update.log"; then
   fail 'historical release downgraded the installer'
 fi
 cmp -s "$ROOT_DIR/scripts/run.sh" "$SCRIPT_PATH" || fail 'current installer was changed'
+
+# Protocol 1 releases from before runtime alias support must not remove it on
+# the next update, even though they already understand the Pool prefix.
+cat >"$RELEASE/run.sh" <<'PRE_ALIAS_INSTALLER'
+#!/usr/bin/env sh
+# CPAP_OPERATOR_PROTOCOL=1
+echo 'pre-alias installer must not replace the current entrypoint' >&2
+exit 92
+PRE_ALIAS_INSTALLER
+if update_operator_script "$RELEASE/run.sh" >"$TEST_ROOT/pre-alias-update.log"; then
+  fail 'older Pool release removed runtime alias support'
+fi
+cmp -s "$ROOT_DIR/scripts/run.sh" "$SCRIPT_PATH" || fail 'pre-alias installer replaced the current entrypoint'
 
 printf '%s\n' immutable-archive >"$RELEASE/codex-cpa-cluster-v9.8.7.tar.gz"
 (

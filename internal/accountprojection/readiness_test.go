@@ -20,6 +20,9 @@ type readinessStore struct {
 func (s readinessStore) ReadRoutes(context.Context) (map[string]string, error) {
 	return map[string]string{"new@example.com": s.account}, nil
 }
+func (s readinessStore) ReadAccounts(context.Context) ([]controlplane.Account, error) {
+	return []controlplane.Account{{ID: "disabled", GroupEnabled: false}, {ID: "alpha", GroupEnabled: true}, {ID: "beta", GroupEnabled: true}}, nil
+}
 func (s readinessStore) ReadInternalKey(context.Context, string) (controlplane.InternalKey, bool, error) {
 	return s.key, true, nil
 }
@@ -72,5 +75,27 @@ func TestUserKeyReadinessRejectsUnsafeRouteAndRedactsTransportErrors(t *testing.
 	probe.Store = readinessStore{"alpha", controlplane.InternalKey{Key: "sensitive", Status: "active"}}
 	if err := probe.VerifyUserKey(context.Background(), "new@example.com"); err == nil || strings.Contains(err.Error(), "sensitive") {
 		t.Fatalf("unsafe transport error: %v", err)
+	}
+}
+
+func TestUserKeyReadinessAcceptsUnassignedUserOnAnEnabledAccount(t *testing.T) {
+	probe := UserKeyReadiness{Store: readinessStore{"", controlplane.InternalKey{Key: "new-private-key", Status: "active"}}, Timeout: 2 * time.Second}
+	var hosts []string
+	probe.Client = &http.Client{Transport: readinessTransport(func(r *http.Request) (*http.Response, error) {
+		hosts = append(hosts, r.URL.Hostname())
+		if r.Header.Get("Authorization") != "Bearer new-private-key" {
+			t.Fatal("probe did not use the new user's internal Key")
+		}
+		if r.URL.Hostname() == "cliproxy-alpha" {
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[]}`)), Header: http.Header{}}, nil
+	})}
+	if err := probe.VerifyUserKey(context.Background(), "new@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(hosts, ",") != "cliproxy-alpha,cliproxy-beta" {
+		t.Fatalf("unexpected readiness targets: %v", hosts)
 	}
 }

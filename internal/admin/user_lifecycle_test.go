@@ -3,6 +3,8 @@ package admin
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -599,6 +601,47 @@ func TestUserManagerRollsBackWhenNewInternalKeyIsNotAccepted(t *testing.T) {
 	}
 	if len(credentials.values) != 0 || projection.calls != 2 || publisher.calls != 1 {
 		t.Fatal("failed activation did not compensate credential, projection and snapshot")
+	}
+}
+
+type lifecycleReadinessTransport func(*http.Request) (*http.Response, error)
+
+func (transport lifecycleReadinessTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+func TestUserManagerRealReadinessPreservesFirstLoginRouteAssignment(t *testing.T) {
+	store := newUserLifecycleStore(t)
+	credentials := &lifecycleCredentialFake{values: make(map[string]usage.PortalCredential)}
+	publisher := &lifecyclePublisherFake{}
+	renderer := &accountprojection.Renderer{Root: store.Root(), Store: store}
+	probed := false
+	probe := accountprojection.UserKeyReadiness{Store: store, Client: &http.Client{Transport: lifecycleReadinessTransport(func(request *http.Request) (*http.Response, error) {
+		key, found, err := store.ReadInternalKey(request.Context(), "alice@example.com")
+		if err != nil || !found || request.Header.Get("Authorization") != "Bearer "+key.Key {
+			t.Fatal("readiness must authenticate the freshly rendered internal Key")
+		}
+		if publisher.calls != 0 {
+			t.Fatal("creation published before checking upstream authentication")
+		}
+		probed = true
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[]}`)), Header: http.Header{}}, nil
+	})}}
+	projection := &lifecycleProjectionFake{
+		refresh: func(ctx context.Context) error { _, err := renderer.Render(ctx); return err },
+		verify:  probe.VerifyUserKey,
+	}
+	manager, err := NewUserManager(UserLifecycleConfig{Store: store, Credentials: credentials, Projection: projection, Snapshots: publisher})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.CreateUser(context.Background(), "alice@example.com", nil)
+	if err != nil || result.APIKey == "" || !probed || publisher.calls != 1 {
+		t.Fatalf("new-user readiness failed: error=%v probed=%v publishes=%d", err, probed, publisher.calls)
+	}
+	routes, err := store.ReadRoutes(context.Background())
+	if err != nil || routes[result.User] != "" {
+		t.Fatal("creation must preserve first-login account assignment")
 	}
 }
 

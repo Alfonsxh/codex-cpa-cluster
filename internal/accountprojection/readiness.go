@@ -14,12 +14,14 @@ import (
 )
 
 type UserKeyReadinessStore interface {
+	ReadAccounts(context.Context) ([]controlplane.Account, error)
 	ReadRoutes(context.Context) (map[string]string, error)
 	ReadInternalKey(context.Context, string) (controlplane.InternalKey, bool, error)
 }
 
 // UserKeyReadiness checks the newly created user's own internal credential on
-// its assigned account. An old user's working Key cannot prove this reload.
+// its assigned account, or an enabled account before first-login assignment.
+// It never assigns a route. An old user's working Key cannot prove this reload.
 type UserKeyReadiness struct {
 	Store   UserKeyReadinessStore
 	Client  *http.Client
@@ -39,10 +41,28 @@ func (probe UserKeyReadiness) VerifyUserKey(ctx context.Context, user string) er
 	if err != nil {
 		return errors.New("read user Key readiness route failed")
 	}
-	account := routes[user]
-	normalized, err := controlplane.NormalizeAccountID(account)
-	if err != nil || normalized != account {
-		return errors.New("user Key readiness requires a valid assigned account")
+	targets := []string{}
+	if account := routes[user]; account != "" {
+		targets = append(targets, account)
+	} else {
+		accounts, err := probe.Store.ReadAccounts(ctx)
+		if err != nil {
+			return errors.New("read user Key readiness accounts failed")
+		}
+		for _, account := range accounts {
+			if account.GroupEnabled {
+				targets = append(targets, account.ID)
+			}
+		}
+	}
+	if len(targets) == 0 {
+		return errors.New("user Key readiness requires an enabled account")
+	}
+	for _, account := range targets {
+		normalized, err := controlplane.NormalizeAccountID(account)
+		if err != nil || normalized != account {
+			return errors.New("user Key readiness requires a valid account")
+		}
 	}
 	client := http.Client{}
 	if probe.Client != nil {
@@ -65,28 +85,39 @@ func (probe UserKeyReadiness) VerifyUserKey(ctx context.Context, user string) er
 	defer ticker.Stop()
 	status := 0
 	for {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://cliproxy-"+account+":8317/v1/models", nil)
-		if err != nil {
-			return errors.New("construct user Key readiness request failed")
-		}
-		request.Header.Set("Authorization", "Bearer "+key.Key)
-		response, requestErr := client.Do(request)
-		if response != nil {
-			status = response.StatusCode
-			var models struct {
-				Data []json.RawMessage `json:"data"`
+		for _, account := range targets {
+			// A stopped or unresponsive candidate must not consume the entire budget
+			// before another enabled account can authenticate an unassigned user.
+			attempt, stop := context.WithTimeout(ctx, time.Second)
+			request, err := http.NewRequestWithContext(attempt, http.MethodGet, "http://cliproxy-"+account+":8317/v1/models", nil)
+			if err != nil {
+				stop()
+				return errors.New("construct user Key readiness request failed")
 			}
-			body, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
-			_ = response.Body.Close()
-			if requestErr == nil && readErr == nil && status == http.StatusOK && len(body) <= 1024*1024 &&
-				json.Unmarshal(body, &models) == nil && models.Data != nil {
-				return nil
+			request.Header.Set("Authorization", "Bearer "+key.Key)
+			response, requestErr := client.Do(request)
+			if response != nil {
+				status = response.StatusCode
+				var models struct {
+					Data []json.RawMessage `json:"data"`
+				}
+				body, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
+				_ = response.Body.Close()
+				if requestErr == nil && readErr == nil && status == http.StatusOK && len(body) <= 1024*1024 &&
+					json.Unmarshal(body, &models) == nil && models.Data != nil {
+					stop()
+					return nil
+				}
+			}
+			stop()
+			if ctx.Err() != nil {
+				break
 			}
 		}
 		select {
 		case <-ctx.Done():
 			// Do not attach transport errors or upstream bodies: either can echo a Key.
-			return fmt.Errorf("account %s did not activate the user credential (HTTP %d): %w", account, status, ctx.Err())
+			return fmt.Errorf("account did not activate the user credential (HTTP %d): %w", status, ctx.Err())
 		case <-ticker.C:
 		}
 	}

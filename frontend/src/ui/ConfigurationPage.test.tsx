@@ -320,6 +320,37 @@ describe("ConfigurationPage", () => {
     await waitFor(() => expect(workspaceReads).toBe(2));
   });
 
+  it("keeps modified quotas only when the global retention control is enabled", async () => {
+    let current = configurationFixture();
+    const saved: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input);
+      const supporting = supportingSettingsResponse(path);
+      if (supporting) return supporting;
+      if (path !== "/admin/api/settings/configuration") throw new Error(`unexpected request: ${path}`);
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { values: Record<string, unknown> };
+        saved.push(body.values);
+        current = withUpdatedValues(current, body.values);
+        return jsonResponse({ message: "已保存 1 项配置", changed: Object.keys(body.values), applied: ["quota"], pending_deployment: false });
+      }
+      return jsonResponse(current);
+    }));
+    const user = userEvent.setup();
+    renderConfiguration(<ConfigurationPage csrfToken="csrf-test" />, "/configuration?section=quota");
+    const retention = await screen.findByRole("checkbox", { name: /保留修改后的额度/ });
+    expect(retention).not.toBeChecked();
+    expect(screen.queryByLabelText("新周恢复默认个人额度")).not.toBeInTheDocument();
+    for (const preserve of [true, false]) {
+      await user.click(retention);
+      await user.click(screen.getByRole("button", { name: "保存配置" }));
+      await user.click(await screen.findByRole("button", { name: "保存并应用" }));
+      await waitFor(() => expect(screen.getByText("未修改")).toBeInTheDocument());
+      expect(retention).toHaveProperty("checked", preserve);
+      expect(saved.at(-1)).toEqual({ "user_quota.preserve_personal_weekly_on_new_week": preserve });
+    }
+  });
+
   it("shows model multipliers and saves Astra changes as quota policy", async () => {
     let current = configurationFixture();
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -558,6 +589,16 @@ function configurationFixture(): ConfigurationCatalog {
             unit: "Token",
             min: 1,
             max: 1_000_000_000_000
+          },
+          {
+            key: "user_quota.preserve_personal_weekly_on_new_week",
+            label: "保留修改后的额度",
+            description: "对所有用户生效，关闭后下周恢复组织默认额度。",
+            type: "boolean",
+            value: false,
+            default: false,
+            apply_mode: "quota",
+            editable: true
           }
         ]
       },

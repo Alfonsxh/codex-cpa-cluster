@@ -330,6 +330,95 @@ func TestWriterWaitsForSQLiteBusyBeforeReadThenWriteIngest(t *testing.T) {
 	}
 }
 
+func TestGlobalQuotaRetentionAcrossNaturalWeek(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, preserve := range []bool{false, true} {
+		t.Run("preserve="+strconv.FormatBool(preserve), func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Date(2026, 9, 13, 23, 50, 0, 0, location)
+			writer, err := OpenWriterPath(createWriterFixture(t, 10), func() time.Time { return now })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer writer.Close()
+			if _, err := writer.EnsureWeekTimezone(ctx, "Asia/Shanghai"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.SyncIdentities(ctx, []Identity{{Key: "alice-key", UserEmail: "alice@example.com", Account: "alpha"}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.IngestEvents(ctx, "alpha", []Event{usageEvent("alice-key", "retention", now.Unix())}, WeightPolicy{}); err != nil {
+				t.Fatal(err)
+			}
+			weekStart, weekEnd := naturalWeekBounds(now.Unix(), location)
+			// Start with both scheduled and indefinite policies, as existing
+			// users can have either when the global setting changes.
+			if _, err := writer.db.ExecContext(ctx, `INSERT INTO user_quota_policies
+				(user_email, weekly_tokens, created_at, updated_at, reset_at) VALUES
+				('alice@example.com', 2000, ?, ?, ?), ('bob@example.com', NULL, ?, ?, NULL)`,
+				now.Unix(), now.Unix(), weekEnd, now.Unix(), now.Unix()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.db.ExecContext(ctx, `INSERT INTO user_quota_adjustments
+				(user_email, week_start_at, action, token_amount, reason, created_at) VALUES
+				('alice@example.com', ?, 'bonus', 100, 'temporary capacity', ?)`, weekStart, now.Unix()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.ConfigurePersonalQuotaReset(ctx, !preserve, false); err != nil {
+				t.Fatal(err)
+			}
+			users := []string{"alice@example.com", "bob@example.com"}
+			defaultLimit := int64(1000)
+			before, err := writer.WeeklyQuotas(ctx, users, &defaultLimit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			alice, bob := before[users[0]], before[users[1]]
+			if alice.LimitTokens == nil || *alice.LimitTokens != 2100 || alice.UsedTokens == 0 || !bob.Unlimited {
+				t.Fatalf("changing retention affected current-week quotas: %#v", before)
+			}
+			for _, quota := range before {
+				if preserve && quota.PolicyResetAt != nil || !preserve && (quota.PolicyResetAt == nil || *quota.PolicyResetAt != weekEnd) {
+					t.Fatalf("global setting did not apply to both personal policies: %#v", quota)
+				}
+			}
+			now = time.Unix(weekEnd, 0)
+			defaultLimit = 3000 // Restoring inherits the latest default, not a saved copy.
+			if _, err := writer.ConfigurePersonalQuotaReset(ctx, !preserve, false); err != nil {
+				t.Fatal(err)
+			}
+			after, err := writer.WeeklyQuotas(ctx, users, &defaultLimit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, quota := range after {
+				if quota.WeekStartAt != weekEnd || quota.UsedTokens != 0 || quota.BonusTokens != 0 {
+					t.Fatalf("usage or temporary bonus carried into new week: %#v", quota)
+				}
+				if !preserve && (quota.PolicyMode != "inherit" || quota.LimitTokens == nil || *quota.LimitTokens != 3000) {
+					t.Fatalf("personal policy did not restore current default: %#v", quota)
+				}
+			}
+			if preserve && (after[users[0]].PolicyMode != "custom" || after[users[0]].LimitTokens == nil || *after[users[0]].LimitTokens != 2000 || !after[users[1]].Unlimited) {
+				t.Fatalf("retained personal policies changed across week: %#v", after)
+			}
+			var events, adjustments int
+			if err := writer.db.GetContext(ctx, &events, "SELECT COUNT(*) FROM usage_events"); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.db.GetContext(ctx, &adjustments, "SELECT COUNT(*) FROM user_quota_adjustments"); err != nil {
+				t.Fatal(err)
+			}
+			if events != 1 || adjustments != 1 {
+				t.Fatalf("week rollover removed history: events=%d adjustments=%d", events, adjustments)
+			}
+		})
+	}
+}
+
 func TestWriterBuildsWeightedWeeklyQuotaAndCollectorStatus(t *testing.T) {
 	path := createWriterFixture(t, 10)
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)

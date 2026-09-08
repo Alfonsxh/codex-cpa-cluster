@@ -26,7 +26,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultProxySecretName = "cpa_default_proxy_url"
+const (
+	defaultProxySecretName = "cpa_default_proxy_url"
+	quotaResetSettingKey   = "user_quota.reset_personal_weekly_on_new_week"
+	quotaRetentionFieldKey = "user_quota.preserve_personal_weekly_on_new_week"
+)
 
 var (
 	configurationDurationPattern = regexp.MustCompile(`^([1-9][0-9]*)([smhd])$`)
@@ -180,7 +184,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		number("account_failover.reserve_percent", "目标账号安全余量", 5, 0, 50, "live"),
 		integer("account_failover.stale_after_seconds", "额度数据失效时间", 120, 60, 7200, "live"),
 		{Key: "user_quota.default_weekly_tokens", Label: "用户周额度系统默认值", ValueType: "nullable_integer", ApplyMode: "quota", Default: nil, Minimum: 1, Maximum: 1_000_000_000_000, HasMinimum: true, HasMaximum: true},
-		boolean("user_quota.reset_personal_weekly_on_new_week", "新周恢复默认个人额度", true, "quota"),
+		boolean(quotaResetSettingKey, "保留修改后的额度", true, "quota"),
 		integer("user_quota.fail_open_after_seconds", "额度故障放行等待", 300, 30, 3600, "quota"),
 	}
 	for _, model := range usage.ModelMultiplierDefinitions() {
@@ -245,6 +249,21 @@ func (server *Server) updateConfiguration(c *gin.Context) {
 	changes := make(map[string]any, len(body.Values))
 	for key, value := range body.Values {
 		changes[key] = value
+	}
+	// The catalog presents retention positively while existing settings and
+	// runtime readers keep their reset flag. Do not persist two opposing flags.
+	if raw, found := changes[quotaRetentionFieldKey]; found {
+		if _, duplicate := changes[quotaResetSettingKey]; duplicate {
+			writeError(c, http.StatusBadRequest, "请只设置保留修改后的额度，不要同时提交旧版恢复默认配置", "invalid_request")
+			return
+		}
+		value, err := normalizeConfigurationValue(configurationDefinitionByKey[quotaResetSettingKey], raw)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, err.Error(), "invalid_request")
+			return
+		}
+		changes[quotaResetSettingKey] = !value.(bool)
+		delete(changes, quotaRetentionFieldKey)
 	}
 	// v1 deliberately treats an empty proxy field as "leave unchanged" so a
 	// masked secret rendered by the browser cannot accidentally clear it.
@@ -358,8 +377,16 @@ func (server *Server) updateConfiguration(c *gin.Context) {
 	if pendingDeployment {
 		message += "；业务 CPA 参数已写入私有 Compose 投影，重建对应账号后生效"
 	}
+	responseChanged := append([]string(nil), changed...)
+	if _, retentionRequested := body.Values[quotaRetentionFieldKey]; retentionRequested {
+		for index, key := range responseChanged {
+			if key == quotaResetSettingKey {
+				responseChanged[index] = quotaRetentionFieldKey
+			}
+		}
+	}
 	c.JSON(http.StatusOK, configurationUpdateResponse{
-		Message: message, Changed: changed, Applied: applied, PendingDeployment: pendingDeployment,
+		Message: message, Changed: responseChanged, Applied: applied, PendingDeployment: pendingDeployment,
 	})
 }
 

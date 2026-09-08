@@ -431,12 +431,12 @@
           "max": 1000000000000
         },
         {
-          "key": "user_quota.reset_personal_weekly_on_new_week",
-          "label": "新周恢复默认个人额度",
-          "description": "新周恢复系统默认额度。",
+          "key": "user_quota.preserve_personal_weekly_on_new_week",
+          "label": "保留修改后的额度",
+          "description": "对所有用户生效。关闭时，本周额度不变，下周一 00:00 按系统时区恢复组织默认额度；开启时持续保留个人额度。每周用量仍重新累计，临时追加额度仍在换周后失效。",
           "type": "boolean",
-          "value": true,
-          "default": true,
+          "value": false,
+          "default": false,
           "apply_mode": "quota",
           "editable": true
         },

@@ -88,6 +88,11 @@ func (server *Server) readConfiguration(c *gin.Context) {
 			ApplyMode: definition.ApplyMode, Editable: true, Unit: presentation.Unit,
 			DigestRequired: definition.DigestRequired,
 		}
+		if definition.Key == quotaResetSettingKey {
+			field.Key = quotaRetentionFieldKey
+			field.Value = !values[definition.Key].(bool)
+			field.Default = !definition.Default.(bool)
+		}
 		if definition.HasMinimum {
 			minimum := definition.Minimum
 			field.Minimum = &minimum
@@ -190,7 +195,7 @@ var configurationPresentationByKey = map[string]configurationPresentation{
 	"account_failover.reserve_percent":                   {Group: "账号自动切换", Description: "剩余额度不高于此值时不接收迁入。", Unit: "%"},
 	"account_failover.stale_after_seconds":               {Group: "账号自动切换", Description: "额度过期后停止迁移。", Unit: "秒"},
 	"user_quota.default_weekly_tokens":                   {Group: "用户额度", Description: "每人自然周加权上限；留空不限额，个人策略优先。", Unit: "Token"},
-	"user_quota.reset_personal_weekly_on_new_week":       {Group: "用户额度", Description: "新周恢复系统默认额度。"},
+	quotaResetSettingKey:                                 {Group: "用户额度", Description: "对所有用户生效。关闭时，本周额度不变，下周一 00:00 按系统时区恢复组织默认额度；开启时持续保留个人额度。每周用量仍重新累计，临时追加额度仍在换周后失效。"},
 	"system.timezone":                                    {Group: "系统设置", Description: "统一用于页面时间、今日用量、自然周额度与通知调度。修改后将重新归集本周用量。"},
 	"user_quota.fail_open_after_seconds":                 {Group: "用户额度", Description: "采集异常超时后放行并告警。", Unit: "秒"},
 	"user_quota.reasoning_multiplier.none":               {Group: "推理强度策略", Description: "新采集事件的 Token 倍率。", Unit: "倍"},

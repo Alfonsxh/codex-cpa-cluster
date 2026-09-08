@@ -129,10 +129,95 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	if weekly.Minimum == nil || *weekly.Minimum != 1 || weekly.Maximum == nil || *weekly.Maximum != 1_000_000_000_000 || weekly.Unit != "Token" {
 		t.Fatalf("weekly quota metadata = %#v", weekly)
 	}
+	retention := fields[quotaRetentionFieldKey]
+	if retention.Label != "保留修改后的额度" || retention.Value != false || retention.Default != false || retention.ApplyMode != "quota" {
+		t.Fatalf("global quota retention metadata = %#v", retention)
+	}
+	if _, duplicate := fields[quotaResetSettingKey]; duplicate {
+		t.Fatal("catalog exposes both quota retention and the old inverse reset control")
+	}
 	astra := fields["user_quota.model_multiplier.gpt-6-astra"]
 	if astra.Default != float64(4) || astra.Value != float64(4) || astra.Minimum == nil ||
 		*astra.Minimum != 0.1 || astra.Maximum == nil || *astra.Maximum != 10 || astra.Unit != "倍" {
 		t.Fatalf("Astra model multiplier metadata = %#v", astra)
+	}
+}
+
+func TestConfigurationQuotaRetentionPreservesLegacySettingsAndRoundTrips(t *testing.T) {
+	base, store := newTestAdmin(t)
+	base.Close()
+	applier := &recordingConfigurationApplier{}
+	server, err := New(Config{Store: store, ConfigurationApplier: applier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(server.Close)
+	ctx := context.Background()
+	headers := map[string]string{"X-Management-Key": "test-management-key"}
+	readRetention := func(want bool) {
+		t.Helper()
+		response := performAdminRequest(server, http.MethodGet, "/admin/api/settings/configuration", nil, headers, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("read retention = %d %s", response.Code, response.Body.String())
+		}
+		var catalog configurationCatalogResponse
+		decodeAdminResponse(t, response, &catalog)
+		for _, group := range catalog.Groups {
+			for index, field := range group.Fields {
+				if field.Key == quotaRetentionFieldKey {
+					if group.Name != "用户额度" || index == 0 || group.Fields[index-1].Key != "user_quota.default_weekly_tokens" || field.Value != want || field.Default != false {
+						t.Fatalf("retention field = %#v in %s at %d, want %v", field, group.Name, index, want)
+					}
+					return
+				}
+			}
+		}
+		t.Fatal("missing retention control")
+	}
+	readRetention(false)
+	for _, reset := range []bool{false, true} {
+		if err := store.UpdateSettings(ctx, map[string]any{quotaResetSettingKey: reset}); err != nil {
+			t.Fatal(err)
+		}
+		readRetention(!reset)
+	}
+	for _, preserve := range []bool{true, false} {
+		response := performAdminRequest(server, http.MethodPost, "/admin/api/settings/configuration", map[string]any{
+			"confirm": "save", "values": map[string]any{quotaRetentionFieldKey: preserve},
+		}, headers, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("save retention = %d %s", response.Code, response.Body.String())
+		}
+		var result configurationUpdateResponse
+		decodeAdminResponse(t, response, &result)
+		if !reflect.DeepEqual(result.Changed, []string{quotaRetentionFieldKey}) || !reflect.DeepEqual(result.Applied, []string{"quota"}) {
+			t.Fatalf("retention save result = %#v", result)
+		}
+		settings, err := store.ReadSettings(ctx)
+		if err != nil || settings[quotaResetSettingKey] != !preserve {
+			t.Fatalf("stored reset policy = %v, %v", settings[quotaResetSettingKey], err)
+		}
+		if _, duplicate := settings[quotaRetentionFieldKey]; duplicate {
+			t.Fatal("retention must not create a second persisted policy")
+		}
+		call := applier.calls[len(applier.calls)-1]
+		if call.After[quotaResetSettingKey] != !preserve || !reflect.DeepEqual(call.Modes, []string{"quota"}) {
+			t.Fatalf("runtime must apply inverse reset policy: %#v", call)
+		}
+		readRetention(preserve)
+	}
+	for _, values := range []map[string]any{
+		{quotaRetentionFieldKey: true, quotaResetSettingKey: false},
+		{quotaRetentionFieldKey: "invalid"},
+	} {
+		response := performAdminRequest(server, http.MethodPost, "/admin/api/settings/configuration", map[string]any{
+			"confirm": "save", "values": values,
+		}, headers, nil)
+		assertAdminError(t, response, http.StatusBadRequest, "invalid_request")
+		readRetention(false)
+	}
+	if len(applier.calls) != 2 {
+		t.Fatalf("invalid retention requests triggered an apply: %d", len(applier.calls))
 	}
 }
 

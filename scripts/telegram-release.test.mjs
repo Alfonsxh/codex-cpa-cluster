@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import { atLeast, checkDestination, deliver, eligible, notifyRelease, readConfig, readReceipt, receiptPath, renderMessage, stable, telegramAPI } from "./telegram-release.mjs";
@@ -75,6 +77,22 @@ test("only canonical stable published Releases are eligible; prereleases perform
   assert.equal(atLeast("v10.0.0", "v2.9.9"), true);
   assert.equal(atLeast("v2.0.1", version), false);
   for (const flag of ["draft", "prerelease"]) assert.equal(eligible({ tag_name: version, draft: false, prerelease: false, published_at: "now", [flag]: true }, version), false);
+});
+
+test("CLI runs through physical and symlinked checkout paths", t => {
+  const f = fixture(t);
+  const script = fileURLToPath(new URL("./telegram-release.mjs", import.meta.url));
+  const alias = path.join(f.directory, "publisher");
+  symlinkSync(path.dirname(script), alias, "dir");
+  for (const entry of [script, path.join(alias, "telegram-release.mjs")]) {
+    const output = execFileSync(process.execPath, [entry, "send", "--repo", repo,
+      "--version", "v2.0.2-rc.1", "--config", f.configFile], { encoding: "utf8" });
+    assert.equal(JSON.parse(output).status, "skipped");
+  }
+  const imported = execFileSync(process.execPath, ["--input-type=module", "-"], {
+    encoding: "utf8", input: `import ${JSON.stringify(new URL("./telegram-release.mjs", import.meta.url).href)}; console.log("imported");`,
+  });
+  assert.equal(imported.trim(), "imported");
 });
 
 test("stable sends only after artifact/image verification and duplicate invocations reuse the receipt", t => {
@@ -181,15 +199,30 @@ test("confirmed rejection can be retried, recreation cannot, explicit edits reus
   assert.throws(() => delivery(f, f.api), /身份不匹配/);
 });
 
-test("message rendering uses curated sections, fixed version links, plain text and bounded length", () => {
+test("message rendering uses curated sections, fixed version links, styled headings and bounded length", () => {
   const message = renderMessage({ tag_name: version, body }, repo);
   assert.ok(message.text.includes(`CCPA ${version} 正式发布`));
   assert.ok(!message.text.includes("详细说明"));
-  assert.equal(message.parse_mode, undefined);
+  assert.equal(message.parse_mode, "HTML");
+  assert.ok(message.text.includes(`<b>CCPA ${version} 正式发布</b>`));
+  assert.ok(message.text.includes("<b>本次更新</b>"));
+  assert.ok(message.text.includes("• 改进时间筛选。"));
   assert.equal(message.reply_markup.inline_keyboard[0][1].url, `https://github.com/${repo}/blob/${version}/docs/upgrade.md`);
   assert.throws(() => renderMessage({ tag_name: version, body: body + "\n## 社群摘要\n重复" }, repo), /唯一/);
   assert.throws(() => renderMessage({ tag_name: version, body: "## 社群摘要\n更新\n## 升级提示" }, repo), /不能为空/);
   assert.throws(() => renderMessage({ tag_name: version, body: body.replace("新增", "x".repeat(4000)) }, repo), /过长/);
+});
+
+test("notification emphasis and commands render safely while raw HTML remains literal", () => {
+  const notes = "## 社群摘要\n- **账号管理**：测试 <模型> & 状态。\n\n- **通知服务**：修复发送。\n## 升级提示\n运行：\n`./run.sh`\n`<b>literal & **text**</b>`\n<b>raw</b>\n[说明](https://example.com/?a=1&b=2)";
+  const { text } = renderMessage({ tag_name: version, body: notes }, repo);
+  assert.ok(text.includes("• <b>账号管理</b>：测试 &lt;模型&gt; &amp; 状态。"));
+  assert.ok(text.includes("\n\n• <b>通知服务</b>"));
+  assert.ok(text.includes("<code>./run.sh</code>"));
+  assert.ok(text.includes("<code>&lt;b&gt;literal &amp; **text**&lt;/b&gt;</code>"));
+  assert.ok(text.includes("&lt;b&gt;raw&lt;/b&gt;"));
+  assert.ok(text.includes("说明 (https://example.com/?a=1&amp;b=2)"));
+  assert.ok(!text.includes("<b>raw</b>"));
 });
 
 test("Telegram credentials stay on stdin and subprocess errors never expose them", () => {

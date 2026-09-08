@@ -86,12 +86,22 @@ function section(body, title) {
   const newline = parts[0].indexOf("\n");
   const text = newline < 0 ? "" : parts[0].slice(newline + 1).trim();
   requireValue(text.length > 0, `Release 的“${title}”不能为空`);
-  return text.replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, "$1 ($2)").replace(/`|\*\*/g, "");
+  return text;
+}
+const escapeHTML = value => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function formatSection(text) {
+  // Only render authored emphasis and inline commands. Raw HTML stays literal.
+  return text.replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, "$1 ($2)")
+    .replace(/^[ \t]*[-*] +/gm, "• ").split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map(part => {
+      if (part.startsWith("`") && part.endsWith("`") && part.length > 2) return `<code>${escapeHTML(part.slice(1, -1))}</code>`;
+      if (part.startsWith("**") && part.endsWith("**") && part.length > 4) return `<b>${escapeHTML(part.slice(2, -2))}</b>`;
+      return escapeHTML(part);
+    }).join("");
 }
 export function renderMessage(release, repo) {
-  const text = `🎉 CCPA ${release.tag_name} 正式发布\n\n${section(release.body || "", "社群摘要")}\n\n升级提示\n${section(release.body || "", "升级提示")}`;
+  const text = `🎉 <b>CCPA ${escapeHTML(release.tag_name)} 正式发布</b>\n\n<b>本次更新</b>\n${formatSection(section(release.body || "", "社群摘要"))}\n\n<b>升级提示</b>\n${formatSection(section(release.body || "", "升级提示"))}`;
   requireValue(text.length <= 3800, "群通知过长；请精简 Release 的社群摘要和升级提示");
-  return { text, link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[
+  return { text, parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[
     { text: "发布详情", url: `https://github.com/${repo}/releases/tag/${release.tag_name}` },
     { text: "安装升级", url: `https://github.com/${repo}/blob/${release.tag_name}/docs/upgrade.md` }
   ]] } };
@@ -245,7 +255,8 @@ export function notifyRelease({ action, repo, version, revision, imagePrefix, co
   const destination = checkDestination(config, api);
   return deliver({ config, release, message, destination, action, api });
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// macOS temporary worktrees may enter via /var while ESM resolves /private/var.
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [action, ...args] = process.argv.slice(2), options = {};
     for (let i = 0; i < args.length; i += 2) {

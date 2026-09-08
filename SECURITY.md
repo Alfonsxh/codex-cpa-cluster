@@ -24,8 +24,8 @@ https://github.com/Alfonsxh/codex-cpa-pool/security/advisories/new
 ## 部署者责任
 
 - 只通过 HTTPS 暴露公开入口。
-- 保持 Gateway、Management 和业务 CPA 的宿主机端口绑定回环地址。
+- 保持 Gateway、Admin 和业务 CPA 的宿主机端口绑定回环地址。
 - 将 `secrets/control-plane.key`、管理密钥和 OAuth 文件限制为最小读取权限。
 - 定期备份并验证控制面数据库与主密钥可以成对恢复。
-- 仅从可信 Registry 拉取 digest 固定的应用镜像。
+- 仅从可信 Registry 拉取发布描述指定的不可变镜像，并校验组件标签。
 - Admin 当前拥有 Docker Socket 访问能力，应放置在可信主机并严格保护管理入口。

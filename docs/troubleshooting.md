@@ -1,109 +1,78 @@
 # 故障排查
 
-所有命令都必须使用当前操作者提供的 Test/Production 私有环境文件。先确认目标，再执行只读诊断；不要从旧归档或 Git 历史推断主机和目录。
+先确认实际部署目录和私有 `target.env`。在匹配 Release 的目录执行：
 
 ```sh
-make -f scripts/build.mk target-config TARGET_ENV=/absolute/path/to/target.env
-make -f scripts/build.mk target-ownership-status TARGET_ENV=/absolute/path/to/target.env
 make -f scripts/build.mk target-ps TARGET_ENV=/absolute/path/to/target.env
+make -f scripts/build.mk target-ownership-status TARGET_ENV=/absolute/path/to/target.env
 make -f scripts/build.mk target-smoke TARGET_ENV=/absolute/path/to/target.env
 ```
 
-查看 Go 服务日志：
+日志使用同一目标的 Compose 项目与配置；分享前删除密钥、OAuth、Webhook、邮箱和私有地址。
 
-```sh
-docker compose --env-file /absolute/path/to/target.env -f docker-compose.yml \
-  --profile writers --profile external-effects \
-  logs --tail=200 admin web edge gateway-blue gateway-green usage-collector quota account-failover notifications
-```
+## 通知没有发送
 
-输出前删除管理密钥、用户 Key、OAuth、Webhook、邮箱、私有域名和目标地址。
+企业微信先看配置中心的“后台调度”和“最近心跳”：
 
-## 通知已启用但定时消息未发送
+- 无心跳或超过 3 分钟未更新：检查 `notifications` 容器、所有权和数据库错误。
+- 心跳正常：检查开关、Webhook、发送错误、计划时间和系统时区。
+- 手动发送成功仅证明通道可用；超过补发窗口的漏发不会自动补发。
 
-先查看配置中心的“后台调度”和“最近心跳”。“最近发送成功”同时包含手动发送，不能证明调度正在运行。心跳超过 3 分钟未更新或尚无心跳时，检查 `notifications` 容器是否存在、运行，以及其日志中的所有权或数据库错误。新版本的普通部署会自动启动该进程，关闭通知仅停止自动发送。
+Telegram 正式版公告由发布工作站发送，按[通知文档](telegram-release.md#预览与回执)检查回执。
 
-心跳正常时，再检查 Webhook、最近发送错误、每日发送时间与系统时区。超过“定时补发窗口”的漏发不会自动补发；只有用户明确需要补发时，才点击“发送账号报告”。
+## Gateway 请求失败
+
+| 状态 | 检查 |
+| --- | --- |
+| `401` | Key 是否有效、路由是否可用、鉴权快照是否刷新 |
+| `503 authentication_snapshot_unavailable` | `state/gateway/auth-snapshot.json` 的完整性、新鲜度与权限 |
+| `502 upstream_unavailable` | 账号容器、内部网络、内部 Key 与上游错误 |
+
+账号管理的“模型通信测试”可直接验证指定账号生成，最长等待 25 秒，输出上限 64 Token。它产生少量用量，需要可用内部凭据，但无需将用户绑定到该账号。
+
+模型列表或账号测试成功不能代替外部 Gateway 的实际 Responses/SSE 验证。
 
 ## Edge 健康但访问 502
 
-依次检查：
+核对 Edge 的 Control/Ingress 网络、Gateway 与 Admin 的上游网络，以及 Web 到 Admin 的连接。`state/edge/active-gateway.conf` 只能选择 `blue` 或 `green`。
 
-1. `edge` 同时连接 `<project>_control` 与 `<project>_ingress`。
-2. `gateway-blue`、`gateway-green` 和 `admin` 同时连接 Control 与配置的上游网络。
-3. `web` 连接 Control 网络，Admin 健康。
-4. `state/edge/active-gateway.conf` 只选择 `blue` 或 `green` 对应配置。
+用匹配目标的 `target-up-core` 恢复声明拓扑，不将手工连接未知容器作为长期修复。
 
-`run.sh` 的内部 `up-core` 动作会逐个启动并校验精确容器/服务标签、网络与端口；不要用手工连接未知容器作为长期修复。
+## 页面白屏或资源 404
 
-## Gateway 返回 401、503 或 502
-
-| 状态 | 含义 | 检查 |
-|---|---|---|
-| `401` | 外部 Key 不在有效鉴权快照 | Key 是否撤销、用户是否有有效路由、鉴权快照是否已刷新 |
-| `503 authentication_snapshot_unavailable` | 快照损坏、缺失或超过新鲜度边界 | `state/gateway/auth-snapshot.json`、Collector/Failover 日志与文件权限 |
-| `502 upstream_unavailable` | 已鉴权但目标账号不可达 | 账号容器、内部网络、内部 Key 和上游错误 |
-
-不得用 `/v1/models` 成功推断 Responses/SSE 正常；必须发送实际请求。
-
-在管理中心展开一个账号，点击“模型通信测试”，选择模型后点击“开始测试”。页面会显示
-生成是否完成、耗时、HTTP 状态和测试时间；授权失败、请求受限和超时会给出对应提示。
-每次测试直接请求该账号，最多等待 25 秒，使用固定短提示词和 64 个输出 Token 上限，
-会产生少量用量。测试不会改变用户路由；无需用户绑定到此账号，但系统中须有可用的用户
-内部凭据。模型列表读取本身不执行生成，模型测试成功也不代表外部 Gateway/SSE 已验收。
-
-## 管理页面白屏或静态资源 404
+检查 `web` 镜像与 Release 描述是否一致。下例端口须替换为实际 `CPA_PUBLIC_PORT`：
 
 ```sh
-curl --noproxy '*' -I http://127.0.0.1:<public-port>/admin/
-curl --noproxy '*' -I http://127.0.0.1:<public-port>/portal/assets/codex-cpa-pool-logo.svg
+curl --noproxy '*' -I http://127.0.0.1:18317/admin/
+curl --noproxy '*' -I http://127.0.0.1:18317/portal/assets/codex-cpa-pool-logo.svg
 ```
 
-入口 HTML 应为 `no-cache`，带内容指纹的 JS/CSS 应为长期不可变缓存，稳定品牌 SVG 应为 `no-cache`。检查 `web` 镜像是否与发布 Manifest 的 Web 源码摘要一致。
+HTML 与稳定品牌资源使用 `no-cache`，内容指纹 JS/CSS 使用长期缓存。
 
 ## 用量不更新
 
-检查 `usage-collector` 健康和日志、`state/usage.sqlite3` 权限/磁盘空间、Gateway 访问日志是否持续产生事件，以及 Collector 是否仍持有 Writer Lease。Generation 改变后的旧进程不能继续写入。
+检查 Collector 健康、Writer Lease、用量库权限与磁盘空间，以及 Gateway 日志是否产生新事件。旧 Generation 不能继续写入；不要直接修改 SQLite 绕过所有权。
 
-## 所有 CPA 都因代理投影缺失而不可用
+## 账号代理投影损坏
 
-普通账号更新必须先把路由迁移到有额度的健康 CPA 并等待进行中请求排空；如果所有账号都因同一个代理投影问题而不可用，就不存在安全迁移目标。此时只能对一个已经确认不可用、仍有路由的账号执行受限恢复：
+普通修复先迁移路由并等待请求排空。仅当源账号已不可用、仍有路由且全池没有安全迁移目标时，才能使用受限接口：
 
 ```http
 POST /admin/api/accounts/repair-proxy
-X-Management-Key: <当前管理密钥>
+X-Management-Key: <管理密钥>
 Content-Type: application/json
 
-{
-  "id": "<account-id>",
-  "proxy_url": "http://<existing-proxy>:<port>",
-  "confirm": "repair-proxy:<account-id>"
-}
+{"id":"<account-id>","proxy_url":"http://<existing-proxy>:<port>","confirm":"repair-proxy:<account-id>"}
 ```
 
-该动作只允许写入新的独立代理并重建同一个账号；不能同时修改邮箱、标识、启停策略或路由。如果源账号仍可用、没有路由，或已经存在有剩余额度的安全目标，接口会拒绝。第一个账号恢复额度读取后，其余账号必须回到普通更新流程，使用路由迁移与请求排空。代理值只进入加密控制面和生成配置，不会出现在响应中。
+操作前核对既有代理网络并保留可恢复备份。该接口只修改独立代理并重建同一账号，不修改外部代理服务、账号标识或路由。首个账号恢复后，其余账号回到普通迁移流程。
 
-这不是修改外部代理拓扑的接口。执行前仍需单独确认既有代理容器、网络与端口健康，并保留控制库、主密钥、OAuth 和账号配置备份。
+## 部署检查失败
 
-## 所有权激活失败
-
-如果已有活动所有者，先查明并停止既有 Writer，等待或显式完成受控所有权交接。空所有权历史只允许：
-
-- 隔离测试：`CPA_BOOTSTRAP_MODE=isolated-test`。
-- 经批准的正式切换：`CPA_BOOTSTRAP_MODE=controlled-cutover`，并用 `CPA_CONFIRM_WRITERS_STOPPED` 精确重复已停止全部既有 Writer 的目标目录。
-
-不要删除所有权记录或直接修改 SQLite 绕过 Fencing。
-
-## 发布或镜像校验失败
-
-- 四个镜像必须来自同一发布 Manifest。
-- 目标引用必须是发布描述中的 `:sha256-<源码摘要>` 标签。
-- `io.codex-cpa.component`、`io.codex-cpa.component-digest` 与 `io.codex-cpa.source-digest` 必须匹配。
-- 移动标签、容器启动时间和本地 image ID 不能代替组件源码摘要。
-- Registry 凭据只存在于操作者与目标机 Docker Credential Store，不打印到日志。
-
-## Gateway 排空或 Edge 维护确认失败
-
-- 排空超时不会终止旧 SSE；旧槽保持运行。修复异常长请求后重新执行 `up-core`，脚本仍会先检查该槽 `/__stats`。
-- Edge 镜像或 Compose Hash 变化时，`verify-images` 会在重建前失败。只有已批准维护窗口时，才设置 `CPA_ALLOW_EDGE_RECREATE=true`，并用 `CPA_CONFIRM_EDGE_MAINTENANCE` 精确重复 `CPA_DEPLOY_ROOT`。
-- `target.env` 是正式控制面唯一配置来源；不要把配置中心的 `state/compose.env` 改造成第二份控制面环境文件。
+| 问题 | 处理 |
+| --- | --- |
+| 镜像不匹配 | 使用同一 Release 的四组件摘要引用，核对组件名与两个摘要标签 |
+| 所有权冲突 | 先查明并停止旧 Writer，再进行受控交接，不删除所有权记录 |
+| Gateway 排空超时 | 旧槽与 SSE 保持运行，处理长请求后重试 |
+| Edge 维护未确认 | 明确维护窗口后填写两个 Edge 确认字段，见[部署](deployment.md#底层应用与验收) |
+| 配置来源冲突 | 正式控制面使用 `target.env`，账号投影 `state/compose.env` 不可替代它 |

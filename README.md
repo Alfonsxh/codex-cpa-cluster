@@ -34,14 +34,7 @@
   <p><sub>深色模式 · 演示数据，非真实账号与用量</sub></p>
 </div>
 
-**Codex CPA Pool** 将多个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 账号容器收敛到一个稳定入口。典型用法是：
-
-- 把若干个 Codex 账号集中托管为一个共享账号池；
-- 为每位成员发放独立 API Key，并分配周额度；
-- 成员照常在自己的工具里接入使用；
-- 管理者在一个面板里查看所有成员的用量与消耗趋势。
-
-> PS：个人聚合多账号同样适用。
+**Codex CPA Pool** 将多个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 账号统一到一个入口，为成员分配独立 API Key 和周额度，并集中查看用量。适用于团队共享或个人多账号管理。
 
 <a id="quick-start"></a>
 
@@ -54,11 +47,7 @@ curl -fsSLO https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/
 sudo sh run.sh
 ```
 
-也可以一条命令启动，安装器会先将 `run.sh` 保存到运维目录再继续执行：
-
-```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
-```
+首次设置见[快速开始](./docs/getting-started.md)，已有环境见[升级指南](./docs/upgrade.md)。
 
 <a id="features"></a>
 
@@ -96,14 +85,7 @@ flowchart LR
   Control --> Docker["Docker Engine"]
 ```
 
-正式部署由四类不可变镜像组成：
-
-- `control`：控制面，读写控制与用量 SQLite，管理账号容器生命周期；
-- `web`：Go Web + React 管理与门户界面；
-- `gateway`：模型请求数据面，蓝绿双槽切换；
-- `edge`：固定公网入口，聚合浏览器与 API 流量。
-
-控制数据与高频用量分别存储，Gateway 只读取原子发布的鉴权、额度和路由快照。完整设计见[架构文档](./docs/architecture.md)。
+部署包含 Control、Web、Gateway、Edge 四类镜像。控制数据与用量分别存储，Gateway 读取鉴权、额度和路由快照。详见[架构](./docs/architecture.md)。
 
 <a id="documentation"></a>
 
@@ -111,14 +93,15 @@ flowchart LR
 
 | 文档 | 内容 |
 | --- | --- |
-| [快速开始](./docs/getting-started.md) | 开发依赖、页面预览、首次管理员设置和隔离测试 |
+| [快速开始](./docs/getting-started.md) | 安装、首次设置和后续操作 |
 | [架构](./docs/architecture.md) | 服务拓扑、数据所有权、请求链路与蓝绿切换 |
-| [部署](./docs/deployment.md) | 目标前置条件、发布流程、入口配置与上线验收 |
+| [部署](./docs/deployment.md) | 目录、入口、部署前提与验收 |
 | [配置中心](./docs/configuration-center.md) | 邮箱、额度、通知、品牌和上游代理配置 |
 | [升级](./docs/upgrade.md) | 备份、升级、验收与回滚边界 |
 | [备份与恢复](./docs/backup-and-restore.md) | SQLite、主密钥、OAuth 和账号配置恢复 |
 | [故障排查](./docs/troubleshooting.md) | 常见部署、网关、账号和用量问题 |
 | [开发指南](./docs/development.md) | 本地开发、验证工具链与测试约定 |
+| [Telegram 发布通知](./docs/telegram-release.md) | 正式版公告配置、模板与回执 |
 | [更新日志](./CHANGELOG.md) | 面向使用者的版本变更记录 |
 
 ## 本地开发

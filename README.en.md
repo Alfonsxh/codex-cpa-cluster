@@ -26,14 +26,7 @@
   <p><sub>Dark mode · Synthetic accounts and usage data</sub></p>
 </div>
 
-**Codex CPA Pool** consolidates multiple [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) account containers behind a single stable endpoint. Typical usage:
-
-- Pool several Codex accounts into one shared account pool;
-- Issue each member an individual API key with its own weekly quota;
-- Everyone keeps working in their own tools;
-- The admin sees all members' usage and consumption trends in a single dashboard.
-
-> PS: Works just as well for individuals pooling personal accounts.
+**Codex CPA Pool** puts multiple [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) accounts behind one endpoint, with individual API keys, weekly quotas and shared usage reporting. Use it for a team or your own accounts.
 
 ## Quick Start
 
@@ -44,11 +37,7 @@ curl -fsSLO https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/
 sudo sh run.sh
 ```
 
-Or start directly with one command; the installer saves `run.sh` in the operator directory before continuing:
-
-```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
-```
+See [Getting started](./docs/getting-started.md) for setup or [Upgrade](./docs/upgrade.md) for an existing installation.
 
 ## Features
 
@@ -82,14 +71,7 @@ flowchart LR
   Control --> Docker["Docker Engine"]
 ```
 
-A production deployment consists of four immutable images:
-
-- `control`: control plane — owns the control & usage SQLite databases and the account container lifecycle;
-- `web`: Go Web + React admin and portal UI;
-- `gateway`: model request data plane with blue-green slots;
-- `edge`: fixed public entry aggregating browser and API traffic.
-
-Control data and high-frequency usage are stored separately, and the Gateway only reads atomically published auth, quota and routing snapshots.
+Four images provide Control, Web, Gateway and Edge. Control and usage data are stored separately; Gateway reads published auth, quota and routing snapshots. See [Architecture](./docs/architecture.md).
 
 <a id="documentation"></a>
 
@@ -99,14 +81,15 @@ Full documentation is currently available in Chinese:
 
 | Document | Contents |
 | --- | --- |
-| [Getting started](./docs/getting-started.md) | Dev dependencies, page preview, first admin setup, isolated testing |
+| [Getting started](./docs/getting-started.md) | Installation, initial setup and next steps |
 | [Architecture](./docs/architecture.md) | Service topology, data ownership, request paths, blue-green switching |
-| [Deployment](./docs/deployment.md) | Target prerequisites, release flow, entry configuration, acceptance |
+| [Deployment](./docs/deployment.md) | Directories, ingress, prerequisites and acceptance |
 | [Configuration center](./docs/configuration-center.md) | Email, quotas, notifications, branding, upstream proxies |
 | [Upgrade](./docs/upgrade.md) | Backup, upgrade, acceptance and rollback boundaries |
 | [Backup and restore](./docs/backup-and-restore.md) | SQLite, master key, OAuth and account config recovery |
 | [Troubleshooting](./docs/troubleshooting.md) | Common deployment, gateway, account and usage issues |
 | [Development](./docs/development.md) | Local development, verification toolchain, testing conventions |
+| [Telegram releases](./docs/telegram-release.md) | Stable release notices, templates and receipts |
 | [Changelog](./CHANGELOG.md) | User-facing release notes |
 
 ## Local Development

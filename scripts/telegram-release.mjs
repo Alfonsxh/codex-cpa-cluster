@@ -103,7 +103,7 @@ export function renderMessage(release, repo) {
   requireValue(text.length <= 3800, "群通知过长；请精简 Release 的社群摘要和升级提示");
   return { text, parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[
     { text: "发布详情", url: `https://github.com/${repo}/releases/tag/${release.tag_name}` },
-    { text: "安装升级", url: `https://github.com/${repo}/blob/${release.tag_name}/docs/upgrade.md` }
+    { text: "安装升级", url: `https://github.com/${repo}/blob/main/docs/upgrade.md` }
   ]] } };
 }
 export function eligible(release, version) {

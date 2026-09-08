@@ -74,16 +74,6 @@ sequenceDiagram
 
 `internal/gateway` 在鉴权快照损坏或过期时失败关闭；已加载的有效空快照允许全新控制面就绪，但所有未知 Key 仍返回 401。上游不可用返回受控 502。`internal/edge` 对非法槽位配置保留最后有效值。对应隔离验证由 `scripts/test-smoke.sh` 和 `scripts/test-faults.sh` 执行。
 
-## 验证入口
+## 验证
 
-```sh
-make -f scripts/build.mk verify
-npm --prefix frontend run test:e2e
-make -f scripts/build.mk test-build
-make -f scripts/build.mk test-up
-make -f scripts/build.mk test-smoke
-make -f scripts/build.mk test-faults
-make -f scripts/build.mk test-down
-```
-
-真实上线还必须使用同一个真实 API Key 验证 `/v1/models`、非流式 `/v1/responses` 和 SSE；容器健康或隔离 Test 不能替代业务验收。
+源码和隔离数据面检查见[开发指南](development.md#验证)，真实请求和部署验收见[部署](deployment.md#底层应用与验收)。

@@ -1,66 +1,48 @@
 # 开发与验证
 
-## 依赖
+## 环境
 
-- Go：版本由 `go.mod` 决定。
-- Node.js 22：React 与 OpenAPI 生成。
-- Docker Compose：隔离数据面和正式 Compose 校验。
+依赖 Go（版本见 `go.mod`）、Node.js 22、Docker Engine 和 Compose v2。在仓库根目录执行：
 
 ```sh
 npm ci --prefix frontend
 npm ci --prefix tools/openapi
 ```
 
-## 本地前端
+根 `Makefile` 管理前端开发；构建、验证和发布使用 `make -f scripts/build.mk`。
 
-前端只代理当前页面需要的细粒度接口。复制本地环境文件并设置已授权的 Test Admin：
+## 前端热更新
 
-```sh
-cp frontend/.env.example frontend/.env
-```
-
-在 `frontend/.env` 中配置 `CPA_DEV_PROXY_TARGET` 后，同时启动 Admin、Usage 和 Portal
-三个开发服务：
+复制 `frontend/.env.example` 为 `frontend/.env`，将 `CPA_DEV_PROXY_TARGET` 设为已授权的 Test Admin，然后运行：
 
 ```sh
 make frontend-dev-all
 ```
 
-`frontend/.env` 被 Git 忽略；`frontend/.env.example` 只提供本机 `8318` 示例，不包含
-测试目标地址。命令行 `FRONTEND_DEV_UPSTREAM=<URL>` 可临时覆盖文件值。
+Admin、Usage 和 Portal 开发服务支持热更新，修改页面通常无需重启。命令行 `FRONTEND_DEV_UPSTREAM=<URL>` 可临时覆盖配置；不要将开发写接口连接生产。
 
-本机 Go Preview 只支持 Admin 的只读模拟接口。如需使用：
+只读 Admin 演示可在两个终端分别运行：
 
 ```sh
 go run ./cmd/test-preview --address 127.0.0.1:8896 --root .
+```
+
+```sh
 make frontend-dev FRONTEND_DEV_UPSTREAM=http://127.0.0.1:8896
 ```
 
-Usage 和 Portal 必须连接完整的 Test Admin 后端。不要代理 Production 写接口。
+Preview 使用固定演示数据，不能执行真实写操作；Usage 和 Portal 需要完整 Test Admin。
 
-## 常用门禁
-
-根目录 `Makefile` 只提供本地前端开发与联调。隔离 Test Compose、源码验证、契约生成、
-正式构建、发布和目标部署统一通过 `make -f scripts/build.mk <目标>` 调用；
-以上命令均从仓库根目录执行。`test-build` 仅构建本地测试环境需要的镜像。
+## 验证
 
 ```sh
-make -f scripts/build.mk generate-api
-make -f scripts/build.mk check-generated-api
 make -f scripts/build.mk verify
 npm --prefix frontend run test:e2e
 ```
 
-`make -f scripts/build.mk verify` 包含：
+`verify` 包含生成契约、Shell/Go 检查、单元与竞态测试、前端类型/测试/构建、部署脚本、隐私和 Compose 校验。修改 OpenAPI 后先运行 `make -f scripts/build.mk generate-api`。
 
-1. Shell 语法、Go 格式与 OpenAPI 生成一致性。
-2. `go vet`、Go 单元测试和竞态测试。
-3. React 类型检查、Vitest 和生产构建。
-4. 发布隐私扫描。
-5. 正式 Compose 与隔离 Test Compose 校验。
-6. 已移除运行时残留检查与 `git diff --check`。
-
-## 隔离数据面
+Playwright 默认两个 worker，资源紧张时设 `CPAP_E2E_WORKERS=1`。隔离数据面演练：
 
 ```sh
 make -f scripts/build.mk test-build
@@ -70,70 +52,35 @@ make -f scripts/build.mk test-faults
 make -f scripts/build.mk test-down
 ```
 
-故障演练覆盖上游不可用、无效 Key、损坏鉴权快照、Edge 非法槽位、蓝绿切换和 SSE 排空。
+覆盖 Key 拒绝、上游故障、快照损坏、蓝绿切换及 SSE 排空，不替代真实目标验收。Writer 必须持有运行时与自身 Lease，旧 Generation 写入应返回 `ErrLeaseLost`。
 
-## Writer 所有权
+## 发布版本
 
-所有写进程必须同时持有 `runtime-writer` 与自己的 Worker Lease。Generation 变化后，旧进程写入返回 `ErrLeaseLost`。
-
-```sh
-go test -count=1 -run '^TestWriterLeaseGenerationTransferFencesStaleOwner$' ./internal/ownership
-go test -count=1 -run '^TestGoWorkerLeaseGroupTransfersAllScopesAndRejectsDuplicate$' ./internal/ownership
-```
-
-不得绕过所有权直接修改 SQLite，也不得用本地 Test 通过代替真实 API Key 的 `/v1/responses` 验收。
-
-## 发布验收与重试
-
-开发中的检查继续使用 `make -f scripts/build.mk verify` 和
-`npm --prefix frontend run test:e2e`。准备发布时，先把最终改动形成干净的本地提交，再执行：
+将最终提交推送到干净、同步的 `main`，为准确版本和提交准备 Release Draft。正文与公告模板见[Telegram 发布通知](telegram-release.md)。
 
 ```sh
-make -f scripts/build.mk release-verify
-# 验收完成后，按仓库提交流程将同一提交推送到 main，并准备版本说明 Draft。
-make -f scripts/build.mk release-check VERSION=v2.0.0-rc.50 IMAGE_PREFIX=ghcr.io/owner
-make -f scripts/build.mk release VERSION=v2.0.0-rc.50 IMAGE_PREFIX=ghcr.io/owner
+make -f scripts/build.mk release-check VERSION=v2.0.2 IMAGE_PREFIX=ghcr.io/owner
+make -f scripts/build.mk release VERSION=v2.0.2 IMAGE_PREFIX=ghcr.io/owner
 ```
 
-`release-verify` 可以在本地分支执行，不推送代码、Tag、镜像或 GitHub Release。
-它在固定提交的独立快照中运行完整源码和浏览器检查；依赖目录由该快照独占。
-直接运行 `release` 也会自动完成相同验收，无需预先重复执行两个检查命令。
+将示例版本替换为待发布版本。`release` 在固定提交的独立快照中完成源码和浏览器验收，再发布镜像、Tag、附件和 Release。可提前用 `release-verify` 只做验收。
 
-成功记录和生产前端产物保存在 Git common directory 的 `release-validation/` 中，
-不会进入源码或发布包。缓存绑定整个 Git 源码树、Node/npm/Go/Compose、浏览器文件、
-目标平台及相关环境配置。源码、工具链或产物校验变化时重新验收；只有完整验收通过
-且文件摘要匹配的静态产物才可交给 Web 镜像。相同源码在浏览器检查失败后，可复用
-已经成功的源码检查；镜像或 GitHub 上传失败后重试，也会复用成功的验收及不可变镜像。
-版本号、GitHub Draft 和远端镜像仍在每次发布时重新检查。
+验证记录与前端产物绑定源码、工具链和环境，重试可复用匹配结果。镜像按组件源码摘要复用，缺失组件才构建；不可变引用全部校验后才更新 `latest`。已公开 Release 拒绝覆盖。
 
-发布路径直接使用验收生成的前端产物，避免 Docker 再次编译三套页面。
-普通 Docker 构建仍支持从源码构建前端。Control 的程序分别放入独立镜像层；
-新镜像只推送内容标签，再由 Registry 添加版本标签，既有镜像继续按摘要复用。
-只有 `v数字.数字.数字` 形式的规范正式版本可设为 GitHub Latest，RC 等使用 Pre-release。
-脚本输出验收、镜像、附件和公开阶段的耗时，便于区分编译与网络等待。
+规范 `vX.Y.Z` 可作为正式 Latest，RC 等标记为 Pre-release。启用 Telegram 后只通知正式版；通知失败单独处理回执，不重新发布版本。CI 仅手动验证和打包，节点升级使用目标机的 `run.sh`。
 
-Playwright 默认使用两个 worker；资源紧张时可使用 `CPAP_E2E_WORKERS=1`。
-浏览器上下文和接口覆盖按用例隔离，预览服务仅提供只读 fixture。
-Vitest 的 Ant Design 交互用例保持按文件串行，避免资源争用导致超时。
-同一源码的并发验收由锁保护；若进程被强制终止，确认已退出后可移除错误信息中
-标明的遗留锁目录。CI 继续只验证和打包，部署仍由目标环境操作入口执行。
+## 前端与统计约定
 
-## 使用中心查询性能
+前端数据和凭据规则见 [frontend/README](../frontend/README.md)。使用中心缓存按用户和时间范围隔离：列表/摘要 15 秒、模型明细 30 秒，闲置数据最多保留 5 分钟；刷新和账号切换使相关缓存失效。
 
-近一小时活跃用户查询先固定时间范围，再按账号和规范化邮箱去重，避免 SQLite 为了
-账号分组而扫描全部历史索引。查询计划回归覆盖同时存在账号、用户和时间索引的场景；
-该优化不创建索引、不迁移数据库，也不改变统计口径。
+账号列表可短暂使用运行状态缓存并后台刷新；路由、账号切换和自动分配仍使用独立有效性检查。不能用展示缓存作为授权依据。
 
-账号列表可展示最多两个缓存周期内的原生运行状态（默认最多 30 秒），并在第一个
-15 秒周期过期后后台刷新。没有缓存、缓存超过上限或账号服务集合变化时，仍等待
-新的完整观测。禁用、容器停止、OAuth 缺失和持久化额度状态继续在每次请求中检查；
-账号切换和自动分配使用原来的状态读取，不使用扩展的展示缓存。
+## 文档与截图
 
-使用中心的个人数据缓存按登录用户和时间范围隔离。列表、个人摘要在 15 秒内复用，
-模型明细在 30 秒内复用；未使用的数据最多保留 5 分钟，过期后后台更新。手动刷新
-同时更新列表和已展开明细，并使其他时间范围缓存失效；账号切换同样使列表缓存失效。
-API Key 仍按需读取，退出登录和会话失效继续清理缓存。
+每页围绕一个任务，先写步骤，再写必要前提或失败处理。共享细节放在所属页面并链接，避免重复接口定义、像素参数和历史实现过程；命令、默认值和限制以当前代码为准。
 
-## 公开文档截图
+```sh
+npm --prefix frontend run docs:screenshots
+```
 
-运行 `npm --prefix frontend run docs:screenshots`，使用 Playwright 的隔离演示后端生成 `docs/assets/screenshot-{overview,accounts,usage}.png`，两个语言的 README 共享这些图片。截图固定为 1920×1080 的深色模式视口，不缩放页面或拼接长图，账号和统计均来自合成测试数据；不要改接真实环境。发布前逐张检查图片，确认没有真实邮箱、Key、Webhook、内部域名或目标地址。日常浏览器矩阵仍覆盖深浅两种主题，不将测试基准图片作为产品截图发布。
+截图为 1920×1080 深色模式，使用隔离演示数据，不缩放或拼接。发布前检查邮箱、Key、Webhook 和私有地址；日常浏览器测试仍覆盖深浅两种主题。

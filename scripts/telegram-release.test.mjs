@@ -199,7 +199,7 @@ test("confirmed rejection can be retried, recreation cannot, explicit edits reus
   assert.throws(() => delivery(f, f.api), /身份不匹配/);
 });
 
-test("message rendering uses curated sections, fixed version links, styled headings and bounded length", () => {
+test("message rendering uses curated sections, version release and maintained upgrade links", () => {
   const message = renderMessage({ tag_name: version, body }, repo);
   assert.ok(message.text.includes(`CCPA ${version} 正式发布`));
   assert.ok(!message.text.includes("详细说明"));
@@ -207,7 +207,8 @@ test("message rendering uses curated sections, fixed version links, styled headi
   assert.ok(message.text.includes(`<b>CCPA ${version} 正式发布</b>`));
   assert.ok(message.text.includes("<b>本次更新</b>"));
   assert.ok(message.text.includes("• 改进时间筛选。"));
-  assert.equal(message.reply_markup.inline_keyboard[0][1].url, `https://github.com/${repo}/blob/${version}/docs/upgrade.md`);
+  assert.equal(message.reply_markup.inline_keyboard[0][0].url, `https://github.com/${repo}/releases/tag/${version}`);
+  assert.equal(message.reply_markup.inline_keyboard[0][1].url, `https://github.com/${repo}/blob/main/docs/upgrade.md`);
   assert.throws(() => renderMessage({ tag_name: version, body: body + "\n## 社群摘要\n重复" }, repo), /唯一/);
   assert.throws(() => renderMessage({ tag_name: version, body: "## 社群摘要\n更新\n## 升级提示" }, repo), /不能为空/);
   assert.throws(() => renderMessage({ tag_name: version, body: body.replace("新增", "x".repeat(4000)) }, repo), /过长/);

@@ -1,52 +1,30 @@
 # 备份与恢复
 
-## 必须成对保存
+## 升级备份
 
-最小业务备份包括：
+`run.sh` 在升级前自动备份到运维目录的 `backups/`，与 `runtime/` 分开。归档权限为 `0600`，目录为 `0700`；可用 `CPAP_BACKUP_DIR` 指定位置。
 
-```text
-state/control-plane.sqlite3
-state/usage.sqlite3
-secrets/control-plane.key
-auth/
-configs/
-state/gateway/
-state/edge/
-```
+归档包含两份 SQLite 副本、`secrets/`、`auth/`、`configs/`、`management/`、部署配置和 Edge 活动槽。不复制日志、历史备份、生成快照或在线 WAL/SHM 文件。
 
-`control-plane.sqlite3` 中的秘密依赖 `control-plane.key`；缺少任一文件都不能视为可恢复备份。OAuth、Webhook、API Key、邮箱和私有地址不得进入仓库、发布包或公开日志。
+数据库通过 SQLite Backup API 固定只读快照并校验 `quick_check=ok`。WAL 模式下业务写入可继续，不会因新提交反复重拷。两库分别取得快照，**不代表跨库和配置的同一业务停写点**；需要该保证时使用下述停写备份。
 
-账号配置使用 `configs/<account>/config.yaml`。必须按目录层级恢复，不能改回单文件 Docker bind mount；单文件挂载会固定旧 inode，导致控制面原子替换配置后，运行中的账号容器仍读取旧 API Key 列表。
+## 停写备份
 
-## 备份流程
+1. 暂停新请求、管理变更和自动任务，等待已有请求结束、最后用量入库。
+2. 停止全部数据库 Writer 及账号生命周期写入，记录镜像、Compose 身份和活动槽。
+3. 用 SQLite Backup API 生成两份数据库副本，同批保存匹配主密钥、OAuth、账号和部署配置。
+4. 验证副本完整性、关键行数和秘密可解密；保存受保护的异机副本。
 
-1. 记录当前四个不可变镜像引用、组件摘要、Compose 项目名和活动 Gateway 槽。
-2. 停止 `usage-collector`、`quota`、`account-failover`、`notifications` 和 `log-maintenance`，阻止新的数据库写入。
-3. 对两份 SQLite 使用支持 SQLite Backup API 的受控工具或一致性文件系统快照；不要在 WAL 模式下只复制主文件。
-4. 同一批次复制匹配主密钥、OAuth、账号配置和 Gateway/Edge 状态。
-5. 将备份保存到不同故障域，并限制为操作者可读。
+不能只复制运行中的 SQLite 主文件。控制库与 `secrets/control-plane.key` 必须成对保存；自动升级备份不能替代异地灾备。
 
-统一的 `/home/ccpa/run.sh` 在每次升级前自动执行上述数据库一致性步骤：使用 SQLite Backup API 生成两份独立副本，要求副本 `quick_check=ok`，不把运行中的 WAL/SHM 文件放入归档，再与同批主密钥、OAuth 和运行配置一起保存到 `/home/ccpa/backups/`。这份升级前备份不替代异地灾备。 新安装默认运维根目录为 `/home/ccpa`；历史 `/home/cpac` 环境继续在原址备份，实际目录以部署完成信息为准。
+## 恢复
 
-账号重命名、删除和 OAuth 清理产生的可恢复目录位于 `backups/accounts/`，由 `internal/accountlifecycle` 管理；它们不是两份 SQLite 的完整灾备替代品。
+1. 保持目标停写，在隔离目录解包并检查文件、权限和镜像版本。
+2. 核对两库 `quick_check`、Schema 兼容性、关键数据和主密钥；不执行备份中的未知程序。
+3. 恢复数据库、匹配凭据、账号配置和部署状态。配置保留 `configs/<account>/config.yaml` 的目录挂载结构。
+4. 按兼容版本的启动顺序激活唯一所有权、重新生成 Gateway 快照并恢复服务；验证完成前保持入口停流。
+5. 检查页面和数据，以原 API Key 验证实际 Responses、SSE 及新增用量。
 
-## 备份验收
+恢复失败保持停写。备份后的新业务数据须先核对和保全，不能直接覆盖；OAuth 已刷新时，也不能盲目还原旧 refresh token。
 
-在隔离目录验证：
-
-- 两份 SQLite `PRAGMA quick_check` 返回 `ok`。
-- Schema 版本不高于恢复镜像支持版本。
-- 主密钥权限为 `0600`，控制面能读取现有加密秘密状态。
-- 账号、用户、路由、团队和用量关键行数与备份前记录一致。
-- OAuth 与账号 ID 对应，目录内不存在符号链接或额外秘密副本。
-
-## 恢复顺序
-
-1. 停止目标的全部 Go Control Writer 和账号生命周期写操作。
-2. 恢复两份 SQLite、匹配主密钥、OAuth、账号配置与槽位/快照文件。
-3. 恢复正确所有者和最小权限，不从备份启动未知脚本或二进制。
-4. 使用与 Schema 兼容的不可变镜像执行 `make -f scripts/build.mk target-config` 和 `make -f scripts/build.mk target-verify-images`。
-5. 激活唯一 Go 所有者，再依次启动核心服务与 Writer。
-6. 执行目标烟测、数据库检查、浏览器检查和真实 API Key 的 Responses/SSE 验收。
-
-恢复失败时保持 Writer 停止，不得用空数据库、错误主密钥或仅页面可打开作为成功条件。
+账号删除或重命名产生的 `runtime/backups/accounts/` 只用于账号恢复，不是完整业务备份。底层部署要求见[部署](deployment.md#底层应用与验收)。

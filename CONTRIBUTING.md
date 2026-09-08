@@ -10,9 +10,7 @@
 4. 运行 `make -f scripts/build.mk verify`。
 5. 提交 Pull Request，说明问题、方案、验证和部署影响。
 
-`make -f scripts/build.mk verify` 需要 Node.js 22、Go（版本以 `go.mod` 为准）、可用的 Docker daemon，以及
-Docker Compose。首次验证前在 `frontend/` 和 `tools/openapi/` 执行 `npm ci`。Go 与 React
-代码始终纳入同一质量门禁。
+依赖与验证命令见[开发指南](docs/development.md)。文档先给步骤，共享细节使用链接；默认值和命令须与代码一致。
 
 ## Pull Request 要求
 

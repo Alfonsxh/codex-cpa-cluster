@@ -19,7 +19,7 @@
     <a href="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Alfonsxh/codex-cpa-pool/actions/workflows/ci.yml/badge.svg"></a>
     <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/Alfonsxh/codex-cpa-pool">
     <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/Alfonsxh/codex-cpa-pool"></a>
-    <a href="https://t.me/+vzojgInHfy44ZTM9"><img alt="Telegram 交流群" src="https://img.shields.io/badge/Telegram-%E4%BA%A4%E6%B5%81%E7%BE%A4-26A5E4?logo=telegram&amp;logoColor=white"></a>
+    <a href="https://t.me/codex_ccpa"><img alt="Telegram 交流群" src="https://img.shields.io/badge/Telegram-%E4%BA%A4%E6%B5%81%E7%BE%A4-26A5E4?logo=telegram&amp;logoColor=white"></a>
   </p>
 
   <p>
@@ -42,10 +42,6 @@
 - 管理者在一个面板里查看所有成员的用量与消耗趋势。
 
 > PS：个人聚合多账号同样适用。
-
-项目与 GitHub 仓库统一使用 **Codex CPA Pool**（`Alfonsxh/codex-cpa-pool`）。
-
-加入 [Telegram 项目交流群](https://t.me/+vzojgInHfy44ZTM9)，交流使用经验、部署问题与功能建议。反馈问题时请提供版本和脱敏日志。
 
 <a id="quick-start"></a>
 

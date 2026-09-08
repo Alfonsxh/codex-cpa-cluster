@@ -3,6 +3,7 @@ set -eu
 
 # CPAP_OPERATOR_PROTOCOL=1
 # CPAP_RUNTIME_ROOT_ALIAS=1
+# CPAP_RUNTIME_ROOT_CONFIG=1
 # Compatibility boundary: accept the former operator prefix only as input.
 # Values are never evaluated as shell code; the suffix list is fixed here.
 for operator_suffix in GITHUB_REPOSITORY RUN_ASSET_URL STAGING_ROOT DEPLOY_ROOT \
@@ -96,17 +97,76 @@ set_operator_deploy_root() {
   fi
 }
 
+# Read only the directory field; operator configuration is never shell code.
+config_deploy_root() (
+  root_config=$1
+  [ -e "$root_config" ] || [ -L "$root_config" ] || return 0
+  [ -f "$root_config" ] && [ ! -L "$root_config" ] || {
+    printf 'ERROR  运行目录配置必须是普通非符号链接文件：%s\n' "$root_config" >&2
+    return 1
+  }
+  saved_root=$(awk -F= '
+    $1 == "CPAP_DEPLOY_ROOT" {
+      count++
+      value=substr($0, index($0, "=") + 1)
+    }
+    END {
+      if (count > 1 || (count == 1 && value == "")) exit 1
+      if (count == 1) print value
+    }
+  ' "$root_config") || {
+    printf 'ERROR  CPAP_DEPLOY_ROOT 配置重复或为空：%s\n' "$root_config" >&2
+    return 1
+  }
+  [ -n "$saved_root" ] || return 0
+  resolve_deploy_root "$saved_root"
+)
+
+resolve_operator_deploy_root() (
+  saved_root=$(config_deploy_root "$1") || return 1
+  if [ -n "$saved_root" ]; then
+    [ -d "$saved_root" ] || {
+      printf 'ERROR  已记录的运行目录不存在，拒绝初始化其他目录：%s\n' "$saved_root" >&2
+      return 1
+    }
+    if [ -n "${CPAP_DEPLOY_ROOT:-}" ]; then
+      explicit_root=$(resolve_deploy_root "$CPAP_DEPLOY_ROOT") || return 1
+      if [ "$explicit_root" != "$saved_root" ]; then
+        printf 'ERROR  CPAP_DEPLOY_ROOT 与已记录的运行目录冲突：%s\n' "$saved_root" >&2
+        return 1
+      fi
+    fi
+    printf '%s\n' "$saved_root"
+  elif [ -n "${CPAP_DEPLOY_ROOT:-}" ]; then
+    resolve_deploy_root "$CPAP_DEPLOY_ROOT"
+  else
+    selected_root=$(resolve_existing_root "$2" "$3") || return 1
+    resolve_deploy_root "$selected_root"
+  fi
+)
+
 bootstrap_from_stdin() {
   if [ -n "${CPAP_STAGING_ROOT:-}" ]; then
     bootstrap_root=$CPAP_STAGING_ROOT
   else
     bootstrap_root=$(resolve_existing_root /home/ccpa /home/cpac) || exit 1
   fi
-  if [ -n "${CPAP_DEPLOY_ROOT:-}" ]; then
-    bootstrap_deploy_root=$CPAP_DEPLOY_ROOT
-  else
-    bootstrap_deploy_root=$(resolve_existing_root "$bootstrap_root/runtime" /opt/codex-cpa-cluster) || exit 1
-  fi
+  bootstrap_config=${CPAP_CONFIG_FILE:-$bootstrap_root/config.env}
+  # Respect the same --config selection when the script arrives through stdin.
+  bootstrap_next_is_config=false
+  for bootstrap_argument in "$@"; do
+    if [ "$bootstrap_next_is_config" = true ]; then
+      bootstrap_config=$bootstrap_argument
+      bootstrap_next_is_config=false
+    elif [ "$bootstrap_argument" = --config ]; then
+      bootstrap_next_is_config=true
+    fi
+  done
+  [ "$bootstrap_next_is_config" = false ] || {
+    printf 'ERROR  --config 缺少参数\n' >&2
+    exit 1
+  }
+  bootstrap_deploy_root=$(resolve_operator_deploy_root "$bootstrap_config" "$bootstrap_root/runtime" /opt/codex-cpa-cluster) || exit 1
   set_operator_deploy_root "$bootstrap_deploy_root" || exit 1
   case "$bootstrap_root" in
     /*) ;;
@@ -164,11 +224,18 @@ bootstrap_from_stdin() {
     printf 'ERROR  下载的 run.sh 无效\n' >&2
     exit 1
   }
-  chmod 0755 "$bootstrap_temporary" \
-    && mv -f -- "$bootstrap_temporary" "$bootstrap_destination" || {
-      printf 'ERROR  无法安装 run.sh\n' >&2
-      exit 1
-    }
+  if [ -f "$bootstrap_destination" ] \
+    && grep -Fxq '# CPAP_RUNTIME_ROOT_CONFIG=1' "$bootstrap_destination" \
+    && ! grep -Fxq '# CPAP_RUNTIME_ROOT_CONFIG=1' "$bootstrap_temporary"; then
+    printf '%s\n' '所选安装器不支持已记录的运行目录；保留当前 run.sh' >&2
+    rm -f -- "$bootstrap_temporary"
+  else
+    chmod 0755 "$bootstrap_temporary" \
+      && mv -f -- "$bootstrap_temporary" "$bootstrap_destination" || {
+        printf 'ERROR  无法安装 run.sh\n' >&2
+        exit 1
+      }
+  fi
   bootstrap_temporary=
   trap - EXIT HUP INT TERM
 
@@ -188,11 +255,6 @@ esac
 SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 SCRIPT_PATH="$SCRIPT_DIRECTORY/$(basename -- "$0")"
 STAGING_ROOT=${CPAP_STAGING_ROOT:-$SCRIPT_DIRECTORY}
-if [ -n "${CPAP_DEPLOY_ROOT:-}" ]; then
-  DEFAULT_DEPLOY_ROOT=$CPAP_DEPLOY_ROOT
-else
-  DEFAULT_DEPLOY_ROOT=$(resolve_existing_root "$STAGING_ROOT/runtime" /opt/codex-cpa-cluster) || exit 1
-fi
 DEFAULT_BACKUP_ROOT=${CPAP_BACKUP_DIR:-$STAGING_ROOT/backups}
 DEFAULT_CONFIG_FILE=${CPAP_CONFIG_FILE:-$STAGING_ROOT/config.env}
 LEGACY_CONFIG_FILE=${CPAP_LEGACY_CONFIG_FILE:-/etc/cpac/config.env}
@@ -462,6 +524,11 @@ write_config() {
   config_file=$1
   domain=$2
   ingress_mode=${3:-}
+  saved_config_root=$(config_deploy_root "$config_file") || die "运行目录配置无效：$config_file"
+  config_root=${4:-$saved_config_root}
+  if [ -n "$config_root" ]; then
+    config_root=$(resolve_deploy_root "$config_root") || die "运行目录配置无效"
+  fi
   normalize_domain "$domain" >/dev/null || die "域名配置无效：$domain"
   if [ -n "$ingress_mode" ]; then
     ingress_mode=$(validate_ingress_mode "$ingress_mode") \
@@ -474,6 +541,7 @@ write_config() {
   if ! {
     printf 'CPA_DOMAIN=%s\n' "$domain"
     [ -z "$ingress_mode" ] || printf 'CPAP_INGRESS_MODE=%s\n' "$ingress_mode"
+    [ -z "$config_root" ] || printf 'CPAP_DEPLOY_ROOT=%s\n' "$config_root"
   } >"$config_tmp" \
     || ! chmod 0600 "$config_tmp" \
     || ! mv -f -- "$config_tmp" "$config_file"; then
@@ -1577,6 +1645,10 @@ update_operator_script() {
     ui_note "所选发布的安装器不支持运行目录入口解析；保留当前安装器以原址升级"
     return 1
   fi
+  if ! grep -Fxq '# CPAP_RUNTIME_ROOT_CONFIG=1' "$verified_script"; then
+    ui_note "所选发布的安装器不支持已记录的运行目录；保留当前安装器"
+    return 1
+  fi
   if cmp -s "$verified_script" "$SCRIPT_PATH"; then
     return 1
   fi
@@ -1888,7 +1960,6 @@ prune_legacy_release_payload() {
 
 run_install_or_upgrade() {
   config_file=$DEFAULT_CONFIG_FILE
-  deploy_root=$DEFAULT_DEPLOY_ROOT
   repository=$DEFAULT_REPOSITORY
   explicit_domain=${CPAP_DOMAIN:-}
   explicit_ingress_mode=${CPAP_INGRESS_MODE:-}
@@ -1931,6 +2002,7 @@ run_install_or_upgrade() {
     esac
   done
   require_root run
+  deploy_root=$(resolve_operator_deploy_root "$config_file" "$STAGING_ROOT/runtime" /opt/codex-cpa-cluster) || return 1
   set_operator_deploy_root "$deploy_root" || return 1
   deploy_root=$CPAP_DEPLOY_ROOT
   ui_banner
@@ -2137,6 +2209,7 @@ run_install_or_upgrade() {
 
   upgrade_pending=false
   write_initialized_marker "$deploy_root" "$selected_version"
+  write_config "$config_file" "$domain" "$ingress_mode" "$deploy_root"
   prune_legacy_release_payload "$deploy_root"
   if [ "$ingress_mode" = managed ]; then
     ui_step "验证公网 HTTPS"
@@ -2159,7 +2232,7 @@ run_install_or_upgrade() {
       ui_note "首次管理员凭据已安全保留；请在交互终端执行：sudo $SCRIPT_PATH admin-key claim"
     fi
   fi
-  ui_note "以后安装和升级都执行：curl -fsSL $RUN_ASSET_URL | sudo sh"
+  ui_note "以后升级直接执行：sudo $SCRIPT_PATH"
 }
 
 run_domain_set() {

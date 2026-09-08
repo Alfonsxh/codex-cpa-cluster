@@ -9,12 +9,14 @@ Python v1 首次切换到 Go v2 必须先完成 [保留数据迁移方案](pytho
 已经初始化的目标直接执行：
 
 ```sh
-curl -fsSL https://github.com/Alfonsxh/codex-cpa-pool/releases/latest/download/run.sh | sudo sh
+sudo /home/ccpa/run.sh
 ```
 
 从 Codex CPA Pool 的 GitHub Releases 下载升级脚本，安装器可读取历史发布归档。以下路径以新默认运维根目录 `/home/ccpa` 为例；历史 `/home/cpac` 安装继续原址运行，执行命令时使用其实际根目录，不迁移运行数据。新 `CPAP_*` 参数与配置兼容旧 `CPAC_*`；升级只替换既有 `target.env` 的 Control、Web、Gateway、Edge 四个镜像字段，保留目标身份、网络、端口与维护确认配置，Nginx 配置和 `external` 提示使用该文件的实际 `CPA_PUBLIC_PORT`（`18317` 仅为新安装默认值）。指定历史 Release 附带旧安装器时，会保留当前 Pool 安装器，避免退回旧安装协议。
 
-命令重新获取最新 `run.sh`，然后自动复用 `/home/ccpa/config.env` 中的域名和入口模式，在 `/home/ccpa/backups/` 创建 root-only 备份并执行正式蓝绿部署。升级成功后会删除旧版 `/home/ccpa/deploy.sh` 入口。升级绝不因缺少 Nginx、证书或不同域名站点而改变既有入口模式：`external` 始终不触碰 Nginx/Certbot 且跳过公网检查；`managed` 只更新本项目自己托管的站点。旧版无标记站点不会被自动认领，保留旧站点时应先执行 `sudo /home/ccpa/run.sh ingress set external`。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会先安全迁移到解析后的实际运维根目录。
+脚本自动读取 `/home/ccpa/config.env` 中已记录的真实运行目录、域名和入口模式，获取最新 Release 并校验其部署脚本，在 `/home/ccpa/backups/` 创建 root-only 备份，再执行正式蓝绿部署。安装或升级成功后，真实运行目录自动保存为 `CPAP_DEPLOY_ROOT`；以后无需在命令行重复输入。修改域名或入口模式会保留该字段。升级成功后会删除旧版 `/home/ccpa/deploy.sh` 入口。升级绝不因缺少 Nginx、证书或不同域名站点而改变既有入口模式：`external` 始终不触碰 Nginx/Certbot 且跳过公网检查；`managed` 只更新本项目自己托管的站点。旧版无标记站点不会被自动认领，保留旧站点时应先执行 `sudo /home/ccpa/run.sh ingress set external`。旧版本的 `/etc/cpac/config.env` 和待领取管理员凭据会先安全迁移到解析后的实际运维根目录。
+
+对于已有的自定义部署目录，可以在确认数据与 `target.env` 属于该部署后，将 `CPAP_DEPLOY_ROOT=/srv/ccpa-runtime` 加入现有 `config.env`，保留原有域名和入口字段。脚本只读取字段，不执行配置内容。已记录的目录优先于新旧默认目录；目录缺失、配置重复或环境变量指向不同部署时会停止，不会重新初始化其他目录。配置文件使用普通非软链接文件，权限保持 `0600`。可用 `--config /absolute/path/config.env` 选择另一份运维配置。
 
 执行 `sudo /home/ccpa/run.sh --tag` 可读取 `.deploy-initialized` 中的当前版本，只查询正式 GitHub Releases，并列出所有更高版本。交互终端选择序号后才会进入升级流程；非交互环境只打印当前版本和候选版本，不改配置、不拉镜像、不升级。没有候选时会明确提示当前已是最新版本；尚未初始化的环境必须直接使用 Latest Release，或通过 `sudo /home/ccpa/run.sh --tag v2.0.0` 明确指定版本。指定 Tag 必须对应包含完整附件的 GitHub Release。兼容入口 `--version` 仍可使用，但新操作统一使用 `--tag`。需要切换入口时必须显式确认 `sudo /home/ccpa/run.sh ingress set managed|external`，再执行日常部署。
 
@@ -27,9 +29,9 @@ sudo ln -s /srv/ccpa-runtime /home/ccpa/runtime
 sudo /home/ccpa/run.sh --tag
 ```
 
-使用前需安装包含运行目录入口解析功能的 `run.sh`。直接运行和管道入口都会先解析真实目录，版本查询、备份、部署身份校验和 Compose 操作均使用该真实路径；脚本自更新后继续沿用它。选择附带旧安装器的 Release 时，保留当前安装器，避免丢失软链接支持。也可以通过 `CPAP_DEPLOY_ROOT` 显式传入同类入口。
+使用前需安装包含运行目录入口解析和配置持久化功能的 `run.sh`。直接运行和新版脚本的管道入口都会先读取已保存的目录并解析真实路径，版本查询、备份、部署身份校验和 Compose 操作均使用该真实路径；脚本自更新后继续沿用它。选择附带旧安装器的 Release 时，保留当前安装器，避免丢失软链接和已保存目录的支持。也可以通过 `CPAP_DEPLOY_ROOT` 显式传入指向同一部署的入口。
 
-断链、循环链接、指向文件或文件系统根目录的链接会在写入前被拒绝。新旧默认入口指向同一真实目录时视为同一部署，指向不同目录时仍需明确选择。运维目录与 `run.sh`、数据库、密钥及运行目录内部的非软链接要求继续保留；既有 `target.env` 中的路径和身份字段不会因入口变化而改写。
+断链、循环链接、指向文件或文件系统根目录的链接会在写入前被拒绝。尚未记录目录时，新旧默认入口指向同一真实目录视为同一部署，指向不同目录则需明确选择；记录后不再受其他历史目录影响。运维目录与 `run.sh`、数据库、密钥及运行目录内部的非软链接要求继续保留；既有 `target.env` 中的路径和身份字段不会因入口变化而改写。
 
 ## 前置条件
 

@@ -604,7 +604,14 @@ fi
 FAKE_READLINK
 chmod 0755 "$FAKE_BIN/readlink"
 
-run_operator_deploy() {
+run_operator_deploy() (
+  if [ "${USE_SAVED_ROOT:-false}" = true ]; then
+    unset CPAP_DEPLOY_ROOT CPAC_DEPLOY_ROOT
+    set --
+  else
+    export CPAP_DEPLOY_ROOT="$OPERATOR_ROOT/runtime"
+    set -- run --domain qdata.example.com --ingress managed --tag "$RELEASE_VERSION"
+  fi
   PATH="$FAKE_BIN:$PATH" \
     FAKE_DOCKER_LOG="$COMMAND_LOG" \
     FAKE_SYSTEM_LOG="$SYSTEM_LOG" \
@@ -613,7 +620,6 @@ run_operator_deploy() {
     FAKE_RELEASE_VERSION="$RELEASE_VERSION" \
     CPAP_ALLOW_NON_ROOT=true \
     CPAP_STAGING_ROOT="$OPERATOR_ROOT" \
-    CPAP_DEPLOY_ROOT="$OPERATOR_ROOT/runtime" \
     CPAP_BACKUP_DIR="$OPERATOR_ROOT/backups" \
     CPAP_LEGACY_CONFIG_FILE="$TEST_ROOT/etc/ccpa/config.env" \
     CPAP_LOCK_FILE="$TEST_ROOT/cpa-deploy.lock" \
@@ -621,9 +627,8 @@ run_operator_deploy() {
     CPAP_NGINX_ENABLED_DIRECTORY="$TEST_ROOT/nginx/enabled" \
     CPAP_CERTIFICATE_ROOT="$TEST_ROOT/certificates" \
     CPAP_ACME_ROOT="$TEST_ROOT/acme" \
-    sh "$OPERATOR_ROOT/run.sh" run \
-      --domain qdata.example.com --ingress managed --tag "$RELEASE_VERSION"
-}
+    sh "$OPERATOR_ROOT/run.sh" "$@"
+)
 
 run_release_choice() {
   PATH="$FAKE_BIN:$PATH" \
@@ -717,7 +722,7 @@ cmp -s "$OPERATOR_ROOT/run.sh" "$RELEASE_SERVER/run.sh" \
   || { echo "fresh deploy created the removed external operator config directory" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/runtime/scripts" ] \
   || { echo "fresh deploy published a second target-side script directory" >&2; exit 1; }
-[ "$(cat "$OPERATOR_CONFIG")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAP_INGRESS_MODE=managed')" ] \
+[ "$(cat "$OPERATOR_CONFIG")" = "$(printf 'CPA_DOMAIN=qdata.example.com\nCPAP_INGRESS_MODE=managed\nCPAP_DEPLOY_ROOT=%s' "$OPERATOR_ROOT/runtime")" ] \
   || { echo "fresh deploy did not persist its domain" >&2; exit 1; }
 [ ! -e "$OPERATOR_ROOT/deploy.sh" ] \
   || { echo "run.sh did not remove the recognized legacy operator script" >&2; exit 1; }
@@ -803,7 +808,7 @@ PATH="$FAKE_BIN:$PATH" \
   sh "$EXTERNAL_OPERATOR_ROOT/run.sh" run \
     --domain existing.example.com --ingress external --version "$RELEASE_VERSION" \
     >"$EXTERNAL_OPERATOR_ROOT/install-output.log"
-[ "$(cat "$EXTERNAL_CONFIG")" = "$(printf 'CPA_DOMAIN=existing.example.com\nCPAP_INGRESS_MODE=external')" ] \
+[ "$(cat "$EXTERNAL_CONFIG")" = "$(printf 'CPA_DOMAIN=existing.example.com\nCPAP_INGRESS_MODE=external\nCPAP_DEPLOY_ROOT=%s' "$EXTERNAL_OPERATOR_ROOT/runtime")" ] \
   || { echo "external ingress mode was not persisted" >&2; exit 1; }
 grep -Fq '复用现有反向代理' "$EXTERNAL_OPERATOR_ROOT/install-output.log" \
   || { echo "external ingress did not describe the existing proxy contract" >&2; exit 1; }
@@ -945,6 +950,23 @@ if grep -Fq "$OPERATOR_ROOT/runtime" "$COMMAND_LOG" || grep -q cpa-bootstrap "$C
 fi
 grep -Fq "$PHYSICAL_RUNTIME" "$COMMAND_LOG" \
   || { echo "alias upgrade did not deploy the physical runtime" >&2; exit 1; }
+# A new shell must upgrade with no arguments or directory variables, including
+# re-exec of the downloaded installer and a later invocation after that update.
+cp "$ROOT_DIR/scripts/run.sh" "$OPERATOR_ROOT/run.sh"
+cp "$OPERATOR_CONFIG" "$TEST_ROOT/saved-root-config.env"
+: >"$COMMAND_LOG"
+USE_SAVED_ROOT=true run_operator_deploy >"$OPERATOR_ROOT/saved-root-upgrade.log"
+grep -Fq '部署脚本已更新，继续执行' "$OPERATOR_ROOT/saved-root-upgrade.log" \
+  || { echo "saved-root upgrade did not exercise re-exec" >&2; exit 1; }
+USE_SAVED_ROOT=true run_operator_deploy >"$OPERATOR_ROOT/saved-root-second-upgrade.log"
+cmp -s "$OPERATOR_CONFIG" "$TEST_ROOT/saved-root-config.env" \
+  && cmp -s "$PHYSICAL_RUNTIME/target.env" "$TEST_ROOT/physical-target.env" \
+  && cmp -s "$PHYSICAL_RUNTIME/secrets/control-plane.key" "$TEST_ROOT/key-before-alias-upgrade" \
+  || { echo "no-argument upgrade changed the saved root, target identity or key" >&2; exit 1; }
+if grep -Fq "$OPERATOR_ROOT/runtime" "$COMMAND_LOG" || grep -q cpa-bootstrap "$COMMAND_LOG"; then
+  echo "no-argument upgrade used another root or initialized parallel state" >&2
+  exit 1
+fi
 FAKE_RELEASES_FILE="$RELEASE_SERVER/releases.json" \
   run_release_choice </dev/null >"$OPERATOR_ROOT/alias-release-choice.log"
 grep -Fq "当前部署  $RELEASE_VERSION" "$OPERATOR_ROOT/alias-release-choice.log" \

@@ -40,6 +40,7 @@ awk '
           line == "    CPAC_DEPLOY_ROOT=$CPAP_DEPLOY_ROOT" ||
           line == "    export CPAC_DEPLOY_ROOT") next
       if (line ~ /operator_legacy_(set|value)=/ || line ~ /resolve_existing_root / ||
+          line ~ /resolve_operator_deploy_root .* \/opt\/codex-cpa-cluster\)/ ||
           line ~ /^LEGACY_CONFIG_FILE=/ || line ~ /\$1 == "CPAC_INGRESS_MODE"/ ||
           line ~ /legacy_release_key=/ || line ~ /"codex-cpa-cluster-\$2.tar.gz"/ ||
           line ~ /grep -[Fqx]+ .*Managed by CPAC (run|deploy)\.sh/ ||
@@ -48,6 +49,7 @@ awk '
     }
     if (path == "scripts/test-run-runtime.sh" &&
         (line ~ /^DEFAULT_REPOSITORY=/ || line ~ /Managed by CPAC (run|deploy)\.sh/ ||
+         line == "    unset CPAP_DEPLOY_ROOT CPAC_DEPLOY_ROOT" ||
          line ~ /codex-cpa-cluster-\$RELEASE_VERSION/ || line ~ /s\/\^CPAP_\/CPAC_\// ||
          line == "CPAC_DEPLOY_ROOT=\"$OPERATOR_ROOT/runtime\" run_operator_deploy >\"$OPERATOR_ROOT/alias-upgrade.log\"" ||
          line ~ /^CPAC_STAGING_ROOT=/)) next

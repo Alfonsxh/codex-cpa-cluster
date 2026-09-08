@@ -57,6 +57,46 @@ do
   [ ! -e "$TEST_ROOT/invalid-root-config.env" ] || fail 'invalid runtime wrote configuration'
 done
 
+# The saved physical root disambiguates old directories without an environment
+# override, survives ordinary config edits, and never becomes a fresh install.
+SAVED_CONFIG="$TEST_ROOT/saved-root.env"
+write_config "$SAVED_CONFIG" example.test external "$PHYSICAL_ROOT"
+(
+  unset CPAP_DEPLOY_ROOT CPAC_DEPLOY_ROOT
+  [ "$(resolve_operator_deploy_root "$SAVED_CONFIG" "$TEST_ROOT/current" "$TEST_ROOT/legacy")" = "$PHYSICAL_ROOT" ] \
+    || fail 'saved root did not disambiguate different existing defaults'
+)
+write_config "$SAVED_CONFIG" changed.example.test managed
+[ "$(config_deploy_root "$SAVED_CONFIG")" = "$PHYSICAL_ROOT" ] \
+  || fail 'domain or ingress update erased the saved root'
+CPAP_DEPLOY_ROOT="$TEST_ROOT/runtime-chain" \
+  resolve_operator_deploy_root "$SAVED_CONFIG" "$TEST_ROOT/current" "$TEST_ROOT/legacy" >/dev/null
+reject env CPAP_DEPLOY_ROOT="$TEST_ROOT/current" CPAP_ALLOW_NON_ROOT=true \
+  sh "$ROOT_DIR/scripts/run.sh" --config "$SAVED_CONFIG" --tag
+cp "$SAVED_CONFIG" "$TEST_ROOT/saved-root.before"
+if (
+  unset CPAP_DEPLOY_ROOT CPAC_DEPLOY_ROOT
+  CPAP_ALLOW_NON_ROOT=true sh "$ROOT_DIR/scripts/run.sh" --config "$SAVED_CONFIG" --tag
+) >"$TEST_ROOT/saved-root-query.log" 2>&1; then fail 'query accepted an absent version marker'; fi
+grep -Fq '未检测到有效的当前部署版本' "$TEST_ROOT/saved-root-query.log" \
+  || fail '--config did not select the saved root before default discovery'
+cmp -s "$SAVED_CONFIG" "$TEST_ROOT/saved-root.before" || fail 'read-only query rewrote configuration'
+printf 'CPAP_DEPLOY_ROOT=%s\n' "$PHYSICAL_ROOT" >>"$SAVED_CONFIG"
+reject config_deploy_root "$SAVED_CONFIG"
+printf 'CPAP_DEPLOY_ROOT=\n' >"$SAVED_CONFIG"
+reject config_deploy_root "$SAVED_CONFIG"
+printf 'CPAP_DEPLOY_ROOT=%s\n' "$TEST_ROOT/removed-deployment" >"$SAVED_CONFIG"
+reject resolve_operator_deploy_root "$SAVED_CONFIG" "$TEST_ROOT/current" "$TEST_ROOT/legacy"
+[ ! -e "$TEST_ROOT/removed-deployment" ] || fail 'missing saved root was recreated'
+printf 'CPAP_DEPLOY_ROOT=$(touch %s)\n' "$TEST_ROOT/injected" >"$SAVED_CONFIG"
+reject config_deploy_root "$SAVED_CONFIG"
+[ ! -e "$TEST_ROOT/injected" ] || fail 'saved configuration was executed'
+rm "$SAVED_CONFIG"
+ln -s runtime-file "$SAVED_CONFIG"
+reject config_deploy_root "$SAVED_CONFIG"
+rm "$SAVED_CONFIG"
+write_config "$SAVED_CONFIG" example.test external "$PHYSICAL_ROOT"
+
 # The stdin entry must resolve before replacing run.sh, and pass a physical root
 # even to a downloaded installer that does not itself know about aliases.
 PIPE_OPERATOR="$TEST_ROOT/alias-operator"
@@ -84,6 +124,24 @@ sed "s|/opt/codex-cpa-cluster|$TEST_ROOT/legacy|g" "$ROOT_DIR/scripts/run.sh" >"
 )
 [ "$(cat "$TEST_ROOT/root-capture")" = "$(printf '%s\n' "$PHYSICAL_ROOT" "$PHYSICAL_ROOT")" ] \
   || fail 'legacy runtime input conflicted with the resolved root after bootstrap'
+sed "s|/opt/codex-cpa-cluster|$TEST_ROOT/current|g" "$ROOT_DIR/scripts/run.sh" >"$TEST_ROOT/saved-bootstrap.sh"
+(
+  unset CPAP_DEPLOY_ROOT CPAC_DEPLOY_ROOT
+  CPAP_ALLOW_NON_ROOT=true CPAP_STAGING_ROOT="$PIPE_OPERATOR" \
+    CPAP_RUN_ASSET_URL="file://$TEST_ROOT/capture-installer.sh" ROOT_CAPTURE="$TEST_ROOT/root-capture" \
+    sh -s -- help --config "$SAVED_CONFIG" <"$TEST_ROOT/saved-bootstrap.sh" >/dev/null
+)
+[ "$(cat "$TEST_ROOT/root-capture")" = "$(printf '%s\n' "$PHYSICAL_ROOT" unset)" ] \
+  || fail 'stdin bootstrap did not reuse --config root in an ambiguous layout'
+cp "$ROOT_DIR/scripts/run.sh" "$PIPE_OPERATOR/run.sh"
+(
+  unset CPAP_DEPLOY_ROOT CPAC_DEPLOY_ROOT
+  CPAP_ALLOW_NON_ROOT=true CPAP_STAGING_ROOT="$PIPE_OPERATOR" CPAP_CONFIG_FILE="$SAVED_CONFIG" \
+    CPAP_RUN_ASSET_URL="file://$TEST_ROOT/capture-installer.sh" \
+    sh -s -- help <"$TEST_ROOT/saved-bootstrap.sh" >/dev/null 2>&1
+)
+cmp -s "$ROOT_DIR/scripts/run.sh" "$PIPE_OPERATOR/run.sh" \
+  || fail 'stdin bootstrap removed saved-root support with an older installer'
 for invalid_root in "$TEST_ROOT/dangling-runtime" "$TEST_ROOT/loop-a" "$TEST_ROOT/file-runtime"; do
   printf '%s\n' preserved-script >"$PIPE_OPERATOR/run.sh"
   reject env CPAP_ALLOW_NON_ROOT=true CPAP_DEPLOY_ROOT="$invalid_root" CPAP_STAGING_ROOT="$PIPE_OPERATOR" \
@@ -238,6 +296,12 @@ if update_operator_script "$RELEASE/run.sh" >"$TEST_ROOT/pre-alias-update.log"; 
   fail 'older Pool release removed runtime alias support'
 fi
 cmp -s "$ROOT_DIR/scripts/run.sh" "$SCRIPT_PATH" || fail 'pre-alias installer replaced the current entrypoint'
+
+printf '%s\n' '# CPAP_RUNTIME_ROOT_ALIAS=1' >>"$RELEASE/run.sh"
+if update_operator_script "$RELEASE/run.sh" >"$TEST_ROOT/pre-config-update.log"; then
+  fail 'older release removed saved-root support'
+fi
+cmp -s "$ROOT_DIR/scripts/run.sh" "$SCRIPT_PATH" || fail 'pre-config installer replaced the current entrypoint'
 
 printf '%s\n' immutable-archive >"$RELEASE/codex-cpa-cluster-v9.8.7.tar.gz"
 (

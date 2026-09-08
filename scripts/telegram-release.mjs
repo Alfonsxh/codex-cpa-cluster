@@ -99,7 +99,7 @@ function formatSection(text) {
     }).join("");
 }
 export function renderMessage(release, repo) {
-  const text = `🎉 <b>CCPA ${escapeHTML(release.tag_name)} 正式发布</b>\n\n<b>本次更新</b>\n${formatSection(section(release.body || "", "社群摘要"))}\n\n<b>升级提示</b>\n${formatSection(section(release.body || "", "升级提示"))}`;
+  const text = `🎉 <b>CCPA ${escapeHTML(release.tag_name)} 正式发布</b>\n\n<b>本次更新</b>\n\n${formatSection(section(release.body || "", "社群摘要"))}\n\n<b>升级提示</b>\n\n${formatSection(section(release.body || "", "升级提示"))}`;
   requireValue(text.length <= 3800, "群通知过长；请精简 Release 的社群摘要和升级提示");
   return { text, parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[
     { text: "发布详情", url: `https://github.com/${repo}/releases/tag/${release.tag_name}` },

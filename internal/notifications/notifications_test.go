@@ -108,7 +108,7 @@ func TestQuotaRowsAndMarkdownUseAccountSummary(t *testing.T) {
 	for _, row := range rows {
 		got = append(got, row.Account+":"+row.Level)
 	}
-	want := []string{"cpa-10:exhausted", "cpa-3:unavailable", "cpa-1:normal", "cpa-2:normal"}
+	want := []string{"cpa-10:exhausted", "cpa-1:normal", "cpa-2:normal", "cpa-3:unavailable"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("row ordering = %v", got)
 	}
@@ -129,9 +129,9 @@ func TestQuotaRowsAndMarkdownUseAccountSummary(t *testing.T) {
 			t.Fatalf("markdown is missing %q:\n%s", expected, content)
 		}
 	}
-	if !(strings.Index(content, "| 🔴 cpa-10 |") < strings.Index(content, "| ⚪ cpa-3 |") &&
-		strings.Index(content, "| ⚪ cpa-3 |") < strings.Index(content, "| 🟢 cpa-1 |") &&
-		strings.Index(content, "| 🟢 cpa-1 |") < strings.Index(content, "| 🟢 cpa-2 |")) {
+	if !(strings.Index(content, "| 🔴 cpa-10 |") < strings.Index(content, "| 🟢 cpa-1 |") &&
+		strings.Index(content, "| 🟢 cpa-1 |") < strings.Index(content, "| 🟢 cpa-2 |") &&
+		strings.Index(content, "| 🟢 cpa-2 |") < strings.Index(content, "| ⚪ cpa-3 |")) {
 		t.Fatalf("markdown row ordering:\n%s", content)
 	}
 }

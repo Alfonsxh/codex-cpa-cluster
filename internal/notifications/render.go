@@ -69,13 +69,22 @@ func QuotaRows(snapshot Snapshot, thresholdPercent float64, onlyKeys map[string]
 		}
 		rows = append(rows, row)
 	}
-	priority := map[string]int{"exhausted": 0, "warning": 1, "unavailable": 2, "normal": 3}
 	sort.SliceStable(rows, func(left int, right int) bool {
-		if priority[rows[left].Level] != priority[rows[right].Level] {
-			return priority[rows[left].Level] < priority[rows[right].Level]
+		// Keep the report focused on weekly consumption: accounts with a
+		// higher used percentage always appear first, regardless of status.
+		// Accounts without a usable quota value are placed after measured rows.
+		leftUsed, rightUsed := rows[left].UsedPercent, rows[right].UsedPercent
+		if leftUsed == nil || rightUsed == nil {
+			if leftUsed != nil {
+				return true
+			}
+			if rightUsed != nil {
+				return false
+			}
+			return naturalCompare(rows[left].Account, rows[right].Account) < 0
 		}
-		if rows[left].UsedPercent != nil && rows[right].UsedPercent != nil && *rows[left].UsedPercent != *rows[right].UsedPercent {
-			return *rows[left].UsedPercent > *rows[right].UsedPercent
+		if *leftUsed != *rightUsed {
+			return *leftUsed > *rightUsed
 		}
 		return naturalCompare(rows[left].Account, rows[right].Account) < 0
 	})

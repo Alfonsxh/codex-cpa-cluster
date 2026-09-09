@@ -27,6 +27,10 @@ var strictReleaseSemverPattern = regexp.MustCompile(
 	`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`,
 )
 
+// The installer also accepts dotted pre-release tags. Normalize that separator
+// only for comparisons; retain the published tag in the displayed version.
+var dottedReleasePrereleasePattern = regexp.MustCompile(`^(v?[0-9]+\.[0-9]+\.[0-9]+)\.(rc|alpha|beta)(\.[0-9A-Za-z.-]+)?$`)
+
 type ReleaseCatalog interface {
 	LatestRelease(context.Context) (string, error)
 }
@@ -211,6 +215,7 @@ func readDeploymentVersionMarker(root string) (string, bool, error) {
 
 func normalizedSemver(value string) string {
 	value = strings.TrimSpace(value)
+	value = dottedReleasePrereleasePattern.ReplaceAllString(value, "$1-$2$3")
 	if !strictReleaseSemverPattern.MatchString(value) {
 		return ""
 	}

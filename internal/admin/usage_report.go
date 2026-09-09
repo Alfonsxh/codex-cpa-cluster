@@ -18,6 +18,15 @@ type weeklyUsageReader interface {
 
 func (server *Server) exportWeeklyUsage(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
+	withUnits := false
+	switch c.Query("with_units") {
+	case "", "false":
+	case "true":
+		withUnits = true
+	default:
+		writeError(c, http.StatusBadRequest, "with_units 必须为 true 或 false", "invalid_report_format")
+		return
+	}
 	reader, ok := server.usage.(weeklyUsageReader)
 	if !ok {
 		writeError(c, http.StatusServiceUnavailable, "用量导出服务尚未就绪", "usage_not_ready")
@@ -76,7 +85,7 @@ func (server *Server) exportWeeklyUsage(c *gin.Context) {
 		server.reportError(c, err)
 		return
 	}
-	data, err := usagereport.XLSX(ctx, report)
+	data, err := usagereport.XLSX(ctx, report, usagereport.XLSXOptions{WithUnits: withUnits})
 	if err != nil {
 		server.reportError(c, err)
 		return

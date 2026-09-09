@@ -67,8 +67,8 @@ export function readReleaseStatus(fresh = false, signal?: AbortSignal): Promise<
   return apiRequest<ReleaseStatus>(`/admin/api/release${fresh ? "?fresh=1" : ""}`, { signal });
 }
 
-export async function exportWeeklyUsage(weekStart: string, signal?: AbortSignal) {
-  const query = new URLSearchParams({ week_start: weekStart });
+export async function exportWeeklyUsage(weekStart: string, signal?: AbortSignal, withUnits = false) {
+  const query = new URLSearchParams({ week_start: weekStart, with_units: String(withUnits) });
   const response = await apiResponse(`/admin/api/overview/usage-report.xlsx?${query}`, {
     signal,
     headers: { Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }

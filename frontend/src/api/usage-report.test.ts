@@ -5,17 +5,17 @@ import { subscribeUnauthorized } from "./client";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("weekly usage binary export", () => {
-  it("downloads an authenticated XLSX with the server filename and no overview filters", async () => {
+  it.each([false, true])("downloads an authenticated XLSX with the selected units mode (%s) and no overview filters", async (withUnits) => {
     const filename = "CCPA_Token周报_2026-08-31_2026-09-06.xlsx";
     const fetchMock = vi.fn().mockResolvedValue(new Response("workbook-bytes", { headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename*=utf-8''${encodeURIComponent(filename)}`
     } }));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await exportWeeklyUsage("2026-08-31");
+    const result = await exportWeeklyUsage("2026-08-31", undefined, withUnits);
     expect(result.filename).toBe(filename);
     expect(result.blob.size).toBe(14);
-    expect(fetchMock).toHaveBeenCalledWith("/admin/api/overview/usage-report.xlsx?week_start=2026-08-31", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith(`/admin/api/overview/usage-report.xlsx?week_start=2026-08-31&with_units=${withUnits}`, expect.objectContaining({ credentials: "same-origin" }));
   });
 
   it("uses normal session expiry handling for failed downloads", async () => {

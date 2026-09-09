@@ -78,6 +78,24 @@ func TestAdminWeeklyReportAuthorizationDefaultsAndDownload(t *testing.T) {
 	}
 	response = performAdminRequest(server, http.MethodGet, path+"?week_start=2026-09-08", nil, headers, nil)
 	assertAdminError(t, response, http.StatusBadRequest, "invalid_report_week")
+	reader.windows = nil
+	response = performAdminRequest(server, http.MethodGet, path+"?with_units=invalid", nil, headers, nil)
+	assertAdminError(t, response, http.StatusBadRequest, "invalid_report_format")
+	if len(reader.windows) != 0 {
+		t.Fatal("invalid units option queried usage")
+	}
+	response = performAdminRequest(server, http.MethodGet, path+"?with_units=true", nil, headers, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("download with units: %d %s", response.Code, response.Body.String())
+	}
+	withUnits, err := excelize.OpenReader(bytes.NewReader(response.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer withUnits.Close()
+	if value, err := withUnits.GetCellValue("周报总览", "B6"); err != nil || value != "400 Token" {
+		t.Fatalf("units option was not applied: %q %v", value, err)
+	}
 	server.usageReportMu.Lock()
 	response = performAdminRequest(server, http.MethodGet, path, nil, headers, nil)
 	server.usageReportMu.Unlock()

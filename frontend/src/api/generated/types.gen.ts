@@ -3373,6 +3373,10 @@ export type ExportAdminWeeklyUsageData = {
          * Monday date in system.timezone, from 1970 and no later than this week
          */
         week_start?: string;
+        /**
+         * Display Token cells and chart axes with K/M/B units while retaining numeric values; false displays complete numbers
+         */
+        with_units?: boolean;
     };
     url: '/admin/api/overview/usage-report.xlsx';
 };

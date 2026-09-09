@@ -1216,6 +1216,10 @@ paths:
           in: query
           description: Monday date in system.timezone, from 1970 and no later than this week
           schema: { type: string, format: date }
+        - name: with_units
+          in: query
+          description: Display Token cells and chart axes with K/M/B units while retaining numeric values; false displays complete numbers
+          schema: { type: boolean, default: false }
       responses:
         "200":
           description: Complete XLSX report; current-week future days remain blank

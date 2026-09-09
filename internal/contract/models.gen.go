@@ -4224,6 +4224,9 @@ type GetAdminOverviewUsageParamsTokenMode string
 type ExportAdminWeeklyUsageParams struct {
 	// WeekStart Monday date in system.timezone, from 1970 and no later than this week
 	WeekStart *openapi_types.Date `form:"week_start,omitempty" json:"week_start,omitempty"`
+
+	// WithUnits Display Token cells and chart axes with K/M/B units while retaining numeric values; false displays complete numbers
+	WithUnits *bool `form:"with_units,omitempty" json:"with_units,omitempty"`
 }
 
 // GetAdminReleaseStatusParams defines parameters for GetAdminReleaseStatus.

@@ -3,6 +3,7 @@ package usagereport
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/xuri/excelize/v2"
@@ -10,17 +11,31 @@ import (
 
 const ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+type XLSXOptions struct {
+	WithUnits bool
+}
+
+type tokenStyleKey struct {
+	base   int
+	format string
+}
+
 type workbook struct {
 	file                                                     *excelize.File
 	ctx                                                      context.Context
 	err                                                      error
 	title, header, text, number, percent, delta, total, note int
+	withUnits                                                bool
+	tokenStyles                                              map[tokenStyleKey]int
 }
 
 // XLSX returns an entirely generated workbook before HTTP headers are written.
 // SetCellValue writes labels as strings, never formulas or hyperlinks.
-func XLSX(ctx context.Context, report Report) ([]byte, error) {
-	x := &workbook{file: excelize.NewFile(), ctx: ctx}
+func XLSX(ctx context.Context, report Report, options ...XLSXOptions) ([]byte, error) {
+	x := &workbook{file: excelize.NewFile(), ctx: ctx, tokenStyles: map[tokenStyleKey]int{}}
+	if len(options) > 0 {
+		x.withUnits = options[0].WithUnits
+	}
 	defer x.file.Close()
 	x.check(x.file.SetSheetName("Sheet1", "周报总览"))
 	for _, name := range []string{"团队统计", "账号统计", "个人统计", "每日趋势"} {
@@ -76,13 +91,63 @@ func cell(col, row int) string {
 	return name
 }
 
-func (x *workbook) row(sheet string, row int, values []any, style int) {
+func (x *workbook) row(sheet string, row int, values []any, style int, tokenColumns ...int) {
 	if x.err != nil {
 		return
 	}
 	x.check(x.file.SetSheetRow(sheet, cell(1, row), &values))
 	x.check(x.file.SetCellStyle(sheet, cell(1, row), cell(len(values), row), style))
+	if x.withUnits {
+		for _, col := range tokenColumns {
+			var amount float64
+			switch value := values[col-1].(type) {
+			case int64:
+				amount = float64(value)
+			case float64:
+				amount = value
+			default:
+				continue
+			}
+			tokenStyle := x.tokenStyle(style, amount)
+			if x.err != nil {
+				return
+			}
+			x.check(x.file.SetCellStyle(sheet, cell(col, row), cell(col, row), tokenStyle))
+		}
+	}
 	x.check(x.file.SetRowHeight(sheet, row, 26))
+}
+
+func compactTokenNumberFormat(amount float64) string {
+	switch absolute := math.Abs(amount); {
+	case absolute >= 1_000_000_000:
+		return `0.00,,," B"`
+	case absolute >= 1_000_000:
+		return `0.00,," M"`
+	case absolute >= 1_000:
+		return `0.00," K"`
+	default:
+		return `#,##0" Token"`
+	}
+}
+
+func (x *workbook) tokenStyle(base int, amount float64) int {
+	key := tokenStyleKey{base: base, format: compactTokenNumberFormat(amount)}
+	if id, ok := x.tokenStyles[key]; ok {
+		return id
+	}
+	style, err := x.file.GetStyle(base)
+	x.check(err)
+	if x.err != nil {
+		return base
+	}
+	// Change only Excel's display format; retain the numeric cell value and
+	// the original row's font, alignment and total-row background.
+	style.NumFmt = 0
+	style.CustomNumFmt = &key.format
+	id := x.style(style)
+	x.tokenStyles[key] = id
+	return id
 }
 
 func (x *workbook) merged(sheet, from, to string, value any, style int) {
@@ -167,11 +232,11 @@ func (x *workbook) details(r Report) {
 	}
 	x.row("团队统计", 5, []any{"排名", "团队", "活跃人数", "原始 Token", "加权 Token", "消耗占比", "人均加权 Token", "上期加权 Token", "环比", "请求次数", "成功率", "上期记录"}, x.header)
 	for i, e := range r.Teams {
-		x.row("团队统计", i+6, []any{i + 1, e.Name, e.Current.Users, e.Current.TotalTokens, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, r.Current.WeightedTokens), ratio(e.Current.WeightedTokens, int64(e.Current.Users)), e.Previous.WeightedTokens, change(e.Current.WeightedTokens, e.Previous.WeightedTokens), e.Current.RequestCount, ratio(e.Current.SuccessCount, e.Current.RequestCount), comparisonStatus(e.Previous)}, x.number)
+		x.row("团队统计", i+6, []any{i + 1, e.Name, e.Current.Users, e.Current.TotalTokens, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, r.Current.WeightedTokens), ratio(e.Current.WeightedTokens, int64(e.Current.Users)), e.Previous.WeightedTokens, change(e.Current.WeightedTokens, e.Previous.WeightedTokens), e.Current.RequestCount, ratio(e.Current.SuccessCount, e.Current.RequestCount), comparisonStatus(e.Previous)}, x.number, 4, 5, 7, 8)
 		x.check(x.file.SetCellStyle("团队统计", cell(2, i+6), cell(2, i+6), x.text))
 	}
 	m, p := r.Current, r.Previous
-	x.row("团队统计", len(r.Teams)+7, []any{"合计", "全部团队及未分配", m.Users, m.TotalTokens, m.WeightedTokens, ratio(m.WeightedTokens, m.WeightedTokens), ratio(m.WeightedTokens, int64(m.Users)), p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, ratio(m.SuccessCount, m.RequestCount), comparisonStatus(p)}, x.total)
+	x.row("团队统计", len(r.Teams)+7, []any{"合计", "全部团队及未分配", m.Users, m.TotalTokens, m.WeightedTokens, ratio(m.WeightedTokens, m.WeightedTokens), ratio(m.WeightedTokens, int64(m.Users)), p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, ratio(m.SuccessCount, m.RequestCount), comparisonStatus(p)}, x.total, 4, 5, 7, 8)
 	x.finishTable("团队统计", len(r.Teams)+5, 2, []int{6, 11}, 9, 5)
 	x.row("账号统计", 5, []any{"排名", "CPA 账号", "账号标识", "使用人数", "原始 Token", "加权 Token", "消耗占比", "上期加权 Token", "环比", "请求次数", "成功率", "上期记录"}, x.header)
 	x.check(x.file.SetColWidth("账号统计", "C", "C", 36))
@@ -180,19 +245,19 @@ func (x *workbook) details(r Report) {
 		if id == "" {
 			id = "未识别账号"
 		}
-		x.row("账号统计", i+6, []any{i + 1, id, e.Name, e.Current.Users, e.Current.TotalTokens, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, m.WeightedTokens), e.Previous.WeightedTokens, change(e.Current.WeightedTokens, e.Previous.WeightedTokens), e.Current.RequestCount, ratio(e.Current.SuccessCount, e.Current.RequestCount), comparisonStatus(e.Previous)}, x.number)
+		x.row("账号统计", i+6, []any{i + 1, id, e.Name, e.Current.Users, e.Current.TotalTokens, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, m.WeightedTokens), e.Previous.WeightedTokens, change(e.Current.WeightedTokens, e.Previous.WeightedTokens), e.Current.RequestCount, ratio(e.Current.SuccessCount, e.Current.RequestCount), comparisonStatus(e.Previous)}, x.number, 5, 6, 8)
 		x.check(x.file.SetCellStyle("账号统计", cell(2, i+6), cell(3, i+6), x.text))
 	}
-	x.row("账号统计", len(r.Accounts)+7, []any{"合计", "全部账号", "", m.Users, m.TotalTokens, m.WeightedTokens, ratio(m.WeightedTokens, m.WeightedTokens), p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, ratio(m.SuccessCount, m.RequestCount), comparisonStatus(p)}, x.total)
+	x.row("账号统计", len(r.Accounts)+7, []any{"合计", "全部账号", "", m.Users, m.TotalTokens, m.WeightedTokens, ratio(m.WeightedTokens, m.WeightedTokens), p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, ratio(m.SuccessCount, m.RequestCount), comparisonStatus(p)}, x.total, 5, 6, 8)
 	x.finishTable("账号统计", len(r.Accounts)+5, 3, []int{7, 11}, 9, 6)
 	x.row("个人统计", 5, []any{"排名", "用户", "当前团队", "使用账号数", "活跃天数", "原始 Token", "加权 Token", "消耗占比", "上期加权 Token", "环比", "请求次数", "上期记录"}, x.header)
 	x.check(x.file.SetColWidth("个人统计", "B", "B", 36))
 	x.check(x.file.SetColWidth("个人统计", "C", "C", 28))
 	for i, e := range r.Users {
-		x.row("个人统计", i+6, []any{i + 1, e.Name, e.Team, e.Current.Accounts, e.Current.Days, e.Current.TotalTokens, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, m.WeightedTokens), e.Previous.WeightedTokens, change(e.Current.WeightedTokens, e.Previous.WeightedTokens), e.Current.RequestCount, comparisonStatus(e.Previous)}, x.number)
+		x.row("个人统计", i+6, []any{i + 1, e.Name, e.Team, e.Current.Accounts, e.Current.Days, e.Current.TotalTokens, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, m.WeightedTokens), e.Previous.WeightedTokens, change(e.Current.WeightedTokens, e.Previous.WeightedTokens), e.Current.RequestCount, comparisonStatus(e.Previous)}, x.number, 6, 7, 9)
 		x.check(x.file.SetCellStyle("个人统计", cell(2, i+6), cell(3, i+6), x.text))
 	}
-	x.row("个人统计", len(r.Users)+7, []any{"合计", "全部用户", "", m.Accounts, m.Days, m.TotalTokens, m.WeightedTokens, ratio(m.WeightedTokens, m.WeightedTokens), p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, comparisonStatus(p)}, x.total)
+	x.row("个人统计", len(r.Users)+7, []any{"合计", "全部用户", "", m.Accounts, m.Days, m.TotalTokens, m.WeightedTokens, ratio(m.WeightedTokens, m.WeightedTokens), p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, comparisonStatus(p)}, x.total, 6, 7, 9)
 	x.finishTable("个人统计", len(r.Users)+5, 3, []int{8}, 10, 7)
 }
 
@@ -206,10 +271,10 @@ func (x *workbook) daily(r Report) {
 		if d.Included {
 			values = []any{d.Date.Format(time.DateOnly), weekdays[i], d.Current.TotalTokens, d.Current.WeightedTokens, d.PreviousDate.Format(time.DateOnly), d.Previous.WeightedTokens, change(d.Current.WeightedTokens, d.Previous.WeightedTokens), d.Current.RequestCount, d.Current.Accounts, d.Current.Teams, d.Current.Users, comparisonStatus(d.Previous)}
 		}
-		x.row(sheet, i+6, values, x.number)
+		x.row(sheet, i+6, values, x.number, 3, 4, 6)
 	}
 	m, p := r.Current, r.Previous
-	x.row(sheet, 14, []any{"合计（去重）", "", m.TotalTokens, m.WeightedTokens, "", p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, m.Accounts, m.Teams, m.Users, comparisonStatus(p)}, x.total)
+	x.row(sheet, 14, []any{"合计（去重）", "", m.TotalTokens, m.WeightedTokens, "", p.WeightedTokens, change(m.WeightedTokens, p.WeightedTokens), m.RequestCount, m.Accounts, m.Teams, m.Users, comparisonStatus(p)}, x.total, 3, 4, 6)
 	x.finishTable(sheet, 12, 2, nil, 7, 4)
 }
 
@@ -230,7 +295,11 @@ func (x *workbook) summary(r Report) {
 		{"活跃人数", m.Users, p.Users, m.Users - p.Users},
 	}
 	for i, values := range metrics {
-		x.row(sheet, i+6, values, x.number)
+		var tokenColumns []int
+		if i < 2 {
+			tokenColumns = []int{2, 3}
+		}
+		x.row(sheet, i+6, values, x.number, tokenColumns...)
 		x.check(x.file.SetCellStyle(sheet, cell(1, i+6), cell(1, i+6), x.text))
 	}
 	x.check(x.file.SetCellStyle(sheet, "D6", "D8", x.delta))
@@ -249,6 +318,14 @@ func (x *workbook) summary(r Report) {
 	for row := 14; row <= 28; row++ {
 		x.check(x.file.SetRowHeight(sheet, row, 22))
 	}
+	chartNumberFormat := "#,##0"
+	if x.withUnits {
+		var peak int64
+		for _, day := range r.Daily {
+			peak = max(peak, day.Current.WeightedTokens, day.Previous.WeightedTokens)
+		}
+		chartNumberFormat = compactTokenNumberFormat(float64(peak))
+	}
 	x.check(x.file.AddChart(sheet, "A14", &excelize.Chart{
 		Type: excelize.Line,
 		Series: []excelize.ChartSeries{
@@ -257,7 +334,7 @@ func (x *workbook) summary(r Report) {
 		},
 		Dimension:    excelize.ChartDimension{Width: 1040, Height: 405},
 		Legend:       excelize.ChartLegend{Position: "bottom"},
-		YAxis:        excelize.ChartAxis{MajorGridLines: true, NumFmt: excelize.ChartNumFmt{CustomNumFmt: "#,##0"}},
+		YAxis:        excelize.ChartAxis{MajorGridLines: true, NumFmt: excelize.ChartNumFmt{CustomNumFmt: chartNumberFormat}},
 		ShowBlanksAs: "gap",
 	}))
 	row := 30
@@ -285,7 +362,7 @@ func (x *workbook) summary(r Report) {
 					name = "未识别账号"
 				}
 			}
-			x.row(sheet, row+2+count, []any{name, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, m.WeightedTokens), change(e.Current.WeightedTokens, e.Previous.WeightedTokens)}, x.number)
+			x.row(sheet, row+2+count, []any{name, e.Current.WeightedTokens, ratio(e.Current.WeightedTokens, m.WeightedTokens), change(e.Current.WeightedTokens, e.Previous.WeightedTokens)}, x.number, 2)
 			x.check(x.file.SetCellStyle(sheet, cell(3, row+2+count), cell(3, row+2+count), x.percent))
 			x.check(x.file.SetCellStyle(sheet, cell(4, row+2+count), cell(4, row+2+count), x.delta))
 			// Give long identifiers enough room without overlapping numeric columns.
@@ -306,6 +383,11 @@ func (x *workbook) summary(r Report) {
 		"活跃指期间有请求。人数与账号数均去重；活跃团队不含未分配，空身份不计入活跃人数／账号数，但用量仍计入合计。",
 		"上期零值或无请求记录时环比为 —；无记录不保证没有实际用量。采集延迟或缺失会影响本表。",
 		"数据范围覆盖全部账号及用户，不受页面搜索、筛选和 Top10 限制。当前身份无请求也保留在明细中。",
+	}
+	if x.withUnits {
+		notes = append(notes, "Token 按 K/M/B 单位显示；单元格保留完整数值，可继续求和、排序与统计。")
+	} else {
+		notes = append(notes, "Token 以完整数值显示，不附加单位；单元格可继续求和、排序与统计。")
 	}
 	for i, note := range notes {
 		x.merged(sheet, cell(1, row+1+i), cell(8, row+1+i), note, x.note)

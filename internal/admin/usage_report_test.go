@@ -60,7 +60,7 @@ func TestAdminWeeklyReportAuthorizationDefaultsAndDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if value, _ := f.GetCellValue("周报总览", "B6"); value != "400" {
+	if value, _ := f.GetCellValue("用量总览", "E8"); value != "400" {
 		t.Fatalf("total=%q", value)
 	}
 	for _, sheet := range f.GetSheetList() {
@@ -93,7 +93,7 @@ func TestAdminWeeklyReportAuthorizationDefaultsAndDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer withUnits.Close()
-	if value, err := withUnits.GetCellValue("周报总览", "B6"); err != nil || value != "400 Token" {
+	if value, err := withUnits.GetCellValue("用量总览", "E8"); err != nil || value != "400 Token" {
 		t.Fatalf("units option was not applied: %q %v", value, err)
 	}
 	server.usageReportMu.Lock()

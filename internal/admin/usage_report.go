@@ -60,7 +60,12 @@ func (server *Server) exportWeeklyUsage(c *gin.Context) {
 		server.internalError(c, "read report accounts", err)
 		return
 	}
-	catalog := usagereport.Catalog{Accounts: map[string]string{}, Teams: map[string]string{}, UserTeams: teamCatalog.currentTeamByUser}
+	routes, err := server.store.ReadRoutes(ctx)
+	if err != nil {
+		server.internalError(c, "read report user bindings", err)
+		return
+	}
+	catalog := usagereport.Catalog{Accounts: map[string]string{}, Teams: map[string]string{}, UserTeams: teamCatalog.currentTeamByUser, UserAccounts: routes}
 	for _, account := range accounts {
 		catalog.Accounts[account.ID] = account.Email
 	}

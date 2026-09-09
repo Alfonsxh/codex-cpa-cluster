@@ -137,7 +137,7 @@ export function WeeklyUsageExport({ onDownloaded }: { onDownloaded: () => void }
             <h3 id="weekly-report-content">导出内容</h3><span>5 个工作表</span>
           </div>
           <ul className="weekly-usage-export-sheets">
-            {["周报总览", "团队统计", "账号统计", "个人统计", "每日趋势"].map((sheet) => <li key={sheet}>{sheet}</li>)}
+            {["用量总览", "团队统计", "账号明细", "用户使用明细", "每日趋势"].map((sheet) => <li key={sheet}>{sheet}</li>)}
           </ul>
           <div className="weekly-usage-export-format">
             <div className="weekly-usage-export-heading">
@@ -155,7 +155,7 @@ export function WeeklyUsageExport({ onDownloaded }: { onDownloaded: () => void }
         <Alert className="weekly-usage-export-method" type="info" showIcon title="统计口径"
           description={<>
             <p>按自然周统计，开始与结束日期自动联动。</p>
-            <p>以加权 Token 为主，同时保留原始 Token；团队按当前归属汇总。</p>
+            <p>按原始 Token 降序，保留加权用量；团队按当前归属汇总。</p>
             <p>{partial ? "本周统计截至生成时间，与上周同一时段对比。" : "所选周与前一个完整自然周对比。"}</p>
           </>} />
         {error ? <Alert type="error" title={error} showIcon /> : null}

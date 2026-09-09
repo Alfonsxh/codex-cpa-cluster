@@ -78,9 +78,10 @@ func (period Period) Windows() []usage.ReportWindow {
 }
 
 type Catalog struct {
-	Accounts  map[string]string // CPA ID -> email, never credentials or runtime configuration
-	Teams     map[string]string // team ID -> display name
-	UserTeams map[string]string // normalized email -> current team ID
+	Accounts     map[string]string // CPA ID -> email, never credentials or runtime configuration
+	Teams        map[string]string // team ID -> display name
+	UserTeams    map[string]string // normalized email -> current team ID
+	UserAccounts map[string]string // normalized email -> current route; never historical attribution
 }
 
 type Metrics struct {
@@ -90,6 +91,8 @@ type Metrics struct {
 
 type Entry struct {
 	ID, Name, Team    string
+	CurrentAccount    string
+	BoundUsers        int
 	Current, Previous Metrics
 }
 
@@ -167,8 +170,8 @@ func sortedEntries(entries map[string]*entryAccumulator) []Entry {
 		result = append(result, entry.entry)
 	}
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].Current.WeightedTokens != result[j].Current.WeightedTokens {
-			return result[i].Current.WeightedTokens > result[j].Current.WeightedTokens
+		if result[i].Current.TotalTokens != result[j].Current.TotalTokens {
+			return result[i].Current.TotalTokens > result[j].Current.TotalTokens
 		}
 		return result[i].ID < result[j].ID
 	})
@@ -242,6 +245,16 @@ func Build(period Period, catalog Catalog, rows []usage.ReportUsageRow) (Report,
 	}
 	if len(teams) > 20_000 || len(accounts) > 20_000 || len(users) > 20_000 {
 		return Report{}, usage.ErrReportTooLarge
+	}
+	// Current bindings are informational and never reattribute historical usage.
+	for user := range catalog.UserTeams {
+		accountID := catalog.UserAccounts[user]
+		users[user].entry.CurrentAccount = accountID
+		if accountID != "" {
+			if account, ok := accounts[accountID]; ok {
+				account.entry.BoundUsers++
+			}
+		}
 	}
 	report.Current, report.Previous = current.metrics(), previous.metrics()
 	report.Teams, report.Accounts, report.Users = sortedEntries(teams), sortedEntries(accounts), sortedEntries(users)

@@ -67,9 +67,10 @@ func reportFixture(t *testing.T) Report {
 		return usage.WeightedMetrics{RawMetrics: usage.RawMetrics{RequestCount: requests, SuccessCount: requests, TotalTokens: raw}, WeightedTokens: weighted}
 	}
 	r, err := Build(p, Catalog{
-		Accounts:  map[string]string{"alpha": "alpha@example.com", "beta": "beta@example.com", "idle": "idle@example.com"},
-		Teams:     map[string]string{"team-a": "研发", "team-idle": "运营"},
-		UserTeams: map[string]string{"alice@example.com": "team-a", "bob@example.com": "team-a", "idle@example.com": ""},
+		Accounts:     map[string]string{"alpha": "alpha@example.com", "beta": "beta@example.com", "idle": "idle@example.com"},
+		Teams:        map[string]string{"team-a": "研发", "team-idle": "运营"},
+		UserTeams:    map[string]string{"alice@example.com": "team-a", "bob@example.com": "team-a", "idle@example.com": ""},
+		UserAccounts: map[string]string{"alice@example.com": "beta", "bob@example.com": "alpha", "idle@example.com": "idle"},
 	}, []usage.ReportUsageRow{
 		{Window: 0, Account: "alpha", User: "alice@example.com", Usage: metrics(1, 50, 100)},
 		{Window: 1, Account: "gamma", User: "gone@example.com", Usage: metrics(1, 10, 10)},
@@ -96,8 +97,8 @@ func TestReportReconcilesAllIdentitiesAndDeduplicatesActivity(t *testing.T) {
 			raw += e.Current.TotalTokens
 			weighted += e.Current.WeightedTokens
 			prior += e.Previous.WeightedTokens
-			if i > 0 && e.Current.WeightedTokens > entries[i-1].Current.WeightedTokens {
-				t.Fatal("not sorted by weighted usage")
+			if i > 0 && e.Current.TotalTokens > entries[i-1].Current.TotalTokens {
+				t.Fatal("not sorted by raw usage")
 			}
 		}
 		if raw != r.Current.TotalTokens || weighted != r.Current.WeightedTokens || prior != r.Previous.WeightedTokens {
@@ -129,15 +130,15 @@ func TestXLSXNumbersTotalsChartsAndUntrustedLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if strings.Join(f.GetSheetList(), ",") != "周报总览,团队统计,账号统计,个人统计,每日趋势" {
+	if strings.Join(f.GetSheetList(), ",") != "用量总览,团队统计,账号明细,用户使用明细,每日趋势" {
 		t.Fatalf("sheets=%v", f.GetSheetList())
 	}
 	for _, tc := range []struct{ sheet, cell, want string }{
-		{"周报总览", "B6", "285"}, {"周报总览", "B7", "167"},
-		{"团队统计", fmt.Sprintf("E%d", len(r.Teams)+7), "285"},
-		{"账号统计", fmt.Sprintf("F%d", len(r.Accounts)+7), "285"},
-		{"个人统计", fmt.Sprintf("G%d", len(r.Users)+7), "285"},
-		{"每日趋势", "D14", "285"}, {"个人统计", "B6", r.Users[0].Name}, {"团队统计", "B6", "+1+1"},
+		{"用量总览", "E8", "285"}, {"用量总览", "B8", "167"},
+		{"团队统计", fmt.Sprintf("G%d", len(r.Teams)+8), "285"},
+		{"账号明细", fmt.Sprintf("L%d", len(r.Accounts)+8), "285"},
+		{"用户使用明细", fmt.Sprintf("K%d", len(r.Users)+8), "285"},
+		{"每日趋势", "E15", "285"}, {"用户使用明细", "B8", r.Users[0].Name}, {"团队统计", "C8", "+1+1"},
 	} {
 		got, err := f.GetCellValue(tc.sheet, tc.cell, excelize.Options{RawCellValue: true})
 		if err != nil || got != tc.want {
@@ -148,11 +149,11 @@ func TestXLSXNumbersTotalsChartsAndUntrustedLabels(t *testing.T) {
 			t.Fatalf("unexpected formula: %s %v", formula, err)
 		}
 	}
-	if kind, _ := f.GetCellType("个人统计", "G6"); kind != excelize.CellTypeNumber && kind != excelize.CellTypeUnset {
+	if kind, _ := f.GetCellType("用户使用明细", "K8"); kind != excelize.CellTypeNumber && kind != excelize.CellTypeUnset {
 		t.Fatalf("numeric token cell type=%v", kind)
 	}
-	panes, err := f.GetPanes("个人统计")
-	if err != nil || !panes.Freeze || panes.XSplit != 3 || panes.YSplit != 5 {
+	panes, err := f.GetPanes("用户使用明细")
+	if err != nil || !panes.Freeze || panes.XSplit != 3 || panes.YSplit != 7 {
 		t.Fatalf("panes=%+v err=%v", panes, err)
 	}
 	z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
@@ -168,7 +169,7 @@ func TestXLSXNumbersTotalsChartsAndUntrustedLabels(t *testing.T) {
 			t.Fatalf("unsafe workbook component %s", file.Name)
 		}
 	}
-	if charts != 1 {
+	if charts != 2 {
 		t.Fatalf("chart count=%d", charts)
 	}
 }
@@ -191,7 +192,7 @@ func TestEmptyPartialWeekHasBlankFutureDaysAndUndefinedComparison(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer f.Close()
-	for _, tc := range []struct{ cell, want string }{{"D8", "0"}, {"D9", ""}, {"F9", ""}, {"G8", "—"}} {
+	for _, tc := range []struct{ cell, want string }{{"E10", "0"}, {"E11", ""}, {"H11", ""}, {"I10", "—"}} {
 		got, err := f.GetCellValue("每日趋势", tc.cell)
 		if err != nil || got != tc.want {
 			t.Fatalf("%s=%q want %q err=%v", tc.cell, got, tc.want, err)

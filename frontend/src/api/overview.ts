@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiRequest, apiResponse } from "./client";
 import type {
   OverviewCatalog,
   OverviewPayload,
@@ -65,4 +65,23 @@ export function readOverviewUsage(options: OverviewUsageOptions, signal?: AbortS
 
 export function readReleaseStatus(fresh = false, signal?: AbortSignal): Promise<ReleaseStatus> {
   return apiRequest<ReleaseStatus>(`/admin/api/release${fresh ? "?fresh=1" : ""}`, { signal });
+}
+
+export async function exportWeeklyUsage(weekStart: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ week_start: weekStart });
+  const response = await apiResponse(`/admin/api/overview/usage-report.xlsx?${query}`, {
+    signal,
+    headers: { Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+  });
+  if (!response.headers.get("Content-Type")?.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) {
+    throw new Error("未收到有效的周报文件，请稍后重试");
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encoded = /filename\*=utf-8''([^;]+)/i.exec(disposition)?.[1];
+  let filename = `CCPA_Token周报_${weekStart}.xlsx`;
+  if (encoded) {
+    try { filename = decodeURIComponent(encoded); } catch { /* Keep the safe fallback. */ }
+  }
+  filename = filename.replace(/[\\/\u0000-\u001f\u007f]/g, "_");
+  return { blob: await response.blob(), filename };
 }

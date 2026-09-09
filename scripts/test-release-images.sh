@@ -165,7 +165,7 @@ EOF
 
 chmod 0755 "$BIN_DIR/git" "$BIN_DIR/releasectl" "$BIN_DIR/docker"
 
-VERSION=v9.9.9-rc.1
+VERSION=v9.9.9
 COMPONENT_PLAN="$TEST_ROOT/components.tsv"
 "$REAL_RELEASECTL" manifest plan --root "$ROOT_DIR" >"$COMPONENT_PLAN"
 
@@ -362,5 +362,18 @@ grep -Fq "$PREFIX_B/codex-cpa-web:sha256-$WEB_DIGEST" "$DOCKER_LOG" \
   || { echo "Registry B Web content tag was not built" >&2; exit 1; }
 ! grep -F 'buildx bake' "$DOCKER_LOG" | grep -Fq "$PREFIX_A/codex-cpa-web" \
   || { echo "Registry A Web was unnecessarily rebuilt" >&2; exit 1; }
+
+# Both accepted RC tag spellings must publish immutable tags without reading or
+# moving latest. The stable cases above continue to exercise latest promotion.
+for RC_VERSION in v2.0.3.rc.1 v2.0.3-rc.1; do
+  reset_scenario
+  run_publish "$PREFIX_A" VERSION="$RC_VERSION" >"$TEST_ROOT/prerelease.log" 2>&1
+  for COMPONENT in control web gateway edge; do
+    test -f "$(state_path "$PREFIX_A/codex-cpa-$COMPONENT:$RC_VERSION")" \
+      || { echo "missing prerelease component: $COMPONENT" >&2; exit 1; }
+  done
+  ! grep -Fq ':latest' "$DOCKER_LOG" \
+    || { echo "prerelease touched latest" >&2; exit 1; }
+done
 
 printf '%s\n' 'release image publication contract tests passed'

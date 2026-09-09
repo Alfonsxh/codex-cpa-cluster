@@ -38,6 +38,7 @@ import { OverviewTokenValue } from "./components/OverviewTokenValue";
 import { formatTokens } from "./formatters";
 import { recentUsageWindows, UsageTimeRangeControl } from "./components/UsageTimeRangeControl";
 import { OnboardingCard } from "./OnboardingCard";
+import { WeeklyUsageExport } from "./components/WeeklyUsageExport";
 
 const { Text } = Typography;
 
@@ -267,15 +268,18 @@ export function OverviewPage() {
               <h3 id="overview-token-monitor-title">Token 使用</h3>
               <p className="section-kicker">TOKEN MONITOR</p>
             </div>
-            <div className="overview-collector-meta" aria-live="polite">
-              <span className={`overview-collector-state ${collectorState(usage.data?.collector.status).tone}`}>
-                {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
-              </span>
-              <time aria-label="最近采集时间">
-                {usage.data?.collector.heartbeat_at
-                  ? formatSiteTimestamp(usage.data.collector.heartbeat_at, getSiteTimezone())
-                  : "—"}
-              </time>
+            <div className="overview-token-heading-actions">
+              <div className="overview-collector-meta" aria-live="polite">
+                <span className={`overview-collector-state ${collectorState(usage.data?.collector.status).tone}`}>
+                  {usage.isPending ? "正在加载" : collectorState(usage.data?.collector.status).label}
+                </span>
+                <time aria-label="最近采集时间">
+                  {usage.data?.collector.heartbeat_at
+                    ? formatSiteTimestamp(usage.data.collector.heartbeat_at, getSiteTimezone())
+                    : "—"}
+                </time>
+              </div>
+              <WeeklyUsageExport onDownloaded={() => showToast("周报已生成，已开始下载")} />
             </div>
           </div>
           <div className="overview-legacy-filters usage-monitor-filters" aria-label="Token Dashboard 变量">

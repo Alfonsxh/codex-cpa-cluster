@@ -3365,6 +3365,60 @@ export type GetAdminOverviewUsageResponses = {
 
 export type GetAdminOverviewUsageResponse = GetAdminOverviewUsageResponses[keyof GetAdminOverviewUsageResponses];
 
+export type ExportAdminWeeklyUsageData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Monday date in system.timezone, from 1970 and no later than this week
+         */
+        week_start?: string;
+    };
+    url: '/admin/api/overview/usage-report.xlsx';
+};
+
+export type ExportAdminWeeklyUsageErrors = {
+    /**
+     * Safe JSON error envelope
+     */
+    400: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    401: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    422: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    429: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    503: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    504: ErrorEnvelope;
+    /**
+     * Safe JSON error envelope
+     */
+    default: ErrorEnvelope;
+};
+
+export type ExportAdminWeeklyUsageError = ExportAdminWeeklyUsageErrors[keyof ExportAdminWeeklyUsageErrors];
+
+export type ExportAdminWeeklyUsageResponses = {
+    /**
+     * Complete XLSX report; current-week future days remain blank
+     */
+    200: Blob | File;
+};
+
+export type ExportAdminWeeklyUsageResponse = ExportAdminWeeklyUsageResponses[keyof ExportAdminWeeklyUsageResponses];
+
 export type RebalanceAdminAccountData = {
     body: RebalanceAccountRequest;
     headers: {

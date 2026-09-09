@@ -431,6 +431,13 @@ while IFS="$TAB" read -r PREFIX COMPONENT DIGEST CONTENT_IMAGE VERSION_IMAGE PLA
     "$PREFIX" "$COMPONENT" "$DIGEST" "$VERSION_IMAGE" "$VERSION_MANIFEST" >>"$PREPARED_FILE"
 done <"$PUBLISH_PLAN"
 
+# Pre-releases publish immutable version/content tags only. The stable update
+# channel must not move even when an RC successfully passes image validation.
+if ! printf '%s' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+  echo "预发布镜像已完成，保留 latest：version=$VERSION revision=$REVISION prefixes=$IMAGE_PREFIXES"
+  exit 0
+fi
+
 # Phase 2: all Registries now contain all immutable tags. Only now may latest
 # move. Existing matching latest tags are reused, making retries idempotent.
 LATEST_REQUESTS="$WORK_DIR/latest-requests.tsv"

@@ -1958,6 +1958,13 @@ a { color: inherit; text-decoration: none; }
 .overview-legacy-toolbar { position: relative; z-index: 4; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 18px; overflow: visible; }
 .overview-token-monitor-toolbar { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 22px 22px 18px; }
 .overview-token-heading-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 18px; }
+.overview-token-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.weekly-usage-export { display: grid; gap: 16px; padding-top: 16px; }
+.weekly-usage-export-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.weekly-usage-export-picker label { margin-right: 8px; font-weight: 600; }
+.weekly-usage-export-period { display: grid; gap: 6px; padding: 14px 16px; border-radius: 8px; background: var(--surface-2); }
+.weekly-usage-export-period span, .weekly-usage-export p { color: var(--muted); }
+.weekly-usage-export p { margin: 0; line-height: 1.7; }
 .overview-legacy-toolbar-title { display: grid; min-width: 140px; gap: 2px; }
 .overview-legacy-toolbar-title h3 { margin: 0; color: var(--ink); font-size: 15px; letter-spacing: -.02em; }
 .overview-legacy-toolbar-title .section-kicker { margin: 7px 0 0; color: var(--accent); font: 650 10px/1.2 var(--mono); letter-spacing: .13em; }

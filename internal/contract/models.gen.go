@@ -4220,6 +4220,12 @@ type GetAdminOverviewUsageParams struct {
 // GetAdminOverviewUsageParamsTokenMode defines parameters for GetAdminOverviewUsage.
 type GetAdminOverviewUsageParamsTokenMode string
 
+// ExportAdminWeeklyUsageParams defines parameters for ExportAdminWeeklyUsage.
+type ExportAdminWeeklyUsageParams struct {
+	// WeekStart Monday date in system.timezone, from 1970 and no later than this week
+	WeekStart *openapi_types.Date `form:"week_start,omitempty" json:"week_start,omitempty"`
+}
+
 // GetAdminReleaseStatusParams defines parameters for GetAdminReleaseStatus.
 type GetAdminReleaseStatusParams struct {
 	Fresh *GetAdminReleaseStatusParamsFresh `form:"fresh,omitempty" json:"fresh,omitempty"`

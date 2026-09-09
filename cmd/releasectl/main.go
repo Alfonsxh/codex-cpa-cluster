@@ -74,7 +74,7 @@ var componentInputs = map[string][]string{
 		"internal/bootstrap", "internal/controlplane", "internal/failover",
 		"internal/gateway", "internal/identity", "internal/logmaintenance", "internal/notifications",
 		"internal/ownership", "internal/portal", "internal/quota", "internal/runtimeops",
-		"internal/scheduler", "internal/sitetime", "internal/snapshotfile", "internal/usage",
+		"internal/scheduler", "internal/sitetime", "internal/snapshotfile", "internal/usage", "internal/usagereport",
 	},
 	"web": {
 		".dockerignore", "Dockerfile", "docker-bake.hcl", "go.mod", "go.sum", "cmd/web", "internal/web",

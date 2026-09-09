@@ -181,6 +181,7 @@ type Server struct {
 	configurationApplier    ConfigurationApplier
 	configurationLock       sync.Locker
 	releaseStatusMu         sync.Mutex
+	usageReportMu           sync.Mutex
 	releaseStatusCache      *releaseLookupStatus
 	releaseStatusCacheUntil time.Time
 	sessionGeneration       atomic.Int64
@@ -386,6 +387,7 @@ func (server *Server) registerRoutes() {
 	authenticated.GET("/overview/catalog", server.readOverviewCatalog)
 	authenticated.GET("/overview/status", server.readOverviewStatus)
 	authenticated.GET("/overview/usage", server.readOverviewUsage)
+	authenticated.GET("/overview/usage-report.xlsx", server.exportWeeklyUsage)
 	authenticated.GET("/onboarding", server.readOnboarding)
 	authenticated.PUT("/onboarding/preferences", server.limitBody(defaultBodyLimit), server.updateOnboardingPreferences)
 	authenticated.GET("/images/cliproxy", server.readCPAImageStatus)

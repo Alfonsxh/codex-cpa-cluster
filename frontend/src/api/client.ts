@@ -37,6 +37,12 @@ export function subscribeUnauthorized(listener: (event: UnauthorizedEvent) => vo
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await apiResponse(path, init);
+  return (await response.json()) as T;
+}
+
+// Binary exports share session-expiry handling with ordinary JSON requests.
+export async function apiResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
@@ -74,7 +80,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     }
     throw error;
   }
-  return (await response.json()) as T;
+  return response;
 }
 
 function parseRetryAfterSeconds(value: string | null): number {

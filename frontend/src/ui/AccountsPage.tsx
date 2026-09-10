@@ -1009,7 +1009,7 @@ function accountColumns({
                   type="button"
                   aria-label="重置"
                   disabled={!account.resettable}
-                  title={account.resettable ? `重置 ${account.reset_window_labels?.join("、") || "周限额"}` : "该账号当前没有可重置的周限额"}
+                  title={account.resettable ? `重置 ${account.reset_window_labels?.join("、") || "周限额"}` : account.reset_credit_count === 0 ? "没有剩余重置次数" : "周额度尚未耗尽或状态待刷新"}
                   onClick={() => onResetQuota(account)}
                 >重置</button>
               </div>
@@ -1544,7 +1544,7 @@ function accountStatusLabel(account: Account) {
 
 function accountResetCreditLabel(account: Account) {
   return typeof account.reset_credit_count === "number"
-    ? `${account.reset_credit_count} 次可用`
+    ? `剩余 ${account.reset_credit_count} 次`
     : "额度未知";
 }
 

@@ -27,6 +27,10 @@ type WeeklyWindow struct {
 }
 
 type AccountQuota struct {
+	// Retained only during this fetch round to bind native recovery to the same
+	// upstream identity. Never persisted or exposed through the quota API.
+	oauthAccountID   string
+	recoveryAllowed  bool
 	Account          string         `json:"account"`
 	Status           string         `json:"status"`
 	PlanType         *string        `json:"plan_type"`

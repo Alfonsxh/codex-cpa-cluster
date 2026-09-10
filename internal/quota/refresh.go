@@ -138,6 +138,8 @@ func (refresher *Refresher) RunOnce(ctx context.Context) (Snapshot, error) {
 				result.Accounts[index] = unavailableAccount(account.ID, "unavailable")
 			default:
 				result.Accounts[index] = Normalize(account.ID, payload)
+				result.Accounts[index].oauthAccountID = auth.AccountID
+				result.Accounts[index].recoveryAllowed = allRateLimitsAllowRecovery(payload)
 			}
 			return nil
 		})

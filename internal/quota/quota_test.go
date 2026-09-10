@@ -272,6 +272,38 @@ func TestNormalizeMatchesDefaultAndAdditionalWeeklyContract(t *testing.T) {
 	}
 }
 
+func TestNormalizeWeeklyResetUsesExhaustionDespiteUpstreamHints(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		used         float64
+		seconds      int64
+		limitReached bool
+		wantWindows  int
+		wantReset    bool
+	}{
+		{name: "weekly exhausted", used: 100, seconds: WeeklyWindowSeconds, wantWindows: 1, wantReset: true},
+		{name: "weekly has remaining quota", used: 99.99, seconds: WeeklyWindowSeconds, wantWindows: 1},
+		{name: "fresh weekly period", used: 0, seconds: WeeklyWindowSeconds, wantWindows: 1},
+		{name: "short window alone is not weekly", used: 100, seconds: 18000, limitReached: true},
+		{name: "source limit alone does not exhaust weekly", used: 20, seconds: WeeklyWindowSeconds, limitReached: true, wantWindows: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Normalize("alpha", map[string]any{
+				"rate_limit": map[string]any{
+					"allowed": true, "limit_reached": test.limitReached,
+					"primary_window": map[string]any{"limit_window_seconds": test.seconds, "used_percent": test.used},
+				},
+				"rate_limit_reached_type":  nil,
+				"rate_limit_reset_credits": map[string]any{"available_count": 3, "applicable_available_count": 0},
+			})
+			if len(result.WeeklyWindows) != test.wantWindows ||
+				(test.wantWindows > 0 && result.WeeklyWindows[0].Resettable != test.wantReset) {
+				t.Fatalf("weekly windows = %#v", result.WeeklyWindows)
+			}
+		})
+	}
+}
+
 func TestRefresherPublishesOrderedSecretFreeSnapshot(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -336,6 +368,12 @@ func TestRefresherPublishesOrderedSecretFreeSnapshot(t *testing.T) {
 			t.Fatalf("runtime state leaked secret %q: %s", secret, raw)
 		}
 	}
+	if snapshot.Accounts[0].oauthAccountID != "official-alpha" || !snapshot.Accounts[0].recoveryAllowed ||
+		state.Snapshot.Accounts[0].oauthAccountID != "" || state.Snapshot.Accounts[0].recoveryAllowed {
+		t.Fatal("recovery identity must remain bound only to the live fetch round")
+	}
+	snapshot.Accounts[0].oauthAccountID = ""
+	snapshot.Accounts[0].recoveryAllowed = false
 	if !reflect.DeepEqual(snapshot.Accounts, state.Snapshot.Accounts) {
 		t.Fatalf("stored snapshot differs: %#v != %#v", state.Snapshot.Accounts, snapshot.Accounts)
 	}

@@ -276,7 +276,7 @@ describe("AccountsPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByText("1 次可用")).toBeInTheDocument();
+    expect(await screen.findByText("剩余 1 次")).toBeInTheDocument();
     expect(requestsTo(fetchMock, "/admin/api/accounts/quota-reset?account=alpha")).toHaveLength(0);
     const resetButton = screen.getAllByRole("button", { name: "重置" }).find((button) => !button.hasAttribute("disabled"));
     expect(resetButton).toBeDefined();
@@ -920,7 +920,7 @@ describe("AccountsPage", () => {
     renderPage();
 
     expect(await screen.findByText("alpha", { selector: ".account-name-cell .table-primary" })).toBeInTheDocument();
-    expect(screen.queryByText(/undefined 次可用/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/剩余 undefined 次/)).not.toBeInTheDocument();
     expect(screen.getAllByText("额度未知")).toHaveLength(2);
     expect(screen.getByText("已停止", { selector: ".account-runtime-status" })).toHaveAttribute(
       "aria-label",

@@ -83,6 +83,11 @@ func Normalize(account string, payload map[string]any) AccountQuota {
 				effective = 100
 			}
 			_, resettableSource := source.reachedTypeAlias[reachedDetails]
+			// A depleted weekly window can request a reset even when upstream
+			// applicability hints disagree. Keep explicit upstream
+			// eligibility for windows whose percentage has not reached 100 yet.
+			resettable := reported >= 100 ||
+				(applicable != nil && *applicable > 0 && limitReached && resettableSource)
 			result.WeeklyWindows = append(result.WeeklyWindows, WeeklyWindow{
 				Key: source.key + ":" + slot, Label: source.label,
 				MeteredFeature: source.meteredFeature, WindowSlot: slot,
@@ -90,7 +95,7 @@ func Normalize(account string, payload map[string]any) AccountQuota {
 				ReportedUsedPercent: reported, ResetAt: nonnegativeInt(window["reset_at"]),
 				ResetAfterSeconds: nonnegativeInt(window["reset_after_seconds"]),
 				WindowSeconds:     *windowSeconds, LimitReached: limitReached,
-				Resettable: applicable != nil && *applicable > 0 && limitReached && resettableSource,
+				Resettable: resettable,
 			})
 		}
 	}

@@ -133,7 +133,10 @@ func run(config appConfig) error {
 		if config.IntervalSet {
 			interval = config.Interval
 		}
-		refresher := &quota.Refresher{Root: config.Root, Store: store}
+		refresher := recoveringRefresher{
+			refreshRunner: &quota.Refresher{Root: config.Root, Store: store},
+			recovery:      quota.NewCooldownRecovery(store), logger: logger,
+		}
 		if config.Once {
 			snapshot, err := refresher.RunOnce(runContext)
 			if err != nil {

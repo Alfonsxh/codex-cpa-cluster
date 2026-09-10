@@ -224,8 +224,7 @@ func (resetter *Resetter) Reset(
 				eligibleWindows = append(eligibleWindows, window)
 			}
 		}
-		applicable := nonnegativeInt(object(usagePayload["rate_limit_reset_credits"])["applicable_available_count"])
-		if applicable == nil || *applicable == 0 || len(eligibleWindows) == 0 {
+		if len(eligibleWindows) == 0 {
 			return ErrResetUnavailable
 		}
 		consumePayload, requestError := resetter.client.ConsumeResetCredit(ctx, auth, proxyURL, creditID)

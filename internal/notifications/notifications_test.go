@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -108,7 +109,7 @@ func TestQuotaRowsAndMarkdownUseAccountSummary(t *testing.T) {
 	for _, row := range rows {
 		got = append(got, row.Account+":"+row.Level)
 	}
-	want := []string{"cpa-10:exhausted", "cpa-1:normal", "cpa-2:normal", "cpa-3:unavailable"}
+	want := []string{"cpa-1:normal", "cpa-2:normal", "cpa-10:exhausted", "cpa-3:unavailable"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("row ordering = %v", got)
 	}
@@ -120,7 +121,7 @@ func TestQuotaRowsAndMarkdownUseAccountSummary(t *testing.T) {
 		t.Fatalf("BuildMarkdownV2: %v", err)
 	}
 	for _, expected := range []string{
-		"| 账号 | 周额度已用 | 近1h用户 | 剩余重置次数 | 额度重置时间 |",
+		"| 账号 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |",
 		"> 应用地址：[http://cpa.example.com/usage/](http://cpa.example.com/usage/)",
 		"| 🔴 cpa-10 | 100% | 3 | 2", "账号总数 4", "额度正常 2", "耗尽 1", "数据不可用 1",
 		"2026-07-20 10:00:00", "> 预警阈值：90%",
@@ -129,9 +130,9 @@ func TestQuotaRowsAndMarkdownUseAccountSummary(t *testing.T) {
 			t.Fatalf("markdown is missing %q:\n%s", expected, content)
 		}
 	}
-	if !(strings.Index(content, "| 🔴 cpa-10 |") < strings.Index(content, "| 🟢 cpa-1 |") &&
-		strings.Index(content, "| 🟢 cpa-1 |") < strings.Index(content, "| 🟢 cpa-2 |") &&
-		strings.Index(content, "| 🟢 cpa-2 |") < strings.Index(content, "| ⚪ cpa-3 |")) {
+	if !(strings.Index(content, "| 🟢 cpa-1 |") < strings.Index(content, "| 🟢 cpa-2 |") &&
+		strings.Index(content, "| 🟢 cpa-2 |") < strings.Index(content, "| 🔴 cpa-10 |") &&
+		strings.Index(content, "| 🔴 cpa-10 |") < strings.Index(content, "| ⚪ cpa-3 |")) {
 		t.Fatalf("markdown row ordering:\n%s", content)
 	}
 }
@@ -153,6 +154,135 @@ func TestQuotaRowsExcludeAdditionalWindowsAndDeduplicateAccounts(t *testing.T) {
 	rows = QuotaRows(snapshot, 90, nil)
 	if len(rows) != 1 || rows[0].Level != "unavailable" || rows[0].UsedPercent != nil {
 		t.Fatalf("missing regular quota must not fall back to additional quota: %#v", rows)
+	}
+}
+
+func TestQuotaRowsSortNumericallyWithNaturalTiesAndUnknownLast(t *testing.T) {
+	snapshot := Snapshot{Accounts: []AccountSnapshot{
+		testAccountSnapshot("cpa-1", 90, "常规周限额"),
+		testAccountSnapshot("cpa-10", 2, "常规周限额"),
+		testAccountSnapshot("cpa-3", 10, "常规周限额"),
+		testAccountSnapshot("cpa-2", 2, "常规周限额"),
+		testAccountSnapshot("cpa-20", math.NaN(), "常规周限额"),
+		testAccountSnapshot("cpa-4", math.Inf(1), "常规周限额"),
+	}}
+	var accounts []string
+	for _, row := range QuotaRows(snapshot, 90, nil) {
+		accounts = append(accounts, row.Account)
+	}
+	if got := strings.Join(accounts, ","); got != "cpa-2,cpa-10,cpa-3,cpa-1,cpa-4,cpa-20" {
+		t.Fatalf("account order = %s", got)
+	}
+}
+
+func TestMarkdownEventsUseCompleteTablesAndCurrentQuotaOrdering(t *testing.T) {
+	now := time.Date(2026, 7, 20, 2, 0, 0, 0, time.UTC)
+	resetAt := now.Add(24 * time.Hour).Unix()
+	const publicURL = "https://cpa.example.com/pool/usage/"
+	const header = "| 账号 | 变化 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |"
+	cases := []struct {
+		event    string
+		previous float64
+		current  float64
+		cells    string
+	}{
+		{"warning", 89, 90, "🟠 达到预警：89% → 90% | 90%"},
+		{"exhausted", 99, 100, "🔴 额度耗尽：99% → 100% | 100%"},
+		{"recovered", 100, 0, "🟢 额度恢复：100% → 0% | 0%"},
+		{"recovered_warning", 100, 95, "🟠 额度恢复，仍处于预警范围：100% → 95% | 95%"},
+		{"refreshed", 40, 2, "🔄 周额度已重置：40% → 2% | 2%"},
+	}
+	snapshot := Snapshot{Accounts: []AccountSnapshot{testAccountSnapshot("unaffected", 0, "常规周限额")}}
+	keys := make(map[string]struct{})
+	events := make(map[string]string)
+	previous := make(map[string]WindowRecord)
+	for _, item := range cases {
+		account := testAccountSnapshot(item.event, item.current, "常规周限额")
+		account.Quota.WeeklyWindows[0].ResetAt = &resetAt
+		snapshot.Accounts = append(snapshot.Accounts, account)
+		key := item.event + "|default:primary_window"
+		keys[key] = struct{}{}
+		events[key] = item.event
+		previous[key] = WindowRecord{UsedPercent: item.previous}
+		t.Run(item.event, func(t *testing.T) {
+			content, err := BuildMarkdownV2(snapshot, "额度变化", time.UTC, 90, now,
+				map[string]struct{}{key: {}}, events, publicURL, ReportOptions{PreviousWindows: previous})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expected := range []string{header, "> 本次涉及：**1 个账号**",
+				"> 应用地址：[" + publicURL + "](" + publicURL + ")",
+				"| " + item.event + " | " + item.cells + " | 3 | 2 | 07-21 02:00 |"} {
+				if !strings.Contains(content, expected) {
+					t.Fatalf("missing %q:\n%s", expected, content)
+				}
+			}
+			if strings.Contains(content, "unaffected") || strings.Contains(content, "账号总数") {
+				t.Fatalf("event includes unrelated account summary:\n%s", content)
+			}
+		})
+	}
+	content, err := BuildMarkdownV2(snapshot, "额度变化", time.UTC, 90, now,
+		keys, events, publicURL, ReportOptions{PreviousWindows: previous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, header) || !strings.Contains(content, "> 本次涉及：**5 个账号**") {
+		t.Fatalf("multiple-account table:\n%s", content)
+	}
+	lastIndex := -1
+	for _, event := range []string{"recovered", "refreshed", "warning", "recovered_warning", "exhausted"} {
+		index := strings.Index(content, "| "+event+" |")
+		if index <= lastIndex {
+			t.Fatalf("events are not ordered by current quota:\n%s", content)
+		}
+		lastIndex = index
+	}
+}
+
+func TestMarkdownHeadersKeepConfiguredTimeAndFullApplicationURL(t *testing.T) {
+	now := time.Date(2026, 7, 20, 2, 0, 0, 0, time.UTC)
+	for _, item := range []struct{ timezone, timestamp string }{
+		{"Asia/Shanghai", "2026-07-20 10:00:00"},
+		{"America/New_York", "2026-07-19 22:00:00"},
+		{"UTC", "2026-07-20 02:00:00"},
+	} {
+		t.Run(item.timezone, func(t *testing.T) {
+			config, err := ParseConfig(map[string]any{
+				"system.timezone": item.timezone, "branding.public_base_url": "https://cpa.example.com/pool/",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := BuildMarkdownV2(Snapshot{}, "报告", config.Timezone, 90, now,
+				nil, nil, UsageCenterURL(config.PublicBaseURL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			testMessage, err := BuildTestMarkdownV2(config, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, content := range []string{report, testMessage} {
+				for _, expected := range []string{
+					"> 统计时间：" + item.timestamp + "\n\n",
+					"> 应用地址：[https://cpa.example.com/pool/usage/](https://cpa.example.com/pool/usage/)",
+				} {
+					if !strings.Contains(content, expected) {
+						t.Fatalf("missing %q:\n%s", expected, content)
+					}
+				}
+			}
+			if !strings.Contains(report, "| 暂无匹配账号 | — | — | — | — |") ||
+				!strings.Contains(testMessage, "| 通知类型 | 状态 |\n| :--- | :--- |\n| 通道测试 |") {
+				t.Fatalf("empty report or channel test table missing:\n%s\n%s", report, testMessage)
+			}
+		})
+	}
+	content, err := BuildTestMarkdownV2(Config{ShortName: "CPA"}, now)
+	if err != nil || !strings.Contains(content, "> 应用地址：未配置") ||
+		!strings.Contains(content, "> 统计时间：2026-07-20 02:00:00\n\n") {
+		t.Fatalf("unconfigured URL and timezone = (%q, %v)", content, err)
 	}
 }
 
@@ -304,7 +434,7 @@ func TestWorkerScheduledReportAbsorbsTransitionsAndDisabledPreservesError(t *tes
 	runWorkerAt(t, worker, 9, 0, nil)
 	setQuota(store, "alpha", 4, "ok", cycleEnd+quota.WeeklyWindowSeconds)
 	runWorkerAt(t, worker, 9, 1, []string{"scheduled"})
-	if len(sender.contents) != 1 || !strings.Contains(sender.contents[0], "🔄 周额度已重置") {
+	if len(sender.contents) != 1 || !strings.Contains(sender.contents[0], "🔄 周额度已重置：40% → 4% | 4% |") {
 		t.Fatalf("scheduled transition content = %#v", sender.contents)
 	}
 	state := store.notificationState(t)

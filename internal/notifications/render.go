@@ -71,7 +71,7 @@ func QuotaRows(snapshot Snapshot, thresholdPercent float64, onlyKeys map[string]
 	}
 	sort.SliceStable(rows, func(left int, right int) bool {
 		// Keep the report focused on weekly consumption: accounts with a
-		// higher used percentage always appear first, regardless of status.
+		// lower used percentage always appear first, regardless of status.
 		// Accounts without a usable quota value are placed after measured rows.
 		leftUsed, rightUsed := rows[left].UsedPercent, rows[right].UsedPercent
 		if leftUsed == nil || rightUsed == nil {
@@ -84,7 +84,7 @@ func QuotaRows(snapshot Snapshot, thresholdPercent float64, onlyKeys map[string]
 			return naturalCompare(rows[left].Account, rows[right].Account) < 0
 		}
 		if *leftUsed != *rightUsed {
-			return *leftUsed > *rightUsed
+			return *leftUsed < *rightUsed
 		}
 		return naturalCompare(rows[left].Account, rows[right].Account) < 0
 	})
@@ -153,19 +153,16 @@ func BuildMarkdownV2(
 		}
 	}
 	sections := messageHeader(title, location, now, usageCenterURL, thresholdPercent)
-	sections = append(sections, accountSummary(allRows))
 	if len(onlyKeys) > 0 {
 		sections = append(sections, fmt.Sprintf("> 本次涉及：**%d 个账号**", len(rows)))
-	}
-	if len(onlyKeys) > 0 && len(rows) == 1 {
-		var previous map[string]WindowRecord
-		if len(options) > 0 {
-			previous = options[0].PreviousWindows
-		}
-		sections = append(sections, accountTransition(rows[0], transitionEvents[rows[0].Key], previous, location, now))
 	} else {
-		sections = append(sections, accountTable(rows, transitionEvents, location, now, len(onlyKeys) > 0))
+		sections = append(sections, accountSummary(allRows))
 	}
+	var previous map[string]WindowRecord
+	if len(options) > 0 {
+		previous = options[0].PreviousWindows
+	}
+	sections = append(sections, accountTable(rows, transitionEvents, previous, location, now, len(onlyKeys) > 0))
 	return boundedMessage(sections)
 }
 
@@ -177,6 +174,8 @@ func messageHeader(title string, location *time.Location, now time.Time, usageCe
 	if usageCenterURL = strings.TrimSpace(usageCenterURL); usageCenterURL != "" {
 		link := strings.NewReplacer("(", "%28", ")", "%29", "[", "%5B", "]", "%5D").Replace(usageCenterURL)
 		sections = append(sections, fmt.Sprintf("> 应用地址：[%s](%s)", link, link))
+	} else {
+		sections = append(sections, "> 应用地址：未配置")
 	}
 	return sections
 }
@@ -185,11 +184,7 @@ func notificationTime(now time.Time, location *time.Location) string {
 	if location == nil {
 		location = time.UTC
 	}
-	label := location.String()
-	if label == "Asia/Shanghai" {
-		label = "北京时间"
-	}
-	return now.In(location).Format("2006-01-02 15:04:05") + "（" + label + "）"
+	return now.In(location).Format("2006-01-02 15:04:05")
 }
 
 func accountSummary(rows []Row) string {
@@ -205,39 +200,34 @@ func accountSummary(rows []Row) string {
 		len(rows), active, counts["normal"], counts["warning"], counts["exhausted"], counts["unavailable"])
 }
 
-func accountTable(rows []Row, transitions map[string]string, location *time.Location, now time.Time, eventsOnly bool) string {
+func accountTable(rows []Row, transitions map[string]string, previous map[string]WindowRecord, location *time.Location, now time.Time, eventsOnly bool) string {
 	icons := map[string]string{"normal": "🟢", "warning": "🟠", "exhausted": "🔴", "unavailable": "⚪"}
+	withChanges := eventsOnly || len(transitions) > 0
 	table := []string{
-		"| 账号 | 周额度已用 | 近1h用户 | 剩余重置次数 | 额度重置时间 |",
+		"| 账号 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |",
 		"| :--- | ---: | ---: | ---: | :--- |",
 	}
-	if len(transitions) > 0 {
+	if withChanges {
 		table = []string{
-			"| 账号 | 变化 | 周额度已用 | 近1h用户 | 剩余重置次数 | 额度重置时间 |",
+			"| 账号 | 变化 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |",
 			"| :--- | :--- | ---: | ---: | ---: | :--- |",
 		}
 	}
-	if eventsOnly {
-		table = []string{"| 账号 | 变化 | 当前已用 |", "| :--- | :--- | ---: |"}
-	}
 	for _, row := range rows {
-		if eventsOnly {
-			table = append(table, "| "+strings.Join([]string{safeCell(row.Account, 32),
-				defaultString(transitionLabels[transitions[row.Key]], "—"), formatPercent(row.UsedPercent)}, " | ")+" |")
-			continue
+		account := safeCell(row.Account, 32)
+		if !eventsOnly {
+			account = icons[row.Level] + " " + account
 		}
-		cells := []string{icons[row.Level] + " " + safeCell(row.Account, 32)}
-		if len(transitions) > 0 {
-			cells = append(cells, defaultString(transitionLabels[transitions[row.Key]], "—"))
+		cells := []string{account}
+		if withChanges {
+			cells = append(cells, accountChange(row, transitions[row.Key], previous))
 		}
 		cells = append(cells, formatPercent(row.UsedPercent), strconv.Itoa(row.ActiveUsers),
 			formatOptionalInt(row.ResetCount), formatReset(row.ResetAt, location, now))
 		table = append(table, "| "+strings.Join(cells, " | ")+" |")
 	}
 	if len(rows) == 0 {
-		if eventsOnly {
-			table = append(table, "| 暂无匹配账号 | — | — |")
-		} else if len(transitions) > 0 {
+		if withChanges {
 			table = append(table, "| 暂无匹配账号 | — | — | — | — | — |")
 		} else {
 			table = append(table, "| 暂无匹配账号 | — | — | — | — |")
@@ -246,28 +236,21 @@ func accountTable(rows []Row, transitions map[string]string, location *time.Loca
 	return strings.Join(table, "\n")
 }
 
-func accountTransition(row Row, event string, previous map[string]WindowRecord, location *time.Location, now time.Time) string {
-	used := formatPercent(row.UsedPercent)
+func accountChange(row Row, event string, previous map[string]WindowRecord) string {
+	label := defaultString(transitionLabels[event], "—")
+	if event == "" {
+		return label
+	}
 	if before, found := previous[row.Key]; found && row.UsedPercent != nil &&
-		!math.IsNaN(before.UsedPercent) && !math.IsInf(before.UsedPercent, 0) && before.UsedPercent != *row.UsedPercent {
-		used = formatPercentValue(before.UsedPercent) + " → " + used
+		before.UsedPercent >= 0 && before.UsedPercent <= 100 && before.UsedPercent != *row.UsedPercent {
+		label += "：" + formatPercentValue(before.UsedPercent) + " → " + formatPercent(row.UsedPercent)
 	}
-	remaining := "—"
-	if row.UsedPercent != nil {
-		remaining = formatPercentValue(100 - *row.UsedPercent)
-	}
-	return strings.Join([]string{
-		"**" + safeCell(row.Account, 32) + "** · " + defaultString(transitionLabels[event], "额度状态变更"),
-		"周额度已用：" + used + "　当前剩余：" + remaining,
-		fmt.Sprintf("近 1 小时用户：%d", row.ActiveUsers),
-		"剩余重置次数：" + formatOptionalInt(row.ResetCount),
-		"额度重置时间：" + formatReset(row.ResetAt, location, now),
-	}, "\n\n")
+	return label
 }
 
 func BuildTestMarkdownV2(config Config, now time.Time) (string, error) {
 	sections := messageHeader("✅ "+config.ShortName+" · 通知测试", config.Timezone, now, UsageCenterURL(config.PublicBaseURL))
-	sections = append(sections, "企业微信通知通道连接正常。", "> 消息类型：通道测试")
+	sections = append(sections, "| 通知类型 | 状态 |\n| :--- | :--- |\n| 通道测试 | 企业微信通知通道连接正常。 |")
 	return boundedMessage(sections)
 }
 

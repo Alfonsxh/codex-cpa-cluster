@@ -193,7 +193,7 @@ fi
 
 if [ "${1:-}" = exec ]; then
   case "$scenario" in
-    drain-timeout)
+    drain-timeout|drain-slot-*|drain-stop-failure)
       printf '%s\n' '[{"label":"fixture@example.com","account":"alpha","inflight":1}]'
       ;;
     invalid-stats)
@@ -207,6 +207,7 @@ if [ "${1:-}" = exec ]; then
 fi
 
 if [ "${1:-}" = stop ]; then
+  [ "$scenario" != drain-stop-failure ] || exit 9
   exit 0
 fi
 
@@ -223,7 +224,16 @@ cat >"$FAKE_BIN/curl" <<'FAKE_CURL'
 #!/usr/bin/env sh
 set -eu
 case "$*" in
-  *'/__internal/edge/slot'*) printf '%s\n' blue ;;
+  *'/__internal/edge/slot'*)
+    if grep -Fq '/__stats' "$FAKE_DOCKER_LOG"; then
+      case "${FAKE_DOCKER_SCENARIO:-ordinary}" in
+        drain-slot-unavailable) exit 7 ;;
+        drain-slot-invalid) printf '%s\n' unknown; exit 0 ;;
+        drain-slot-active) printf '%s\n' green; exit 0 ;;
+      esac
+    fi
+    printf '%s\n' blue
+    ;;
   *) printf '%s\n' 200 ;;
 esac
 FAKE_CURL
@@ -398,6 +408,26 @@ expect_failure drain-timeout-disabled \
   "Go Gateway drain timed out without terminating existing requests" drain-timeout up-core
 if grep -E 'stop --time 0 .*gateway-green|compose .* up .*gateway-green' "$COMMAND_LOG" >/dev/null; then
   echo "disabled drain cleanup still interrupted or recreated the old Gateway" >&2
+  exit 1
+fi
+
+for scenario in drain-slot-unavailable drain-slot-invalid drain-slot-active; do
+  new_fixture "$scenario"
+  write_env "$DEPLOY_ROOT"
+  : >"$COMMAND_LOG"
+  expect_failure "$scenario" 'refusing to force-stop' "$scenario" up-core
+  if grep -E '^stop |compose .* up .*gateway-green' "$COMMAND_LOG" >/dev/null; then
+    echo "unverified inactive slot was stopped or recreated: $scenario" >&2
+    exit 1
+  fi
+done
+
+new_fixture drain-stop-failure
+write_env "$DEPLOY_ROOT"
+: >"$COMMAND_LOG"
+expect_failure drain-stop-failure 'Go Gateway force-stop failed' drain-stop-failure up-core
+if grep -E 'compose .* up .*gateway-green' "$COMMAND_LOG" >/dev/null; then
+  echo "Gateway was recreated after its stop failed" >&2
   exit 1
 fi
 

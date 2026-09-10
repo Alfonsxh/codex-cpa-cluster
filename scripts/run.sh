@@ -1900,7 +1900,7 @@ collect_core_deployment_summary() {
   if [ "$DEPLOY_SUMMARY_BEFORE_SLOT" = 未知 ]; then
     DEPLOY_SUMMARY_GATEWAY_ACTION="初始化 blue/green；活动槽 $current_slot"
   elif [ "$DEPLOY_SUMMARY_BEFORE_SLOT" != "$current_slot" ]; then
-    DEPLOY_SUMMARY_GATEWAY_ACTION="$DEPLOY_SUMMARY_BEFORE_SLOT -> ${current_slot}；原槽排空完成；双槽已对齐"
+    DEPLOY_SUMMARY_GATEWAY_ACTION="$DEPLOY_SUMMARY_BEFORE_SLOT -> ${current_slot}；原槽更新完成；双槽已对齐"
   elif [ "$blue_action" = 复用 ] && [ "$green_action" = 复用 ]; then
     DEPLOY_SUMMARY_GATEWAY_ACTION="保持 ${current_slot}；双槽复用，无需切换"
   else
@@ -2969,19 +2969,31 @@ wait_gateway_drain() {
     sleep 1
   done
   if [ "$CPA_GATEWAY_FORCE_STOP_ON_DRAIN_TIMEOUT" = true ]; then
-    echo "Go Gateway drain timed out; force-stopping existing requests: container=$gateway_container inflight=$inflight" >&2
     gateway_slot=${gateway_container##*-gateway-}
     edge_slot_port=${ROLLOUT_EDGE_INTERNAL_PORT:-$CPA_INTERNAL_PORT}
-    current_edge_slot=$(curl --noproxy '*' -fsS "http://127.0.0.1:$edge_slot_port/__internal/edge/slot" 2>/dev/null || true)
+    current_edge_slot=$(curl --noproxy '*' --connect-timeout 2 --max-time 5 -fsS \
+      "http://127.0.0.1:$edge_slot_port/__internal/edge/slot" 2>/dev/null) || {
+      echo "refusing to force-stop Gateway without a verified Edge slot: container=$gateway_container" >&2
+      return 1
+    }
     if [ "$current_edge_slot" = "$gateway_slot" ]; then
       echo "refusing to force-stop the active Gateway slot: container=$gateway_container slot=$current_edge_slot" >&2
       return 1
     fi
+    case "$gateway_slot:$current_edge_slot" in
+      blue:green|green:blue) ;;
+      *)
+        echo "refusing to force-stop Gateway without a verified Edge slot: container=$gateway_container" >&2
+        return 1
+        ;;
+    esac
+    echo "Go Gateway drain timed out; force-stopping existing requests: container=$gateway_container inflight=$inflight" >&2
     if docker stop --time 0 "$gateway_container" >/dev/null; then
       echo "Go Gateway force-stopped after drain timeout: container=$gateway_container" >&2
       return 0
     fi
     echo "Go Gateway force-stop failed: container=$gateway_container" >&2
+    return 1
   fi
   echo "Go Gateway drain timed out without terminating existing requests: container=$gateway_container inflight=$inflight" >&2
   return 1

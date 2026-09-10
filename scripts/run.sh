@@ -347,6 +347,9 @@ ui_run() {
     return 1
   }
   if ( "$@" ) >"$ui_log" 2>&1; then
+    if grep -Fq 'Go Gateway force-stopped after drain timeout' "$ui_log"; then
+      ui_note "旧 Gateway 连接已超过排空时限，按策略中断并清理"
+    fi
     rm -f -- "$ui_log"
     ui_done "$ui_title"
     return 0
@@ -1290,6 +1293,7 @@ write_target_env() {
     printf 'CPA_CONFIRM_EDGE_MAINTENANCE=%s\n' "$deploy_root"
     printf '%s\n' \
       'CPA_GATEWAY_DRAIN_TIMEOUT_SECONDS=3600' \
+      'CPA_GATEWAY_FORCE_STOP_ON_DRAIN_TIMEOUT=true' \
       'CPA_DOCKER_SOCKET_PATH=/var/run/docker.sock' \
       'CPA_ACCOUNT_COMPOSE_PROJECT=cliproxy-multi' \
       'CPA_ACCOUNT_INSTANCE_NAME=cliproxy' \
@@ -2429,6 +2433,7 @@ set +a
 : "${CPA_OWNERSHIP_ACTIVATION_TTL:=2m}"
 : "${CPA_ALLOW_EDGE_RECREATE:=false}"
 : "${CPA_GATEWAY_DRAIN_TIMEOUT_SECONDS:=3600}"
+: "${CPA_GATEWAY_FORCE_STOP_ON_DRAIN_TIMEOUT:=true}"
 : "${CPA_CONFIRM_DEPLOY_ROOT:?CPA_CONFIRM_DEPLOY_ROOT must exactly repeat CPA_DEPLOY_ROOT}"
 
 
@@ -2577,6 +2582,10 @@ case "$CPA_GATEWAY_DRAIN_TIMEOUT_SECONDS" in
     echo "CPA_GATEWAY_DRAIN_TIMEOUT_SECONDS must be a positive integer" >&2
     exit 1
     ;;
+esac
+case "$CPA_GATEWAY_FORCE_STOP_ON_DRAIN_TIMEOUT" in
+  true|false) ;;
+  *) echo "CPA_GATEWAY_FORCE_STOP_ON_DRAIN_TIMEOUT must be true or false" >&2; exit 1 ;;
 esac
 
 compose() {
@@ -2959,6 +2968,21 @@ wait_gateway_drain() {
     elapsed=$((elapsed + 1))
     sleep 1
   done
+  if [ "$CPA_GATEWAY_FORCE_STOP_ON_DRAIN_TIMEOUT" = true ]; then
+    echo "Go Gateway drain timed out; force-stopping existing requests: container=$gateway_container inflight=$inflight" >&2
+    gateway_slot=${gateway_container##*-gateway-}
+    edge_slot_port=${ROLLOUT_EDGE_INTERNAL_PORT:-$CPA_INTERNAL_PORT}
+    current_edge_slot=$(curl --noproxy '*' -fsS "http://127.0.0.1:$edge_slot_port/__internal/edge/slot" 2>/dev/null || true)
+    if [ "$current_edge_slot" = "$gateway_slot" ]; then
+      echo "refusing to force-stop the active Gateway slot: container=$gateway_container slot=$current_edge_slot" >&2
+      return 1
+    fi
+    if docker stop --time 0 "$gateway_container" >/dev/null; then
+      echo "Go Gateway force-stopped after drain timeout: container=$gateway_container" >&2
+      return 0
+    fi
+    echo "Go Gateway force-stop failed: container=$gateway_container" >&2
+  fi
   echo "Go Gateway drain timed out without terminating existing requests: container=$gateway_container inflight=$inflight" >&2
   return 1
 }
@@ -3177,7 +3201,8 @@ case "$ACTION" in
       if container_exists "$inactive_container" && container_running "$inactive_container"; then
         require_exact_compose_service "$inactive_container" "$project" "gateway-$inactive_slot"
         # A previous rollout may have switched away from this slot and timed
-        # out while preserving a long SSE. Never recreate it until it drains.
+        # out while preserving a long SSE. Drain it first; the configured
+        # timeout policy may force-stop the old container before recreation.
         wait_gateway_drain "$inactive_container"
       fi
       start_gateway_service "$inactive_slot" "$project" "$control_network"

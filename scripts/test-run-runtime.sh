@@ -206,6 +206,10 @@ if [ "${1:-}" = exec ]; then
   exit 0
 fi
 
+if [ "${1:-}" = stop ]; then
+  exit 0
+fi
+
 case "${1:-}" in
   pull|run|network)
     exit 0
@@ -260,6 +264,7 @@ write_env() {
   control_image=${2:-registry.example.test/codex-cpa-control:sha256-$DIGEST}
   allow_edge=${3:-false}
   edge_confirmation=${4:-}
+  force_stop=${5:-true}
   cat >"$ENV_FILE" <<EOF
 CPA_CONTROL_IMAGE=$control_image
 CPA_WEB_IMAGE=registry.example.test/codex-cpa-web:sha256-$DIGEST
@@ -276,6 +281,7 @@ CPA_ACCOUNT_COMPOSE_PROJECT=cliproxy-multi
 CPA_ACCOUNT_INSTANCE_NAME=cliproxy
 CPA_RUNTIME_OWNER=codex-cpa
 CPA_GATEWAY_DRAIN_TIMEOUT_SECONDS=1
+CPA_GATEWAY_FORCE_STOP_ON_DRAIN_TIMEOUT=$force_stop
 CPA_ALLOW_EDGE_RECREATE=$allow_edge
 CPA_CONFIRM_EDGE_MAINTENANCE=$edge_confirmation
 EOF
@@ -367,10 +373,31 @@ expect_failure compose-hash-failure \
 new_fixture drain-timeout
 write_env "$DEPLOY_ROOT"
 : >"$COMMAND_LOG"
-expect_failure drain-timeout \
+if ! run_action drain-timeout up-core >"$FIXTURE/output.log" 2>&1; then
+  echo "drain timeout did not force-stop the old Gateway and continue" >&2
+  sed -n '1,120p' "$FIXTURE/output.log" >&2
+  exit 1
+fi
+grep -Fq 'Go Gateway force-stopped after drain timeout' "$FIXTURE/output.log" || {
+  echo "drain timeout did not report the forced stop" >&2
+  exit 1
+}
+if ! grep -E 'stop --time 0 .*gateway-green' "$COMMAND_LOG" >/dev/null; then
+  echo "drain timeout did not stop the preserved inactive Gateway" >&2
+  exit 1
+fi
+if ! grep -E 'compose .* up .*gateway-green' "$COMMAND_LOG" >/dev/null; then
+  echo "drain timeout did not recreate the stopped inactive Gateway" >&2
+  exit 1
+fi
+
+new_fixture drain-timeout-disabled
+write_env "$DEPLOY_ROOT" 'registry.example.test/codex-cpa-control:sha256-'"$DIGEST" false '' false
+: >"$COMMAND_LOG"
+expect_failure drain-timeout-disabled \
   "Go Gateway drain timed out without terminating existing requests" drain-timeout up-core
-if grep -E 'compose .* up .*gateway-green' "$COMMAND_LOG" >/dev/null; then
-  echo "drain timeout recreated the preserved inactive Gateway" >&2
+if grep -E 'stop --time 0 .*gateway-green|compose .* up .*gateway-green' "$COMMAND_LOG" >/dev/null; then
+  echo "disabled drain cleanup still interrupted or recreated the old Gateway" >&2
   exit 1
 fi
 

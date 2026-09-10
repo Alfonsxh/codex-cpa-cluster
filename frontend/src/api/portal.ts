@@ -86,9 +86,11 @@ export function readPortalRoute(signal?: AbortSignal): Promise<PortalRoute> {
 
 export function readPortalAccounts(
   window: PortalUsageWindow,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fresh = false
 ): Promise<PortalAccounts> {
   const query = new URLSearchParams({ window });
+  if (fresh) query.set("fresh", "1");
   return apiRequest<PortalAccounts>(`/usage/me/accounts?${query.toString()}`, { signal });
 }
 

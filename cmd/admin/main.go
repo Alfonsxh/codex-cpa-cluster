@@ -434,8 +434,8 @@ func runOwnedAdmin(
 		Root:                 config.Root,
 		Store:                store,
 		Accounts:             store,
-		AccountStates:        stateProvider,
-		AccountRuntime:       runtimeObserver,
+		AccountStates:        listStateProvider,
+		AccountRuntime:       displayAccountObserver{runtimeObserver},
 		ModelProbe:           modelProbe,
 		Activity:             usageReader,
 		OAuth:                oauthLoader,
@@ -514,7 +514,8 @@ type accountRuntimeObserver interface {
 	Observe(context.Context, map[string]string) map[string]accountstatus.State
 }
 
-// Only the read-only Usage account list may use a briefly stale runtime overlay.
+// Both read-only account lists share this bounded runtime cache. Route writes use
+// the normal observer and never authorize from an expired display snapshot.
 type displayAccountObserver struct {
 	observer *accountstatus.Observer
 }

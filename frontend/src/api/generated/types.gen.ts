@@ -1084,6 +1084,10 @@ export type PortalWindow = {
 };
 
 export type PortalAccounts = {
+    /**
+     * Official quota refresh is pending; poll again while true.
+     */
+    quota_refreshing?: boolean;
     generated_at: number;
     window: PortalWindow;
     current_group: string;
@@ -4217,6 +4221,10 @@ export type ListPortalAccountsData = {
     path?: never;
     query: {
         window: PortalUsageWindowWritable;
+        /**
+         * Join the same throttled official quota refresh used by Admin; no reset credit is consumed.
+         */
+        fresh?: '0' | '1';
     };
     url: '/usage/me/accounts';
 };

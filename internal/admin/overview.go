@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"net/http"
-	"strings"
 
 	"github.com/Alfonsxh/codex-cpa-pool/internal/accountstatus"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
@@ -73,22 +72,16 @@ func (server *Server) readOverviewSummary(c *gin.Context) {
 	})
 }
 
-// readOverviewCatalog returns only the identities required by the two legacy
-// trend selectors. Account status is calculated from the same runtime, OAuth,
-// quota and native-health inputs as the account page; an enabled flag alone is
-// never widened into an "available" status.
+// readOverviewCatalog reuses the canonical account presentation for trend selectors.
 func (server *Server) readOverviewCatalog(c *gin.Context) {
-	if server.accountStates == nil || server.runtime == nil || server.oauth == nil {
+	if server.accountStates == nil {
 		writeError(c, http.StatusServiceUnavailable, "总览筛选目录服务尚未就绪", "overview_catalog_not_ready")
 		return
 	}
 	var (
-		accounts      []controlplane.Account
-		users         []controlplane.UserSummary
-		services      []runtimeops.Service
-		states        map[string]failover.AccountState
-		officialQuota quota.RuntimeState
-		quotaFound    bool
+		accounts []controlplane.Account
+		users    []controlplane.UserSummary
+		states   map[string]failover.AccountState
 	)
 	group, groupContext := errgroup.WithContext(c.Request.Context())
 	group.Go(func() error {
@@ -103,17 +96,7 @@ func (server *Server) readOverviewCatalog(c *gin.Context) {
 	})
 	group.Go(func() error {
 		var err error
-		services, err = server.runtime.List(groupContext)
-		return err
-	})
-	group.Go(func() error {
-		var err error
 		states, err = server.accountStates.AccountStates(groupContext)
-		return err
-	})
-	group.Go(func() error {
-		var err error
-		quotaFound, err = server.store.ReadRuntimeState(groupContext, quota.RuntimeStateName, &officialQuota)
 		return err
 	})
 	if err := group.Wait(); err != nil {
@@ -121,60 +104,11 @@ func (server *Server) readOverviewCatalog(c *gin.Context) {
 		return
 	}
 
-	servicesByName := make(map[string]runtimeops.Service, len(services))
-	runningAccountServices := make(map[string]string, len(accounts))
-	for _, service := range services {
-		servicesByName[service.Service] = service
-		if service.State == "running" && strings.HasPrefix(service.Service, "cliproxy-") {
-			runningAccountServices[strings.TrimPrefix(service.Service, "cliproxy-")] = service.Service
-		}
-	}
-	runtimeStatuses := make(map[string]accountstatus.State)
-	if server.accountRuntime != nil && len(runningAccountServices) > 0 {
-		runtimeStatuses = server.accountRuntime.Observe(c.Request.Context(), runningAccountServices)
-	}
-	quotaByAccount := make(map[string]quota.AccountQuota, len(officialQuota.Snapshot.Accounts))
-	if quotaFound {
-		for _, accountQuota := range officialQuota.Snapshot.Accounts {
-			quotaByAccount[accountQuota.Account] = accountQuota
-		}
-	}
-
 	accountItems := make([]overviewCatalogAccount, 0, len(accounts))
 	for _, account := range accounts {
-		oauthConfigured := false
-		if _, err := server.oauth.Load(account.ID); err == nil {
-			oauthConfigured = true
-		} else if !errors.Is(err, quota.ErrOAuthMissing) {
-			server.internalError(c, "read overview account OAuth status", err)
-			return
-		}
-		service, serviceFound := servicesByName["cliproxy-"+account.ID]
-		containerState := "missing"
-		if serviceFound {
-			containerState = service.State
-		}
-		runtimeStatus := runtimeStatuses[account.ID]
-		authFiles := runtimeStatus.AuthFiles
-		if oauthConfigured && authFiles == 0 {
-			authFiles = 1
-		}
-		state, stateAvailable := states[account.ID]
-		if !stateAvailable {
-			state = failover.AccountState{Account: account.ID, Reason: "quota_unavailable"}
-		}
-		accountItems = append(accountItems, overviewCatalogAccount{
-			ID: account.ID,
-			OperationalStatus: buildAccountOperationalStatus(
-				account.GroupEnabled,
-				containerState,
-				authFiles,
-				quotaByAccount[account.ID],
-				runtimeStatus.Runtime,
-				state,
-				stateAvailable && quotaFound,
-			),
-		})
+		state, found := states[account.ID]
+		accountItems = append(accountItems, overviewCatalogAccount{ID: account.ID,
+			OperationalStatus: accountstatus.Present(account.GroupEnabled, state, found)})
 	}
 	userItems := make([]overviewCatalogUser, 0, len(users))
 	for _, user := range users {

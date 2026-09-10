@@ -40,13 +40,7 @@ type AccountRuntimeReader interface {
 	Observe(context.Context, map[string]string) map[string]accountstatus.State
 }
 
-type accountOperationalStatus struct {
-	Code       string `json:"code"`
-	Label      string `json:"label"`
-	Tone       string `json:"tone"`
-	Reason     string `json:"reason"`
-	Selectable bool   `json:"selectable"`
-}
+type accountOperationalStatus = accountstatus.Presentation
 
 type accountListItem struct {
 	ID                   string                   `json:"id"`
@@ -396,10 +390,7 @@ func (server *Server) listAccounts(c *gin.Context) {
 				authState = "pending"
 			}
 		}
-		operationalStatus := buildAccountOperationalStatus(
-			account.GroupEnabled, containerState, authFiles, accountQuota,
-			runtimeStatus.Runtime, state, stateAvailable && stateError == nil,
-		)
+		operationalStatus := accountstatus.Present(account.GroupEnabled, state, stateAvailable && stateError == nil)
 		items = append(items, accountListItem{
 			ID: account.ID, Email: account.Email, Port: account.Port,
 			ProxyMode: account.ProxyMode, ProxySource: proxySource, ProxyDisplay: proxyDisplay,
@@ -504,60 +495,6 @@ func nullablePositiveTimestamp(value int64) *int64 {
 		return nil
 	}
 	return &value
-}
-
-func buildAccountOperationalStatus(
-	enabled bool,
-	containerState string,
-	authFiles int,
-	accountQuota quota.AccountQuota,
-	runtime accountstatus.Runtime,
-	state failover.AccountState,
-	stateAvailable bool,
-) accountOperationalStatus {
-	status := func(code, label, tone, reason string, selectable bool) accountOperationalStatus {
-		return accountOperationalStatus{Code: code, Label: label, Tone: tone, Reason: reason, Selectable: selectable}
-	}
-	switch {
-	case !enabled:
-		return status("disabled", "已停用", "neutral", "账号已停用", false)
-	case containerState != "running":
-		return status("stopped", "已停止", "danger", "CPA 容器未运行", false)
-	case authFiles <= 0:
-		return status("auth_missing", "未授权", "danger", "OAuth 尚未授权", false)
-	case state.Exhausted || state.Reason == accountstatus.ReasonQuotaExhausted ||
-		boolFalse(accountQuota.Allowed) || boolValue(accountQuota.LimitReached) ||
-		accountQuota.Weekly != nil && accountQuota.Weekly.LimitReached:
-		return status("quota_exhausted", "额度耗尽", "danger", "账号周额度已耗尽", false)
-	}
-	runtimeReason := state.Reason
-	switch {
-	case runtime.State == "unavailable" && runtimeReason == accountstatus.ReasonTransientCooldown,
-		runtimeReason == accountstatus.ReasonTransientCooldown:
-		return status("transient_cooldown", "临时冷却", "warning", "上游请求临时失败，CPA 正在等待凭据冷却恢复", true)
-	case runtime.State == "unavailable", runtimeReason == accountstatus.ReasonCredentialUnavailable:
-		return status("credential_unavailable", "凭据不可用", "danger", "OAuth 凭据已失效，需要重新授权", false)
-	case runtime.State == "rate_limited", runtimeReason == accountstatus.ReasonRateLimited:
-		return status("rate_limited", "限流中", "warning", "账号近期出现 429，仍可选择并稍后重试", true)
-	case runtime.State == "degraded", runtimeReason == accountstatus.ReasonDegraded:
-		return status("degraded", "近期异常", "warning", "账号近期出现请求异常", true)
-	case runtime.State == "unknown", runtimeReason == accountstatus.ReasonRuntimeUnknown:
-		return status("unknown", "状态未知", "neutral", "CPA 原生状态暂不可查询", true)
-	case !stateAvailable || accountQuota.Status != "ok" || accountQuota.Weekly == nil:
-		return status("quota_unknown", "额度未知", "neutral", "额度状态暂不可确认", true)
-	case accountQuota.Weekly.RemainingPercent <= 10:
-		return status("quota_warning", "注意额度", "warning", "周额度剩余不高于 10%", true)
-	default:
-		return status("available", "可用", "success", "容器、OAuth 与额度均正常", true)
-	}
-}
-
-func boolValue(value *bool) bool {
-	return value != nil && *value
-}
-
-func boolFalse(value *bool) bool {
-	return value != nil && !*value
 }
 
 func (server *Server) parseAccountListUsageWindow(c *gin.Context) (usageWindowContext, error) {

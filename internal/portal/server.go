@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Alfonsxh/codex-cpa-pool/internal/accountstatus"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/failover"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/identity"
@@ -542,6 +543,18 @@ func (server *Server) readAccounts(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, err.Error(), "invalid_request")
 		return
 	}
+	if c.Query("fresh") == "1" {
+		refreshStore, ready := server.quotaStore.(quota.RefreshRequestStore)
+		if !ready {
+			writeError(c, http.StatusServiceUnavailable, "额度刷新服务尚未就绪", "quota_refresh_not_ready")
+			return
+		}
+		if _, _, err := quota.RequestRefresh(c.Request.Context(), refreshStore, server.now()); err != nil {
+			server.internalError(c, "request official quota refresh", err)
+			return
+		}
+	}
+
 	accounts, err := server.identity.ReadAccounts(c.Request.Context())
 	if err != nil {
 		server.internalError(c, "read portal accounts", err)
@@ -573,6 +586,16 @@ func (server *Server) readAccounts(c *gin.Context) {
 			server.logger.Warn("portal account state unavailable", zap.Error(stateError))
 		}
 	}
+	refreshing := false
+	if server.quotaStore != nil {
+		request, _, err := quota.ReadRefreshRequest(c.Request.Context(), server.quotaStore)
+		if err != nil {
+			warnings = append(warnings, "额度刷新状态暂不可用")
+		} else {
+			refreshing = request.Pending()
+		}
+	}
+
 	activity := make(map[string]int)
 	if server.activity != nil {
 		if loaded, activityError := server.activity.RefreshActiveUsersLastHour(c.Request.Context()); activityError == nil {
@@ -600,7 +623,7 @@ func (server *Server) readAccounts(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"generated_at": server.now().Unix(), "window": window,
 		"current_group": routes[auth.Session.User], "accounts": items,
-		"totals": accountUsage.Totals, "warnings": warnings,
+		"totals": accountUsage.Totals, "warnings": warnings, "quota_refreshing": refreshing,
 	})
 }
 
@@ -1056,74 +1079,17 @@ func (server *Server) usageTimezone(ctx context.Context) (string, error) {
 }
 
 type accountStatus struct {
-	Code             string   `json:"code"`
-	Label            string   `json:"label"`
-	Tone             string   `json:"tone"`
-	Reason           string   `json:"reason"`
-	Selectable       bool     `json:"selectable"`
+	accountstatus.Presentation
 	UsedPercent      *float64 `json:"used_percent,omitempty"`
 	RemainingPercent *float64 `json:"remaining_percent,omitempty"`
 	ResetAt          int64    `json:"reset_at,omitempty"`
 }
 
 func presentAccountState(account controlplane.Account, state failover.AccountState, found bool) accountStatus {
-	if !account.GroupEnabled {
-		return accountStatus{Code: "disabled", Label: "已停用", Tone: "neutral", Reason: "账号已被管理员停用"}
+	return accountStatus{
+		Presentation: accountstatus.Present(account.GroupEnabled, state, found),
+		UsedPercent:  state.UsedPercent, RemainingPercent: state.RemainingPercent, ResetAt: state.ResetAt,
 	}
-	if !found {
-		return accountStatus{Code: "unknown", Label: "状态未知", Tone: "neutral", Reason: "账号运行状态暂不可确认", Selectable: false}
-	}
-	status := accountStatus{
-		Code: "unknown", Label: "状态未知", Tone: "neutral", Reason: "账号运行状态暂不可确认", Selectable: true,
-		UsedPercent:      state.UsedPercent,
-		RemainingPercent: state.RemainingPercent, ResetAt: state.ResetAt,
-	}
-	switch state.Reason {
-	case "available":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"available", "可用", "success", "账号当前可用", true
-	case "quota_exhausted":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"quota_exhausted", "额度耗尽", "danger", "账号周额度已耗尽", false
-	case "account_disabled":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"disabled", "已停用", "neutral", "账号已被管理员停用", false
-	case "container_not_running":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"stopped", "已停止", "danger", "CPA 服务未运行", false
-	case "oauth_missing":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"auth_missing", "未授权", "danger", "OAuth 尚未授权", false
-	case "credential_unavailable":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"credential_unavailable", "凭据不可用", "danger", "OAuth 凭据已失效，需要重新授权", false
-	case "transient_cooldown":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"transient_cooldown", "临时冷却", "warning", "上游请求临时失败，CPA 正在等待凭据冷却恢复", true
-	case "rate_limited":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"rate_limited", "限流中", "warning", "账号近期出现 429，仍可选择并稍后重试", true
-	case "degraded":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"degraded", "近期异常", "warning", "账号近期出现请求异常", true
-	case "runtime_unknown":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"unknown", "状态未知", "neutral", "CPA 原生状态暂不可查询", true
-	case "reserve_reached":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"quota_warning", "额度预留", "warning", "账号已达到预留额度", true
-	case "quota_stale":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"unknown", "状态未知", "neutral", "账号实时状态暂不可确认", true
-	case "quota_unavailable", "upstream_disallowed":
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"quota_unknown", "额度未知", "neutral", "额度状态暂不可确认", true
-	}
-	if state.Exhausted {
-		status.Code, status.Label, status.Tone, status.Reason, status.Selectable =
-			"quota_exhausted", "额度耗尽", "danger", "账号周额度已耗尽", false
-	}
-	return status
 }
 
 func (server *Server) sessionToken(c *gin.Context) string {

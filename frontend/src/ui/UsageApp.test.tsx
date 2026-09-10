@@ -535,6 +535,7 @@ describe("UsageDashboard", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/accounts?window=today")).toHaveLength(2));
+    expect(requestPaths(fetchMock, "/usage/me/accounts?window=today&fresh=1")).toHaveLength(1);
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/usage-breakdown?")).toHaveLength(2));
     await user.click(screen.getByRole("button", { name: "7 天" }));
     await waitFor(() => expect(requestPaths(fetchMock, "/usage/me/accounts?window=604800")).toHaveLength(2));

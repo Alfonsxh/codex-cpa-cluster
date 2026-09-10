@@ -1855,6 +1855,24 @@ func (e GetPublicGatewayUsageParamsWindow) Valid() bool {
 	}
 }
 
+// Defines values for ListPortalAccountsParamsFresh.
+const (
+	ListPortalAccountsParamsFreshN0 ListPortalAccountsParamsFresh = "0"
+	ListPortalAccountsParamsFreshN1 ListPortalAccountsParamsFresh = "1"
+)
+
+// Valid indicates whether the value is a known member of the ListPortalAccountsParamsFresh enum.
+func (e ListPortalAccountsParamsFresh) Valid() bool {
+	switch e {
+	case ListPortalAccountsParamsFreshN0:
+		return true
+	case ListPortalAccountsParamsFreshN1:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	AccountState AccountState `json:"account_state"`
@@ -2859,9 +2877,12 @@ type PortalAccounts struct {
 	Accounts     []PortalAccount `json:"accounts"`
 	CurrentGroup string          `json:"current_group"`
 	GeneratedAt  int64           `json:"generated_at"`
-	Totals       UsageMetrics    `json:"totals"`
-	Warnings     []string        `json:"warnings"`
-	Window       PortalWindow    `json:"window"`
+
+	// QuotaRefreshing Official quota refresh is pending; poll again while true.
+	QuotaRefreshing *bool        `json:"quota_refreshing,omitempty"`
+	Totals          UsageMetrics `json:"totals"`
+	Warnings        []string     `json:"warnings"`
+	Window          PortalWindow `json:"window"`
 }
 
 // PortalKeyResponse defines model for PortalKeyResponse.
@@ -4466,7 +4487,13 @@ type GetPublicGatewayUsageParamsWindow int
 // ListPortalAccountsParams defines parameters for ListPortalAccounts.
 type ListPortalAccountsParams struct {
 	Window PortalUsageWindowQuery `form:"window" json:"window"`
+
+	// Fresh Join the same throttled official quota refresh used by Admin; no reset credit is consumed.
+	Fresh *ListPortalAccountsParamsFresh `form:"fresh,omitempty" json:"fresh,omitempty"`
 }
+
+// ListPortalAccountsParamsFresh defines parameters for ListPortalAccounts.
+type ListPortalAccountsParamsFresh string
 
 // GetPortalUsageBreakdownParams defines parameters for GetPortalUsageBreakdown.
 type GetPortalUsageBreakdownParams struct {

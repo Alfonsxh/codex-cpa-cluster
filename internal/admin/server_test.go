@@ -1464,7 +1464,7 @@ func TestOverviewCatalogUsesTheAccountPageOperationalStatusContract(t *testing.T
 	server, err := New(Config{
 		Store: store,
 		AccountStates: staticAdminAccountStates{states: map[string]failover.AccountState{
-			"alpha": {Account: "alpha", Eligible: true, RemainingPercent: &remaining},
+			"alpha": {Account: "alpha", Eligible: true, Reason: "available", RemainingPercent: &remaining},
 			"beta":  {Account: "beta", Eligible: true, RemainingPercent: &remaining},
 		}},
 		AccountRuntime: staticAdminAccountRuntime{states: map[string]accountstatus.State{

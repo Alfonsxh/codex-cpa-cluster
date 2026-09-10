@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -60,10 +61,16 @@ func (state RefreshRequestState) Pending() bool {
 	return state.Version == refreshRequestVersion && state.RequestID != "" && state.CompletedID != state.RequestID
 }
 
+// The Admin and Usage handlers share one process; serialize their check/request
+// sequence so simultaneous clicks join the same worker request.
+var refreshRequestMu sync.Mutex
+
 // RequestRefresh records a new request only when there is no in-flight request
 // and the persistent quota snapshot is old enough to match the v1 force-refresh
 // throttle. Runtime-state writes are fenced by the owning control-plane Store.
 func RequestRefresh(ctx context.Context, store RefreshRequestStore, now time.Time) (RefreshRequestState, bool, error) {
+	refreshRequestMu.Lock()
+	defer refreshRequestMu.Unlock()
 	request, _, err := ReadRefreshRequest(ctx, store)
 	if err != nil {
 		return RefreshRequestState{}, false, err

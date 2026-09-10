@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
+import { accountListRefreshOptions, refreshAccountList } from "../api/account-refresh";
 import { ApiError } from "../api/client";
 import {
   autoAssignPortalAccount,
@@ -84,10 +85,7 @@ export function UsageDashboard({ user, onSessionExpired }: { user: string; onSes
   const accounts = useQuery({
     queryKey: [...portalAccountsQueryKey(window), user],
     queryFn: ({ signal }) => readPortalAccounts(window, signal),
-    staleTime: 15_000,
-    gcTime: 5 * 60_000,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true
+    ...accountListRefreshOptions
   });
   const quota = useQuery({
     queryKey: quotaQueryKey,
@@ -211,11 +209,20 @@ export function UsageDashboard({ user, onSessionExpired }: { user: string; onSes
     });
     setKeyOpen(false);
   };
-  const refresh = () => void Promise.all([
-    profile.refetch(), quota.refetch(), route.refetch(),
-    queryClient.invalidateQueries({ queryKey: portalAccountsQueryRoot }),
-    queryClient.invalidateQueries({ queryKey: portalBreakdownQueryRoot })
-  ]);
+  const accountRefresh = useMutation({
+    mutationFn: () => refreshAccountList(
+      queryClient, portalAccountsQueryRoot, [...portalAccountsQueryKey(window), user],
+      (signal) => readPortalAccounts(window, signal, true)
+    ),
+    onError: (error) => { if (isUnauthorized(error)) onSessionExpired(); }
+  });
+  const refresh = () => {
+    accountRefresh.mutate();
+    void Promise.all([
+      profile.refetch(), quota.refetch(), route.refetch(),
+      queryClient.invalidateQueries({ queryKey: portalBreakdownQueryRoot })
+    ]);
+  };
   const toggleExpanded = (accountID: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -286,8 +293,8 @@ export function UsageDashboard({ user, onSessionExpired }: { user: string; onSes
             <AccountWindowControl
               window={window}
               onChange={setWindow}
-              refreshing={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
-              loading={accounts.isFetching || quota.isFetching}
+              refreshing={accountRefresh.isPending || profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
+              loading={accountRefresh.isPending || accounts.data?.quota_refreshing === true || accounts.isFetching || quota.isFetching}
               failed={accounts.isError || quota.isError}
               updatedAt={accounts.data?.generated_at ?? quota.data?.generated_at ?? 0}
               onRefresh={refresh}
@@ -309,8 +316,8 @@ export function UsageDashboard({ user, onSessionExpired }: { user: string; onSes
                     className="usage-mobile-panel-actions"
                     window={window}
                     onChange={setWindow}
-                    refreshing={profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
-                    loading={accounts.isFetching || quota.isFetching}
+                    refreshing={accountRefresh.isPending || profile.isFetching || quota.isFetching || accounts.isFetching || route.isFetching}
+                    loading={accountRefresh.isPending || accounts.data?.quota_refreshing === true || accounts.isFetching || quota.isFetching}
                     failed={accounts.isError || quota.isError}
                     updatedAt={accounts.data?.generated_at ?? quota.data?.generated_at ?? 0}
                     onRefresh={refresh}

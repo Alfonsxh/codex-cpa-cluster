@@ -1770,6 +1770,10 @@ paths:
         - portalSession: []
       parameters:
         - $ref: "#/components/parameters/PortalUsageWindowQuery"
+        - name: fresh
+          in: query
+          description: Join the same throttled official quota refresh used by Admin; no reset credit is consumed.
+          schema: { type: string, enum: ["0", "1"], default: "0" }
       responses:
         "200":
           description: Current user's account catalog and totals
@@ -3837,6 +3841,7 @@ components:
       additionalProperties: false
       required: [generated_at, window, current_group, accounts, totals, warnings]
       properties:
+        quota_refreshing: { type: boolean, description: Official quota refresh is pending; poll again while true. }
         generated_at: { type: integer, format: int64 }
         window: { $ref: "#/components/schemas/PortalWindow" }
         current_group: { type: string }

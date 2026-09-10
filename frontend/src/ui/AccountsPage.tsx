@@ -27,6 +27,7 @@ import { useSearchParams } from "react-router-dom";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { accountListRefreshOptions, refreshAccountList } from "../api/account-refresh";
 import { ApiError } from "../api/client";
 import {
   accountQuotaResetQueryKey,
@@ -195,9 +196,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
     queryKey: accountListQueryKey(usageRange),
     queryFn: ({ signal }) => listAccounts(usageRange, signal),
     enabled: usageWindow !== "custom" || customUsageRange !== null,
-    retry: false,
-    refetchInterval: (query) => query.state.data?.quota_refreshing ? 3_000 : false,
-    refetchOnWindowFocus: false
+    ...accountListRefreshOptions
   });
   const imageStatus = useQuery({
     queryKey: cpaImageStatusQueryKey,
@@ -208,8 +207,10 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   const refreshAccountCatalog = useCallback(async () => {
     void queryClient.refetchQueries({ queryKey: cpaImageStatusQueryKey, exact: true });
     try {
-      const catalog = await listAccounts(usageRange, undefined, true);
-      queryClient.setQueryData(accountListQueryKey(usageRange), catalog);
+      const catalog = await refreshAccountList(
+        queryClient, accountsQueryKey, accountListQueryKey(usageRange),
+        (signal) => listAccounts(usageRange, signal, true)
+      );
       await queryClient.refetchQueries({
         queryKey: [...usageBreakdownQueryRoot, "account"],
         type: "active"

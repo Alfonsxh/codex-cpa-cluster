@@ -406,6 +406,23 @@ func TestWorkerRefreshBaselineAdvancesEvenWhenWebhookFails(t *testing.T) {
 	}
 }
 
+func TestWorkerWeeklyRefreshSendsCompleteAccountTable(t *testing.T) {
+	store, activity, sender := workerFixtures()
+	store.settings["notification.daily_times"] = "23:59"
+	store.accounts = append(store.accounts, controlplane.Account{ID: "beta"})
+	worker := &Worker{Store: store, Activity: activity, Sender: sender}
+	cycleEnd := fixedNow("Asia/Shanghai", 2026, 7, 20, 10, 1, 0)().Unix()
+	setQuotas(store, map[string]float64{"alpha": 40, "beta": 55}, cycleEnd)
+	runWorkerAt(t, worker, 10, 0, nil)
+	setQuotas(store, map[string]float64{"alpha": 2, "beta": 3}, cycleEnd+quota.WeeklyWindowSeconds)
+	runWorkerAt(t, worker, 10, 1, []string{"quota_refreshed"})
+	if len(sender.contents) != 1 || strings.Contains(sender.contents[0], "> 本次涉及：**") ||
+		!strings.Contains(sender.contents[0], "| 🟢 alpha | 🔄 周额度已重置：40% → 2%") ||
+		!strings.Contains(sender.contents[0], "| 🟢 beta | 🔄 周额度已重置：55% → 3%") {
+		t.Fatalf("weekly refresh notification was not complete: %#v", sender.contents)
+	}
+}
+
 func TestWorkerFailedRecoveryRetainsAlertAndRetries(t *testing.T) {
 	store, activity, sender := workerFixtures()
 	store.settings["notification.daily_times"] = "23:59"
@@ -624,6 +641,32 @@ func setQuota(store *fakeStore, account string, used float64, status string, res
 				LimitReached: used >= 100, ResetAt: &resetAt,
 			}},
 		}}},
+	}
+	raw, _ := json.Marshal(state)
+	store.runtime[quota.RuntimeStateName] = raw
+}
+
+func setQuotas(store *fakeStore, values map[string]float64, resetTimes ...int64) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	resetAt := int64(1_900_000_000)
+	if len(resetTimes) > 0 {
+		resetAt = resetTimes[0]
+	}
+	resetCount := int64(2)
+	accounts := make([]quota.AccountQuota, 0, len(values))
+	for account, used := range values {
+		accounts = append(accounts, quota.AccountQuota{
+			Account: account, Status: "ok", ResetCreditCount: &resetCount,
+			WeeklyWindows: []quota.WeeklyWindow{{
+				Key: "default:primary_window", Label: "常规周限额", UsedPercent: used,
+				LimitReached: used >= 100, ResetAt: &resetAt,
+			}},
+		})
+	}
+	state := quota.RuntimeState{
+		Version:  1,
+		Snapshot: quota.Snapshot{Accounts: accounts},
 	}
 	raw, _ := json.Marshal(state)
 	store.runtime[quota.RuntimeStateName] = raw

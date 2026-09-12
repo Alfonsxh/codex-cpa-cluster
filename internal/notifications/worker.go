@@ -70,9 +70,9 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 	state.NextScheduleAt = NextScheduleAt(nowTime.In(config.Timezone), config.DailyTimes)
 	dueKeys := dueScheduleKeys(nowTime, config, state.Scheduled)
 	lastQuotaCheck := int64Value(state.QuotaCheckedAt)
-	quotaCheckDue := config.QuotaAlertEnabled &&
-		(lastQuotaCheck == 0 || nowUnix >= lastQuotaCheck+int64(config.QuotaCheckInterval/time.Second))
-	if len(dueKeys) == 0 && !quotaCheckDue {
+	quotaCheckDue := lastQuotaCheck == 0 || nowUnix >= lastQuotaCheck+int64(config.QuotaCheckInterval/time.Second)
+	evaluateQuota := quotaCheckDue || len(dueKeys) > 0
+	if len(dueKeys) == 0 && !evaluateQuota {
 		if err := worker.patchState(ctx, state,
 			"heartbeat_at", "scheduled", "next_schedule_at",
 		); err != nil {
@@ -99,27 +99,29 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 	previousWindows := state.QuotaWindows
 	currentSignals := make(map[string]Row)
 	transitionEvents := make(map[string]string)
-	evaluateAlerts := config.QuotaAlertEnabled && (quotaCheckDue || len(dueKeys) > 0)
-	if evaluateAlerts {
+	weeklyRefreshDetected := false
+	if evaluateQuota {
 		for _, row := range QuotaRows(snapshot, threshold, nil) {
 			currentSignals[row.Key] = row
 		}
 		for key, row := range currentSignals {
-			previousLevel := previousAlerts[key].Level
-			switch row.Level {
-			case "warning":
-				if previousLevel == "exhausted" {
-					transitionEvents[key] = "recovered_warning"
-				} else if previousLevel != "warning" && previousLevel != "exhausted" {
-					transitionEvents[key] = "warning"
-				}
-			case "exhausted":
-				if previousLevel != "exhausted" {
-					transitionEvents[key] = "exhausted"
-				}
-			case "normal":
-				if previousLevel == "warning" || previousLevel == "exhausted" {
-					transitionEvents[key] = "recovered"
+			if config.QuotaAlertEnabled {
+				previousLevel := previousAlerts[key].Level
+				switch row.Level {
+				case "warning":
+					if previousLevel == "exhausted" {
+						transitionEvents[key] = "recovered_warning"
+					} else if previousLevel != "warning" && previousLevel != "exhausted" {
+						transitionEvents[key] = "warning"
+					}
+				case "exhausted":
+					if previousLevel != "exhausted" {
+						transitionEvents[key] = "exhausted"
+					}
+				case "normal":
+					if previousLevel == "warning" || previousLevel == "exhausted" {
+						transitionEvents[key] = "recovered"
+					}
 				}
 			}
 			previous, found := previousWindows[key]
@@ -129,6 +131,7 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 				*previous.ResetAt > 0 && *previous.ResetAt <= nowUnix &&
 				*row.ResetAt > nowUnix && *row.ResetAt > *previous.ResetAt {
 				transitionEvents[key] = "refreshed"
+				weeklyRefreshDetected = true
 			}
 		}
 		updatedWindows := make(map[string]WindowRecord)
@@ -168,9 +171,12 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 	}
 	if len(transitionEvents) > 0 && !scheduledSent {
 		title, label := transitionTitle(config.ShortName, transitionEvents)
-		onlyKeys := make(map[string]struct{}, len(transitionEvents))
-		for key := range transitionEvents {
-			onlyKeys[key] = struct{}{}
+		var onlyKeys map[string]struct{}
+		if !weeklyRefreshDetected {
+			onlyKeys = make(map[string]struct{}, len(transitionEvents))
+			for key := range transitionEvents {
+				onlyKeys[key] = struct{}{}
+			}
 		}
 		content, buildError := BuildMarkdownV2(
 			snapshot, title, config.Timezone, threshold, nowTime,
@@ -185,7 +191,7 @@ func (worker *Worker) RunOnce(ctx context.Context) (RunResult, error) {
 		}
 		result.Sent = append(result.Sent, label)
 	}
-	if evaluateAlerts {
+	if config.QuotaAlertEnabled && evaluateQuota {
 		updatedAlerts := make(map[string]AlertRecord)
 		for key, value := range previousAlerts {
 			if _, found := currentAccounts[accountFromSignalKey(key)]; found && regularSignalKey(key) {

@@ -598,10 +598,19 @@ func (server *Server) readAccounts(c *gin.Context) {
 
 	activity := make(map[string]int)
 	if server.activity != nil {
-		if loaded, activityError := server.activity.RefreshActiveUsersLastHour(c.Request.Context()); activityError == nil {
+		var loaded map[string]int
+		var activityError error
+		if configured, ok := server.activity.(interface {
+			RefreshActiveUsers(context.Context) (map[string]int, error)
+		}); ok {
+			loaded, activityError = configured.RefreshActiveUsers(c.Request.Context())
+		} else {
+			loaded, activityError = server.activity.RefreshActiveUsersLastHour(c.Request.Context())
+		}
+		if activityError == nil {
 			activity = loaded
 		} else {
-			warnings = append(warnings, "近 1 小时活跃用户数暂不可用")
+			warnings = append(warnings, formatPortalActivityWindow(server.activity)+"活跃用户数暂不可用")
 			server.logger.Warn("portal account activity unavailable", zap.Error(activityError))
 		}
 	}
@@ -622,9 +631,26 @@ func (server *Server) readAccounts(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"generated_at": server.now().Unix(), "window": window,
-		"current_group": routes[auth.Session.User], "accounts": items,
+		"active_user_window_seconds": activeUserWindowSeconds(server.activity),
+		"current_group":              routes[auth.Session.User], "accounts": items,
 		"totals": accountUsage.Totals, "warnings": warnings, "quota_refreshing": refreshing,
 	})
+}
+
+func activeUserWindowSeconds(provider failover.ActivityProvider) int64 {
+	if reader, ok := provider.(*usage.Store); ok {
+		return int64(reader.ActiveUserWindow() / time.Second)
+	}
+	return int64(usage.DefaultActiveUserWindow / time.Second)
+}
+
+func formatPortalActivityWindow(provider failover.ActivityProvider) string {
+	seconds := activeUserWindowSeconds(provider)
+	minutes := (seconds + 59) / 60
+	if minutes%60 == 0 {
+		return fmt.Sprintf("近 %d 小时", minutes/60)
+	}
+	return fmt.Sprintf("近 %d 分钟", minutes)
 }
 
 func (server *Server) readUsageBreakdown(c *gin.Context) {

@@ -244,7 +244,7 @@ describe("AccountsPage", () => {
     expect(alice.parentElement?.querySelectorAll(".account-active-user-email")).toHaveLength(2);
     expect(alice.parentElement).toHaveTextContent("bob@example.com");
     await user.unhover(activeCount);
-    const helpText = "过去滚动 60 分钟内至少发起 1 次业务请求的去重用户；成功和失败请求均计入。";
+    const helpText = "过去近 15 分钟内至少发起 1 次业务请求的去重用户；成功和失败请求均计入。";
     const help = screen.getAllByRole("button", { name: helpText })[1];
     await user.hover(help);
     const tooltip = await screen.findByRole("tooltip", { name: helpText });
@@ -491,7 +491,7 @@ describe("AccountsPage", () => {
   it("confirms global rebalance and refreshes only the account query", async () => {
     const fetchMock = accountPageFetchMock(catalog, {
       "/admin/api/accounts/rebalance-all": {
-        message: "账号用户负载均衡已完成，近 1 小时活跃用户数已刷新",
+        message: "账号用户负载均衡已完成，近 15 分钟活跃用户数已刷新",
         rebalance: {
           moved_users: 1,
           destinations: { beta: 1 },

@@ -1925,20 +1925,23 @@ type AccountRuntimeState string
 
 // AccountCatalog defines model for AccountCatalog.
 type AccountCatalog struct {
-	Accounts               []Account             `json:"accounts"`
-	Collector              CollectorStatus       `json:"collector"`
-	GeneratedAt            int64                 `json:"generated_at"`
-	QuotaCacheTtlSeconds   int64                 `json:"quota_cache_ttl_seconds"`
-	QuotaCached            bool                  `json:"quota_cached"`
-	QuotaGeneratedAt       *int64                `json:"quota_generated_at"`
-	QuotaRefreshing        bool                  `json:"quota_refreshing"`
-	Warnings               []string              `json:"warnings"`
-	Window                 AccountCatalog_Window `json:"window"`
-	WindowEndAt            *int64                `json:"window_end_at"`
-	WindowSeconds          *int64                `json:"window_seconds"`
-	WindowStartAt          *int64                `json:"window_start_at"`
-	WindowStartAtByAccount *map[string]int64     `json:"window_start_at_by_account"`
-	WindowTimezone         string                `json:"window_timezone"`
+	Accounts []Account `json:"accounts"`
+
+	// ActiveUserWindowSeconds Rolling distinct-user activity window in seconds.
+	ActiveUserWindowSeconds int64                 `json:"active_user_window_seconds"`
+	Collector               CollectorStatus       `json:"collector"`
+	GeneratedAt             int64                 `json:"generated_at"`
+	QuotaCacheTtlSeconds    int64                 `json:"quota_cache_ttl_seconds"`
+	QuotaCached             bool                  `json:"quota_cached"`
+	QuotaGeneratedAt        *int64                `json:"quota_generated_at"`
+	QuotaRefreshing         bool                  `json:"quota_refreshing"`
+	Warnings                []string              `json:"warnings"`
+	Window                  AccountCatalog_Window `json:"window"`
+	WindowEndAt             *int64                `json:"window_end_at"`
+	WindowSeconds           *int64                `json:"window_seconds"`
+	WindowStartAt           *int64                `json:"window_start_at"`
+	WindowStartAtByAccount  *map[string]int64     `json:"window_start_at_by_account"`
+	WindowTimezone          string                `json:"window_timezone"`
 }
 
 // AccountCatalogWindow0 defines model for AccountCatalog.Window.0.
@@ -2874,9 +2877,10 @@ type PortalAccountStatusTone string
 
 // PortalAccounts defines model for PortalAccounts.
 type PortalAccounts struct {
-	Accounts     []PortalAccount `json:"accounts"`
-	CurrentGroup string          `json:"current_group"`
-	GeneratedAt  int64           `json:"generated_at"`
+	Accounts                []PortalAccount `json:"accounts"`
+	ActiveUserWindowSeconds int64           `json:"active_user_window_seconds"`
+	CurrentGroup            string          `json:"current_group"`
+	GeneratedAt             int64           `json:"generated_at"`
 
 	// QuotaRefreshing Official quota refresh is pending; poll again while true.
 	QuotaRefreshing *bool        `json:"quota_refreshing,omitempty"`

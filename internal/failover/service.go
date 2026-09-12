@@ -32,6 +32,9 @@ type AccountStateProvider interface {
 type ActivityProvider interface {
 	RefreshActiveUsersLastHour(context.Context) (map[string]int, error)
 }
+type configuredActivityProvider interface {
+	RefreshActiveUsers(context.Context) (map[string]int, error)
+}
 
 type Snapshot struct {
 	Generation string `json:"generation"`
@@ -171,7 +174,7 @@ func (service *Service) EvacuateExhausted(ctx context.Context) (EvacuationResult
 
 // EvacuateAccount moves every active, safely routable user off one explicitly
 // confirmed source account. It uses the same all-or-nothing plan, expected-route
-// write, activated auth snapshot, rollback, and immediate one-hour activity
+// write, activated auth snapshot, rollback, and immediate configured-window activity
 // refresh as automatic exhausted-account evacuation.
 func (service *Service) EvacuateAccount(ctx context.Context, account string) (EvacuationResult, error) {
 	if service.Lock != nil {
@@ -276,14 +279,31 @@ func (service *Service) applyPlan(ctx context.Context, plan Plan) (RebalanceResu
 	// refresh and leave the Admin catalog stale until its next ordinary read.
 	refreshContext, cancelRefresh := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancelRefresh()
-	activity, refreshError := service.Activity.RefreshActiveUsersLastHour(refreshContext)
+	var activity map[string]int
+	var refreshError error
+	if configured, ok := service.Activity.(configuredActivityProvider); ok {
+		activity, refreshError = configured.RefreshActiveUsers(refreshContext)
+	} else {
+		activity, refreshError = service.Activity.RefreshActiveUsersLastHour(refreshContext)
+	}
 	if refreshError != nil {
-		result.Warning = "routes changed, but the one-hour active-user refresh failed: " + refreshError.Error()
+		result.Warning = "routes changed, but the " + activityWindowLabel(service.Activity) + " active-user refresh failed: " + refreshError.Error()
 		return result, nil
 	}
 	result.ActiveUsers1H = activity
 	result.ActivityRefreshed = true
 	return result, nil
+}
+
+func activityWindowLabel(provider ActivityProvider) string {
+	if configured, ok := provider.(interface{ ActiveUserWindow() time.Duration }); ok {
+		minutes := int(configured.ActiveUserWindow() / time.Minute)
+		if minutes%60 == 0 {
+			return fmt.Sprintf("%d-hour", minutes/60)
+		}
+		return fmt.Sprintf("%d-minute", minutes)
+	}
+	return "one-hour"
 }
 
 func emptyRebalanceResult(plan Plan) RebalanceResult {

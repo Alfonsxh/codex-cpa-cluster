@@ -125,6 +125,9 @@ func run(config appConfig) error {
 			return err
 		}
 		defer activity.Close()
+		if settings, settingsError := store.ReadSettings(runContext); settingsError == nil {
+			activity.SetActiveUserWindow(usage.ActiveUserWindowFromSettings(settings))
+		}
 		sender, err := notifications.NewFencedSender(
 			&notifications.WebhookSender{Store: store, Timeout: 10 * time.Second},
 			store,

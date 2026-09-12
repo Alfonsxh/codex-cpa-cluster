@@ -298,6 +298,10 @@ export type AccountCatalog = {
     } | null;
     window_end_at: number | null;
     window_timezone: string;
+    /**
+     * Rolling distinct-user activity window in seconds.
+     */
+    active_user_window_seconds: number;
     quota_generated_at: number | null;
     quota_cached: boolean;
     quota_refreshing: boolean;
@@ -1091,6 +1095,7 @@ export type PortalAccounts = {
     generated_at: number;
     window: PortalWindow;
     current_group: string;
+    active_user_window_seconds: number;
     accounts: Array<PortalAccount>;
     totals: UsageMetrics;
     warnings: Array<string>;

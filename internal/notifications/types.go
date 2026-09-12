@@ -52,7 +52,8 @@ type AccountSnapshot struct {
 }
 
 type Snapshot struct {
-	Accounts []AccountSnapshot
+	Accounts                []AccountSnapshot
+	ActiveUserWindowSeconds int64
 }
 
 type Row struct {

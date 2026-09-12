@@ -14,8 +14,8 @@ import (
 )
 
 func TestConfigurationDefinitionsMatchCompleteGoContract(t *testing.T) {
-	if len(configurationDefinitions) != 78 {
-		t.Fatalf("configuration definition count = %d, want 78", len(configurationDefinitions))
+	if len(configurationDefinitions) != 79 {
+		t.Fatalf("configuration definition count = %d, want 79", len(configurationDefinitions))
 	}
 	if len(configurationPresentationByKey) != len(configurationDefinitions) {
 		t.Fatalf("configuration presentation count = %d, want %d", len(configurationPresentationByKey), len(configurationDefinitions))
@@ -82,7 +82,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 	}
 	var catalog configurationCatalogResponse
 	decodeAdminResponse(t, response, &catalog)
-	if catalog.Version != 2 || catalog.FieldCount != 78 || len(catalog.Groups) != 11 || catalog.GeneratedAt <= 0 {
+	if catalog.Version != 2 || catalog.FieldCount != 79 || len(catalog.Groups) != 11 || catalog.GeneratedAt <= 0 {
 		t.Fatalf("configuration catalog summary = %#v", catalog)
 	}
 	groupNames := make([]string, 0, len(catalog.Groups))
@@ -102,7 +102,7 @@ func TestConfigurationCatalogReturnsCompleteMetadataWithoutProxySecret(t *testin
 			fields[field.Key] = field
 		}
 	}
-	if len(fields) != 78 {
+	if len(fields) != 79 {
 		t.Fatalf("configuration catalog fields = %d", len(fields))
 	}
 	proxy := fields["cpa.proxy_url"]

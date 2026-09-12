@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -44,9 +45,16 @@ var requiredUsageEventColumns = []string{
 // Store is a live, read-only view of the usage database. It deliberately owns
 // no application mutex and relies on SQLite WAL snapshots for consistent reads.
 type Store struct {
-	db  *sqlx.DB
-	now func() time.Time
+	db            *sqlx.DB
+	now           func() time.Time
+	windowMu      sync.RWMutex
+	windowSeconds int64
 }
+
+const (
+	ActiveUserWindowSettingKey = "usage.active_user_window_seconds"
+	DefaultActiveUserWindow    = 15 * time.Minute
+)
 
 func OpenReadOnly(root string, now func() time.Time) (*Store, error) {
 	if strings.TrimSpace(root) == "" {
@@ -87,12 +95,50 @@ func OpenReadOnlyPath(path string, now func() time.Time) (*Store, error) {
 	if now == nil {
 		now = time.Now
 	}
-	store := &Store{db: database, now: now}
+	store := &Store{db: database, now: now, windowSeconds: int64(DefaultActiveUserWindow / time.Second)}
 	if err := store.validateSchema(context.Background()); err != nil {
 		database.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+// SetActiveUserWindow updates the rolling distinct-user window used by all
+// activity readers sharing this store. Invalid values leave the prior value.
+func (store *Store) SetActiveUserWindow(window time.Duration) {
+	seconds := int64(window / time.Second)
+	if seconds < 60 || seconds > 24*60*60 {
+		return
+	}
+	store.windowMu.Lock()
+	store.windowSeconds = seconds
+	store.windowMu.Unlock()
+}
+
+func (store *Store) ActiveUserWindow() time.Duration {
+	store.windowMu.RLock()
+	seconds := store.windowSeconds
+	store.windowMu.RUnlock()
+	if seconds < 60 {
+		return DefaultActiveUserWindow
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func ActiveUserWindowFromSettings(settings map[string]any) time.Duration {
+	seconds := int64(0)
+	switch value := settings[ActiveUserWindowSettingKey].(type) {
+	case int:
+		seconds = int64(value)
+	case int64:
+		seconds = value
+	case float64:
+		seconds = int64(value)
+	}
+	if seconds < 60 || seconds > 24*60*60 {
+		return DefaultActiveUserWindow
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func (store *Store) Close() error {
@@ -868,7 +914,19 @@ func (store *Store) AccountBreakdown(
 }
 
 func (store *Store) RefreshActiveUsersLastHour(ctx context.Context) (map[string]int, error) {
-	emails, err := store.ActiveUserEmailsLastHour(ctx)
+	emails, err := store.activeUserEmails(ctx, time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int, len(emails))
+	for account, users := range emails {
+		result[account] = len(users)
+	}
+	return result, nil
+}
+
+func (store *Store) RefreshActiveUsers(ctx context.Context) (map[string]int, error) {
+	emails, err := store.ActiveUserEmails(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -899,12 +957,20 @@ const activeUserEmailsLastHourQuery = `
 // these identities on demand in the account activity tooltip; public usage
 // surfaces must continue to consume only the aggregate count.
 func (store *Store) ActiveUserEmailsLastHour(ctx context.Context) (map[string][]string, error) {
+	return store.activeUserEmails(ctx, time.Hour)
+}
+
+func (store *Store) ActiveUserEmails(ctx context.Context) (map[string][]string, error) {
+	return store.activeUserEmails(ctx, store.ActiveUserWindow())
+}
+
+func (store *Store) activeUserEmails(ctx context.Context, window time.Duration) (map[string][]string, error) {
 	rows := make([]struct {
 		Account string `db:"account"`
 		Email   string `db:"user_email"`
 	}, 0)
-	if err := store.db.SelectContext(ctx, &rows, activeUserEmailsLastHourQuery, store.now().Unix()-int64(time.Hour/time.Second)); err != nil {
-		return nil, fmt.Errorf("query one-hour active user emails: %w", err)
+	if err := store.db.SelectContext(ctx, &rows, activeUserEmailsLastHourQuery, store.now().Unix()-int64(window/time.Second)); err != nil {
+		return nil, fmt.Errorf("query active user emails: %w", err)
 	}
 	result := make(map[string][]string)
 	for _, row := range rows {

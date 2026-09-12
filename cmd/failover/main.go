@@ -143,6 +143,9 @@ func run(config appConfig) error {
 			return fmt.Errorf("open failover usage reader: %w", err)
 		}
 		defer usage.Close()
+		if settings, settingsError := store.ReadSettings(runContext); settingsError == nil {
+			usage.SetActiveUserWindow(usagestore.ActiveUserWindowFromSettings(settings))
+		}
 		address := func(account controlplane.Account) string {
 			return fmt.Sprintf(config.AccountAddressFormat, account.ID)
 		}

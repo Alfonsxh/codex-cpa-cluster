@@ -336,7 +336,7 @@ export function UsageDashboard({ user, onSessionExpired }: { user: string; onSes
                             <SortableHeader field="current" label="当前账号" sort={sort} onSort={changeSort} />
                             <SortableHeader field="account" label="CPA 账号" sort={sort} onSort={changeSort} />
                             <SortableHeader field="quota" label="账号周额度" detail="所有用户共享 · 已用较少优先" sort={sort} onSort={changeSort} />
-                            <SortableHeader field="active_users" label="活跃用户" detail="近 1 小时" sort={sort} onSort={changeSort} />
+                            <SortableHeader field="active_users" label="活跃用户" detail={formatActiveUserWindow(accounts.data?.active_user_window_seconds ?? 900)} sort={sort} onSort={changeSort} />
                             <SortableHeader field="status" label="账号状态" sort={sort} onSort={changeSort} />
                             <SortableHeader field="requests" label="我的请求" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
                             <SortableHeader className="usage-token-header" field="tokens" label="我的 Token" detail={windowLabel(window)} sort={sort} onSort={changeSort} />
@@ -354,6 +354,7 @@ export function UsageDashboard({ user, onSessionExpired }: { user: string; onSes
                               index={index}
                               currentGroup={currentGroup}
                               window={window}
+                              activeUserWindowSeconds={accounts.data?.active_user_window_seconds ?? 900}
                               expanded={expanded.has(account.id)}
                               onToggle={() => toggleExpanded(account.id)}
                               onSwitch={() => { accountSwitch.reset(); setSwitchTarget(account); }}
@@ -580,7 +581,7 @@ function SortableHeader({ field, label, detail, className = "", sort, onSort }: 
   );
 }
 
-function AccountRows({ user, account, index, currentGroup, window, expanded, onToggle, onSwitch }: { user: string; account: PortalAccount; index: number; currentGroup: string; window: PortalUsageWindow; expanded: boolean; onToggle: () => void; onSwitch: () => void }) {
+function AccountRows({ user, account, index, currentGroup, window, activeUserWindowSeconds, expanded, onToggle, onSwitch }: { user: string; account: PortalAccount; index: number; currentGroup: string; window: PortalUsageWindow; activeUserWindowSeconds: number; expanded: boolean; onToggle: () => void; onSwitch: () => void }) {
   const current = account.id === currentGroup;
   const used = accountUsedPercent(account);
   const remaining = account.status.remaining_percent ?? Math.max(0, 100 - used);
@@ -604,7 +605,7 @@ function AccountRows({ user, account, index, currentGroup, window, expanded, onT
             <small>{account.status.reset_at ? `${formatServerTimestamp(account.status.reset_at)} 重置` : "重置时间未知"}</small>
           </div>
         </td>
-        <td data-label="活跃用户（近 1 小时）"><strong className="usage-cell-number">{formatNumber(account.active_users_1h)}</strong></td>
+        <td data-label={`活跃用户（${formatActiveUserWindow(activeUserWindowSeconds)}）`}><strong className="usage-cell-number">{formatNumber(account.active_users_1h)}</strong></td>
         <td data-label="账号状态"><StatusTag account={account} /></td>
         <td data-label={`我的请求（${windowLabel(window)}）`}><strong className="usage-cell-number" title={formatNumber(account.usage.request_count)}>{formatCompact(account.usage.request_count)}</strong></td>
         <td className="usage-token-cell" data-label={`我的 Token（${windowLabel(window)}）`}><div className="usage-token-content"><TokenPair metrics={account.usage} /></div></td>
@@ -859,6 +860,11 @@ function formatPercent(value: number) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
+}
+
+function formatActiveUserWindow(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return minutes % 60 === 0 ? `近 ${minutes / 60} 小时` : `近 ${minutes} 分钟`;
 }
 
 function formatCompact(value: number) {

@@ -188,6 +188,7 @@ var configurationPresentationByKey = map[string]configurationPresentation{
 	"cpa.error_logs_max_files":                           {Group: "CPA 请求", Description: "单个 CPA 错误日志文件上限。", Unit: "个"},
 	"cpa.usage_statistics_enabled":                       {Group: "用量与额度", Description: "关闭后停止采集新增 Token 用量。"},
 	"cpa.usage_queue_retention_seconds":                  {Group: "用量与额度", Description: "中断时事件保留时间。", Unit: "秒"},
+	usage.ActiveUserWindowSettingKey:                     {Group: "用量与额度", Description: "账号活跃用户去重统计的滚动时间窗口。", Unit: "秒"},
 	"usage.quota_cache_seconds":                          {Group: "用量与额度", Description: "官方额度缓存时间。", Unit: "秒"},
 	"usage.upstream_timeout_seconds":                     {Group: "用量与额度", Description: "官方接口超时时间。", Unit: "秒"},
 	"account_failover.mode":                              {Group: "账号自动切换", Description: "官方周额度耗尽后自动迁移用户。", ChoiceLabels: map[string]string{"off": "关闭", "active": "自动执行"}},

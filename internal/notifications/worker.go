@@ -11,6 +11,7 @@ import (
 
 	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -241,6 +242,16 @@ func CollectSnapshot(
 	if store == nil || activityProvider == nil {
 		return Snapshot{}, errors.New("notification snapshot dependencies are incomplete")
 	}
+	if reader, ok := activityProvider.(interface{ SetActiveUserWindow(time.Duration) }); ok {
+		if settingsStore, settingsOK := store.(interface {
+			ReadSettings(context.Context) (map[string]any, error)
+		}); settingsOK {
+			settings, err := settingsStore.ReadSettings(ctx)
+			if err == nil {
+				reader.SetActiveUserWindow(usage.ActiveUserWindowFromSettings(settings))
+			}
+		}
+	}
 	var (
 		accounts      []controlplane.Account
 		quotaState    quota.RuntimeState
@@ -260,7 +271,13 @@ func CollectSnapshot(
 	})
 	group.Go(func() error {
 		var err error
-		activity, err = activityProvider.RefreshActiveUsersLastHour(groupContext)
+		if configured, ok := activityProvider.(interface {
+			RefreshActiveUsers(context.Context) (map[string]int, error)
+		}); ok {
+			activity, err = configured.RefreshActiveUsers(groupContext)
+		} else {
+			activity, err = activityProvider.RefreshActiveUsersLastHour(groupContext)
+		}
 		return err
 	})
 	if err := group.Wait(); err != nil {
@@ -272,7 +289,11 @@ func CollectSnapshot(
 			quotaByAccount[account.Account] = account
 		}
 	}
-	result := Snapshot{Accounts: make([]AccountSnapshot, 0, len(accounts))}
+	windowSeconds := int64(900)
+	if reader, ok := activityProvider.(interface{ ActiveUserWindow() time.Duration }); ok {
+		windowSeconds = int64(reader.ActiveUserWindow() / time.Second)
+	}
+	result := Snapshot{Accounts: make([]AccountSnapshot, 0, len(accounts)), ActiveUserWindowSeconds: windowSeconds}
 	for _, account := range accounts {
 		accountQuota, found := quotaByAccount[account.ID]
 		if !found {

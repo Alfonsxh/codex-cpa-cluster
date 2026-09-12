@@ -156,13 +156,13 @@ func BuildMarkdownV2(
 	if len(onlyKeys) > 0 {
 		sections = append(sections, fmt.Sprintf("> 本次涉及：**%d 个账号**", len(rows)))
 	} else {
-		sections = append(sections, accountSummary(allRows))
+		sections = append(sections, accountSummary(allRows, snapshot.ActiveUserWindowSeconds))
 	}
 	var previous map[string]WindowRecord
 	if len(options) > 0 {
 		previous = options[0].PreviousWindows
 	}
-	sections = append(sections, accountTable(rows, transitionEvents, previous, location, now, len(onlyKeys) > 0))
+	sections = append(sections, accountTable(rows, transitionEvents, previous, location, now, len(onlyKeys) > 0, snapshot.ActiveUserWindowSeconds))
 	return boundedMessage(sections)
 }
 
@@ -187,7 +187,7 @@ func notificationTime(now time.Time, location *time.Location) string {
 	return now.In(location).Format("2006-01-02 15:04:05")
 }
 
-func accountSummary(rows []Row) string {
+func accountSummary(rows []Row, windowSeconds int64) string {
 	counts := make(map[string]int)
 	active := 0
 	for _, row := range rows {
@@ -196,20 +196,32 @@ func accountSummary(rows []Row) string {
 			active++
 		}
 	}
-	return fmt.Sprintf("> **账号总数 %d**　近 1 小时活跃账号 %d\n> 🟢 额度正常 %d　🟠 预警 %d　🔴 耗尽 %d　⚪ 数据不可用 %d",
-		len(rows), active, counts["normal"], counts["warning"], counts["exhausted"], counts["unavailable"])
+	return fmt.Sprintf("> **账号总数 %d**　%s活跃账号 %d\n> 🟢 额度正常 %d　🟠 预警 %d　🔴 耗尽 %d　⚪ 数据不可用 %d",
+		len(rows), activeWindowLabel(windowSeconds), active,
+		counts["normal"], counts["warning"], counts["exhausted"], counts["unavailable"])
 }
 
-func accountTable(rows []Row, transitions map[string]string, previous map[string]WindowRecord, location *time.Location, now time.Time, eventsOnly bool) string {
+func activeWindowLabel(seconds int64) string {
+	if seconds <= 0 {
+		seconds = int64(15 * time.Minute / time.Second)
+	}
+	minutes := (seconds + 59) / 60
+	if minutes%60 == 0 {
+		return fmt.Sprintf("近 %d 小时", minutes/60)
+	}
+	return fmt.Sprintf("近 %d 分钟", minutes)
+}
+
+func accountTable(rows []Row, transitions map[string]string, previous map[string]WindowRecord, location *time.Location, now time.Time, eventsOnly bool, windowSeconds int64) string {
 	icons := map[string]string{"normal": "🟢", "warning": "🟠", "exhausted": "🔴", "unavailable": "⚪"}
 	withChanges := eventsOnly || len(transitions) > 0
 	table := []string{
-		"| 账号 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |",
+		"| 账号 | 周额度已用 ↑ | " + activeWindowLabel(windowSeconds) + "用户 | 剩余重置次数 | 下次周期重置 |",
 		"| :--- | ---: | ---: | ---: | :--- |",
 	}
 	if withChanges {
 		table = []string{
-			"| 账号 | 变化 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |",
+			"| 账号 | 变化 | 周额度已用 ↑ | " + activeWindowLabel(windowSeconds) + "用户 | 剩余重置次数 | 下次周期重置 |",
 			"| :--- | :--- | ---: | ---: | ---: | :--- |",
 		}
 	}

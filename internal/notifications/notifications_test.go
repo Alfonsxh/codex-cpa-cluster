@@ -121,7 +121,7 @@ func TestQuotaRowsAndMarkdownUseAccountSummary(t *testing.T) {
 		t.Fatalf("BuildMarkdownV2: %v", err)
 	}
 	for _, expected := range []string{
-		"| 账号 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |",
+		"| 账号 | 周额度已用 ↑ | 近 15 分钟用户 | 剩余重置次数 | 下次周期重置 |",
 		"> 应用地址：[http://cpa.example.com/usage/](http://cpa.example.com/usage/)",
 		"| 🔴 cpa-10 | 100% | 3 | 2", "账号总数 4", "额度正常 2", "耗尽 1", "数据不可用 1",
 		"2026-07-20 10:00:00", "> 预警阈值：90%",
@@ -179,7 +179,7 @@ func TestMarkdownEventsUseCompleteTablesAndCurrentQuotaOrdering(t *testing.T) {
 	now := time.Date(2026, 7, 20, 2, 0, 0, 0, time.UTC)
 	resetAt := now.Add(24 * time.Hour).Unix()
 	const publicURL = "https://cpa.example.com/pool/usage/"
-	const header = "| 账号 | 变化 | 周额度已用 ↑ | 近1h用户 | 剩余重置次数 | 下次周期重置 |"
+	const header = "| 账号 | 变化 | 周额度已用 ↑ | 近 15 分钟用户 | 剩余重置次数 | 下次周期重置 |"
 	cases := []struct {
 		event    string
 		previous float64

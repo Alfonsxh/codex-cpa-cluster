@@ -2567,6 +2567,7 @@ components:
         - window_start_at_by_account
         - window_end_at
         - window_timezone
+        - active_user_window_seconds
         - quota_generated_at
         - quota_cached
         - quota_refreshing
@@ -2589,6 +2590,7 @@ components:
           additionalProperties: { type: integer, format: int64 }
         window_end_at: { type: [integer, "null"], format: int64 }
         window_timezone: { type: string }
+        active_user_window_seconds: { type: integer, format: int64, description: Rolling distinct-user activity window in seconds. }
         quota_generated_at: { type: [integer, "null"], format: int64 }
         quota_cached: { type: boolean }
         quota_refreshing: { type: boolean }
@@ -3839,12 +3841,13 @@ components:
     PortalAccounts:
       type: object
       additionalProperties: false
-      required: [generated_at, window, current_group, accounts, totals, warnings]
+      required: [generated_at, window, current_group, accounts, totals, warnings, active_user_window_seconds]
       properties:
         quota_refreshing: { type: boolean, description: Official quota refresh is pending; poll again while true. }
         generated_at: { type: integer, format: int64 }
         window: { $ref: "#/components/schemas/PortalWindow" }
         current_group: { type: string }
+        active_user_window_seconds: { type: integer, format: int64 }
         accounts:
           type: array
           items: { $ref: "#/components/schemas/PortalAccount" }

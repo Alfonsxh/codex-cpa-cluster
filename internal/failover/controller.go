@@ -12,6 +12,7 @@ import (
 
 	"github.com/Alfonsxh/codex-cpa-pool/internal/controlplane"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/quota"
+	"github.com/Alfonsxh/codex-cpa-pool/internal/usage"
 )
 
 const (
@@ -186,6 +187,11 @@ func (controller *Controller) run(ctx context.Context, force bool) (ControllerRe
 	result.Checked = true
 	if !quota.Healthy(quotaState, quotaFound, nowTime, staleAfter) {
 		return result, controller.recordError(ctx, state, nowUnix, pollInterval, ErrQuotaStateUnavailable)
+	}
+	if reader, ok := controller.Activity.(interface{ SetActiveUserWindow(time.Duration) }); ok {
+		if settings, settingsError := controller.Store.ReadSettings(ctx); settingsError == nil {
+			reader.SetActiveUserWindow(usage.ActiveUserWindowFromSettings(settings))
+		}
 	}
 
 	service := Service{

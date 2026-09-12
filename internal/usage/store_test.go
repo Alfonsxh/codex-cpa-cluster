@@ -13,6 +13,15 @@ import (
 	"time"
 )
 
+func TestActiveUserWindowConfiguration(t *testing.T) {
+	if got := ActiveUserWindowFromSettings(map[string]any{ActiveUserWindowSettingKey: 900}); got != 15*time.Minute {
+		t.Fatalf("configured window = %s", got)
+	}
+	if got := ActiveUserWindowFromSettings(map[string]any{ActiveUserWindowSettingKey: 30}); got != DefaultActiveUserWindow {
+		t.Fatalf("invalid window fallback = %s", got)
+	}
+}
+
 func TestReadOnlyStoreMatchesExistingBreakdownSemantics(t *testing.T) {
 	path := createUsageFixture(t, 10)
 	store, err := OpenReadOnlyPath(path, func() time.Time { return time.Unix(7000, 0) })

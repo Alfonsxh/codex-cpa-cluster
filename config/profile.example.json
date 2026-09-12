@@ -12,6 +12,7 @@
     "identity.key_prefix": "ccpa_",
     "portal.provider_name": "Codex CPA Pool",
     "portal.api_key_env": "CCPA_API_KEY",
-    "portal.default_model": "gpt-5.6-sol"
+    "portal.default_model": "gpt-5.6-sol",
+    "usage.active_user_window_seconds": 900
   }
 }

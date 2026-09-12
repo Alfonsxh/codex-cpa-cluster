@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Alfonsxh/codex-cpa-pool/internal/accountlifecycle"
 	"github.com/Alfonsxh/codex-cpa-pool/internal/accountstatus"
@@ -34,6 +35,25 @@ type AccountLifecycleService interface {
 
 type accountActivityEmailReader interface {
 	ActiveUserEmailsLastHour(context.Context) (map[string][]string, error)
+}
+type configuredActivityReader interface {
+	RefreshActiveUsers(context.Context) (map[string]int, error)
+	ActiveUserEmails(context.Context) (map[string][]string, error)
+}
+
+func (server *Server) activityWindow() time.Duration {
+	if reader, ok := server.activity.(*usage.Store); ok {
+		return reader.ActiveUserWindow()
+	}
+	return usage.DefaultActiveUserWindow
+}
+
+func formatActivityWindow(window time.Duration) string {
+	minutes := int(window / time.Minute)
+	if minutes%60 == 0 {
+		return fmt.Sprintf("近 %d 小时", minutes/60)
+	}
+	return fmt.Sprintf("近 %d 分钟", minutes)
 }
 
 type AccountRuntimeReader interface {
@@ -126,15 +146,18 @@ func (server *Server) listAccounts(c *gin.Context) {
 		collectorError  error
 		settings        map[string]any
 	)
+	settings, err = server.store.ReadSettings(c.Request.Context())
+	if err != nil {
+		server.internalError(c, "read account settings", err)
+		return
+	}
+	if reader, ok := server.activity.(*usage.Store); ok {
+		reader.SetActiveUserWindow(usage.ActiveUserWindowFromSettings(settings))
+	}
 	group, groupContext := errgroup.WithContext(c.Request.Context())
 	group.Go(func() error {
 		var err error
 		secretStatuses, err = server.store.SecretStatuses(groupContext)
-		return err
-	})
-	group.Go(func() error {
-		var err error
-		settings, err = server.store.ReadSettings(groupContext)
 		return err
 	})
 	group.Go(func() error {
@@ -158,6 +181,16 @@ func (server *Server) listAccounts(c *gin.Context) {
 	}
 	if server.activity != nil {
 		group.Go(func() error {
+			if reader, ok := server.activity.(configuredActivityReader); ok {
+				activityEmails, activityError = reader.ActiveUserEmails(groupContext)
+				if activityError == nil {
+					activity = make(map[string]int, len(activityEmails))
+					for account, emails := range activityEmails {
+						activity[account] = len(emails)
+					}
+				}
+				return nil
+			}
 			if reader, ok := server.activity.(accountActivityEmailReader); ok {
 				activityEmails, activityError = reader.ActiveUserEmailsLastHour(groupContext)
 				if activityError == nil {
@@ -210,6 +243,9 @@ func (server *Server) listAccounts(c *gin.Context) {
 		server.internalError(c, "read account catalog", err)
 		return
 	}
+	if reader, ok := server.activity.(*usage.Store); ok {
+		reader.SetActiveUserWindow(usage.ActiveUserWindowFromSettings(settings))
+	}
 	quotaByAccount := make(map[string]quota.AccountQuota, len(officialQuota.Snapshot.Accounts))
 	for _, accountQuota := range officialQuota.Snapshot.Accounts {
 		quotaByAccount[accountQuota.Account] = accountQuota
@@ -240,8 +276,8 @@ func (server *Server) listAccounts(c *gin.Context) {
 		warnings = append(warnings, "账号额度状态暂不可用，已按状态未知展示")
 	}
 	if activityError != nil {
-		server.logger.Warn("one-hour account activity is unavailable", zap.Error(activityError))
-		warnings = append(warnings, "近 1 小时活跃用户数暂不可用")
+		server.logger.Warn("active-user activity is unavailable", zap.Error(activityError))
+		warnings = append(warnings, formatActivityWindow(server.activityWindow())+"活跃用户数暂不可用")
 	}
 	if usageError != nil {
 		server.logger.Warn("account usage summaries are unavailable", zap.Error(usageError))
@@ -420,6 +456,7 @@ func (server *Server) listAccounts(c *gin.Context) {
 		"window_start_at":            window.WindowStartAt,
 		"window_start_at_by_account": usageStartAtByAccount,
 		"window_end_at":              window.WindowEndAt,
+		"active_user_window_seconds": int64(server.activityWindow()),
 		"window_timezone":            window.WindowTimezone,
 		"quota_generated_at":         nullablePositiveTimestamp(officialQuota.Snapshot.GeneratedAt),
 		"quota_cached":               quotaStateError == nil && officialQuota.Snapshot.GeneratedAt > 0,
@@ -756,9 +793,9 @@ func (server *Server) rebalanceAllAccounts(c *gin.Context) {
 	}
 	message := "账号已处于目标分布，无需迁移"
 	if result.MovedUsers > 0 && result.ActivityRefreshed {
-		message = "账号用户负载均衡已完成，近 1 小时活跃用户数已刷新"
+		message = "账号用户负载均衡已完成，" + formatActivityWindow(server.activityWindow()) + "活跃用户数已刷新"
 	} else if result.MovedUsers > 0 {
-		message = "账号用户负载均衡已完成，但近 1 小时活跃用户数刷新失败"
+		message = "账号用户负载均衡已完成，但" + formatActivityWindow(server.activityWindow()) + "活跃用户数刷新失败"
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"message":   message,
@@ -819,9 +856,9 @@ func (server *Server) rebalanceAccount(c *gin.Context) {
 	}
 	message := "该账号当前没有需要迁移的用户"
 	if result.MovedUsers > 0 && result.ActivityRefreshed {
-		message = "账号用户已全部安全迁移，近 1 小时活跃用户数已刷新"
+		message = "账号用户已全部安全迁移，" + formatActivityWindow(server.activityWindow()) + "活跃用户数已刷新"
 	} else if result.MovedUsers > 0 {
-		message = "账号用户已全部安全迁移，但近 1 小时活跃用户数刷新失败"
+		message = "账号用户已全部安全迁移，但" + formatActivityWindow(server.activityWindow()) + "活跃用户数刷新失败"
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"message":   message,

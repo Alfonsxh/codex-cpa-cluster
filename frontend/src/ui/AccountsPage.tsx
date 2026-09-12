@@ -135,6 +135,7 @@ const emptyAccountCatalog: AccountCatalog = {
   window_start_at_by_account: null,
   window_end_at: null,
   window_timezone: getSiteTimezone(),
+  active_user_window_seconds: 900,
   quota_generated_at: null,
   quota_cached: false,
   quota_refreshing: false,
@@ -500,12 +501,13 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
   }, []);
   const columns = useMemo(() => accountColumns({
     sort: accountSort,
+    windowSeconds: accounts.data?.active_user_window_seconds ?? 900,
     onSort: changeAccountSort,
     onResetQuota: (account) => {
       quotaReset.reset();
       setQuotaResetAccount(account);
     }
-  }), [accountSort, changeAccountSort, quotaReset]);
+  }), [accountSort, accounts.data?.active_user_window_seconds, changeAccountSort, quotaReset]);
 
   const catalog = accounts.data ?? emptyAccountCatalog;
   const enabledAccounts = catalog.accounts.filter((account) => account.enabled).length;
@@ -827,7 +829,7 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
             description="系统会按账号可用额度重新分布全部有效用户，并尽量减少迁移数量。任一用户不满足统一 Key 安全条件时，整批操作都会拒绝。"
           />
           <Paragraph>
-            路由写入后必须等待 Gateway 激活新的鉴权快照；失败时自动恢复原路由并发布回滚快照。成功后会立即重新查询近 1 小时活跃用户数。
+            路由写入后必须等待 Gateway 激活新的鉴权快照；失败时自动恢复原路由并发布回滚快照。成功后会立即重新查询配置窗口内活跃用户数。
           </Paragraph>
           {rebalance.isError ? <MutationError error={rebalance.error} title="负载均衡未执行" /> : null}
         </Space>
@@ -912,10 +914,12 @@ export function AccountsPage({ csrfToken }: { csrfToken: string }) {
 
 function accountColumns({
   sort,
+  windowSeconds,
   onSort,
   onResetQuota
 }: {
   sort: AccountSortState;
+  windowSeconds: number;
   onSort: (field: AccountSortField) => void;
   onResetQuota: (account: Account) => void;
 }): TableColumnsType<Account> {
@@ -1023,7 +1027,7 @@ function accountColumns({
       ...accountSortHeader("activity", "使用情况", sort, onSort),
       width: "20%",
       render: (_, account) => (
-        <div className="account-cell-content"><AccountActivity account={account} /></div>
+        <div className="account-cell-content"><AccountActivity account={account} windowSeconds={windowSeconds} /></div>
       )
     },
     {
@@ -1422,12 +1426,13 @@ function AccountOAuthStatus({ account }: { account: Account }) {
   return <span className={`status-chip ${configured ? "success" : "warning"}`}>{configured ? "已授权" : "待授权"}</span>;
 }
 
-function AccountActivity({ account }: { account: Account }) {
+function AccountActivity({ account, windowSeconds }: { account: Account; windowSeconds: number }) {
   const activeEmails = [...new Set((account.active_user_emails_1h ?? []).map((email) => email.trim()).filter(Boolean))];
   const activeUsers = account.active_users_1h;
   const activeValue = activeUsers === null ? "—" : formatNumber(activeUsers);
-  const activeDetail = activeUsers === null ? "数据暂不可用" : activeUsers === 0 ? "近 1h 无请求" : "近 1h";
-  const activeHelp = "过去滚动 60 分钟内至少发起 1 次业务请求的去重用户；成功和失败请求均计入。";
+  const windowLabel = formatActiveUserWindow(windowSeconds);
+  const activeDetail = activeUsers === null ? "数据暂不可用" : activeUsers === 0 ? `${windowLabel} 无请求` : windowLabel;
+  const activeHelp = `过去${windowLabel}内至少发起 1 次业务请求的去重用户；成功和失败请求均计入。`;
   return (
     <div className="account-activity account-activity-cell">
       <div className="active">
@@ -1436,11 +1441,11 @@ function AccountActivity({ account }: { account: Account }) {
             <span
               className="account-active-users"
               tabIndex={0}
-              aria-label={`近 1 小时活跃使用者：${activeEmails.join("，")}`}
+              aria-label={`${windowLabel}活跃使用者：${activeEmails.join("，")}`}
             >
               <strong>{activeValue}</strong>
               <span className="account-active-users-tooltip" role="tooltip">
-                <b>近 1 小时活跃使用者（{formatNumber(activeUsers)}）</b>
+                <b>{windowLabel}活跃使用者（{formatNumber(activeUsers)}）</b>
                 {activeEmails.map((email) => <span className="account-active-user-email" key={email}>{email}</span>)}
               </span>
             </span>
@@ -1635,6 +1640,12 @@ const usageWindowOptions = [
   { value: "since_reset", label: "额度周期" },
   { value: "all", label: "全部" }
 ] satisfies Array<{ value: AccountUsageWindow; label: string }>;
+
+function formatActiveUserWindow(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes % 60 === 0) return `近 ${minutes / 60} 小时`;
+  return `近 ${minutes} 分钟`;
+}
 
 const runtimeStateLabel: Record<Account["runtime_state"], string> = {
   running: "运行中",

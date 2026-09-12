@@ -228,6 +228,11 @@ func runOwnedAdmin(
 	}
 	if usageReader != nil {
 		defer usageReader.Close()
+		if settings, settingsError := store.ReadSettings(runContext); settingsError == nil {
+			usageReader.SetActiveUserWindow(usagestore.ActiveUserWindowFromSettings(settings))
+		} else {
+			logger.Warn("active-user window setting unavailable; using default", zap.Error(settingsError))
+		}
 	}
 	portalStore, portalStoreError := usagestore.OpenPortal(config.Root, nil)
 	if portalStoreError != nil {

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -177,6 +178,7 @@ func buildConfigurationDefinitions() []configurationDefinition {
 		integer("cpa.error_logs_max_files", "单 CPA 错误文件上限", 10, 1, 100, "accounts"),
 		boolean("cpa.usage_statistics_enabled", "官方用量事件", true, "accounts"),
 		integer("cpa.usage_queue_retention_seconds", "用量队列保留时间", 3600, 60, 604800, "accounts"),
+		integer(usage.ActiveUserWindowSettingKey, "活跃用户统计窗口", int64(usage.DefaultActiveUserWindow/time.Second), 60, 86400, "live"),
 		integer("usage.quota_cache_seconds", "官方额度缓存", 60, 30, 3600, "live"),
 		integer("usage.upstream_timeout_seconds", "官方接口超时", 20, 5, 120, "live"),
 		choice("account_failover.mode", "自动切换模式", "active", "live", "off", "active"),

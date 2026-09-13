@@ -456,7 +456,7 @@ func (server *Server) listAccounts(c *gin.Context) {
 		"window_start_at":            window.WindowStartAt,
 		"window_start_at_by_account": usageStartAtByAccount,
 		"window_end_at":              window.WindowEndAt,
-		"active_user_window_seconds": int64(server.activityWindow()),
+		"active_user_window_seconds": int64(server.activityWindow() / time.Second),
 		"window_timezone":            window.WindowTimezone,
 		"quota_generated_at":         nullablePositiveTimestamp(officialQuota.Snapshot.GeneratedAt),
 		"quota_cached":               quotaStateError == nil && officialQuota.Snapshot.GeneratedAt > 0,

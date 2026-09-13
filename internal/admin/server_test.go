@@ -1795,11 +1795,13 @@ func TestAccountCatalogReturnsOnlyAccountScopedLiveData(t *testing.T) {
 		t.Fatalf("account catalog status = %d, body = %s", response.Code, response.Body.String())
 	}
 	var payload struct {
-		Accounts []accountListItem `json:"accounts"`
-		Warnings []string          `json:"warnings"`
+		Accounts                []accountListItem `json:"accounts"`
+		ActiveUserWindowSeconds int64             `json:"active_user_window_seconds"`
+		Warnings                []string          `json:"warnings"`
 	}
 	decodeAdminResponse(t, response, &payload)
 	if len(payload.Accounts) != 1 || payload.Accounts[0].RoutedUsers != 1 ||
+		payload.ActiveUserWindowSeconds != int64(15*time.Minute/time.Second) ||
 		payload.Accounts[0].ActiveUsers1H == nil || *payload.Accounts[0].ActiveUsers1H != 1 ||
 		len(payload.Accounts[0].ActiveEmails1H) != 1 || payload.Accounts[0].ActiveEmails1H[0] != "alice@example.com" ||
 		payload.Accounts[0].ResetCreditCount == nil || *payload.Accounts[0].ResetCreditCount != 1 ||
